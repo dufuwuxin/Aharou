@@ -1,0 +1,49 @@
+name: Verify APK (fork only)
+
+# 仅存在于 fork，用来把「改动到底能不能在真机上装起来」这件事变成可下载产物：
+# 上游 ci.yml 只做 assembleUniversalDebug 冒烟、不上传 APK，HyperOS 那种 DocumentsUI
+# 缺席的现场没法在 CI 里复现，只能真机装包验证。
+on:
+  pull_request:
+    branches: [ master ]
+  workflow_dispatch:
+
+jobs:
+  apk:
+    name: Build universal debug APK
+    runs-on: ubuntu-latest
+    env:
+      AHAROU_CI_BUILD: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v5
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x ./gradlew
+
+      - name: Authorize build (CI 例外)
+        run: |
+          mkdir -p .aharou
+          printf 'authorized_by: CI\nquote: "workflow ${{ github.workflow }} run ${{ github.run_id }}"\nat: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > .aharou/build-allowed
+
+      - name: Build universal debug APK
+        run: ./gradlew :app:assembleUniversalDebug --stacktrace
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: aharou-universal-debug-apk
+          path: app/build/outputs/apk/**/*.apk
+          if-no-files-found: error
+          retention-days: 7
