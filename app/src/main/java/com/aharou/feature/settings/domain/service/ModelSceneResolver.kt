@@ -3,6 +3,7 @@ package com.aharou.feature.settings.domain.service
 import com.aharou.feature.settings.data.repository.CompactionModelSettingsRepository
 import com.aharou.feature.settings.data.repository.DefaultModelSettingsRepository
 import com.aharou.feature.settings.data.repository.ImageGenModelSettingsRepository
+import com.aharou.feature.settings.data.repository.MemoryModelSettingsRepository
 import com.aharou.feature.settings.data.repository.TitleModelSettingsRepository
 import com.aharou.feature.settings.data.repository.VisionModelSettingsRepository
 import com.aharou.feature.settings.domain.model.AIProviderConfig
@@ -36,6 +37,7 @@ class ModelSceneResolver @Inject constructor(
     private val compactionModel: CompactionModelSettingsRepository,
     private val visionModel: VisionModelSettingsRepository,
     private val imageGenModel: ImageGenModelSettingsRepository,
+    private val memoryModel: MemoryModelSettingsRepository,
 ) {
 
     /** 一次读齐所有场景的解析结果（供应商列表只查一次）。 */
@@ -101,8 +103,10 @@ class ModelSceneResolver @Inject constructor(
             imageGenModel.getImageGenProviderId(),
             imageGenModel.getImageGenModel(),
         )
-        // 只能被 reusesFrom 指向，本身没有存储。
-        ModelScene.MEMORY -> SceneBinding("", "")
+        ModelScene.MEMORY -> SceneBinding(
+            memoryModel.getMemoryProviderId(),
+            memoryModel.getMemoryModel(),
+        )
     }
 }
 

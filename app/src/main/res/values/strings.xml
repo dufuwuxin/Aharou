@@ -55,6 +55,7 @@
     <string name="settings_compaction_model">压缩模型</string>
     <string name="settings_title_model">标题总结模型</string>
     <string name="settings_image_gen_model">生图模型</string>
+    <string name="settings_memory_model">记忆整理模型</string>
     <string name="settings_voice_stt_model">语音识别模型</string>
     <string name="settings_voice_tts_model">语音合成模型</string>
     <string name="settings_voice_auto_read">自动朗读</string>
@@ -280,6 +281,7 @@
     <string name="settings_scene_binding_fallback">绑定已失效，实际会用聊天模型</string>
     <string name="settings_scene_binding_no_fallback">绑定已失效且没有可回退的模型，需要重新选择</string>
     <string name="settings_image_gen_unconfigured">未配置</string>    <string name="settings_theme_title">外观主题</string>    <string name="theme_auto">自动</string>
+    <string name="settings_memory_model_unconfigured">未配置</string>
     <string name="theme_dark">深色</string>
     <string name="theme_light">浅色</string>
     <string name="theme_mode_section">明暗模式</string>
@@ -453,6 +455,12 @@
     <string name="common_delete">删除</string>
     <string name="common_remove">移除</string>
     <string name="common_cancel">取消</string>
+    <string name="common_retry">重试</string>
+    <string name="memory_ai_optimize_title">AI 优化记忆</string>
+    <string name="memory_ai_optimize_hint">让模型整理当前记忆：合并重复、提炼要点、删掉过时项。生成结果先预览，你点「采纳」才写回，不会自动改。</string>
+    <string name="memory_ai_optimize_prompt_label">优化指令（选填）</string>
+    <string name="memory_ai_optimize_run">开始优化</string>
+    <string name="memory_ai_optimize_accept">采纳</string>
     <string name="common_go_to_settings">去设置</string>
     <string name="common_name">名称</string>
     <string name="common_image_preview">图片预览</string>
@@ -1648,6 +1656,7 @@
     <string name="team_editor_members_empty">还没有成员，先去「创建成员」建一个</string>
     <string name="team_editor_admins">管理员组</string>
     <string name="team_editor_admins_hint">可多选；多个管理员并行给出各自判断，结论由主代理汇总成策略建议</string>
+    <string name="team_editor_admin_add_hint">或直接输入管理员名（成员列表为空时也可用）</string>
     <string name="team_editor_process">团队流程</string>
     <string name="team_editor_process_hint">阶段按顺序执行，阶段内并行；关卡判定不通过就驳回回退到指定阶段重做</string>
     <string name="team_editor_preset_standard">用标准五步：拆解 → 设计 → 分配 → 执行 → 审核</string>
@@ -1718,6 +1727,12 @@
     <string name="subagent_editor_tools_allow_hint">不选则开放全部工具（不含 task）</string>
     <string name="subagent_editor_tools_deny">工具黑名单</string>
     <string name="subagent_editor_tools_deny_hint">优先于白名单生效</string>
+    <string name="subagent_editor_skills">专属技能</string>
+    <string name="subagent_editor_skills_hint">仅该角色可见；其它成员与主代理不注入本角色专属技能，避免 token 浪费。</string>
+    <string name="subagent_editor_skills_empty">未绑定专属技能（所有公共技能均可见）</string>
+    <string name="subagent_editor_keyword_inject">关键词注入</string>
+    <string name="subagent_editor_keyword_inject_hint">格式：「触发词1,触发词2|正文」，每条一行。命中才注入，主代理和其它成员不可见，节省 token。</string>
+    <string name="subagent_editor_keyword_inject_label">关键词注入列表（触发词|正文）</string>
     <string name="subagent_editor_tools_search">搜索工具</string>
     <string name="subagent_editor_selected_count">已选 %1$d 个</string>
     <string name="subagent_editor_none">无</string>
@@ -2574,6 +2589,7 @@
     <string name="soul_field_lang">语言</string>
     <string name="soul_lang_auto">自动</string>
     <string name="soul_lang_zh">中文</string>
+    <string name="soul_lang">Soul Language</string>
     <string name="soul_lang_en">English</string>
     <string name="soul_section_personality">人格正文</string>
     <string name="soul_personality_footer">写清它的性格与说话方式——会注入系统提示。中文 ≤1600 字 / 英文 ≤1000 词，超限不能保存。</string>
@@ -3592,4 +3608,8 @@
     <string name="observe_hint_no_child">当前会话还没有派生过下级。</string>
     <string name="observe_session_missing">会话不存在：%1$s</string>
     <string name="observe_error_tree">读取会话树失败：%1$s</string>
+
+    <string name="bottom_tab_home">首页</string>
+    <string name="bottom_tab_config">配置</string>
+    <string name="bottom_tab_settings">设置</string>
 </resources>

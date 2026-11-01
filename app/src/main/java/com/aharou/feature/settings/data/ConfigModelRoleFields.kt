@@ -9,6 +9,7 @@ import com.aharou.core.config.fields.ClosureField
 import com.aharou.feature.settings.data.repository.CompactionModelSettingsRepository
 import com.aharou.feature.settings.data.repository.DefaultModelSettingsRepository
 import com.aharou.feature.settings.data.repository.ImageGenModelSettingsRepository
+import com.aharou.feature.settings.data.repository.MemoryModelSettingsRepository
 import com.aharou.feature.settings.data.repository.ModelReasoningEffortRepository
 import com.aharou.feature.settings.data.repository.TitleModelSettingsRepository
 import com.aharou.feature.settings.data.repository.VisionModelSettingsRepository
@@ -33,6 +34,7 @@ class ConfigModelRoleFields @Inject constructor(
     private val visionModel: VisionModelSettingsRepository,
     private val imageGenModel: ImageGenModelSettingsRepository,
     private val reasoningEffort: ModelReasoningEffortRepository,
+    private val memoryModel: MemoryModelSettingsRepository,
 ) {
 
     fun registerInto(registry: ConfigRegistry) {
@@ -115,7 +117,17 @@ class ConfigModelRoleFields @Inject constructor(
                 read = { runBlocking { imageGenModel.providerIdFlow.first() to imageGenModel.modelFlow.first() } },
                 write = { p, m -> runBlocking { imageGenModel.setImageGenModel(p, m) } },
                 clear = { runBlocking { imageGenModel.setImageGenModel("", "") } },
-            ),
+            )
+        )
+        registry.register(
+            roleField(
+                path = "model.roles.memory",
+                label = "记忆整理模型",
+                desc = "用于记忆摘要 / AI 优化弹窗的专用模型。留空则跟随压缩模型。",
+                read = { runBlocking { memoryModel.providerIdFlow.first() to memoryModel.modelFlow.first() } },
+                write = { p, m -> runBlocking { memoryModel.setMemoryModel(p, m) } },
+                clear = { runBlocking { memoryModel.clear() } },
+            )
         )
     }
 

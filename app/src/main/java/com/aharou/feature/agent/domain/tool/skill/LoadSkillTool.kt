@@ -41,15 +41,44 @@ class LoadSkillTool @Inject constructor(
         )
     )
 
-    override suspend fun execute(args: Map<String, JsonElement>): ToolResult {
+    /**
+     * 子代理会话按角色过滤：专属技能只有绑定的角色能读，其它成员不可见，避免共享 token。
+     * 主代理（无 [AgentContext.agentDefinition]）可加载全量公共技能。
+     */
+    override suspend fun executeWithContext(
+        args: Map<String, JsonElement>,
+        context: com.aharou.feature.agent.domain.model.AgentContext
+    ): ToolResult {
+        return load(args, context)
+    }
+
+    override suspend fun execute(args: Map<String, JsonElement>): ToolResult = load(args, null)
+
+    private suspend fun load(
+        args: Map<String, JsonElement>,
+        context: com.aharou.feature.agent.domain.model.AgentContext?
+    ): ToolResult {
         val skillName = args["skill_name"]?.jsonPrimitive?.contentOrNull?.trim()
         if (skillName.isNullOrEmpty()) {
             return ToolResult.Error("缺少必需参数: skill_name", "MISSING_SKILL_NAME")
         }
-
+        val agentDef = context?.agentDefinition
+        // 子代理：允许加载的 = 该角色专属绑定的技能 + 全部公共技能；主代理：全量公共技能。
+        val allowed = if (agentDef != null) {
+            skillRepository.listSkillsForAgent(agentDef).map { it.name }.toSet()
+        } else {
+            skillRepository.listSkills().map { it.name }.toSet()
+        }
+        if (skillName !in allowed) {
+            FileLogger.w(TAG, "loadSkill 被拒（不在可见范围）: $skillName，允许: $allowed")
+            return ToolResult.Error(
+                "技能「$skillName」不在当前角色的可见范围内。",
+                "SKILL_NOT_ALLOWED"
+            )
+        }
         val instructions = skillRepository.loadInstructions(skillName)
         if (instructions == null) {
-            val available = skillRepository.listSkills().joinToString(", ") { it.name }
+            val available = allowed.joinToString(", ")
             FileLogger.w(TAG, "load_skill 未找到: $skillName，可用: $available")
             return ToolResult.Error(
                 "未找到技能「$skillName」。可用技能: ${available.ifEmpty { "（无）" }}",

@@ -33,6 +33,19 @@ class SkillRepository @Inject constructor(
     fun listSkills(): List<Skill> =
         filterDisabled(listAllSkills(), skillConfigRepository.disabledNames()).map { it.skill }
 
+    /**
+     * 子代理会话的可见技能：公共技能（已过滤禁用）+ 该角色专属绑定的技能。
+     * 专属技能绑定在 [AgentDefinition.skills]：运行时只有对应角色能看到，其它成员不可读，避免共享 token。
+     */
+    fun listSkillsForAgent(definition: com.aharou.feature.agent.domain.subagent.AgentDefinition?): List<Skill> {
+        val bound = definition?.skills?.toHashSet()
+        if (bound.isNullOrEmpty()) return listSkills()
+        val all = filterDisabled(listAllSkills(), skillConfigRepository.disabledNames())
+        val publicSkills = all.filter { it.skill.name !in bound }
+        val exclusiveSkills = all.filter { it.skill.name in bound }
+        return publicSkills.map { it.skill } + exclusiveSkills.map { it.skill }
+    }
+
     /** 读取指定 skill 的完整指令正文；不存在 / 解析失败 / 已被禁用时返回 null。 */
     fun loadInstructions(name: String): String? {
         if (name.lowercase() in skillConfigRepository.disabledNames()) return null

@@ -55,6 +55,7 @@
     <string name="settings_compaction_model">Compaction Model</string>
     <string name="settings_title_model">Title Model</string>
     <string name="settings_image_gen_model">Image Generation Model</string>
+    <string name="settings_memory_model">Memory Model</string>
     <string name="settings_voice_stt_model">Speech Recognition Model</string>
     <string name="settings_voice_tts_model">Speech Synthesis Model</string>
     <string name="settings_voice_auto_read">Auto read aloud</string>
@@ -280,6 +281,7 @@
     <string name="settings_scene_binding_fallback">Binding is unusable; the chat model will be used instead</string>
     <string name="settings_scene_binding_no_fallback">Binding is unusable and there\'s no fallback model; pick one again</string>
     <string name="settings_image_gen_unconfigured">Not configured</string>    <string name="settings_theme_title">Appearance</string>    <string name="theme_auto">Auto</string>
+    <string name="settings_memory_model_unconfigured">Not configured</string>
     <string name="theme_dark">Dark</string>
     <string name="theme_light">Light</string>
     <string name="theme_mode_section">Appearance mode</string>
@@ -453,6 +455,12 @@
     <string name="common_delete">Delete</string>
     <string name="common_remove">Remove</string>
     <string name="common_cancel">Cancel</string>
+    <string name="common_retry">Retry</string>
+    <string name="memory_ai_optimize_title">AI optimize memory</string>
+    <string name="memory_ai_optimize_hint">Let the model organize current memories: merge duplicates, distill key points, drop stale items. Preview first; your tap of “Accept” writes it back — never automatic.</string>
+    <string name="memory_ai_optimize_prompt_label">Optimization prompt (optional)</string>
+    <string name="memory_ai_optimize_run">Start</string>
+    <string name="memory_ai_optimize_accept">Accept</string>
     <string name="common_go_to_settings">Go to Settings</string>
     <string name="common_name">Name</string>
     <string name="common_image_preview">Image Preview</string>
@@ -1649,6 +1657,7 @@
     <string name="team_editor_members_empty">No members yet — create one first</string>
     <string name="team_editor_admins">Admins</string>
     <string name="team_editor_admins_hint">Pick several: every admin reasons on its own, then the main agent merges them into one recommendation</string>
+    <string name="team_editor_admin_add_hint">Or type an admin name directly (works even when the member list is empty)</string>
     <string name="team_editor_process">Flow</string>
     <string name="team_editor_process_hint">Stages run in order, tasks in parallel; a failing review stage rejects back to the chosen stage</string>
     <string name="team_editor_preset_standard">Use the standard five: split → design → assign → execute → review</string>
@@ -1718,6 +1727,12 @@
     <string name="subagent_editor_tools_allow">Allowed tools</string>
     <string name="subagent_editor_tools_allow_hint">Leave empty to allow every tool except task</string>
     <string name="subagent_editor_tools_deny">Denied tools</string>
+    <string name="subagent_editor_skills">Exclusive skills</string>
+    <string name="subagent_editor_skills_hint">Only this agent can load them; other members and the main agent do not see these to save tokens.</string>
+    <string name="subagent_editor_skills_empty">No exclusive skills bound (all public skills are visible)</string>
+    <string name="subagent_editor_keyword_inject">Keyword injections</string>
+    <string name="subagent_editor_keyword_inject_hint">One rule per line: "trigger1,trigger2|content". Only injected when user text matches any trigger; invisible to main agent and other members to save tokens.</string>
+    <string name="subagent_editor_keyword_inject_label">Keyword injections (trigger|content, one per line)</string>
     <string name="subagent_editor_tools_deny_hint">Takes precedence over the allow list</string>
     <string name="subagent_editor_tools_search">Search tools</string>
     <string name="subagent_editor_selected_count">%1$d selected</string>
@@ -2576,6 +2591,7 @@
     <string name="soul_lang_auto">Auto</string>
     <string name="soul_lang_zh">中文</string>
     <string name="soul_lang_en">English</string>
+    <string name="soul_lang">English</string>
     <string name="soul_section_personality">Personality</string>
     <string name="soul_personality_footer">Personality and voice notes — injected into the system prompt. Up to 1600 CJK chars / 1000 English words; over-limit cannot be saved.</string>
     <string name="soul_body_placeholder">e.g. Short, direct replies; warm to its owner…</string>
@@ -3594,4 +3610,8 @@
     <string name="observe_hint_no_child">This session has not spawned any sub-agents yet.</string>
     <string name="observe_session_missing">Session not found: %1$s</string>
     <string name="observe_error_tree">Failed to read the session tree: %1$s</string>
+
+    <string name="bottom_tab_home">Home</string>
+    <string name="bottom_tab_config">Config</string>
+    <string name="bottom_tab_settings">Settings</string>
 </resources>

@@ -28,8 +28,11 @@ enum class ModelScene(
     /** 上下文压缩（会话历史摘要）。 */
     COMPACTION("compaction", "model.roles.compaction"),
 
-    /** 记忆整理 / 摘要抽取：沿用压缩模型的绑定，不单独提供开关。 */
-    MEMORY("memory", null, reusesFrom = COMPACTION),
+    /**
+     * 记忆整理 / 摘要抽取 / 记忆 AI 优化弹窗专用模型：
+     * 与压缩模型保持独立，这样用户可以单独给记忆相关动作选一个更强的/更轻的模型。
+     */
+    MEMORY("memory", "model.roles.memory"),
 
     /** 视觉理解（识图、截图理解）。 */
     VISION("vision", "model.roles.vision"),
