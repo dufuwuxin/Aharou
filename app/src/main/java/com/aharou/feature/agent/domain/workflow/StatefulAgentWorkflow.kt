@@ -47,6 +47,7 @@ import com.aharou.feature.agent.domain.tool.mode.PlanApprovalManager
 import com.aharou.feature.agent.domain.tool.ToolPermissionManager
 import com.aharou.feature.agent.domain.tool.ToolRegistry
 import com.aharou.feature.agent.domain.tool.ToolResult
+import com.aharou.feature.agent.domain.tool.custom.ToolInjectionGate
 import com.aharou.feature.agent.domain.tool.ToolOutputStore
 import com.aharou.feature.agent.domain.tool.ToolStreamEvent
 import com.aharou.feature.agent.domain.tool.foldStoredToolResults
@@ -140,7 +141,8 @@ class StatefulAgentWorkflow @Inject constructor(
     private val fileAccess: FileAccessProvider,
     private val ocrEngine: TesseractOcrEngine,
     private val vault: VaultRepository,
-    private val memoryCompactor: Lazy<MemoryCompactor> // Lazy 断环：MemoryCompactor 自己依赖 AgentWorkflow
+    private val memoryCompactor: Lazy<MemoryCompactor>, // Lazy 断环：MemoryCompactor 自己依赖 AgentWorkflow
+    private val toolInjectionGate: ToolInjectionGate
 ) : AgentWorkflow {
 
     /** 卡死提示文案：从 prompts 文件读一次并缓存，用户可编辑该文件定制。 */
@@ -313,12 +315,15 @@ class StatefulAgentWorkflow @Inject constructor(
             modeBeforePlan = domain?.modeBeforePlan, reasoningEffort = domain?.reasoningEffort?.apiValue,
             lastInputTokens = session?.lastInputTokens ?: 0, agentDefinition = definition)
         val allTools = toolRegistry.getAvailableTools()
-        val tools = when {
+        val permittedTools = when {
             definition != null -> definition.filterToolNames(allTools.map { it.name }).toSet()
                 .let { allowed -> allTools.filter { it.name in allowed } }
             session?.parentId != null -> allTools // 子代理可再派子代理，递归由 MAX_SUBAGENT_DEPTH 兜底
             else -> allTools.filterNot { it.name == AgentDefinition.PARENT_MESSAGE_TOOL }
         }
+        // 压缩路径没有「当前轮用户消息」，传 null：关键词注入的工具照常全量注入（只剔除显式关闭的），
+        // 避免压缩请求的工具 schema 与主请求忽然不一致。
+        val tools = toolInjectionGate.visible(permittedTools, null)
         val compactionProvider = resolveCompactionFallbackProvider(sessionId) ?: provider
         val reuseMainPrefix = compactionProvider.providerId == provider.providerId && compactionProvider.model == provider.model  // 前缀缓存只同 provider 同 model 内生效，配了独立压缩模型就不复用主前缀
         return contextCompactor.compactIfNeeded(history, compactionProvider, sessionId, force = true, windowProvider = provider,

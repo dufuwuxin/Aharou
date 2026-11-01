@@ -186,6 +186,7 @@ export default defineConfig({
             { text: '子代理', link: '/guide/subagent' },
             { text: '自动化任务', link: '/guide/scheduled-tasks' },
             { text: '设备能力', link: '/guide/device' },
+            { text: '工具管理', link: '/guide/tools' },
             { text: '自定义提示词', link: '/guide/custom-prompts' },
             { text: '记忆与项目规则', link: '/guide/memory' },
             { text: '共享知识库', link: '/guide/knowledge-base' },

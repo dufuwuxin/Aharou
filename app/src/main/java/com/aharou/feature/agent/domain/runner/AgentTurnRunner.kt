@@ -21,6 +21,7 @@ import com.aharou.feature.agent.domain.subagent.SubAgentWriteLease
 import com.aharou.feature.agent.domain.subagent.SubAgentEventType
 import com.aharou.feature.agent.domain.subagent.SubAgentResultInspector
 import com.aharou.feature.agent.domain.tool.ToolRegistry
+import com.aharou.feature.agent.domain.tool.custom.ToolInjectionGate
 import com.aharou.feature.agent.domain.tool.question.PendingUserQuestionStore
 import com.aharou.feature.agent.domain.workflow.AgentEvent
 import com.aharou.feature.agent.domain.workflow.AgentWorkflow
@@ -97,6 +98,7 @@ class AgentTurnRunner @Inject constructor(
     private val subAgentWriteLease: SubAgentWriteLease,
     private val workspaceRepository: WorkspaceRepository,
     private val pendingQuestionStore: PendingUserQuestionStore,
+    private val toolInjectionGate: ToolInjectionGate,
     @param:ApplicationContext private val context: Context,
 ) {
 
@@ -296,7 +298,7 @@ class AgentTurnRunner @Inject constructor(
         )
 
         val allTools = toolRegistry.getAvailableTools()
-        val tools = when {
+        val permittedTools = when {
             agentDefinition != null -> {
                 val allowed = agentDefinition.filterToolNames(allTools.map { it.name }).toSet()
                 allTools.filter { it.name in allowed }
@@ -304,6 +306,9 @@ class AgentTurnRunner @Inject constructor(
             isSub -> allTools // 子代理可再派子代理，递归由 MAX_SUBAGENT_DEPTH 兜底
             else -> allTools.filterNot { it.name == AgentDefinition.PARENT_MESSAGE_TOOL }
         }
+        // 注入三态过滤（每轮 / 关键词命中当前轮用户消息 / 关闭）与内置工具的描述覆盖。
+        // 放在允许清单之后：子代理的工具集照旧生效，注入方式只在上层做减法。
+        val tools = toolInjectionGate.visible(permittedTools, agentContext.currentUserText)
 
         // 工具参数预览：结束时只有部分事件带 argsPreview，缺失时回退到开始时记下的那份
         val toolArgsByMsgId = mutableMapOf<String, String>()

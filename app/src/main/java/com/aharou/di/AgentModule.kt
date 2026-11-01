@@ -62,6 +62,11 @@ import com.aharou.feature.agent.domain.tool.ToolCallGuard
 import com.aharou.feature.agent.domain.tool.ToolRegistry
 import com.aharou.feature.agent.domain.tool.ToolSearchTool
 import com.aharou.feature.agent.domain.tool.ToolOutputStore
+import com.aharou.feature.agent.domain.tool.custom.AharouToolStorageLocator
+import com.aharou.feature.agent.domain.tool.custom.CustomToolRuntime
+import com.aharou.feature.agent.domain.tool.custom.CustomToolSource
+import com.aharou.feature.agent.domain.tool.custom.ToolInjectionGate
+import com.aharou.feature.agent.domain.tool.custom.ToolStorageLocator
 import com.aharou.feature.settings.data.remote.ModelMetadataService
 import com.aharou.feature.terminal.domain.DelegatingTerminalSessionProvider
 import com.aharou.feature.terminal.domain.RemoteTerminalSessionManager
@@ -393,6 +398,16 @@ object AgentModule {
     @Singleton
     fun provideSshHostKeyStore(impl: SharedPrefsSshHostKeyStore): SshHostKeyStore = impl
 
+    /** 工具配置的落盘位置（全局层 + 项目层）。接口绑定，单测可换成临时目录。 */
+    @Provides
+    @Singleton
+    fun provideToolStorageLocator(impl: AharouToolStorageLocator): ToolStorageLocator = impl
+
+    /** 自定义工具来源：让 ToolRegistry 不必直依赖命令引擎与工作区仓库。 */
+    @Provides
+    @Singleton
+    fun provideCustomToolSource(impl: CustomToolRuntime): CustomToolSource = impl
+
     @Provides
     @Singleton
     fun provideSshLoginKeyStore(impl: SharedPrefsSshLoginKeyStore): SshLoginKeyStore = impl
@@ -435,9 +450,10 @@ object AgentModule {
         deviceTool: DeviceTool,
         personalContextTool: PersonalContextTool,
         petAvatarTool: PetAvatarTool,
+        customToolSource: CustomToolSource,
         guard: ToolCallGuard
     ): ToolRegistry {
-        return ToolRegistry(guard).apply {
+        return ToolRegistry(guard, customToolSource).apply {
             register("readFile", readFileTool)
             register("sendFile", sendFileTool)
             register("sendToChat", sendImFileTool)
@@ -513,7 +529,8 @@ object AgentModule {
         memoryCompactor: Lazy<MemoryCompactor>,
         fileAccess: FileAccessProvider,
         ocrEngine: TesseractOcrEngine,
-        vault: VaultRepository
+        vault: VaultRepository,
+        toolInjectionGate: ToolInjectionGate
     ): AgentWorkflow {
         return StatefulAgentWorkflow(
             toolRegistry,
@@ -546,7 +563,8 @@ object AgentModule {
             fileAccess,
             ocrEngine,
             vault,
-            memoryCompactor
+            memoryCompactor,
+            toolInjectionGate
         )
     }
 }
