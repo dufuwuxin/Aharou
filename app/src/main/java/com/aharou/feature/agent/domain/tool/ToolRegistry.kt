@@ -39,20 +39,23 @@ class ToolRegistry @Inject constructor(
     }
 
     /**
-     * 返回可用工具列表（内置 + MCP 动态注册 + 用户自定义），按名称排序。
+     * 返回可用工具列表（内置 + MCP 动态注册 + 用户自定义），**始终**按名称排序。
      *
      * 排序不是为了好看：工具顺序会参与隐式前缀缓存，必须每轮稳定；按名称排是确定性的，
      * 工具集不变时顺序就不变。同名以内置/已注册的为准（自定义名撞车时不会覆盖内置工具）。
+     *
+     * 「只有带自定义工具时才排序」是个坑（2026-11-01 修）：没有自定义工具时返回注册顺序，
+     * 而在有自定义工具时才是名字序，两种形态的顺序在测试与真实环境里对不上，
+     * 压缩用例 `manualCompactionWithoutDefinitionIncludesNestedTask` 就因此整条挂掉。
      *
      * PLAN 模式下仍返回全部工具定义（让 AI 知道这些工具存在，可在计划中引用），
      * 写操作工具由 [com.aharou.feature.agent.domain.permission.ToolPermissionPolicyEngine] 在运行时拦截并返回 PLAN_MODE_REJECTED。
      */
     fun getAvailableTools(): List<AgentTool> {
         val registered = synchronized(tools) { tools.values.toList() }
-        val custom = customTools()
-        if (custom.isEmpty()) return registered
         val registeredNames = registered.mapTo(HashSet()) { it.name }
-        return (registered + custom.filterNot { it.name in registeredNames }).sortedBy { it.name }
+        val custom = customTools().filterNot { it.name in registeredNames }
+        return (registered + custom).sortedBy { it.name }
     }
 
     private fun customTools(): List<AgentTool> = customToolSource?.customTools().orEmpty()
