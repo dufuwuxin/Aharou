@@ -22,6 +22,9 @@ import com.aharou.feature.agent.domain.tool.AgentTool
 import com.aharou.feature.agent.domain.tool.ToolCall
 import com.aharou.feature.agent.domain.tool.ToolOutputStore
 import com.aharou.feature.agent.domain.tool.ToolResult
+import com.aharou.feature.agent.domain.tool.custom.ToolInjectionGate
+import com.aharou.feature.agent.domain.tool.custom.ToolSettingsStore
+import com.aharou.feature.agent.domain.tool.custom.ToolStorageLocator
 import com.aharou.feature.agent.domain.tool.toTransportString
 import com.aharou.feature.agent.domain.workflow.GeneratedImagePersister
 import com.aharou.feature.agent.domain.workflow.StatefulAgentWorkflow.Companion.hasSnapshotData
@@ -44,6 +47,7 @@ import io.mockk.slot
 import io.mockk.spyk
 import io.mockk.unmockkObject
 import io.mockk.verify
+import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.awaitCancellation
@@ -58,6 +62,11 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class StatefulAgentWorkflowTest {
+    private object EmptyToolStorageLocator : ToolStorageLocator {
+        override fun globalToolsDir(): File = File("build/tmp/tool-store-test-global")
+        override fun projectToolsDir(): File? = null
+    }
+
     private val registry = com.aharou.feature.agent.domain.tool.ToolRegistry()
     private val providers = mockk<AIProviderRepository>()
     private val prompts = mockk<SystemPromptProvider>()
@@ -119,7 +128,10 @@ class StatefulAgentWorkflowTest {
         // 协作开关：这些用例不碰跨设备协作，relaxed mock 下 current().enabled 为 false（等价关闭）。
         remoteDeviceSettings = mockk(relaxed = true),
         // 记忆整理入口：这些用例不会走到自动整理，Lazy 里放个 relaxed mock 即可（注入形式是 dagger.Lazy 为了断环）。
-        memoryCompactor = Lazy { mockk<MemoryCompactor>(relaxed = true) }
+        memoryCompactor = Lazy { mockk<MemoryCompactor>(relaxed = true) },
+        // 注入闸门用真实实例 + 空目录：等价于「没有任何注入设置」，所有工具照旧每轮注入。
+        // （这些用例不覆盖三态注入，那部分由 ToolInjectionGateTest 单独覆盖）
+        toolInjectionGate = ToolInjectionGate(ToolSettingsStore(EmptyToolStorageLocator))
     ), recordPrivateCalls = true)
 
     init {

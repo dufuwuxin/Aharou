@@ -1,5 +1,6 @@
 package com.aharou.feature.settings.presentation.component
 
+import androidx.activity.compose.BackHandler
 import androidx.annotation.StringRes
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -19,6 +20,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -35,14 +40,18 @@ import compose.icons.feathericons.BookOpen
 import compose.icons.feathericons.FileText
 import compose.icons.feathericons.HardDrive
 import compose.icons.feathericons.MessageSquare
+import compose.icons.feathericons.Tool
 import compose.icons.feathericons.Users
 
-/** 配置页的一个入口：图标 + 标题 + 一句话说明 + 点击后落到设置页的哪个分区。 */
+/** 配置页的一个入口：图标 + 标题 + 一句话说明 + 点击后落到设置页的哪个分区。
+ *
+ * [section] 为 null 表示这个入口不开设置页的分区，而是就地展开本页自己的子页（目前只有「工具」）。
+ */
 private data class ConfigEntry(
     val icon: ImageVector,
     @param:StringRes val titleRes: Int,
     @param:StringRes val descRes: Int,
-    val section: SettingsSection
+    val section: SettingsSection? = null
 )
 
 private val ConfigEntries = listOf(
@@ -51,20 +60,29 @@ private val ConfigEntries = listOf(
     ConfigEntry(FeatherIcons.HardDrive, R.string.settings_knowledge_base, R.string.config_knowledge_desc, SettingsSection.Knowledge),
     ConfigEntry(FeatherIcons.Users, R.string.settings_teams, R.string.config_teams_desc, SettingsSection.Teams),
     ConfigEntry(FeatherIcons.MessageSquare, R.string.prompts_title, R.string.config_prompts_desc, SettingsSection.Prompts),
-    ConfigEntry(FeatherIcons.FileText, R.string.rules_title, R.string.config_rules_desc, SettingsSection.Rules)
+    ConfigEntry(FeatherIcons.FileText, R.string.rules_title, R.string.config_rules_desc, SettingsSection.Rules),
+    // 工具页没有对应的设置分区页，就地展开：设置页那个文件已贴着行数基线（棘轮只许降），
+    // 再往里塞一整套页面接线只会抬基线，不值当。
+    ConfigEntry(FeatherIcons.Tool, R.string.settings_tools, R.string.config_tools_desc)
 )
 
 /**
- * 底栏「配置」页：只放 AI 的能力与资产入口（记忆 / 技能 / 知识库 / 团队 / 提示词 / 规则）。
+ * 底栏「配置」页：只放 AI 的能力与资产入口（记忆 / 技能 / 知识库 / 团队 / 提示词 / 规则 / 工具）。
  *
- * 点进去复用设置页的既有分区页（[SettingsScreen]），不在这里重做一套编辑界面——
- * 两边各写一份的话，改一处忘另一处。
+ * 除「工具」外都复用设置页的既有分区页（[SettingsScreen]），不在这里重做一套编辑界面——
+ * 两边各写一份的话，改一处忘另一处；工具页是这里唯一自带的子页（[ToolsPage]）。
  */
 @Composable
 fun ConfigScreen(
     onOpenSection: (SettingsSection) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    var showTools by rememberSaveable { mutableStateOf(false) }
+    if (showTools) {
+        BackHandler { showTools = false }
+        ToolsPage(onBack = { showTools = false })
+        return
+    }
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -90,8 +108,11 @@ fun ConfigScreen(
             contentPadding = PaddingValues(bottom = Spacing.xl),
             modifier = Modifier.fillMaxSize()
         ) {
-            items(ConfigEntries, key = { it.section.name }) { entry ->
-                ConfigCard(entry = entry, onClick = { onOpenSection(entry.section) })
+            items(ConfigEntries, key = { it.titleRes }) { entry ->
+                ConfigCard(
+                    entry = entry,
+                    onClick = { entry.section?.let(onOpenSection) ?: run { showTools = true } }
+                )
             }
         }
     }
