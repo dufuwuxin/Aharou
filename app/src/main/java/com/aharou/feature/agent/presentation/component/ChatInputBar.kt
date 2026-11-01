@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -128,6 +129,7 @@ import compose.icons.feathericons.Maximize
 import compose.icons.feathericons.Minimize
 import compose.icons.feathericons.Plus
 import compose.icons.feathericons.Square
+import compose.icons.feathericons.Zap
 import compose.icons.feathericons.Shield
 import kotlinx.coroutines.launch
 
@@ -160,6 +162,11 @@ internal fun ChatInputBar(
     onStop: () -> Unit,
     /** 长按停止键：强制打断，取消协程并杀掉容器里在跑的命令（区别于 [onStop] 的软打断）。 */
     onForceStop: () -> Unit = {},
+    /**
+     * 强制插入：AI 正在跑本轮时，不等本轮结束就把这条消息插进当前轮（搭在下一批工具结果上，
+     * 模型当轮即可看到）。与 [onSend]（忙碌时排队等本轮结束）并列显示，由用户当场选。
+     */
+    onForceInsert: (String) -> Unit = {},
     isBusy: Boolean,
     /** 该会话是否还有 agent 协程在跑：软打断后 [isBusy] 已回到 false，但任务仍在后台跑当前这一步。 */
     canForceStop: Boolean = false,
@@ -539,12 +546,14 @@ internal fun ChatInputBar(
                     ) {
                         val modeColor = when (currentMode) {
                             AgentMode.PLAN -> MaterialTheme.colorScheme.primaryContainer
-                            AgentMode.AUTO -> MaterialTheme.colorScheme.error
+                            AgentMode.AUTO -> MaterialTheme.semanticColors.warningContainer
+                            AgentMode.ALLOW -> MaterialTheme.colorScheme.error
                             AgentMode.BUILD -> MaterialTheme.semanticColors.success
                         }
                         val modeTextColor = when (currentMode) {
                             AgentMode.PLAN -> MaterialTheme.colorScheme.onPrimaryContainer
-                            AgentMode.AUTO -> MaterialTheme.colorScheme.onError
+                            AgentMode.AUTO -> MaterialTheme.semanticColors.onWarningContainer
+                            AgentMode.ALLOW -> MaterialTheme.colorScheme.onError
                             AgentMode.BUILD -> MaterialTheme.semanticColors.onSuccess
                         }
                         Surface(
@@ -555,15 +564,16 @@ internal fun ChatInputBar(
                                     val nextMode = when (currentMode) {
                                         AgentMode.BUILD -> AgentMode.PLAN
                                         AgentMode.PLAN -> AgentMode.AUTO
-                                        AgentMode.AUTO -> AgentMode.BUILD
+                                        AgentMode.AUTO -> AgentMode.ALLOW
+                                        AgentMode.ALLOW -> AgentMode.BUILD
                                     }
                                     onToggleMode(nextMode)
                                 }
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .width(46.dp)
-                                    .padding(vertical = 4.dp),
+                                    .widthIn(min = 46.dp)
+                                    .padding(horizontal = 8.dp, vertical = 4.dp),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
@@ -630,7 +640,15 @@ internal fun ChatInputBar(
                         contentDescription = stringResource(R.string.chat_add_attachment),
                         onClick = { showAttachmentSheet = true }
                     )
-                    SendButton(canSend = canSend, hasContent = hasContent, isBusy = isBusy, canForceStop = canForceStop, tokenProgress = tokenProgress, tokenEstimated = tokenEstimated, onSend = { onSend(inputFieldValue.text) }, onStop = onStop, onForceStop = onForceStop)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        // AI 忙且有内容时，在发送键（此时=排队等本轮结束）旁边并列一个「强制插入」，
+                        // 让用户自己选：等一等，还是立刻让模型看到我这句话。
+                        // 带附件时不插（附件要随新一轮送模型），只有纯文字才给这个按钮。
+                        if (isBusy && hasContent && pendingAttachments.isEmpty()) {
+                            ForceInsertButton(onClick = { onForceInsert(inputFieldValue.text) })
+                        }
+                        SendButton(canSend = canSend, hasContent = hasContent, isBusy = isBusy, canForceStop = canForceStop, tokenProgress = tokenProgress, tokenEstimated = tokenEstimated, onSend = { onSend(inputFieldValue.text) }, onStop = onStop, onForceStop = onForceStop)
+                    }
                 }
             }
         }
@@ -885,6 +903,39 @@ internal fun SendButton(
                     modifier = Modifier.size(18.dp)
                 )
             }
+        }
+    }
+}
+
+/**
+ * 「强制插入」按钮：AI 正在跑本轮时出现，点击不排队、不等本轮结束，直接把输入框内容插进当前轮
+ * （作为用户补充输入搭在下一批工具结果上，模型当轮即可感知）。与旁边的发送键（此时=排队）并列，
+ * 由用户当场选「等一等」还是「现在就告诉它」。
+ */
+@Composable
+internal fun ForceInsertButton(onClick: () -> Unit) {
+    val haptic = LocalHapticFeedback.current
+    Box(
+        modifier = Modifier.size(44.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.semanticColors.warningContainer)
+                .clickable {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onClick()
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                FeatherIcons.Zap,
+                contentDescription = stringResource(R.string.chat_force_insert),
+                tint = MaterialTheme.semanticColors.onWarningContainer,
+                modifier = Modifier.size(18.dp)
+            )
         }
     }
 }

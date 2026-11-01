@@ -547,6 +547,7 @@
     <string name="chat_open_terminal">Open terminal</string>
     <string name="chat_open_browser">Open browser</string>
     <string name="chat_open_activity">Activity</string>
+    <string name="chat_open_observe">Observe upstream/downstream</string>
     <string name="activity_sheet_title">Activity</string>
     <string name="activity_sheet_empty">Nothing yet. Tool runs, calls you denied, and every build will show up here.</string>
     <string name="activity_sheet_args">Arguments</string>
@@ -814,6 +815,7 @@
     <string name="chat_remove_attachment">Remove attachment</string>    <string name="chat_no_models_hint">No models available, add one in "AI Vendors"</string>
     <string name="chat_stop_long_press_hint">Stop (long press to force interrupt)</string>
     <string name="chat_send">Send</string>
+    <string name="chat_force_insert">Force insert into the running turn</string>
     <string name="chat_perm_single_use_desc">Contains command substitution/pipes/redirects, cannot be remembered, single-use only</string>
     <string name="chat_perm_always_tool_desc">"Always allow" will remember all calls of this tool for this project</string>
     <string name="chat_perm_always_prefix">"Always allow" will remember for this project:</string>
@@ -1830,7 +1832,7 @@
     <string name="perm_promote_to_global">Promote to global</string>
     <string name="perm_safety_group">Safety</string>
     <string name="perm_disable_safety_interception">Disable safety interception</string>
-    <string name="perm_disable_safety_interception_desc">When on, AUTO mode stops blocking catastrophic deletes and Shizuku prompts</string>
+    <string name="perm_disable_safety_interception_desc">When on, AUTO mode stops blocking catastrophic deletes and Shizuku prompts (the ALLOW mode already disables this by default)</string>
     <string name="perm_safety_confirm_title">Disable safety interception?</string>
     <string name="perm_safety_confirm_message">Once disabled, AUTO mode no longer blocks catastrophic deletes and no longer prompts for the Shizuku tool. Proceed with caution.</string>
     <string name="perm_safety_confirm_action">Confirm (%1$d)</string>
@@ -3484,4 +3486,41 @@
     <string name="personal_access_special_usage">%1$s must be enabled manually in Settings → Permissions &amp; Background → App Permissions → Usage access</string>
     <string name="personal_access_special_notification">%1$s must be enabled manually in Settings → Permissions &amp; Background → App Permissions → Notification access</string>
     <string name="document_picker_unavailable">System file picker is unavailable. Enable the system "Files" app (Settings → Apps → Show system apps) or import the file another way</string>
+
+    <!-- Read-only observe panel -->
+    <string name="observe_action_back">‹ Back</string>
+    <string name="observe_readonly_badge">Read-only</string>
+    <string name="observe_readonly_title">Read-only view · %1$s · level %2$d</string>
+    <string name="observe_direction_up">Up</string>
+    <string name="observe_direction_down">Down</string>
+    <string name="observe_action_refresh">Refresh</string>
+    <string name="observe_unnamed_session">(Untitled session)</string>
+    <string name="observe_self">You</string>
+    <string name="observe_main_session">Main session</string>
+    <string name="observe_label_depth">Depth</string>
+    <string name="observe_prefix_self">You</string>
+    <string name="observe_prefix_parent">Up · parent</string>
+    <string name="observe_prefix_grandparent">Up · grandparent</string>
+    <string name="observe_prefix_up_n">Up · level %1$d</string>
+    <string name="observe_prefix_down_n">Down · level %1$d</string>
+    <string name="observe_state_running">Running</string>
+    <string name="observe_state_done">Done</string>
+    <string name="observe_state_failed">Failed</string>
+    <string name="observe_state_stopped">Stopped</string>
+    <string name="observe_state_interrupted">Interrupted</string>
+    <string name="observe_state_unknown">No task record</string>
+    <string name="observe_empty_stream">This member has no content yet.</string>
+    <string name="observe_unbound">Not connected yet: no session to observe.</string>
+    <string name="observe_role_user">User</string>
+    <string name="observe_role_ai">AI</string>
+    <string name="observe_tool_pending">Running</string>
+    <string name="observe_tool_success">Success</string>
+    <string name="observe_tool_failed">Failed</string>
+    <string name="observe_tool_args">Arguments</string>
+    <string name="observe_tool_result">Result</string>
+    <string name="observe_tool_fallback_name">Tool</string>
+    <string name="observe_hint_no_parent">This session has no parent: it is already the top of this session tree.</string>
+    <string name="observe_hint_no_child">This session has not spawned any sub-agents yet.</string>
+    <string name="observe_session_missing">Session not found: %1$s</string>
+    <string name="observe_error_tree">Failed to read the session tree: %1$s</string>
 </resources>

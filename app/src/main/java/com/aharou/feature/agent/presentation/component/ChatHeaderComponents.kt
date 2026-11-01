@@ -51,6 +51,7 @@ import compose.icons.feathericons.Folder
 import compose.icons.feathericons.Archive
 import compose.icons.feathericons.ChevronRight
 import compose.icons.feathericons.Clock
+import compose.icons.feathericons.Eye
 import compose.icons.feathericons.GitBranch
 import compose.icons.feathericons.Globe
 import compose.icons.feathericons.HardDrive
@@ -71,6 +72,8 @@ internal fun ChatHeader(
     onNavigateToBrowser: () -> Unit = {},
     onNavigateToSandbox: () -> Unit = {},
     onNavigateToShared: () -> Unit = {},
+    /** 打开只读观察面板：看本会话树里的上/下级在干什么。 */
+    onNavigateToObserve: () -> Unit = {},
     onOpenActivity: () -> Unit = {},
     currentMode: AgentMode,
     onToggleMode: (AgentMode) -> Unit,
@@ -167,6 +170,12 @@ internal fun ChatHeader(
                         active = false,
                         onClick = onNavigateToShared
                     )
+                    IconButton(onClick = onNavigateToObserve) {
+                        Icon(
+                            FeatherIcons.Eye,
+                            contentDescription = stringResource(R.string.chat_open_observe),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                     IconButton(onClick = { toolsExpanded = true }) {
                         Icon(
                             FeatherIcons.Archive,

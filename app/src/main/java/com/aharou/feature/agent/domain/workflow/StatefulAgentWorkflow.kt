@@ -576,6 +576,21 @@ class StatefulAgentWorkflow @Inject constructor(
         return true
     }
 
+    /**
+     * 取走会话里「用户在上一批工具执行期间插进来」的话，转成 user 消息追加到本次请求末尾。
+     *
+     * 与搭车注入（把通知写进工具结果 JSON）不同，这条走进消息列表本身：模型当次请求就能看到，
+     * 纯文本回合（本轮一次工具都没调）也不会漏。取走即 ack，同一条不会被连续两轮重复注入。
+     */
+    private fun drainInsertedUserMessages(sessionId: String?): List<AgentMessage> {
+        if (sessionId == null) return emptyList()
+        val hits = agentNotificationCenter.peek(sessionId)
+            .filter { it.kind == AgentNotificationKind.USER_MESSAGE && !it.message.isNullOrBlank() }
+        if (hits.isEmpty()) return emptyList()
+        agentNotificationCenter.ack(sessionId, hits.map { it.seq })
+        return hits.map { AgentMessage.UserMessage(content = it.message!!) }
+    }
+
     private suspend fun executeLlmEffect(
         initialState: AgentSessionState,
         currentContext: AgentContext,
@@ -686,8 +701,13 @@ class StatefulAgentWorkflow @Inject constructor(
         try {
             // 早轮次里已落盘的工具结果换成引用，长会话不必每轮重发全文。图片投影沿用上面那份：估算的就是发出去的。
             val outboundMasker = outboundMaskerOrNull(generalSettingsRepository.privacyMaskingEnabled())
-            val messagesToSend = foldStoredToolResults(sendProjection)
+            // 强制插入：用户在这批工具执行期间插进来的话，随本次请求直接送到模型面前，
+            // 不必等下一批工具结果或本轮结束。掩码必须跟着一起做，否则开了隐私掩码时这段话会裸奔出站。
+            val insertedUserMessages = drainInsertedUserMessages(currentContext.sessionId)
                 .let { list -> if (outboundMasker == null) list else list.maskedForOutbound(outboundMasker) }
+            val messagesToSend = foldStoredToolResults(sendProjection)
+                .let { list -> if (outboundMasker == null) list else list.maskedForOutbound(outboundMasker) } +
+                insertedUserMessages
             // 采样循环检测：命中后 takeWhile 会取消上游流，模型不再继续把重复内容刷下去。
             var samplingLoopCut = false
             // 用户打断：与采样检测共用同一个 takeWhile，命中即掉断上游流，不再继续吐字。
@@ -1079,7 +1099,9 @@ class StatefulAgentWorkflow @Inject constructor(
         val notifications = if (notifySessionId != null && batchResults.isNotEmpty()) {
             // 用户打断是给循环看的开关，不是要给模型读的提示，别当通知注入进去。
             agentNotificationCenter.peek(notifySessionId)
-                .filter { it.kind != AgentNotificationKind.USER_INTERRUPT }
+                // 用户打断是给循环看的开关，不是要给模型读的提示；USER_MESSAGE（强制插入）
+                // 统一走 drainInsertedUserMessages 进消息列表，在这里别重复注入成应用通知。
+                .filter { it.kind != AgentNotificationKind.USER_INTERRUPT && it.kind != AgentNotificationKind.USER_MESSAGE }
         } else {
             emptyList()
         }
@@ -1442,6 +1464,7 @@ class StatefulAgentWorkflow @Inject constructor(
             .replace(LEADING_COMMENT, "")
             .trim()
             .let { "【模式提醒】$it" }
+        AgentMode.ALLOW -> "【模式提醒】当前为 ALLOW（完全放行）模式：所有工具调用直接执行，不弹确认、也不做安全拦截（含删除系统目录、敏感点按）。安全网不在，破坏性操作自行格外小心。"
         AgentMode.BUILD -> null
     }
 
@@ -1466,7 +1489,8 @@ class StatefulAgentWorkflow @Inject constructor(
             .replace(LEADING_COMMENT, "")
             .trim()
         AgentMode.BUILD -> "\n\n【模式切换】计划已获用户批准，你已切换到 BUILD（构建）模式，可以开始执行计划。"
-        AgentMode.AUTO -> "\n\n【模式切换】计划已获用户批准，你已恢复到 AUTO（自动）模式，可以开始执行计划（工具调用将自动放行）。"
+        AgentMode.AUTO -> "\n\n【模式切换】计划已获用户批准，你已恢复到 AUTO（自动批准）模式，可以开始执行计划（工具调用将自动放行）。"
+        AgentMode.ALLOW -> "\n\n【模式切换】计划已获用户批准，你已切换到 ALLOW（完全放行）模式，可以开始执行计划（工具调用直接执行，无确认也无安全拦截）。"
     }
 
     /** 用户在外部（界面）手动切换模式时拼进工具结果的提示；与 AI 自切的 [buildModeSwitchNotice] 区分，避免误称「计划已获批准」。 */
@@ -1475,7 +1499,8 @@ class StatefulAgentWorkflow @Inject constructor(
             .replace(LEADING_COMMENT, "")
             .trim()
         AgentMode.BUILD -> "\n\n【模式切换】用户已将模式切换为 BUILD（构建）模式，可以正常执行写操作。"
-        AgentMode.AUTO -> "\n\n【模式切换】用户已将模式切换为 AUTO（自动）模式。"
+        AgentMode.AUTO -> "\n\n【模式切换】用户已将模式切换为 AUTO（自动批准）模式。"
+        AgentMode.ALLOW -> "\n\n【模式切换】用户已将模式切换为 ALLOW（完全放行）模式：工具调用一律直接执行，不再弹确认、不再做安全拦截。"
     }
 
     /**

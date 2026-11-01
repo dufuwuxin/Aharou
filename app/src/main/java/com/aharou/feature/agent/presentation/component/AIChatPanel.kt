@@ -98,6 +98,7 @@ import com.aharou.feature.agent.domain.tool.question.UserQuestionAnswer
 import com.aharou.feature.agent.presentation.AgentUIMessage
 import com.aharou.feature.agent.presentation.AgentUIState
 import com.aharou.feature.agent.presentation.AIAgentViewModel
+import com.aharou.feature.agent.presentation.observe.ObserveTargetHolder
 import com.aharou.feature.agent.presentation.MessageRole
 import com.aharou.feature.agent.presentation.QueuedRequest
 import com.aharou.feature.agent.presentation.WorkflowStatus
@@ -165,6 +166,8 @@ fun AIChatPanel(
     onNavigateToBrowser: () -> Unit = {},
     onNavigateToSandbox: () -> Unit = {},
     onNavigateToShared: () -> Unit = {},
+    /** 打开只读观察面板；观察目标由面板自己从 [ObserveTargetHolder] 取。 */
+    onNavigateToObserve: () -> Unit = {},
     settingsViewModel: SettingsViewModel? = null,
     workspaceViewModel: WorkspaceViewModel? = null,
     onOpenDrawer: () -> Unit,
@@ -1017,6 +1020,21 @@ fun AIChatPanel(
         }
     }
 
+    // 强制插入：AI 忙时不等本轮跑完，直接把这句话插进当前轮（搭在下一批工具结果上，模型当轮即看到）；
+    // 空闲时与普通发送等价。只在纯文字、无附件时出现，所以这里不拼附件。
+    val forceInsertMessage: (String) -> Unit = { rawText ->
+        val text = viewModel.expandPastes(rawText).trim()
+        if (text.isNotEmpty()) {
+            viewModel.forceInsertAgentRequest(request = text, projectRoot = projectRoot)
+            viewModel.clearInputDraft()
+            followBottom = true
+            scope.launch {
+                kotlinx.coroutines.delay(0)
+                snapToBottom()
+            }
+        }
+    }
+
     // 切换会话 / 打开搜索命中：优先定位到目标消息，否则贴底并恢复跟随。
     LaunchedEffect(currentSessionId, messagesReady, pendingScroll, chatItems) {
         if (!messagesReady) return@LaunchedEffect
@@ -1212,6 +1230,11 @@ fun AIChatPanel(
                 onNavigateToBrowser = onNavigateToBrowser,
                 onNavigateToSandbox = onNavigateToSandbox,
                 onNavigateToShared = onNavigateToShared,
+                onNavigateToObserve = {
+                    // 把「看哪棵树」先存好再跳转：面板只负责展示，不关心入口在哪。
+                    currentSessionId?.let { ObserveTargetHolder.sessionId = it }
+                    onNavigateToObserve()
+                },
                 onOpenActivity = { showActivity = true },
                 currentMode = currentMode,
                 onToggleMode = { viewModel.setSessionMode(it) },
@@ -1487,6 +1510,7 @@ fun AIChatPanel(
                     value = inputText,
                     onValueChange = viewModel::updateInputDraft,
                     onSend = { text -> sendMessage(text) },
+                    onForceInsert = { text -> forceInsertMessage(text) },
                     enterToSend = settingsViewModel?.enterToSend?.collectAsStateWithLifecycle()?.value ?: false,
                     onStop = { viewModel.stopAgent() },
                     onForceStop = { viewModel.forceStopAgent() },

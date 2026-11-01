@@ -1876,16 +1876,21 @@ class AIAgentViewModel @Inject constructor(
         if (sessionId in stoppingSessions || sessionJobs[sessionId]?.isCompleted == false) return
         val items = agentNotificationCenter.peek(sessionId)
         if (items.isEmpty()) return
-        FileLogger.d(TAG, "flushPendingNotifications: sid=$sessionId items=${items.size} state=${_agentStates.value[sessionId]}")
+        // 强制插入那条用户消息已经自己落过库、正文也在历史里了：这里只消费其余通知，
+        // 否则同一条会被再落一次（多一个用户气泡）、再喂一次模型。
+        val fresh = items.filterNot { it.alreadyPersisted }
+        if (fresh.isEmpty()) return agentNotificationCenter.ack(sessionId, items.map { it.seq })
+        FileLogger.d(TAG, "flushPendingNotifications: sid=$sessionId items=${fresh.size} state=${_agentStates.value[sessionId]}")
         viewModelScope.launch {
             // 先入队再 ack：中途被取消（点停止）就不 ack，通知留在队列里等下次收尾再送，
             // 而不是「已从队列取走、但那一轮并没真的跑起来」把消息丢掉。
             enqueueAgentRequest(
-                request = AgentNotificationFormatter.buildMessage(items),
+                request = AgentNotificationFormatter.buildMessage(fresh),
                 projectRoot = workspaceOf(sessionId),
                 targetSessionId = sessionId
             )
             withContext(NonCancellable) {
+                // 整批 ack：已落库那条已进历史，留在队里下轮又会被 drain 捞去喂模型。
                 agentNotificationCenter.ack(sessionId, items.map { it.seq })
             }
         }
@@ -1999,6 +2004,56 @@ class AIAgentViewModel @Inject constructor(
                 message = req.request
             )
         )
+    }
+
+    /**
+     * 强制插入：忙时不等本轮跑完，直接把这条消息插进当前轮（投 USER_MESSAGE，下一次 LLM 请求
+     * 就以 user 消息形式送到模型面前，纯文本回合也不会漏），用户消息立即落库；空闲时同普通发送。
+     * 带图片/附件时不插入（附件要随新一轮送模型），退回排队。
+     */
+    fun forceInsertAgentRequest(
+        request: String,
+        projectRoot: String = "",
+        inputImages: List<AgentImage> = emptyList(),
+        inputAttachments: List<AgentAttachment> = emptyList(),
+        targetSessionId: String? = null
+    ) {
+        if (request.isBlank()) return
+        val sid = targetSessionId ?: _currentSessionId.value ?: return
+        if (inputImages.isNotEmpty() || inputAttachments.isNotEmpty()) {
+            enqueueAgentRequest(
+                request = request,
+                projectRoot = projectRoot,
+                inputImages = inputImages,
+                inputAttachments = inputAttachments,
+                targetSessionId = sid
+            )
+            return
+        }
+        viewModelScope.launch {
+            // 忙闲要在这里重判：前面到这一步之间隔着两次 DB 写，本轮可能刚好收尾，
+            // 那时插进去就没人消费了，还不如当成普通发送。
+            val running = sid !in stoppingSessions &&
+                (sessionJobs[sid]?.isCompleted == false || sid in _runningCommandSessions.value)
+            if (!running) {
+                enqueueAgentRequest(request = request, projectRoot = projectRoot, targetSessionId = sid)
+                return@launch
+            }
+            messagePersistenceUseCase.persist(sid, MessageRole.USER, request)
+            sessionUseCase.touch(sid, messagePersistenceUseCase.nextTimestamp())
+            deliverSystemEvent(
+                sid,
+                PendingNotification(
+                    kind = AgentNotificationKind.USER_MESSAGE,
+                    sourceId = sid,
+                    title = "",
+                    outcome = NotificationOutcome.COMPLETED,
+                    message = request,
+                    // 已经被上面 persist 落库了，兜底路径别再落一次。
+                    alreadyPersisted = true
+                )
+            )
+        }
     }
 
     private fun processNextInQueue(sessionId: String) {

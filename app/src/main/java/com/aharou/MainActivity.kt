@@ -946,6 +946,7 @@ fun AppNavigation(
                                 onNavigateToBrowser = { openWorkbench(WorkbenchPaneKind.BROWSER) },
                                 onNavigateToSandbox = { navController.navigate("sandbox") },
                                 onNavigateToShared = { navController.navigate("shared") },
+                                onNavigateToObserve = { navController.navigate("observe") },
                                 terminalActive = paneOpen && paneKind == WorkbenchPaneKind.TERMINAL,
                                 gitActive = paneOpen && paneKind == WorkbenchPaneKind.GIT,
                                 browserActive = paneOpen && paneKind == WorkbenchPaneKind.BROWSER,
@@ -1041,6 +1042,12 @@ fun AppNavigation(
                         com.aharou.feature.sandbox.FilePreviewHolder.currentItem = item
                         navController.navigate("sandboxPreview")
                     },
+                )
+            }
+            composable("observe") {
+                // 只读观察：看哪棵树由入口写进 ObserveTargetHolder，这里不拼导航参数。
+                com.aharou.feature.agent.presentation.observe.ObserveScreenRoute(
+                    onBack = { navController.popBackStack() }
                 )
             }
             composable("shared") {

@@ -37,6 +37,9 @@ data class PendingNotification(
     val message: String? = null,
     val fromParent: Boolean = false,
     val newMode: AgentMode? = null,
+    /** [AgentNotificationKind.USER_MESSAGE] 专用：用户这条话已经自己落库过了（强制插入路径），
+     *  兜底发送时不要再落一次，否则历史里会出现两个一模一样的用户气泡。 */
+    val alreadyPersisted: Boolean = false,
     val seq: Long = 0
 )
 

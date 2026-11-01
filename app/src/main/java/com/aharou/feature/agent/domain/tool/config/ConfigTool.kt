@@ -98,7 +98,11 @@ class ConfigTool @Inject constructor(
     )
 
     override suspend fun executeWithContext(args: Map<String, JsonElement>, context: AgentContext): ToolResult =
-        executeInternal(args, autoMode = context.mode == AgentMode.AUTO)
+        executeInternal(
+            args,
+            // ALLOW（完全放行）同样视作自动批准：配置类写入也不再弹确认。
+            autoMode = context.mode == AgentMode.AUTO || context.mode == AgentMode.ALLOW
+        )
 
     /** 无上下文的兜底路径（正常不会走到）：拿不到会话模式，一律按「必须人工确认」处理。 */
     override suspend fun execute(args: Map<String, JsonElement>): ToolResult =

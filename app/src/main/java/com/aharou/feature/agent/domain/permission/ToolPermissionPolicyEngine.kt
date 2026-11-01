@@ -195,12 +195,16 @@ class ToolPermissionPolicyEngine @Inject constructor(
             )
         }
 
-        // ── AUTO 模式：放行所有权限 ─────────────────────────────────
+        // ── AUTO / ALLOW 模式：放行所有权限 ──────────────────────
         // 用户已定：AUTO 维持全放行，新增的污点与敏感拦截均不生效（与 nanoMuse 不同，勿当 bug 修改）。
         // 门阀（含编译）同样不拦 AUTO：用户切到 AUTO 就是不想被逐次打断。
         // 灾难性 rm 防护（根目录/系统目录删除）默认保留，可在「工具授权」设置中关闭（禁用安全拦截）。
-        if (mode == com.aharou.feature.agent.domain.model.AgentMode.AUTO) {
-            val safetyDisabled = toolSafetySettings.isSafetyInterceptionDisabled()
+        // ALLOW（完全放行）就是「连安全防护也关」：不再读那个开关，灾难性命令与 Shizuku 一律放行。
+        if (mode == com.aharou.feature.agent.domain.model.AgentMode.AUTO ||
+            mode == com.aharou.feature.agent.domain.model.AgentMode.ALLOW
+        ) {
+            val safetyDisabled = mode == com.aharou.feature.agent.domain.model.AgentMode.ALLOW ||
+                toolSafetySettings.isSafetyInterceptionDisabled()
             if (!safetyDisabled && isShellTool(toolName, args)) {
                 val command = ((args["command"] ?: args["input"]) as? JsonPrimitive)?.content
                 if (command != null) {

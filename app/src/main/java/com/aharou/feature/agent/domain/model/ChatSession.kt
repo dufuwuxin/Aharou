@@ -6,11 +6,13 @@ package com.aharou.feature.agent.domain.model
 enum class AgentMode {
     BUILD, // 逐个确认模式：未授权操作弹窗确认
     PLAN,  // 计划模式，拦截修改类操作，只读/探索为主
-    AUTO;  // 自动模式，放行所有权限（不弹窗），仅用户手动可切换；AI 无法通过 planMode 进入 —— Aharou 新会话默认
+    AUTO,  // 自动批准模式：工具调用一律不弹窗，安全防护（灾难性删除、敏感点按）仍然生效 —— Aharou 新会话默认
+    ALLOW; // 完全放行：不弹窗，且安全防护一并关闭（灾难性删除、敏感操作、Shizuku 逐次确认都不再拦），仅用户手动可切换
 
-    /** 宽松程度：数值越大越严。AUTO（放行）< BUILD（逐次确认）< PLAN（只读）。 */
+    /** 宽松程度：数值越大越严。ALLOW（完全放行）< AUTO（自动批准）< BUILD（逐次确认）< PLAN（只读）。 */
     private val strictness: Int
         get() = when (this) {
+            ALLOW -> -1
             AUTO -> 0
             BUILD -> 1
             PLAN -> 2

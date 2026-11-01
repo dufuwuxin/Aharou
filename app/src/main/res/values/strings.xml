@@ -546,6 +546,7 @@
     <string name="chat_open_terminal">打开终端</string>
     <string name="chat_open_browser">打开浏览器</string>
     <string name="chat_open_activity">活动记录</string>
+    <string name="chat_open_observe">观察上/下级</string>
     <string name="activity_sheet_title">活动记录</string>
     <string name="activity_sheet_empty">还没有记录。工具执行、被你拒掉的调用和每次编译都会出现在这里。</string>
     <string name="activity_sheet_args">参数</string>
@@ -813,6 +814,7 @@
     <string name="chat_remove_attachment">移除附件</string>    <string name="chat_no_models_hint">暂无可用模型，请在「AI 供应商」中添加</string>
     <string name="chat_stop_long_press_hint">停止（长按强制打断）</string>
     <string name="chat_send">发送</string>
+    <string name="chat_force_insert">强制插入当前轮（不等本轮结束）</string>
     <string name="chat_perm_single_use_desc">含命令替换/管道/重定向，无法记住，仅可单次放行</string>
     <string name="chat_perm_always_tool_desc">「始终允许」将在本项目记住：该工具的全部调用</string>
     <string name="chat_perm_always_prefix">「始终允许」将在本项目记住：</string>
@@ -1829,7 +1831,7 @@
     <string name="perm_promote_to_global">提升为全局</string>
     <string name="perm_safety_group">安全防护</string>
     <string name="perm_disable_safety_interception">禁用安全拦截</string>
-    <string name="perm_disable_safety_interception_desc">开启后 AUTO 模式下不再拦截灾难性删除，Shizuku 也不再逐次确认</string>
+    <string name="perm_disable_safety_interception_desc">开启后 AUTO 模式下不再拦截灾难性删除，Shizuku 也不再逐次确认（ALLOW 完全放行档默认已关闭，无需此开关）</string>
     <string name="perm_safety_confirm_title">确认禁用安全拦截？</string>
     <string name="perm_safety_confirm_message">禁用后，AUTO 模式下连灾难性删除也不再拦截，Shizuku 工具也不再逐次确认。请谨慎操作。</string>
     <string name="perm_safety_confirm_action">确认（%1$d）</string>
@@ -3482,4 +3484,41 @@
     <string name="personal_access_special_usage">「%1$s」需要到「设置 → 权限与后台 → 软件权限 → 使用情况访问」手动开启</string>
     <string name="personal_access_special_notification">「%1$s」需要到「设置 → 权限与后台 → 软件权限 → 通知使用权」手动开启</string>
     <string name="document_picker_unavailable">系统文件选择器不可用：请在「设置 → 应用 → 显示系统应用」中启用「文件」应用，或换一种方式导入</string>
+
+    <!-- 只读观察面板 Observe -->
+    <string name="observe_action_back">‹ 返回</string>
+    <string name="observe_readonly_badge">只读</string>
+    <string name="observe_readonly_title">只读观察 · %1$s第 %2$d 层</string>
+    <string name="observe_direction_up">上级</string>
+    <string name="observe_direction_down">下级</string>
+    <string name="observe_action_refresh">刷新</string>
+    <string name="observe_unnamed_session">（未命名会话）</string>
+    <string name="observe_self">自己</string>
+    <string name="observe_main_session">主会话</string>
+    <string name="observe_label_depth">层级</string>
+    <string name="observe_prefix_self">自己</string>
+    <string name="observe_prefix_parent">上级·父</string>
+    <string name="observe_prefix_grandparent">上级·祖父</string>
+    <string name="observe_prefix_up_n">上级·第 %1$d 层</string>
+    <string name="observe_prefix_down_n">下级·第 %1$d 层</string>
+    <string name="observe_state_running">运行中</string>
+    <string name="observe_state_done">已完成</string>
+    <string name="observe_state_failed">失败</string>
+    <string name="observe_state_stopped">已停止</string>
+    <string name="observe_state_interrupted">已中断</string>
+    <string name="observe_state_unknown">无任务记录</string>
+    <string name="observe_empty_stream">这个成员还没有内容。</string>
+    <string name="observe_unbound">尚未接线：未拿到要观察的会话。</string>
+    <string name="observe_role_user">用户</string>
+    <string name="observe_role_ai">AI</string>
+    <string name="observe_tool_pending">执行中</string>
+    <string name="observe_tool_success">成功</string>
+    <string name="observe_tool_failed">失败</string>
+    <string name="observe_tool_args">参数</string>
+    <string name="observe_tool_result">结果</string>
+    <string name="observe_tool_fallback_name">工具</string>
+    <string name="observe_hint_no_parent">当前会话没有上级：它已经是这棵会话树的顶层。</string>
+    <string name="observe_hint_no_child">当前会话还没有派生过下级。</string>
+    <string name="observe_session_missing">会话不存在：%1$s</string>
+    <string name="observe_error_tree">读取会话树失败：%1$s</string>
 </resources>
