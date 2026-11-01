@@ -49,7 +49,7 @@ abstract class AgentDatabase : RoomDatabase() {
     abstract fun toolCallReceiptDao(): ToolCallReceiptDao
 
     companion object {
-        const val SCHEMA_VERSION = 80
+        const val SCHEMA_VERSION = 81
 
         /** 数据库文件名（落在 `databases/` 下，另有 Room 默认 WAL 模式产生的 `-wal`/`-shm`）。 */
         const val DATABASE_NAME = "aicode_agent_db"

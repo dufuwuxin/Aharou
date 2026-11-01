@@ -1843,9 +1843,18 @@
     <string name="provider_custom_icon">Provider icon</string>
     <string name="provider_custom_icon_hint">Pick an image from your gallery or paste an image link. Leave it empty to use the built-in icon matched by brand name.</string>
     <string name="provider_custom_icon_pick">Choose from gallery</string>
-    <string name="provider_fallback_title">Fallback provider</string>
-    <string name="provider_fallback_hint">When this provider fails (out of quota, auth or rate limit), switch to the fallback one and continue this turn.</string>
+    <string name="provider_fallback_title">Fallback models</string>
+    <string name="provider_fallback_hint">When this provider fails (out of quota, auth or rate limit), the list is walked in order: the first entry takes over, and if that fails too the next one does, and so on.</string>
     <string name="provider_fallback_off">No fallback</string>
+    <string name="provider_fallback_add">Add fallback model</string>
+    <string name="provider_fallback_empty">No fallback models yet. A failed request just reports the error instead of switching.</string>
+    <string name="provider_fallback_no_provider">No other provider to pick: add a second provider first, or use a different model of this provider.</string>
+    <string name="provider_fallback_pick_provider">Choose provider</string>
+    <string name="provider_fallback_pick_model">Choose model</string>
+    <string name="provider_fallback_use_current">Use this provider\'s current model</string>
+    <string name="provider_fallback_manual">Type a model name</string>
+    <string name="provider_fallback_move_up">Move up</string>
+    <string name="provider_fallback_move_down">Move down</string>
     <string name="provider_custom_icon_url">Image link</string>
     <string name="provider_custom_icon_reset">Use default icon</string>    <string name="provider_show_api_key">Show API Key</string>
     <string name="provider_hide_api_key">Hide API Key</string>

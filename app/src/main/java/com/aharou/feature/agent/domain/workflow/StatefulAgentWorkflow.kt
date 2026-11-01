@@ -803,18 +803,14 @@ class StatefulAgentWorkflow @Inject constructor(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            // provider 级失败且本轮未吐出内容：切回退供应商重发（放在溢出恢复之前，压缩救不回来这类错）
+            // provider 级失败且本轮未吐出内容：沿「备用模型」链往下切一跳重发（放在溢出恢复之前，压缩救不回来这类错）
             if (finalResponse == null && acc.isEmpty() && reasoningAcc.isEmpty() && (e.isKeySwitchFailure() || e.isQuotaExhausted())) {
-                if (failoverCoordinator.isActive(currentContext.sessionId)) {
-                    failoverCoordinator.deactivate(currentContext.sessionId)
-                } else {
-                    val origin = aiProviderRepository.getProviderById(providerInUse.providerId)
-                    val target = origin?.let { failoverCoordinator.activate(currentContext.sessionId, it) }
-                    if (target != null) {
-                        val fb = createStandaloneProvider(target, currentContext.sessionId)
-                        return executeLlmEffect(state, currentContext, currentTools, systemPrompt, fb,
-                            inputBudget, budget, actionQueue, emit, telemetry)
-                    }
+                val origin = aiProviderRepository.getProviderById(providerInUse.providerId)
+                val target = origin?.let { failoverCoordinator.next(currentContext.sessionId, it) }
+                if (target != null) {
+                    val fb = createStandaloneProvider(target, currentContext.sessionId)
+                    return executeLlmEffect(state, currentContext, currentTools, systemPrompt, fb,
+                        inputBudget, budget, actionQueue, emit, telemetry)
                 }
             }
             if (finalResponse == null && !budget.overflowRecoveryAttempted && acc.isEmpty() && reasoningAcc.isEmpty() && isContextOverflow(e)) {
