@@ -1215,18 +1215,13 @@ fun AIChatPanel(
                 },
                 onNewChat = { viewModel.newSession() },
                 onOpenWorkflow = onOpenWorkflow,
-                onNavigateToTerminal = onNavigateToTerminal,
-                onNavigateToGit = onNavigateToGit,
-                onNavigateToBrowser = onNavigateToBrowser,
-                onNavigateToSandbox = onNavigateToSandbox,
-                onNavigateToShared = onNavigateToShared,
-                onOpenActivity = { showActivity = true },
+                onNavigateToTerminal = onNavigateToTerminal, onNavigateToGit = onNavigateToGit,
+                onNavigateToBrowser = onNavigateToBrowser, onNavigateToSandbox = onNavigateToSandbox,
+                onNavigateToShared = onNavigateToShared, onOpenActivity = { showActivity = true },
                 currentMode = currentMode,
                 onToggleMode = { viewModel.setSessionMode(it) },
                 connectionState = connectionState?.takeIf { isRemote },
-                terminalActive = terminalActive,
-                gitActive = gitActive,
-                browserActive = browserActive
+                terminalActive = terminalActive, gitActive = gitActive, browserActive = browserActive
             )
         }
     ) { padding ->
@@ -1811,10 +1806,8 @@ fun AIChatPanel(
             }
 
             crossCheckMessage?.let { message -> CrossCheckSheet(message, currentSessionId) { crossCheckMessage = null } }
-            if (showActivity) {
-                val receipts by viewModel.currentSessionReceipts.collectAsStateWithLifecycle()
-                ActivityTimelineSheet(receipts = receipts, onDismiss = { showActivity = false })
-            }
+            if (showActivity) ActivityTimelineSheet(
+                viewModel.currentSessionReceipts.collectAsStateWithLifecycle().value) { showActivity = false }
             editingMessage?.let { message ->
                 EditMessageDialog(
                     initialText = message.content,
