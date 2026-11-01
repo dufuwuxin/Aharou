@@ -3,6 +3,8 @@ package com.aharou.core.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -11,26 +13,22 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import compose.icons.FeatherIcons
-import compose.icons.feathericons.Box
-import compose.icons.feathericons.MessageCircle
-import compose.icons.feathericons.Settings
 import com.aharou.R
 import com.aharou.core.theme.Spacing
-import com.aharou.core.theme.semanticColors
 
 /**
- * 底部主导航：三个标签「首页 / 配置 / 设置」。
- *
- * 与侧边栏不同，这是一条常驻在屏幕底部的胶囊条；每个标签独立可点，点击后
- * 由 [onClick] 切到对应目标页。
+ * 底部主导航：三个图片图标标签（无文字），选中态用主色高亮 + 底部指示点。
+ * 图标资源：ic_nav_home（气泡）、ic_nav_config（立方体）、ic_nav_settings（齿轮）。
  */
 @Composable
 fun BottomNavBar(
@@ -38,66 +36,80 @@ fun BottomNavBar(
     onClick: (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Row(
+    Surface(
+        tonalElevation = 4.dp,
+        color = MaterialTheme.colorScheme.surface,
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = Spacing.md, vertical = Spacing.xs)
-            .height(56.dp),
-        horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically
+            .height(64.dp)
     ) {
-        TabButton(
-            icon = FeatherIcons.MessageCircle,
-            label = stringResource(R.string.bottom_tab_home),
-            selected = selectedTab == 0,
-            onClick = { onClick(0) }
-        )
-        TabButton(
-            icon = FeatherIcons.Box,
-            label = stringResource(R.string.bottom_tab_config),
-            selected = selectedTab == 1,
-            onClick = { onClick(1) }
-        )
-        TabButton(
-            icon = FeatherIcons.Settings,
-            label = stringResource(R.string.bottom_tab_settings),
-            selected = selectedTab == 2,
-            onClick = { onClick(2) }
-        )
+        Row(
+            horizontalArrangement = Arrangement.SpaceAround,
+            verticalAlignment = Alignment.Bottom,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = Spacing.lg, vertical = Spacing.sm)
+        ) {
+            NavTab(
+                iconRes = R.drawable.ic_nav_home,
+                label = stringResource(R.string.bottom_tab_home),
+                selected = selectedTab == 0,
+                onClick = { onClick(0) }
+            )
+            NavTab(
+                iconRes = R.drawable.ic_nav_config,
+                label = stringResource(R.string.bottom_tab_config),
+                selected = selectedTab == 1,
+                onClick = { onClick(1) }
+            )
+            NavTab(
+                iconRes = R.drawable.ic_nav_settings,
+                label = stringResource(R.string.bottom_tab_settings),
+                selected = selectedTab == 2,
+                onClick = { onClick(2) }
+            )
+        }
     }
 }
 
 @Composable
-private fun TabButton(
-    icon: ImageVector,
+private fun NavTab(
+    iconRes: Int,
     label: String,
     selected: Boolean,
     onClick: () -> Unit
 ) {
-    val bg = if (selected) {
-        MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
-    } else {
-        androidx.compose.ui.graphics.Color.Transparent
-    }
-    Row(
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
+            .clickable(onClick = onClick)
             .padding(horizontal = Spacing.md, vertical = Spacing.xs)
-            .background(bg, RoundedCornerShape(12.dp))
-            .clickable(onClick = onClick),
-        horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = label,
-            modifier = Modifier.size(20.dp),
-            tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-        )
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier.size(28.dp)
+        ) {
+            Icon(
+                painter = painterResource(iconRes),
+                contentDescription = label,
+                modifier = Modifier.size(22.dp),
+                tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            if (selected) {
+                Box(
+                    modifier = Modifier
+                        .size(3.dp)
+                        .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(50))
+                        .align(Alignment.BottomCenter)
+                )
+            }
+        }
         Text(
             text = label,
-            style = MaterialTheme.typography.labelMedium,
-            color = if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(start = 6.dp)
+            style = MaterialTheme.typography.labelSmall,
+            color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(top = 2.dp)
         )
     }
 }

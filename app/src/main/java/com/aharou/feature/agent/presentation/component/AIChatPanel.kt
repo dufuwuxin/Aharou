@@ -1239,7 +1239,7 @@ fun AIChatPanel(
                 currentMode = currentMode,
                 onToggleMode = { viewModel.setSessionMode(it) },
                 connectionState = connectionState?.takeIf { isRemote },
-                showMenuButton = showMenuButton,
+                showMenuButton = showMenuButton && sessionReady,
                 terminalActive = terminalActive,
                 gitActive = gitActive,
                 browserActive = browserActive
