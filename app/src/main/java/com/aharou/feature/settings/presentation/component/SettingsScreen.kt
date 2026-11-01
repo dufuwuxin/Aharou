@@ -120,7 +120,7 @@ private val SettingsMenuWidth = 320.dp
 private val SettingsTwoPaneMinWidth = 840.dp
 
 /** 设置页内部二级菜单分区。Menu 为首页菜单，其余为各自的二级页。 */
-internal enum class SettingsSection(@param:StringRes val titleRes: Int) {
+enum class SettingsSection(@param:StringRes val titleRes: Int) {
     Menu(R.string.settings_title),
     Soul(R.string.soul_settings_title),
     ConfigAudit(R.string.config_audit_title),
@@ -178,6 +178,16 @@ internal enum class SettingsSection(@param:StringRes val titleRes: Int) {
     MoreGroup(R.string.settings_category_more),
     HelpGroup(R.string.settings_category_help)
 }
+
+/** 顶层菜单的全部分组：[SettingsMenu] 默认渲染这一份。 */
+private val GROUPS = listOf(
+    SettingsSection.AiGroup,
+    SettingsSection.AharouGroup,
+    SettingsSection.GeneralGroup,
+    SettingsSection.PermissionsGroup,
+    SettingsSection.MoreGroup,
+    SettingsSection.HelpGroup
+)
 /**
  * 分区层级：0 首页菜单，1 一级分区，2 分区里再翻一层的详情 / 编辑页，3 详情页之上的编辑页。
  *
@@ -210,7 +220,9 @@ fun SettingsScreen(
     onStopAllAndCloseTerminal: () -> Unit = {},
     onboardingStep: OnboardingStep? = null,
     onOnboardingModelAdded: (() -> Unit)? = null,
-    onOnboardingDismissFetchDialog: (() -> Unit)? = null
+    onOnboardingDismissFetchDialog: (() -> Unit)? = null,
+    /** 顶层分组过滤：默认空列表展示全部；「配置」页传 listOf(SettingsSection.AiGroup) 只展 AI 组。 */
+    menuGroups: List<SettingsSection> = emptyList()
 ) {
     val scope = rememberCoroutineScope()
     val providers by viewModel.providers.collectAsStateWithLifecycle()
@@ -258,6 +270,8 @@ fun SettingsScreen(
     val titleModel by viewModel.titleModel.collectAsStateWithLifecycle()
     val imageGenProviderId by viewModel.imageGenProviderId.collectAsStateWithLifecycle()
     val imageGenModel by viewModel.imageGenModel.collectAsStateWithLifecycle()
+    val memoryProviderId by viewModel.memoryProviderId.collectAsStateWithLifecycle()
+    val memoryModel by viewModel.memoryModel.collectAsStateWithLifecycle()
     val voiceSttProviderId by viewModel.voiceSttProviderId.collectAsStateWithLifecycle()
     val voiceSttModel by viewModel.voiceSttModel.collectAsStateWithLifecycle()
     val voiceTtsProviderId by viewModel.voiceTtsProviderId.collectAsStateWithLifecycle()
@@ -560,7 +574,8 @@ fun SettingsScreen(
     val menuBody: @Composable () -> Unit = {
         SettingsMenu(
             scrollState = menuScrollState,
-            onOpen = openSection
+            onOpen = openSection,
+            menuGroups = menuGroups
         )
     }
 
@@ -650,6 +665,7 @@ fun SettingsScreen(
                 providers = providers,
                 modelMetadata = modelMetadata,
                 availableTools = remember { viewModel.availableToolNames() },
+                availableSkills = remember { viewModel.allSkillNames() },
                 saveState = subAgentSaveState,
                 onLoadMetadata = { viewModel.loadAllModelMetadata() },
                 onSave = { form, scope -> viewModel.saveSubAgent(form, scope, editingSubAgent?.name) },
@@ -1059,6 +1075,10 @@ fun SettingsScreen(
                     onClearTitleModel = { viewModel.clearTitleModel() },
                     onSelectImageGenModel = { pid, m -> viewModel.setImageGenModel(pid, m) },
                     onClearImageGenModel = { viewModel.clearImageGenModel() },
+                    memoryProviderId = memoryProviderId,
+                    memoryModel = memoryModel,
+                    onSelectMemoryModel = { pid, m -> viewModel.setMemoryModel(pid, m) },
+                    onClearMemoryModel = { viewModel.clearMemoryModel() },
                     onSelectVoiceModel = { pid, m -> viewModel.setVoiceSttModel(pid, m) },
                     onClearVoiceModel = { viewModel.clearVoiceSttModel() },
                     onSelectVoiceTtsModel = { pid, m ->
@@ -1624,8 +1644,11 @@ private fun SettingsDetailPlaceholder() {
 @Composable
 internal fun SettingsMenu(
     scrollState: ScrollState,
-    onOpen: (SettingsSection) -> Unit
+    onOpen: (SettingsSection) -> Unit,
+    menuGroups: List<SettingsSection> = emptyList()
 ) {
+    // 空列表 = 全展示；否则按给定列表过滤，支持「配置」页只显示 AI 组。
+    val displayGroups = if (menuGroups.isEmpty()) GROUPS else menuGroups
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -1634,42 +1657,28 @@ internal fun SettingsMenu(
             .padding(bottom = Spacing.xl),
         verticalArrangement = Arrangement.spacedBy(Spacing.sm)
     ) {
-        SettingsGroup {
-            SettingsRow(
-                icon = FeatherIcons.Cpu,
-                title = stringResource(SettingsSection.AiGroup.titleRes),
-                onClick = { onOpen(SettingsSection.AiGroup) }
-            )
+        if (displayGroups.contains(SettingsSection.AiGroup)) {
+            SettingsRow(icon = FeatherIcons.Cpu, title = stringResource(SettingsSection.AiGroup.titleRes), onClick = { onOpen(SettingsSection.AiGroup) })
             SettingsDivider()
-            SettingsRow(
-                icon = FeatherIcons.Smile,
-                title = stringResource(SettingsSection.AharouGroup.titleRes),
-                onClick = { onOpen(SettingsSection.AharouGroup) }
-            )
+        }
+        if (displayGroups.contains(SettingsSection.AharouGroup)) {
+            SettingsRow(icon = FeatherIcons.Smile, title = stringResource(SettingsSection.AharouGroup.titleRes), onClick = { onOpen(SettingsSection.AharouGroup) })
             SettingsDivider()
-            SettingsRow(
-                icon = FeatherIcons.Sliders,
-                title = stringResource(SettingsSection.GeneralGroup.titleRes),
-                onClick = { onOpen(SettingsSection.GeneralGroup) }
-            )
+        }
+        if (displayGroups.contains(SettingsSection.GeneralGroup)) {
+            SettingsRow(icon = FeatherIcons.Sliders, title = stringResource(SettingsSection.GeneralGroup.titleRes), onClick = { onOpen(SettingsSection.GeneralGroup) })
             SettingsDivider()
-            SettingsRow(
-                icon = FeatherIcons.Shield,
-                title = stringResource(SettingsSection.PermissionsGroup.titleRes),
-                onClick = { onOpen(SettingsSection.PermissionsGroup) }
-            )
+        }
+        if (displayGroups.contains(SettingsSection.PermissionsGroup)) {
+            SettingsRow(icon = FeatherIcons.Shield, title = stringResource(SettingsSection.PermissionsGroup.titleRes), onClick = { onOpen(SettingsSection.PermissionsGroup) })
             SettingsDivider()
-            SettingsRow(
-                icon = FeatherIcons.Box,
-                title = stringResource(SettingsSection.MoreGroup.titleRes),
-                onClick = { onOpen(SettingsSection.MoreGroup) }
-            )
+        }
+        if (displayGroups.contains(SettingsSection.MoreGroup)) {
+            SettingsRow(icon = FeatherIcons.Box, title = stringResource(SettingsSection.MoreGroup.titleRes), onClick = { onOpen(SettingsSection.MoreGroup) })
             SettingsDivider()
-            SettingsRow(
-                icon = FeatherIcons.Info,
-                title = stringResource(SettingsSection.HelpGroup.titleRes),
-                onClick = { onOpen(SettingsSection.HelpGroup) }
-            )
+        }
+        if (displayGroups.contains(SettingsSection.HelpGroup)) {
+            SettingsRow(icon = FeatherIcons.Info, title = stringResource(SettingsSection.HelpGroup.titleRes), onClick = { onOpen(SettingsSection.HelpGroup) })
         }
     }
 }

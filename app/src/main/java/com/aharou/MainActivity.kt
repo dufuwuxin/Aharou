@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.MaterialTheme
@@ -82,6 +83,7 @@ import com.aharou.core.ui.SplitPaneLayout
 import com.aharou.core.ui.drawerWidth
 import com.aharou.core.ui.isExpandedWidth
 import com.aharou.core.ui.pageEnter
+import com.aharou.core.ui.BottomNavBar
 import com.aharou.core.ui.pageExit
 import com.aharou.core.ui.rememberImageViewerState
 import com.aharou.core.ui.rememberViewerDecodeSpec
@@ -975,6 +977,15 @@ fun AppNavigation(
                     },
                 )
             }
+            composable("config") {
+                // 「配置」页：只展 AI 组（提示词/记忆/技能/团队/工具等 AI 相关设置）。
+                SettingsScreen(
+                    viewModel = settingsViewModel,
+                    onNavigateBack = { navController.popBackStack() },
+                    onStopAllAndCloseTerminal = { agentViewModel.stopAllAndCloseTerminal() },
+                    menuGroups = listOf(com.aharou.feature.settings.presentation.component.SettingsSection.AiGroup)
+                )
+            }
             composable("settings") {
                 // 复用 Activity 级 settingsViewModel（MainActivity 顶部已创建并 init），
                 // 避免进入设置页时再建一个 NavBackStackEntry 级实例、重复跑 init 与 9 路 flow 订阅，
@@ -987,6 +998,14 @@ fun AppNavigation(
                         if (!expanded) scope.launch { drawerState.open() }
                     },
                     onStopAllAndCloseTerminal = { agentViewModel.stopAllAndCloseTerminal() },
+                    // 「设置」页：除 AI 组（已拆到「配置」）外的其他分组。
+                    menuGroups = listOf(
+                        com.aharou.feature.settings.presentation.component.SettingsSection.AharouGroup,
+                        com.aharou.feature.settings.presentation.component.SettingsSection.GeneralGroup,
+                        com.aharou.feature.settings.presentation.component.SettingsSection.PermissionsGroup,
+                        com.aharou.feature.settings.presentation.component.SettingsSection.MoreGroup,
+                        com.aharou.feature.settings.presentation.component.SettingsSection.HelpGroup
+                    ),
                     onboardingStep = onboardingUiState.step.takeIf { onboardingUiState.active },
                     onOnboardingModelAdded = {
                         if (onboardingUiState.active && onboardingUiState.step == OnboardingStep.SIMULATE_FETCH_DIALOG) {
@@ -1207,6 +1226,41 @@ fun AppNavigation(
             }
         ) {
             navBody()
+        }
+    }
+
+    // 底部主导航：「首页 / 配置 / 设置」三标签；仅主路由可见，聊天/配置/设置三个目标页会显示，其余子页（编辑器/终端/浏览器等）隐藏。
+    val isMainTab = currentRoute in listOf("chat", "config", "settings")
+    if (isMainTab) {
+        val navBarIndex = when (currentRoute) {
+            "chat" -> 0
+            "config" -> 1
+            else -> 2
+        }
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = androidx.compose.ui.Alignment.BottomCenter
+        ) {
+            BottomNavBar(
+                selectedTab = navBarIndex,
+                onClick = { i ->
+                    val route = when (i) {
+                        0 -> "chat"
+                        1 -> "config"
+                        else -> "settings"
+                    }
+                    if (route != currentRoute) {
+                        navController.navigate(route) {
+                            popUpTo(navController.graph.startDestinationId) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    }
+                },
+                modifier = Modifier
+                    .align(androidx.compose.ui.Alignment.BottomCenter)
+                    .padding(bottom = 8.dp)
+            )
         }
     }
 
