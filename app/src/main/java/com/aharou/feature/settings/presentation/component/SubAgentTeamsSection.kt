@@ -307,7 +307,7 @@ private fun TeamDetailSheet(
                     val names = team.members.filter { it.level == level }.map { it.name }
                     if (names.isEmpty()) return@forEach
                     Text(
-                        text = stringResource(R.string.team_level_label, level) + "：" + names.joinToString("、"),
+                        text = teamRoleLabel(level) + "：" + names.joinToString("、"),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurface
                     )
@@ -320,7 +320,7 @@ private fun TeamDetailSheet(
                 Text(
                     text = buildString {
                         append(index + 1).append(". ").append(stage.title)
-                        append("（").append(stringResource(R.string.team_level_label, stage.level)).append("）")
+                        append("（").append(teamRoleLabel(stage.level)).append("）")
                         if (members.isNotEmpty()) append("：").append(members)
                         if (stage.isReview) append(" · ").append(stringResource(R.string.team_editor_stage_review))
                         stage.rejectTo?.let {
@@ -358,4 +358,16 @@ private fun TeamDetailSheet(
             }
         }
     }
+
+
 }
+
+/** 把层级数字映射到角色文案：一级高管、二级组长、三级组员，其他按数字。 */
+@Composable
+private fun teamRoleLabel(level: Int): String =
+    when (level) {
+        1 -> stringResource(R.string.team_level_role_1)
+        2 -> stringResource(R.string.team_level_role_2)
+        3 -> stringResource(R.string.team_level_role_3)
+        else -> stringResource(R.string.team_level_role_default, level)
+    }

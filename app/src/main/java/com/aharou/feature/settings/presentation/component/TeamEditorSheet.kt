@@ -1,24 +1,37 @@
 package com.aharou.feature.settings.presentation.component
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -34,6 +47,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.aharou.R
 import com.aharou.core.theme.Spacing
+import com.aharou.core.theme.semanticColors
 import com.aharou.core.ui.AdaptiveModalBottomSheet
 import com.aharou.core.ui.AppTextField
 import com.aharou.feature.agent.domain.subagent.AgentDefinitionScope
@@ -44,6 +58,17 @@ import com.aharou.feature.agent.domain.subagent.AgentTeamStageForm
 import com.aharou.feature.agent.domain.subagent.TeamMemberRef
 import com.aharou.feature.agent.domain.subagent.toForm
 import com.aharou.feature.settings.presentation.AgentTeamSaveState
+import compose.icons.FeatherIcons
+import compose.icons.feathericons.Plus
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.background
+import androidx.compose.ui.unit.sp
+import compose.icons.feathericons.ChevronUp
+import compose.icons.feathericons.ChevronDown
 
 /**
  * 创建 / 编辑团队的表单，四段按用户口径排：团队成员 → 管理员组 → 团队流程 → 团队公约。
@@ -141,55 +166,68 @@ internal fun TeamEditorSheet(
             )
             ScopeSelector(scopeIsGlobal = scopeIsGlobal, enabled = initial == null) { scopeIsGlobal = it }
 
-            // 2. 成员名单：只有在这里的成员会被主代理读到
+            // 2. 成员名单：只有在这里的成员会进主代理视野
+            var showPicker by remember { mutableStateOf(false) }
             SettingsGroupHeader(text = stringResource(R.string.team_editor_members))
             Text(
-                text = stringResource(R.string.team_editor_members_hint),
+                text = stringResource(R.string.team_level_editor_desc),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            if (availableMembers.isEmpty()) {
+            if (availableMembers.isEmpty() && members.isEmpty()) {
                 Text(
                     text = stringResource(R.string.team_editor_members_empty),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             } else {
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
-                    availableMembers.forEach { memberName ->
-                        val picked = members.any { it.name == memberName }
-                        FilterChip(
-                            selected = picked,
-                            onClick = {
-                                members = if (picked) {
-                                    members.filterNot { it.name == memberName }
-                                } else {
-                                    members + TeamMemberRef(memberName, 1)
-                                }
-                                // 移出名单的人不能再当管理员
-                                if (picked) admins = admins.filterNot { it == memberName }
+                // 已选成员以卡片行展示；右侧点选择器挑人，而不是把全量名单一次性摊开
+                if (members.isNotEmpty()) {
+                    SettingsGroupHeader(text = stringResource(R.string.team_editor_selected_members))
+                    members.forEach { ref ->
+                        MemberRow(
+                            ref = ref,
+                            onLevelChange = { level ->
+                                members = members.map { if (it.name == ref.name) it.copy(level = level) else it }
                             },
-                            label = { Text(memberName) }
+                            onRemove = {
+                                members = members.filterNot { it.name == ref.name }
+                                admins = admins.filterNot { it == ref.name }
+                            }
                         )
                     }
                 }
-            }
-            // 每个已选成员的层级：一级在前、层级越高越靠执行
-            members.forEach { ref ->
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                    Text(
-                        text = ref.name,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.weight(1f)
-                    )
-                    LevelStepper(
-                        level = ref.level,
-                        onChange = { level ->
-                            members = members.map { if (it.name == ref.name) it.copy(level = level) else it }
-                        }
-                    )
+                // 选择器按钮：打开二级勾选页，把已选的人加进来
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = Spacing.xs),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = { showPicker = true }) {
+                        Icon(
+                            imageVector = FeatherIcons.Plus,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(stringResource(R.string.team_editor_add_members))
+                    }
                 }
+            }
+            if (showPicker) {
+                MemberPickerSheet(
+                    available = availableMembers,
+                    selected = members.map { it.name },
+                    onConfirm = { picked ->
+                        val existingNames = members.map { it.name }.toSet()
+                        val newRefs = picked.filter { it !in existingNames }
+                            .map { name -> TeamMemberRef(name, 1) }
+                        members = (members + newRefs).distinctBy { it.name }
+                        showPicker = false
+                    },
+                    onDismiss = { showPicker = false }
+                )
             }
 
             // 3. 管理员组：可多个，多模型并行出判断，主代理汇总成策略建议
@@ -223,15 +261,22 @@ internal fun TeamEditorSheet(
                 Text(stringResource(R.string.team_editor_preset_standard))
             }
 
+            // 流程图：节点按顺序竖向排列，连线走左侧，驳回边用虚线标出
             stages.forEachIndexed { index, stage ->
-                StageEditor(
-                    index = index,
+                var expanded by remember(stage.title) { mutableStateOf(false) }
+                ProcessNodeCard(
+                    index = index + 1,
                     stage = stage,
-                    members = rows,
-                    earlierTitles = stages.take(index).map { it.title.trim() }.filter { it.isNotEmpty() },
+                    roleLabel = stageRoleLabel(stage.level),
+                    isReview = stage.isReview,
+                    rejectToTitle = stage.rejectTo,
+                    rejectTargets = stages.take(index).map { it.title.trim() }.filter { it.isNotEmpty() },
+                    expanded = expanded,
+                    onToggleExpand = { expanded = it },
                     onChange = { updated -> stages = stages.toMutableList().also { it[index] = updated } },
                     onRemove = { stages = stages.filterIndexed { i, _ -> i != index } },
-                    canRemove = stages.size > 1
+                    canRemove = stages.size > 1,
+                    members = rows
                 )
             }
             TextButton(onClick = {
@@ -389,7 +434,9 @@ private fun StageEditor(
     }
 }
 
-/** 层级步进器：1~5 级够表达「一级成员组 / 二级 / 三级」这类结构，再多就该拆团队了。 */
+/** 层级步进器：1~5 级够表达「一级高管组 / 二级组长 / 三级组员」这类结构，再多就该拆团队了。
+ * 文案按角色定位展示：一级=高管、二级=组长、三级=组员，n级保留数字占位。
+ */
 @Composable
 private fun LevelStepper(level: Int, onChange: (Int) -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -397,12 +444,140 @@ private fun LevelStepper(level: Int, onChange: (Int) -> Unit) {
             Text("−")
         }
         Text(
-            text = stringResource(R.string.team_level_label, level),
+            text = stringResource(
+                when (level) {
+                    1 -> R.string.team_level_role_1
+                    2 -> R.string.team_level_role_2
+                    3 -> R.string.team_level_role_3
+                    else -> R.string.team_level_role_default
+                },
+                level
+            ),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface
         )
         TextButton(onClick = { onChange((level + 1).coerceAtMost(5)) }, enabled = level < 5) {
             Text("+")
+        }
+    }
+}
+
+/** 已选成员行：左侧名字 + 层级步进 + 右侧移除。 */
+@Composable
+private fun MemberRow(ref: TeamMemberRef, onLevelChange: (Int) -> Unit, onRemove: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = Spacing.xs),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = ref.name,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                fontWeight = FontWeight.Medium
+            )
+            Text(
+                text = stringResource(
+                    when (ref.level) {
+                        1 -> R.string.team_level_role_1
+                        2 -> R.string.team_level_role_2
+                        3 -> R.string.team_level_role_3
+                        else -> R.string.team_level_role_default
+                    },
+                    ref.level
+                ),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        LevelStepper(level = ref.level, onChange = onLevelChange)
+        IconButton(onClick = onRemove, modifier = Modifier.size(24.dp)) {
+            Icon(
+                imageVector = Icons.Default.Close,
+                contentDescription = stringResource(R.string.common_remove),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(18.dp)
+            )
+        }
+    }
+}
+
+/** 二级选择页：列出可用成员供勾选，确认后回写已选集合。 */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun MemberPickerSheet(
+    available: List<String>,
+    selected: List<String>,
+    onConfirm: (List<String>) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var picked by remember(selected) { mutableStateOf(selected.toMutableSet()) }
+    val canConfirm = picked.isNotEmpty()
+
+    AdaptiveModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = MaterialTheme.colorScheme.surface
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = Spacing.lg)
+                .padding(bottom = Spacing.xl),
+            verticalArrangement = Arrangement.spacedBy(Spacing.sm)
+        ) {
+            Text(
+                text = stringResource(R.string.team_select_members_title),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            if (available.isEmpty()) {
+                Text(
+                    text = stringResource(R.string.team_select_members_none),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                available.forEach { name ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = Spacing.xs),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(
+                            checked = name in picked,
+                            onCheckedChange = { checked ->
+                                picked = (if (checked) picked + name else picked - name).toMutableSet()
+                            }
+                        )
+                        Text(
+                            text = name,
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+            }
+            Divider(color = MaterialTheme.colorScheme.outlineVariant)
+            Button(
+                onClick = { onConfirm(picked.toList()); onDismiss() },
+                enabled = canConfirm,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = stringResource(R.string.team_select_members_confirm, picked.size),
+                    style = MaterialTheme.typography.bodyLarge
+                )
+            }
+            TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.common_cancel))
+            }
         }
     }
 }
@@ -458,3 +633,131 @@ private fun AgentTeamSaveError.messageRes(): Int = when (this) {
     AgentTeamSaveError.BAD_REJECT_TARGET -> R.string.team_editor_error_bad_reject
     AgentTeamSaveError.IO_FAILED -> R.string.team_editor_error_io
 }
+
+
+/** 把阶段层级映射到角色文案（与团队成员级别一致）。 */
+@Composable
+private fun stageRoleLabel(level: Int): String = when (level) {
+    1 -> stringResource(R.string.team_level_role_1)
+    2 -> stringResource(R.string.team_level_role_2)
+    3 -> stringResource(R.string.team_level_role_3)
+    else -> stringResource(R.string.team_level_role_default, level)
+}
+
+/**
+ * 团队流程节点卡片：左侧竖向连线 + 右侧摘要；展开后内嵌 StageEditor 继续编辑。
+ * 驳回边（审核关）用红色标签标注打回目标；关卡卡片右上角加一个审核图标。
+ */
+@Composable
+private fun ProcessNodeCard(
+    index: Int,
+    stage: AgentTeamStageForm,
+    roleLabel: String,
+    isReview: Boolean,
+    rejectToTitle: String?,
+    rejectTargets: List<String>,
+    expanded: Boolean,
+    onToggleExpand: (Boolean) -> Unit,
+    onChange: (AgentTeamStageForm) -> Unit,
+    onRemove: () -> Unit,
+    canRemove: Boolean,
+    members: List<String>
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.semanticColors.cardSurface, RoundedCornerShape(10.dp))
+                .clickable { onToggleExpand(!expanded) }
+                .padding(horizontal = Spacing.md, vertical = Spacing.sm),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .width(28.dp)
+                    .height(36.dp)
+                    .background(
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
+                        shape = RoundedCornerShape(topStart = 10.dp, bottomStart = 10.dp)
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "$index",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            Spacer(modifier = Modifier.width(Spacing.sm))
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = stage.title.takeIf { it.isNotBlank() } ?: stringResource(R.string.team_editor_stage_title_hint, index),
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    if (isReview) {
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "\u25cf 关卡",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.error,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = roleLabel,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(end = Spacing.xs)
+                    )
+                    if (stage.members.isNotEmpty()) {
+                        Text(
+                            text = stage.members.joinToString(", "),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+            if (rejectToTitle != null && rejectToTitle.isNotBlank()) {
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(
+                        text = stringResource(R.string.team_reject_to, rejectToTitle),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.width(Spacing.sm))
+            if (canRemove) {
+                TextButton(onClick = { onRemove() }, contentPadding = PaddingValues(4.dp)) {
+                    Text(stringResource(R.string.team_editor_remove_stage), color = MaterialTheme.colorScheme.error)
+                }
+            }
+            Icon(
+                imageVector = if (expanded) FeatherIcons.ChevronUp else FeatherIcons.ChevronDown,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(18.dp)
+            )
+        }
+        if (expanded) {
+            Divider(modifier = Modifier.padding(start = 36.dp, end = Spacing.md))
+            StageEditor(
+                index = index - 1,
+                stage = stage,
+                members = members,
+                earlierTitles = rejectTargets,
+                onChange = onChange,
+                onRemove = onRemove,
+                canRemove = canRemove
+            )
+        }
+    }
+}
+

@@ -1167,7 +1167,7 @@ fun SettingsScreen(
                     },
                     onOpenTeams = { section = SettingsSection.Teams }
                 )
-                SettingsSection.Teams -> SubAgentTeamsSection(expertCount = subAgents.size, onOpenExperts = { section = SettingsSection.SubAgents })
+                SettingsSection.Teams -> SubAgentTeamsSection(expertCount = subAgents.size, onOpenExperts = { section = SettingsSection.SubAgentEditor; editingSubAgent = null; subAgentEditorReturn = SettingsSection.Teams })
                 SettingsSection.Tools -> ToolsSection()
                 SettingsSection.Prompts -> {
                     val promptsViewModel: PromptsViewModel =
