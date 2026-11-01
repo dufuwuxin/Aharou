@@ -3444,6 +3444,7 @@
     <!-- 智能托管 Steward -->
     <string name="steward_entry_title">智能托管</string>
     <string name="steward_sheet_intro">每轮回答结束后，由主管模型判断你最初的任务做完没有；没做完就自动把下一步发进同一个会话。</string>
+    <string name="steward_per_session_note">托管按会话独立：开关、轮数与状态只对当前会话生效，切到别的会话互不影响。</string>
     <string name="steward_enable">开启智能托管</string>
     <string name="steward_unlimited">不限轮数</string>
     <string name="steward_unlimited_note">勾选后最多自动续发 %1$d 轮（安全阀），避免空转烧额度。</string>

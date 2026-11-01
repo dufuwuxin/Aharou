@@ -17,6 +17,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -50,14 +51,17 @@ internal fun StewardEntryButton(
     modifier: Modifier = Modifier,
     panelViewModel: StewardPanelViewModel = hiltViewModel(),
 ) {
-    val state by panelViewModel.state.collectAsStateWithLifecycle()
+    val ui by panelViewModel.uiState.collectAsStateWithLifecycle()
     var showSheet by remember { mutableStateOf(false) }
+    // 面板是同一个 ViewModel 实例服务的：切会话时先把它绑到当前会话，否则按钮指示会停在上一个会话的状态上。
+    LaunchedEffect(sessionId) { panelViewModel.bindSession(sessionId) }
+    val panel = ui.forSession(sessionId)
 
     IconButton(onClick = { showSheet = true }, modifier = modifier.size(36.dp)) {
         Icon(
             imageVector = Icons.Default.SmartToy,
             contentDescription = stringResource(R.string.steward_entry_title),
-            tint = if (state.enabled) {
+            tint = if (panel.state.enabled) {
                 MaterialTheme.colorScheme.primary
             } else {
                 MaterialTheme.colorScheme.onSurfaceVariant
@@ -83,9 +87,12 @@ internal fun StewardSheet(
     panelViewModel: StewardPanelViewModel,
     onDismiss: () -> Unit
 ) {
-    val state by panelViewModel.state.collectAsStateWithLifecycle()
-    val unlimited by panelViewModel.unlimited.collectAsStateWithLifecycle()
-    val maxLoops by panelViewModel.maxLoops.collectAsStateWithLifecycle()
+    val ui by panelViewModel.uiState.collectAsStateWithLifecycle()
+    LaunchedEffect(sessionId) { panelViewModel.bindSession(sessionId) }
+    val panel = ui.forSession(sessionId)
+    val state = panel.state
+    val unlimited = panel.unlimited
+    val maxLoops = panel.maxLoops
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val sliderEnabled = state.enabled && !unlimited
 
@@ -104,6 +111,12 @@ internal fun StewardSheet(
             Spacer(Modifier.height(Spacing.xs))
             Text(
                 text = stringResource(R.string.steward_sheet_intro),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(Spacing.xs))
+            Text(
+                text = stringResource(R.string.steward_per_session_note),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -136,7 +149,7 @@ internal fun StewardSheet(
                 )
                 AppSwitch(
                     checked = unlimited,
-                    onCheckedChange = { on -> panelViewModel.setUnlimited(on) },
+                    onCheckedChange = { on -> panelViewModel.setUnlimited(sessionId, on) },
                     enabled = state.enabled
                 )
             }
@@ -169,7 +182,7 @@ internal fun StewardSheet(
             }
             Slider(
                 value = maxLoops.toFloat(),
-                onValueChange = { value -> panelViewModel.setMaxLoops(value.roundToInt()) },
+                onValueChange = { value -> panelViewModel.setMaxLoops(sessionId, value.roundToInt()) },
                 valueRange = StewardSettings.MIN_LOOPS.toFloat()..StewardSettings.MAX_LOOPS.toFloat(),
                 steps = StewardSettings.MAX_LOOPS - StewardSettings.MIN_LOOPS - 1,
                 enabled = sliderEnabled

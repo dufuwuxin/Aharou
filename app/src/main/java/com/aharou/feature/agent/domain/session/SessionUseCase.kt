@@ -6,6 +6,7 @@ import com.aharou.feature.agent.data.local.dao.ChatSessionDao
 import com.aharou.feature.agent.data.local.entity.ChatSessionEntity
 import com.aharou.feature.agent.domain.model.AgentMode
 import com.aharou.feature.agent.domain.model.ReasoningEffort
+import com.aharou.feature.agent.domain.steward.StewardSettingsStore
 import com.aharou.feature.agent.presentation.MessageRole
 import java.util.UUID
 import javax.inject.Inject
@@ -15,7 +16,9 @@ import javax.inject.Singleton
 class SessionUseCase @Inject constructor(
     private val chatSessionDao: ChatSessionDao,
     private val agentMessageDao: AgentMessageDao,
-    private val messageArchiveStore: MessageArchiveStore
+    private val messageArchiveStore: MessageArchiveStore,
+    /** 智能托管按会话存开关：删会话时要把它的键清掉，不留垃圾。 */
+    private val stewardSettings: StewardSettingsStore
 ) {
     companion object {
         private const val TAG = "SessionUseCase"
@@ -82,12 +85,14 @@ class SessionUseCase @Inject constructor(
             chatSessionDao.delete(child.id)
             messageArchiveStore.deleteSession(child.id)
             GhostModeStore.forget(child.id)
+            stewardSettings.forgetSession(child.id)
             deleted.add(child.id)
         }
         agentMessageDao.deleteBySession(id)
         chatSessionDao.delete(id)
         messageArchiveStore.deleteSession(id)
         GhostModeStore.forget(id)
+        stewardSettings.forgetSession(id)
         return deleted
     }
 
@@ -98,6 +103,7 @@ class SessionUseCase @Inject constructor(
         sessions.forEach { session -> agentMessageDao.deleteBySession(session.id) }
         chatSessionDao.deleteByWorkspace(workspacePath)
         sessions.forEach { session -> messageArchiveStore.deleteSession(session.id) }
+        sessions.forEach { session -> stewardSettings.forgetSession(session.id) }
         return sessions.size
     }
 

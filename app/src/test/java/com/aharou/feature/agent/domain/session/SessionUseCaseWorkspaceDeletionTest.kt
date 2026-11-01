@@ -3,6 +3,7 @@ package com.aharou.feature.agent.domain.session
 import com.aharou.feature.agent.data.local.dao.AgentMessageDao
 import com.aharou.feature.agent.data.local.dao.ChatSessionDao
 import com.aharou.feature.agent.data.local.entity.ChatSessionEntity
+import com.aharou.feature.agent.domain.steward.StewardSettingsStore
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
@@ -32,7 +33,7 @@ class SessionUseCaseWorkspaceDeletionTest {
         )
 
         val archives = mockk<MessageArchiveStore>(relaxed = true)
-        val useCase = SessionUseCase(chatDao, messageDao, archives)
+        val useCase = SessionUseCase(chatDao, messageDao, archives, StewardSettingsStore.Noop)
         val deleted = useCase.deleteSessionsByWorkspace("/ws/a")
 
         assertEquals(2, deleted)
@@ -50,7 +51,7 @@ class SessionUseCaseWorkspaceDeletionTest {
         coEvery { chatDao.getAllSessionsByWorkspaceOnce("/ws/empty") } returns emptyList()
 
         val archives = mockk<MessageArchiveStore>(relaxed = true)
-        val useCase = SessionUseCase(chatDao, messageDao, archives)
+        val useCase = SessionUseCase(chatDao, messageDao, archives, StewardSettingsStore.Noop)
         val deleted = useCase.deleteSessionsByWorkspace("/ws/empty")
 
         assertEquals(0, deleted)

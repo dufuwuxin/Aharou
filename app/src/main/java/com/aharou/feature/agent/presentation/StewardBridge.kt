@@ -22,6 +22,7 @@ class StewardBridge @Inject constructor(
     /**
      * 一轮结束即 AI 空闲：旁路问一次主管模型任务做完没有，没做完就把下一步发进同一会话。
      *
+     * 只看该会话自己的开关：别的会话开着托管，不会让这个会话也续发。
      * 判定走独立协程、失败只记日志，不影响本轮收尾；续发与本轮 job 天然串行，不会重入。
      *
      * @param send 把托管生成的下一步当作一条新用户消息发进该会话
@@ -31,12 +32,12 @@ class StewardBridge @Inject constructor(
         sessionId: String,
         send: (String) -> Unit,
     ) {
-        if (!stewardController.enabled) return
+        if (!stewardController.isEnabled(sessionId)) return
         scope.launch {
             val lastReport = messagePersistenceUseCase.getMessagesOnce(sessionId)
                 .lastOrNull { it.role == MessageRole.ASSISTANT.name && it.content.isNotBlank() }
                 ?.content.orEmpty()
-            stewardController.onAiIdle(lastReport, send)
+            stewardController.onAiIdle(sessionId, lastReport, send)
         }
     }
 }
