@@ -53,6 +53,7 @@ import compose.icons.feathericons.Folder
 import compose.icons.feathericons.Archive
 import compose.icons.feathericons.ChevronDown
 import compose.icons.feathericons.ChevronRight
+import compose.icons.feathericons.Clock
 import compose.icons.feathericons.GitBranch
 import compose.icons.feathericons.Globe
 import compose.icons.feathericons.HardDrive
@@ -78,6 +79,7 @@ internal fun ChatHeader(
     onNavigateToBrowser: () -> Unit = {},
     onNavigateToSandbox: () -> Unit = {},
     onNavigateToShared: () -> Unit = {},
+    onOpenActivity: () -> Unit = {},
     currentMode: AgentMode,
     onToggleMode: (AgentMode) -> Unit,
     connectionState: com.aharou.feature.agent.domain.container.ConnectionState? = null,
@@ -168,7 +170,7 @@ internal fun ChatHeader(
                             onClick = onOpenWorkflow
                         )
                         if (toolsExpanded) {
-                            // 展开态：只有工具三入口 + 收起，其余一律让位
+                            // 展开态：工具入口（Git / 终端 / 浏览器 / 活动记录）+ 收起，其余一律让位
                             WorkbenchIconButton(
                                 icon = FeatherIcons.GitBranch,
                                 contentDescription = stringResource(R.string.chat_open_git),
@@ -186,6 +188,12 @@ internal fun ChatHeader(
                                 contentDescription = stringResource(R.string.chat_open_browser),
                                 active = browserActive,
                                 onClick = onNavigateToBrowser
+                            )
+                            WorkbenchIconButton(
+                                icon = FeatherIcons.Clock,
+                                contentDescription = stringResource(R.string.chat_open_activity),
+                                active = false,
+                                onClick = onOpenActivity
                             )
                             IconButton(onClick = { toolsExpanded = false }) {
                                 Icon(
