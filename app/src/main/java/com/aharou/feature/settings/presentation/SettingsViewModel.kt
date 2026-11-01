@@ -40,6 +40,7 @@ import com.aharou.feature.agent.domain.permission.PermissionRule
 import com.aharou.feature.agent.domain.permission.PermissionRulesRepository
 import com.aharou.feature.agent.domain.skill.SkillForm
 import com.aharou.feature.agent.domain.skill.SkillMoveResult
+import com.aharou.feature.agent.domain.skill.SkillRepository
 import com.aharou.feature.agent.domain.skill.SkillScope
 import com.aharou.feature.agent.domain.skill.market.MarketSkill
 import com.aharou.feature.agent.domain.skill.market.SkillRepoAccess
@@ -52,6 +53,7 @@ import com.aharou.feature.agent.domain.subagent.AgentDefinitionRepository
 import com.aharou.feature.agent.domain.subagent.AgentDefinitionScope
 import com.aharou.feature.agent.domain.subagent.AgentSaveError
 import com.aharou.feature.agent.domain.subagent.InjectPart
+import com.aharou.feature.agent.domain.subagent.KeywordInjection
 import com.aharou.feature.agent.domain.tool.ToolRegistry
 import com.aharou.feature.settings.data.remote.ModelApiService
 import com.aharou.feature.settings.data.remote.ModelMetadataService
@@ -96,6 +98,7 @@ import com.aharou.feature.settings.data.repository.ThemeSettingsRepository
 import com.aharou.feature.settings.data.repository.ToolSafetySettingsRepository
 import com.aharou.feature.settings.data.repository.BackgroundSettingsRepository
 import com.aharou.feature.settings.data.repository.ImageGenModelSettingsRepository
+import com.aharou.feature.settings.data.repository.MemoryModelSettingsRepository
 import com.aharou.feature.settings.data.repository.VisionModelSettingsRepository
 import com.aharou.feature.workspace.domain.model.RemoteConnection
 import com.aharou.feature.workspace.domain.repository.RemoteRepository
@@ -201,7 +204,11 @@ data class SubAgentUiEntry(
     val mode: AgentMode?,
     val allowedTools: List<String>,
     val disallowedTools: List<String>,
+    /** 该角色专属绑定的技能名（来自前端matter 的 skills）。主代理和团队里其它成员不可见。 */
+    val skills: List<String> = emptyList(),
     val inject: Set<InjectPart>,
+    /** 关键词注入：每条 [keywords] 匹配用户输入时追加 [injectContent]，仅命中的会话/角色可见。 */
+    val keywordInjections: List<KeywordInjection> = emptyList(),
     val prompt: String,
     val filePath: String?
 )
@@ -244,6 +251,8 @@ class SettingsViewModel @Inject constructor(
     private val voiceModelManager: VoiceModelManager,
     private val tessdataManager: TessdataManager,
     private val imageGenModelSettingsRepository: ImageGenModelSettingsRepository,
+    private val memoryModelSettingsRepository: MemoryModelSettingsRepository,
+    private val skillRepository: SkillRepository,
     private val compactionModelSettingsRepository: CompactionModelSettingsRepository,
     private val titleModelSettingsRepository: TitleModelSettingsRepository,
     private val defaultModelSettingsRepository: DefaultModelSettingsRepository,
@@ -435,6 +444,13 @@ class SettingsViewModel @Inject constructor(
 
     private val _imageGenModel = MutableStateFlow("")
     val imageGenModel: StateFlow<String> = _imageGenModel.asStateFlow()
+
+    /** 记忆整理 / AI 优化弹窗专用模型：providerId 为空即未配置（回退压缩模型）。 */
+    private val _memoryProviderId = MutableStateFlow("")
+    val memoryProviderId: StateFlow<String> = _memoryProviderId.asStateFlow()
+
+    private val _memoryModel = MutableStateFlow("")
+    val memoryModel: StateFlow<String> = _memoryModel.asStateFlow()
 
     /** 语音识别（STT）专用模型：providerId 为空即未配置（回退内置离线模型）。 */
     private val _voiceSttProviderId = MutableStateFlow("")
@@ -879,6 +895,18 @@ class SettingsViewModel @Inject constructor(
             launch {
                 imageGenModelSettingsRepository.modelFlow.collectLatest {
                     _imageGenModel.value = it
+                }
+            }
+
+            launch {
+                memoryModelSettingsRepository.providerIdFlow.collectLatest {
+                    _memoryProviderId.value = it
+                }
+            }
+
+            launch {
+                memoryModelSettingsRepository.modelFlow.collectLatest {
+                    _memoryModel.value = it
                 }
             }
 
@@ -1346,6 +1374,8 @@ class SettingsViewModel @Inject constructor(
                         mode = entry.definition.mode,
                         allowedTools = entry.definition.allowedTools,
                         disallowedTools = entry.definition.disallowedTools,
+                        skills = entry.definition.skills,
+                        keywordInjections = entry.definition.keywordInjections,
                         inject = entry.definition.inject,
                         prompt = entry.definition.prompt,
                         filePath = entry.definition.filePath
@@ -1394,6 +1424,11 @@ class SettingsViewModel @Inject constructor(
 
     /** 当前已注册的全部工具名（含 MCP 动态工具），供编辑页勾选工具白名单与黑名单。 */
     fun availableToolNames(): List<String> = toolRegistry.getAvailableTools().map { it.name }
+
+    /** 全部公共技能名（可用于子代理「专属绑定」下拉）。内置技能不参与绑定（无法独占）。 */
+    fun allSkillNames(): List<String> = skillRepository.listAllSkills()
+        .filter { it.scope != SkillScope.BUILTIN }
+        .map { it.skill.name }
 
     fun deleteSubAgent(name: String, scope: AgentDefinitionScope) {
         if (_subAgentDeleting.value != null) return
@@ -2183,6 +2218,20 @@ class SettingsViewModel @Inject constructor(
     fun clearImageGenModel() {
         viewModelScope.launch {
             imageGenModelSettingsRepository.clear()
+        }
+    }
+
+    /** 设置记忆整理专用模型；providerId 留空等同 [clearMemoryModel]（回退压缩模型）。 */
+    fun setMemoryModel(providerId: String, model: String) {
+        viewModelScope.launch {
+            memoryModelSettingsRepository.setMemoryModel(providerId, model)
+        }
+    }
+
+    /** 清空记忆整理专用模型——回到跟随压缩模型。 */
+    fun clearMemoryModel() {
+        viewModelScope.launch {
+            memoryModelSettingsRepository.clear()
         }
     }
 

@@ -161,6 +161,41 @@ class AharouMemoryStore @Inject constructor(
 
     fun file(name: String): File = File(dir, name)
 
+    /**
+     * 角色记忆（主代理/团队/每个成员）与公共记忆分层：
+     * 公共记忆在 [dir]（CORE.md / GLOBAL.md），角色记忆在 `dir/roles/<roleKey>.md`。
+     * 公共记忆承载跨角色共享的内容（凭据、红线），角色记忆承载角色专属上下文。
+     */
+    private val rolesDir: File = File(dir, "roles")
+
+    /** 列出全部角色记忆条目名（无后缀）。 */
+    fun listRoleMemoryNames(): List<String> {
+        rolesDir.mkdirs()
+        return (rolesDir.listFiles { f -> f.isFile && f.extension == "md" } ?: emptyArray())
+            .map { it.name.removeSuffix(".md") }
+            .sorted()
+    }
+
+    /** 读某个角色的记忆（按角色 key，如 `main`/`team:<name>`/`agent:<name>`）。 */
+    fun readRoleMemory(roleKey: String): String? {
+        if (roleKey.isBlank() || roleKey.contains('/') || roleKey.contains("..")) return null
+        val target = File(rolesDir, "$roleKey.md")
+        return target.takeIf { it.exists() && it.isFile }?.let { runCatching { it.readText() }.getOrNull() }
+    }
+
+    /** 写/覆盖某个角色的记忆。 */
+    fun writeRoleMemory(roleKey: String, content: String): Boolean {
+        if (roleKey.isBlank() || roleKey.contains('/') || roleKey.contains("..")) return false
+        rolesDir.mkdirs()
+        return runCatching { File(rolesDir, "$roleKey.md").writeTextSafely(content, TAG) }.getOrDefault(false)
+    }
+
+    /** 删除某个角色的记忆。 */
+    fun deleteRoleMemory(roleKey: String): Boolean {
+        if (roleKey.isBlank() || roleKey.contains('/') || roleKey.contains("..")) return false
+        return runCatching { File(rolesDir, "$roleKey.md").delete() }.getOrDefault(false)
+    }
+
     /** 追加一条每日日志（按天归档；返回写入的文件）。 */
     fun appendDailyLog(entry: String): File = synchronized(FILE_LOCK) {
         val now = Date()

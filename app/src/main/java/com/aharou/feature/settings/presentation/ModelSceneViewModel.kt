@@ -6,6 +6,7 @@ import com.aharou.feature.settings.data.repository.CompactionModelSettingsReposi
 import com.aharou.feature.settings.data.repository.DefaultModelSettingsRepository
 import com.aharou.feature.settings.data.repository.ImageGenModelSettingsRepository
 import com.aharou.feature.settings.data.repository.TitleModelSettingsRepository
+import com.aharou.feature.settings.data.repository.MemoryModelSettingsRepository
 import com.aharou.feature.settings.data.repository.VisionModelSettingsRepository
 import com.aharou.feature.settings.domain.model.ModelScene
 import com.aharou.feature.settings.domain.model.SceneResolution
@@ -37,6 +38,7 @@ class ModelSceneViewModel @Inject constructor(
     compactionModel: CompactionModelSettingsRepository,
     visionModel: VisionModelSettingsRepository,
     imageGenModel: ImageGenModelSettingsRepository,
+    memoryModel: MemoryModelSettingsRepository,
 ) : ViewModel() {
 
     /** 任一处绑定或供应商列表变化都会触发重算。 */
@@ -52,6 +54,8 @@ class ModelSceneViewModel @Inject constructor(
         visionModel.modelFlow,
         imageGenModel.providerIdFlow,
         imageGenModel.modelFlow,
+        memoryModel.providerIdFlow,
+        memoryModel.modelFlow,
     ).map { }
 
     val resolutions: StateFlow<Map<ModelScene, SceneResolution>> = invalidations

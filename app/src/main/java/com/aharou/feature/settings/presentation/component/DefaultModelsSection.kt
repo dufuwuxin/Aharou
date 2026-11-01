@@ -77,6 +77,7 @@ import compose.icons.FeatherIcons
 import compose.icons.feathericons.ArrowDown
 import compose.icons.feathericons.ArrowUp
 import compose.icons.feathericons.Camera
+import compose.icons.feathericons.Cpu
 import compose.icons.feathericons.Download
 import compose.icons.feathericons.Eye
 import compose.icons.feathericons.Image
@@ -129,6 +130,10 @@ internal fun DefaultModelsSection(
     onClearTitleModel: () -> Unit,
     onSelectImageGenModel: (providerId: String, model: String) -> Unit,
     onClearImageGenModel: () -> Unit,
+    memoryProviderId: String,
+    memoryModel: String,
+    onSelectMemoryModel: (providerId: String, model: String) -> Unit,
+    onClearMemoryModel: () -> Unit,
     onSelectVoiceModel: (providerId: String, model: String) -> Unit,
     onClearVoiceModel: () -> Unit,
     onSelectVoiceTtsModel: (providerId: String, model: String) -> Unit,
@@ -142,6 +147,7 @@ internal fun DefaultModelsSection(
     var showCompactionSheet by remember { mutableStateOf(false) }
     var showTitleSheet by remember { mutableStateOf(false) }
     var showImageGenSheet by remember { mutableStateOf(false) }
+    var showMemorySheet by remember { mutableStateOf(false) }
     var showVoiceSttSheet by remember { mutableStateOf(false) }
     var showVoiceTtsSheet by remember { mutableStateOf(false) }
 
@@ -169,6 +175,12 @@ internal fun DefaultModelsSection(
         stringResource(R.string.settings_image_gen_unconfigured)
     } else {
         imageGenModel
+    }
+
+    val memoryValue = if (memoryProviderId.isBlank() || memoryModel.isBlank()) {
+        stringResource(R.string.settings_memory_model_unconfigured)
+    } else {
+        memoryModel
     }
 
     val voiceSttValue = if (voiceSttProviderId.isBlank() || voiceSttModel.isBlank()) {
@@ -255,6 +267,24 @@ internal fun DefaultModelsSection(
                 trailing = {
                     Text(
                         text = imageGenValue,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        textAlign = TextAlign.End,
+                        modifier = Modifier.weight(2f)
+                    )
+                }
+            )
+            SettingsDivider()
+            SettingsRow(
+                icon = FeatherIcons.Cpu,
+                title = stringResource(R.string.settings_memory_model),
+                subtitle = sceneBindingHint(sceneResolutions[ModelScene.MEMORY]),
+                onClick = { showMemorySheet = true },
+                trailing = {
+                    Text(
+                        text = memoryValue,
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
@@ -503,6 +533,26 @@ internal fun DefaultModelsSection(
                 showImageGenSheet = false
             },
             onDismiss = { showImageGenSheet = false }
+        )
+    }
+
+    if (showMemorySheet) {
+        ModelSelectionSheet(
+            title = stringResource(R.string.settings_memory_model),
+            noModelsText = stringResource(R.string.image_gen_no_models),
+            providers = providers,
+            currentProviderId = memoryProviderId,
+            currentModel = memoryModel,
+            modelMetadata = modelMetadata,
+            onSelect = { pid, model ->
+                onSelectMemoryModel(pid, model)
+                showMemorySheet = false
+            },
+            onClear = {
+                onClearMemoryModel()
+                showMemorySheet = false
+            },
+            onDismiss = { showMemorySheet = false }
         )
     }
 
