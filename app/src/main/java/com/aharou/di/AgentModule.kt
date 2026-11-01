@@ -11,6 +11,8 @@ import com.aharou.feature.agent.data.local.dao.CheckpointDao
 import com.aharou.feature.agent.data.local.dao.LlmCallRecordDao
 import com.aharou.feature.agent.data.local.dao.TodoItemDao
 import com.aharou.feature.agent.data.local.dao.ToolCallReceiptDao
+import com.aharou.feature.agent.data.local.session.MessageUseCaseTranscriptSource
+import com.aharou.feature.agent.data.local.session.RoomSessionTreeSource
 import com.aharou.feature.agent.domain.receipt.ToolCallReceiptRepository
 import com.aharou.feature.settings.data.local.dao.AIProviderDao
 import com.aharou.feature.settings.domain.repository.AIProviderRepository
@@ -54,6 +56,9 @@ import com.aharou.feature.agent.domain.tool.question.AskUserQuestionTool
 import com.aharou.feature.agent.domain.tool.todo.TodoTool
 import com.aharou.feature.agent.domain.tool.subagent.TaskTool
 import com.aharou.feature.agent.domain.tool.subagent.MessageParentTool
+import com.aharou.feature.agent.domain.tool.subagent.ObserveTool
+import com.aharou.feature.agent.domain.subagent.SessionTranscriptSource
+import com.aharou.feature.agent.domain.subagent.SessionTreeSource
 import com.aharou.feature.agent.domain.subagent.SubAgentEventBus
 import com.aharou.feature.agent.domain.personal.PersonalContextTool
 import com.aharou.feature.agent.domain.prompt.SystemPromptProvider
@@ -433,6 +438,7 @@ object AgentModule {
         memoryTool: MemoryTool,
         taskTool: TaskTool,
         messageParentTool: MessageParentTool,
+        observeTool: ObserveTool,
         browserTool: BrowserTool,
         configTool: ConfigTool,
         vdTool: VdTool,
@@ -471,6 +477,7 @@ object AgentModule {
             register("memory", memoryTool)
             register("task", taskTool)
             register("messageParent", messageParentTool)
+            register("observe", observeTool)
             register("browser", browserTool)
             register("config", configTool)
             register("vscreen", vdTool)
@@ -487,6 +494,19 @@ object AgentModule {
     @Provides
     @Singleton
     fun provideAgentEventInjector(): AgentEventInjector = DefaultAgentEventInjector()
+
+    /** 会话树只读源：观察工具的边来自 `chat_sessions.parentId`。 */
+    @Provides
+    @Singleton
+    fun provideSessionTreeSource(chatSessionDao: ChatSessionDao): SessionTreeSource =
+        RoomSessionTreeSource(chatSessionDao)
+
+    /** 会话消息只读源：每次现读，运行中的成员也能看到「到目前为止」的内容。 */
+    @Provides
+    @Singleton
+    fun provideSessionTranscriptSource(
+        messagePersistenceUseCase: MessagePersistenceUseCase
+    ): SessionTranscriptSource = MessageUseCaseTranscriptSource(messagePersistenceUseCase)
 
     @Provides
     @Singleton
