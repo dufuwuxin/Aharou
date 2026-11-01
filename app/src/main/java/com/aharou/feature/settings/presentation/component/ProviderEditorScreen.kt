@@ -115,6 +115,7 @@ import com.aharou.core.ui.FloatingTabItem
 import com.aharou.feature.settings.data.local.CustomModelMetadataStore
 import com.aharou.feature.settings.data.local.ProviderPreset
 import com.aharou.feature.settings.domain.model.AIProviderConfig
+import com.aharou.feature.settings.domain.model.FallbackTarget
 import com.aharou.feature.settings.domain.model.KeyRotationStrategy
 import com.aharou.feature.settings.domain.model.ModelMetadata
 import com.aharou.feature.settings.domain.model.MAX_KEY_WEIGHT
@@ -223,9 +224,10 @@ fun ProviderEditorScreen(
     val providerId = remember { initialProvider?.id ?: System.currentTimeMillis().toString() }
     // 自定义图标：相册导入后存本地绝对路径，也可以直接是图片链接。
     var customIcon by remember { mutableStateOf(initialProvider?.customIcon ?: "") }
-    // 回退供应商：本轮请求失败时切到它继续，空串表示不启用。
-    var fallbackProviderId by remember { mutableStateOf(initialProvider?.fallbackProviderId ?: "") }
-    var fallbackModel by remember { mutableStateOf(initialProvider?.fallbackModel ?: "") }
+    // 备用模型链：按列表顺序轮询（失败切下一条），空列表表示不回退。
+    val fallbackChain = remember {
+        mutableStateListOf<FallbackTarget>().apply { addAll(initialProvider?.effectiveFallbackChain ?: emptyList()) }
+    }
     var showFallbackSheet by remember { mutableStateOf(false) }
     var showIconDialog by remember { mutableStateOf(false) }
     val models = remember {
@@ -369,8 +371,10 @@ fun ProviderEditorScreen(
         proxyPassword = proxyPassword,
         scriptParams = scriptParams.filter { it.first.isNotBlank() }.toMap(),
         customIcon = customIcon,
-        fallbackProviderId = fallbackProviderId,
-        fallbackModel = fallbackModel
+        // 备用链是唯一真相；旧的两个单选字段跟着镜像链上第一条，配置通道与老版本仍能读到
+        fallbackChain = fallbackChain.toList(),
+        fallbackProviderId = fallbackChain.firstOrNull()?.providerId ?: "",
+        fallbackModel = fallbackChain.firstOrNull()?.model ?: ""
     ).sanitized()
 
     // 新建场景下判断用户是否填写了实质内容：名称、API Key、Base URL 任一非空白，或已添加模型 / DIY 脚本参数。
@@ -546,12 +550,9 @@ fun ProviderEditorScreen(
                         SettingsDivider()
                         SettingsRow(
                             title = stringResource(R.string.provider_fallback_title),
-                            subtitle = fallbackProviderId
-                                .takeIf { it.isNotBlank() }
-                                ?.let { id ->
-                                    val name = allProviders.firstOrNull { it.id == id }?.name ?: id
-                                    if (fallbackModel.isNotBlank()) "$name · $fallbackModel" else name
-                                }
+                            subtitle = fallbackChain
+                                .takeIf { it.isNotEmpty() }
+                                ?.let { chain -> fallbackChainSummary(chain) { id -> allProviders.firstOrNull { it.id == id }?.name ?: id } }
                                 ?: stringResource(R.string.provider_fallback_hint),
                             onClick = { showFallbackSheet = true }
                         )
@@ -1103,15 +1104,13 @@ fun ProviderEditorScreen(
     }
 
     if (showFallbackSheet) {
-        ProviderFallbackSheet(
+        ProviderFallbackChainSheet(
             providers = allProviders.filter { it.id != providerId },
-            selectedProviderId = fallbackProviderId,
-            onSelect = { id ->
-                fallbackProviderId = id
-                // 换了回退供应商后旧的回退模型可能已不存在，清空让用户重新选，避免静默用错模型
-                fallbackModel = ""
+            chain = fallbackChain.toList(),
+            onChange = { updated ->
+                fallbackChain.clear()
+                fallbackChain.addAll(updated)
                 saveCurrent()
-                showFallbackSheet = false
             },
             onDismiss = { showFallbackSheet = false }
         )

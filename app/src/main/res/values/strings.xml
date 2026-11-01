@@ -1841,9 +1841,18 @@
     <string name="provider_custom_icon">供应商图标</string>
     <string name="provider_custom_icon_hint">可以从相册选一张图，或填一个图片链接；不设置则按品牌名自动匹配内置图标。</string>
     <string name="provider_custom_icon_pick">从相册选择</string>
-    <string name="provider_fallback_title">回退供应商</string>
-    <string name="provider_fallback_hint">本供应商请求失败（额度耗尽 / 鉴权 / 限流）时，自动切到备用供应商继续本轮请求。</string>
+    <string name="provider_fallback_title">备用模型</string>
+    <string name="provider_fallback_hint">本供应商请求失败（额度耗尽 / 鉴权 / 限流）时，按列表顺序往下轮询：先切第一条，第一条也失败再切第二条，依此类推。</string>
     <string name="provider_fallback_off">不启用回退</string>
+    <string name="provider_fallback_add">添加备用模型</string>
+    <string name="provider_fallback_empty">还没有备用模型：请求失败时直接报错，不会自动切换。</string>
+    <string name="provider_fallback_no_provider">没有可选的供应商：先添加第二个供应商，再用同一个供应商的不同模型也可以。</string>
+    <string name="provider_fallback_pick_provider">选择供应商</string>
+    <string name="provider_fallback_pick_model">选择模型</string>
+    <string name="provider_fallback_use_current">跟随该供应商当前模型</string>
+    <string name="provider_fallback_manual">手动输入模型名</string>
+    <string name="provider_fallback_move_up">上移</string>
+    <string name="provider_fallback_move_down">下移</string>
     <string name="provider_custom_icon_url">图片链接</string>
     <string name="provider_custom_icon_reset">恢复默认图标</string>    <string name="provider_show_api_key">显示密钥</string>
     <string name="provider_hide_api_key">隐藏密钥</string>
