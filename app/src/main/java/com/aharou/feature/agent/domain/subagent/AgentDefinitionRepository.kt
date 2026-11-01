@@ -87,6 +87,8 @@ class AgentDefinitionRepository @Inject constructor(
             mode = form.mode,
             allowedTools = form.allowedTools,
             disallowedTools = form.disallowedTools,
+            skills = form.skills,
+            keywordInjections = form.keywordInjections,
             inject = form.inject,
             prompt = form.prompt
         )

@@ -40,7 +40,9 @@ object AgentDefinitionParser {
             mode = parseMode(frontmatter["mode"]),
             allowedTools = stringList(frontmatter["tools"]),
             disallowedTools = stringList(frontmatter["disallowedTools"]),
+            skills = stringList(frontmatter["skills"]),
             inject = parseInject(frontmatter["inject"]),
+            keywordInjections = parseKeywordInjections(frontmatter["keywordInjection"]),
             prompt = prompt,
             filePath = filePath
         )
@@ -71,6 +73,25 @@ object AgentDefinitionParser {
         return parsed.ifEmpty { AgentDefinition.DEFAULT_INJECT }
     }
 
+    /** keywordInjection: [{keywords: [a,b], inject: "..."}] 列表。非法子项整体跳过。 */
+    private fun parseKeywordInjections(raw: Any?): List<KeywordInjection> {
+        val list = stringList(raw)
+        if (list.isEmpty()) return emptyList()
+        return list.mapNotNull { raw ->
+            val map = raw as? Map<*, *> ?: return@mapNotNull null
+            val keywordsRaw = map["keywords"]
+            val injectRaw = map["inject"]?.toString()?.trim()
+            if (injectRaw.isNullOrBlank()) return@mapNotNull null
+            val keywords = when (keywordsRaw) {
+                is List<*> -> keywordsRaw.mapNotNull { it?.toString()?.trim() }.filter { it.isNotEmpty() }
+                is String -> keywordsRaw.split(',').map { it.trim() }.filter { it.isNotEmpty() }
+                else -> emptyList()
+            }
+            if (keywords.isEmpty()) return@mapNotNull null
+            KeywordInjection(keywords, injectRaw)
+        }
+    }
+
     private val VALID_EFFORTS = ReasoningEffort.entries.mapNotNull { it.apiValue }.toSet()
 
     /**
@@ -88,6 +109,8 @@ object AgentDefinitionParser {
         mode: AgentMode? = null,
         allowedTools: List<String>,
         disallowedTools: List<String>,
+        skills: List<String> = emptyList(),
+        keywordInjections: List<KeywordInjection> = emptyList(),
         inject: Set<InjectPart>,
         prompt: String
     ): String = buildString {
@@ -99,8 +122,17 @@ object AgentDefinitionParser {
         reasoningEffort?.takeIf { it in VALID_EFFORTS }?.let { appendLine("reasoningEffort: $it") }
         mode?.let { appendLine("mode: ${it.name.lowercase()}") }
         if (allowedTools.isNotEmpty()) appendLine("tools: [${allowedTools.joinToString(", ")}]")
-        if (disallowedTools.isNotEmpty()) appendLine("disallowedTools: [${disallowedTools.joinToString(", ")}]")
-        // 空集必须显式写 [none]：省略会被解成默认注入项，恰好与用户「什么都不注入」的选择相反。
+        if (disallowedTools.isNotEmpty()) appendLine("disallowedTools: [${disallowedTools.joinToString(", ")}] ")
+        if (skills.isNotEmpty()) appendLine("skills: [${skills.joinToString(", ") { Frontmatter.quote(it) }}]")
+        if (keywordInjections.isNotEmpty()) {
+            appendLine("keywordInjection:")
+            for (k in keywordInjections) {
+                appendLine("  - keywords: [${k.keywords.joinToString(", ") { Frontmatter.quote(it) }}]")
+                val lines = k.injectContent.trim().lines()
+                val firstLine = lines.firstOrNull()?.trim() ?: ""
+                appendLine("    inject: ${Frontmatter.quote(firstLine)}")
+            }
+        }
         val injectTokens = if (inject.isEmpty()) {
             "none"
         } else {

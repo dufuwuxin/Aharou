@@ -54,6 +54,7 @@ import com.aharou.feature.agent.domain.subagent.AgentDefinitionForm
 import com.aharou.feature.agent.domain.subagent.AgentDefinitionScope
 import com.aharou.feature.agent.domain.subagent.AgentSaveError
 import com.aharou.feature.agent.domain.subagent.InjectPart
+import com.aharou.feature.agent.domain.subagent.KeywordInjection
 import com.aharou.feature.agent.presentation.component.reasoningEffortLabel
 import com.aharou.feature.settings.presentation.SubAgentSaveState
 import com.aharou.feature.settings.presentation.SubAgentUiEntry
@@ -79,6 +80,7 @@ internal fun SubAgentEditorScreen(
     providers: List<AIProviderConfig>,
     modelMetadata: Map<String, ModelMetadata>,
     availableTools: List<String>,
+    availableSkills: List<String> = emptyList(),
     saveState: SubAgentSaveState,
     onLoadMetadata: () -> Unit,
     onSave: (AgentDefinitionForm, AgentDefinitionScope) -> Unit,
@@ -101,12 +103,19 @@ internal fun SubAgentEditorScreen(
     }
     var allowTools by rememberSaveable { mutableStateOf(initial?.allowedTools ?: emptyList()) }
     var denyTools by rememberSaveable { mutableStateOf(initial?.disallowedTools ?: emptyList()) }
+    var skills by rememberSaveable { mutableStateOf(initial?.skills ?: emptyList()) }
+    // 关键词注入：前端存成「keyword1|content1\nkeyword2|content2\n...」的明文，save 时拆开成 KeywordInjection。
+    // 每条是一个「触发词 | 正文」对，便于手抄/粘贴；UI 上展示为一行行的输入框。
+    var keywordInjectionsRaw by rememberSaveable { mutableStateOf(initial?.keywordInjections?.joinToString("\n") { inj ->
+        inj.keywords.joinToString(",") + "|" + inj.injectContent
+    } ?: "") }
 
     var showModelSheet by remember { mutableStateOf(false) }
     var showEffortSheet by remember { mutableStateOf(false) }
     var showModeSheet by remember { mutableStateOf(false) }
     var showAllowSheet by remember { mutableStateOf(false) }
     var showDenySheet by remember { mutableStateOf(false) }
+    var showSkillsSheet by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) { onLoadMetadata() }
     LaunchedEffect(saveState) {
@@ -152,6 +161,15 @@ internal fun SubAgentEditorScreen(
                                     mode = mode.takeIf { it.isNotBlank() }?.let { AgentMode.valueOf(it) },
                                     allowedTools = allowTools,
                                     disallowedTools = denyTools,
+                                    skills = skills,
+                                    keywordInjections = keywordInjectionsRaw.trim().split("\n").mapNotNull { line ->
+                                        val pipe = line.indexOf('|')
+                                        if (pipe < 0) return@mapNotNull null
+                                        val keywords = line.substring(0, pipe).split(',').map { it.trim() }.filter { it.isNotEmpty() }
+                                        val content = line.substring(pipe + 1).trim()
+                                        if (keywords.isEmpty() || content.isEmpty()) return@mapNotNull null
+                                        KeywordInjection(keywords, content)
+                                    },
                                     inject = injectTokens.mapNotNull { InjectPart.fromToken(it) }.toSet(),
                                     prompt = prompt.trim()
                                 ),
@@ -297,6 +315,44 @@ internal fun SubAgentEditorScreen(
                             }
                         )
                     }
+                )
+            }
+
+            SettingsGroupHeader(text = stringResource(R.string.subagent_editor_skills))
+            SettingsGroup {
+                SettingsRow(
+                    title = stringResource(R.string.subagent_editor_skills),
+                    subtitle = stringResource(R.string.subagent_editor_skills_hint),
+                    onClick = { showSkillsSheet = true },
+                    trailing = {
+                        ValueText(
+                            if (skills.isEmpty()) {
+                                stringResource(R.string.subagent_editor_skills_empty)
+                            } else {
+                                stringResource(R.string.subagent_editor_selected_count, skills.size)
+                            }
+                        )
+                    }
+                )
+            }
+
+            // 关键词注入：触发词与正文一换行一条；格式「触发词1,触发词2|正文」
+            SettingsGroupHeader(text = stringResource(R.string.subagent_editor_keyword_inject))
+            SettingsGroup {
+                SettingsRow(
+                    title = stringResource(R.string.subagent_editor_keyword_inject),
+                    subtitle = stringResource(R.string.subagent_editor_keyword_inject_hint),
+                )
+                AppTextField(
+                    value = keywordInjectionsRaw,
+                    onValueChange = { keywordInjectionsRaw = it },
+                    label = stringResource(R.string.subagent_editor_keyword_inject_label),
+                    singleLine = false,
+                    minLines = 5,
+                    maxLines = 20,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = Spacing.lg, vertical = Spacing.xs)
                 )
             }
 
@@ -484,6 +540,20 @@ internal fun SubAgentEditorScreen(
             onDismiss = { showDenySheet = false }
         )
     }
+
+    if (showSkillsSheet) {
+        SkillPickerSheet(
+            title = stringResource(R.string.subagent_editor_skills),
+            hint = stringResource(R.string.subagent_editor_skills_hint),
+            allSkills = availableSkills,
+            selected = skills,
+            onConfirm = {
+                skills = it
+                showSkillsSheet = false
+            },
+            onDismiss = { showSkillsSheet = false }
+        )
+    }
 }
 
 /**
@@ -640,4 +710,72 @@ private fun InjectPart.hintRes(): Int = when (this) {
     InjectPart.SKILLS -> R.string.subagent_inject_skills_hint
     InjectPart.MEMORY -> R.string.subagent_inject_memory_hint
     InjectPart.PROJECT_RULES -> R.string.subagent_inject_project_rules_hint
+}
+
+/**
+ * 技能多选 Sheet：复用 [ToolPickerSheet] 的逻辑，只把列表换成 [availableSkills]。
+ * 内置技能已从调用方过滤，这里只显示全局+项目级的公共技能 + 用户想绑定的专属技能名。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SkillPickerSheet(
+    title: String,
+    hint: String,
+    allSkills: List<String>,
+    selected: List<String>,
+    onConfirm: (List<String>) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var query by remember { mutableStateOf("") }
+    var picked by remember { mutableStateOf(selected.toSet()) }
+    val visible = remember(query, allSkills) {
+        if (query.isBlank()) allSkills else allSkills.filter { it.contains(query, ignoreCase = true) }
+    }
+
+    AdaptiveModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = settingsPageBackground()
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = Spacing.lg).padding(bottom = Spacing.xl),
+            verticalArrangement = Arrangement.spacedBy(Spacing.sm)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(text = title, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
+                    Text(text = hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                TextButton(onClick = { picked = emptySet() }) { Text(stringResource(R.string.subagent_editor_clear)) }
+                TextButton(onClick = { onConfirm(picked.toList().sorted()) }) { Text(stringResource(R.string.common_save)) }
+            }
+
+            ModelSearchField(
+                query = query,
+                onQueryChange = { query = it },
+                placeholder = stringResource(R.string.subagent_editor_tools_search)
+            )
+
+            Box(
+                modifier = Modifier.heightIn(max = 420.dp).nestedScroll(rememberSheetFlingFix(sheetState))
+            ) {
+                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                    SettingsGroup {
+                        visible.forEachIndexed { index, skill ->
+                            if (index > 0) SettingsDivider()
+                            PickerRow(
+                                title = skill,
+                                selected = skill in picked,
+                                onClick = { picked = if (skill in picked) picked - skill else picked + skill }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

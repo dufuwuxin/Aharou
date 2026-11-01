@@ -144,7 +144,7 @@ object TeamRunner {
             stage.rejectTo?.let { append("；不通过则驳回→").append(it) }
             append("\n")
         }
-        if (team.charter.isNotBlank()) append("公约：").append(team.charter.lineSequence().first().take(LIST_DESCRIPTION_MAX)).append("\n")
+        // 团队公约不在主代理可见层：它属于子代理指令的一部分，只在 team_run 展开时随 task prompt 注入。
         append("文件：").append(team.filePath ?: "-").append("\n")
         append("执行：task(action=\"team_run\", team=\"").append(team.name).append("\", goal=\"<本次目标>\")")
     }

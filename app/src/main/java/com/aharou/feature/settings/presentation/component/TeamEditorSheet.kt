@@ -101,6 +101,8 @@ internal fun TeamEditorSheet(
     var admins by remember(initial) {
         mutableStateOf(initial?.let { entry -> entry.team.toForm(entry.scope).admins } ?: emptyList())
     }
+    /** 管理员组手动输入的名字：候选成员列表为空（还没有建任何子代理角色）时也能先填上管理员。 */
+    var adminTextInput by remember { mutableStateOf("") }
     var stages by remember(initial) {
         mutableStateOf(
             initial?.let { entry -> entry.team.toForm(entry.scope).stages }
@@ -112,10 +114,8 @@ internal fun TeamEditorSheet(
         if (saveState is AgentTeamSaveState.Saved) onSaved()
     }
 
-    // 名单里没有的成员不可能是管理员：两边用一个真源，避免出现「管理员不在名单」的保存失败。
-    val rows = remember(members, availableMembers) {
-        (members.map { it.name } + availableMembers).distinct()
-    }
+    // 阶段里可点选的成员：只列团队自己的成员（不是 all availableMembers），避免还没添加的人被选中。
+    val stageMembers = remember(members) { members.map { it.name } }
     val canSave = name.isNotBlank() && stages.any { it.members.isNotEmpty() || it.prompt.isNotBlank() }
 
     AdaptiveModalBottomSheet(
@@ -237,15 +237,50 @@ internal fun TeamEditorSheet(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
-                members.forEach { ref ->
-                    val picked = admins.contains(ref.name)
-                    FilterChip(
-                        selected = picked,
-                        onClick = {
-                            admins = if (picked) admins - ref.name else admins + ref.name
-                        },
-                        label = { Text(ref.name) }
+            if (members.isNotEmpty()) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+                    members.forEach { ref ->
+                        val picked = admins.contains(ref.name)
+                        FilterChip(
+                            selected = picked,
+                            onClick = {
+                                admins = if (picked) admins - ref.name else admins + ref.name
+                            },
+                            label = { Text(ref.name) }
+                        )
+                    }
+                }
+            }
+            // 手动添加：成员名单为空（还没有建子代理角色）时这是唯一入口；输入的名字不要求在名单里
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = Spacing.xs),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                AppTextField(
+                    value = adminTextInput,
+                    onValueChange = { adminTextInput = it },
+                    label = stringResource(R.string.team_editor_admin_add_hint),
+                    singleLine = true,
+                    modifier = Modifier.weight(1f)
+                )
+                Spacer(modifier = Modifier.width(Spacing.xs))
+                val trimmed = adminTextInput.trim()
+                Button(
+                    onClick = {
+                        if (trimmed.isNotBlank() && trimmed.length <= 64 && !admins.contains(trimmed)) {
+                            admins = admins + trimmed
+                            adminTextInput = ""
+                        }
+                    },
+                    enabled = trimmed.isNotBlank() && !admins.contains(trimmed),
+                    modifier = Modifier.height(48.dp)
+                ) {
+                    Icon(
+                        imageVector = FeatherIcons.Plus,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
                     )
                 }
             }
@@ -276,7 +311,7 @@ internal fun TeamEditorSheet(
                     onChange = { updated -> stages = stages.toMutableList().also { it[index] = updated } },
                     onRemove = { stages = stages.filterIndexed { i, _ -> i != index } },
                     canRemove = stages.size > 1,
-                    members = rows
+                    members = stageMembers
                 )
             }
             TextButton(onClick = {

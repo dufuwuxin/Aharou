@@ -11,7 +11,9 @@ package com.aharou.feature.agent.domain.subagent
  */
 data class TeamMemberRef(
     val name: String,
-    val level: Int = 1
+    val level: Int = 1,
+    /** 该成员专属绑定的技能名列表：运行时子代理只能 loadSkill 这些技能，其他成员不可见。 */
+    val skills: List<String> = emptyList()
 )
 
 /**
@@ -167,7 +169,11 @@ enum class AgentTeamSaveError {
     IO_FAILED
 }
 
-/** 把已保存的团队回填成编辑表单。 */
+/**
+ * 把已保存的团队回填成编辑表单。
+ *
+ * [admins] 字段来自 frontmatter，可能包含不在成员名单里的人名（历史遗留），直接透传给界面显示与编辑。
+ */
 fun AgentTeam.toForm(scope: AgentDefinitionScope): AgentTeamForm = AgentTeamForm(
     name = name,
     description = description,

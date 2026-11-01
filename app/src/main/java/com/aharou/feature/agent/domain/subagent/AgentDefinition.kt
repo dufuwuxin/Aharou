@@ -43,6 +43,16 @@ enum class InjectPart(val token: String) {
 }
 
 /**
+ * 关键词注入条目：由用户定义一套「触发词→注入正文」的映射，运行时按当前任务的用户文本
+ * 做 substring 匹配。命中的正文只在命中的会话/角色里出现，主代理（非匹配会话）与未命中
+ * 的成员都看不到——节省 token，减少上下文污染。
+ */
+data class KeywordInjection(
+    val keywords: List<String>,
+    val injectContent: String
+)
+
+/**
  * 一个自定义子代理定义，来自 `agents/<name>.md` 的 frontmatter + 正文。
  *
  * @param name 唯一标识，`task(agent="<name>")` 用它派发
@@ -54,6 +64,7 @@ enum class InjectPart(val token: String) {
  * @param allowedTools 工具白名单；空表示继承全量工具
  * @param disallowedTools 工具黑名单，先于白名单生效
  * @param inject 要注入的提示词片段
+ * @param keywordInjections 关键词注入列表：运行时仅当本次用户输入含任意一条 keyword 时把对应正文追加到提示词
  * @param prompt agent 自身的系统提示词（正文）
  * @param filePath 定义文件的容器路径，供设置页展示与删除
  */
@@ -66,7 +77,10 @@ data class AgentDefinition(
     val mode: AgentMode? = null,
     val allowedTools: List<String> = emptyList(),
     val disallowedTools: List<String> = emptyList(),
+    /** 该角色专属绑定的技能名：运行时系统提示词只注入公共技能 + 这些专属技能，避免给别的角色看。 */
+    val skills: List<String> = emptyList(),
     val inject: Set<InjectPart> = DEFAULT_INJECT,
+    val keywordInjections: List<KeywordInjection> = emptyList(),
     val prompt: String,
     val filePath: String? = null
 ) {
@@ -159,7 +173,9 @@ data class AgentDefinitionForm(
     val mode: AgentMode? = null,
     val allowedTools: List<String> = emptyList(),
     val disallowedTools: List<String> = emptyList(),
+    val skills: List<String> = emptyList(),
     val inject: Set<InjectPart> = AgentDefinition.DEFAULT_INJECT,
+    val keywordInjections: List<KeywordInjection> = emptyList(),
     val prompt: String = ""
 )
 

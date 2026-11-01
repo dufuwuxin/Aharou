@@ -74,7 +74,10 @@ class SystemPromptProvider @Inject constructor(
             val key = SourceCacheKey(ctx.sessionId, ctx.projectRoot)
             val cached = cachedByKey[key]
             if (cached != null) return cached.ifEmpty { null }
-            val skills = try { skillRepository.listSkills() } catch (e: Exception) { return null }
+            // 子代理会话：只看该角色绑定的专属技能 + 公共技能；主代理看全量公共技能。
+            val skills = try {
+                ctx.agentDefinition?.let { skillRepository.listSkillsForAgent(it) } ?: skillRepository.listSkills()
+            } catch (e: Exception) { return null }
             if (skills.isEmpty()) {
                 cachedByKey[key] = ""
                 return null
@@ -842,6 +845,21 @@ class SystemPromptProvider @Inject constructor(
                 projectRuleSource.build(agentContext)?.let {
                     append("\n\n")
                     append(it)
+                }
+            }
+
+            // 关键词注入：主代理/成员不可见（这里只拼进 subagent prompt），命中才追加，节省 token
+            if (definition.keywordInjections.isNotEmpty()) {
+                val userText = agentContext.currentUserText
+                val matched = definition.keywordInjections.filter { inj ->
+                    inj.keywords.any { keyword -> userText.contains(keyword, ignoreCase = true) }
+                }
+                if (matched.isNotEmpty()) {
+                    val keywordBlock = matched.joinToString("\n") { inj ->
+                        "## 关键词注入（${inj.keywords.joinToString(", ")}）\n" + inj.injectContent
+                    }
+                    append("\n\n")
+                    append(keywordBlock)
                 }
             }
 
