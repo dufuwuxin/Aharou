@@ -362,12 +362,5 @@ private fun TeamDetailSheet(
 
 }
 
-/** 把层级数字映射到角色文案：一级高管、二级组长、三级组员，其他按数字。 */
 @Composable
-private fun teamRoleLabel(level: Int): String =
-    when (level) {
-        1 -> stringResource(R.string.team_level_role_1)
-        2 -> stringResource(R.string.team_level_role_2)
-        3 -> stringResource(R.string.team_level_role_3)
-        else -> stringResource(R.string.team_level_role_default, level)
-    }
+private fun teamRoleLabel(level: Int): String = stringResource(R.string.team_level_label, level)

@@ -1629,11 +1629,6 @@
     <string name="team_new">创建团队</string>
     <string name="team_create_member">创建成员</string>
     <string name="team_level_label">%1$d 级成员组</string>
-    <string name="team_level_role_1">一级·高管</string>
-    <string name="team_level_role_2">二级·组长</string>
-    <string name="team_level_role_3">三级·组员</string>
-    <string name="team_level_role_default">%1$d 级</string>
-    <string name="team_level_editor_desc">层级决定角色定位：一级=高管（规划/拆解/设计），二级=组长（带队执行），三级及以下=组员</string>
     <string name="team_editor_add_members">选择成员</string>
     <string name="team_editor_selected_members">已选成员</string>
     <string name="team_select_members_title">选择成员</string>

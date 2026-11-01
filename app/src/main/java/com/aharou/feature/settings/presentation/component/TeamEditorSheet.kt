@@ -170,7 +170,7 @@ internal fun TeamEditorSheet(
             var showPicker by remember { mutableStateOf(false) }
             SettingsGroupHeader(text = stringResource(R.string.team_editor_members))
             Text(
-                text = stringResource(R.string.team_level_editor_desc),
+                text = stringResource(R.string.team_editor_members_hint),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -217,8 +217,8 @@ internal fun TeamEditorSheet(
             }
             if (showPicker) {
                 MemberPickerSheet(
-                    available = availableMembers,
-                    selected = members.map { it.name },
+                    available = availableMembers.filter { name -> members.all { it.name != name } },
+                    selected = emptyList(),
                     onConfirm = { picked ->
                         val existingNames = members.map { it.name }.toSet()
                         val newRefs = picked.filter { it !in existingNames }
@@ -444,15 +444,7 @@ private fun LevelStepper(level: Int, onChange: (Int) -> Unit) {
             Text("−")
         }
         Text(
-            text = stringResource(
-                when (level) {
-                    1 -> R.string.team_level_role_1
-                    2 -> R.string.team_level_role_2
-                    3 -> R.string.team_level_role_3
-                    else -> R.string.team_level_role_default
-                },
-                level
-            ),
+            text = stringResource(R.string.team_level_label, level),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface
         )
@@ -479,15 +471,7 @@ private fun MemberRow(ref: TeamMemberRef, onLevelChange: (Int) -> Unit, onRemove
                 fontWeight = FontWeight.Medium
             )
             Text(
-                text = stringResource(
-                    when (ref.level) {
-                        1 -> R.string.team_level_role_1
-                        2 -> R.string.team_level_role_2
-                        3 -> R.string.team_level_role_3
-                        else -> R.string.team_level_role_default
-                    },
-                    ref.level
-                ),
+                text = stringResource(R.string.team_level_label, ref.level),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -635,14 +619,9 @@ private fun AgentTeamSaveError.messageRes(): Int = when (this) {
 }
 
 
-/** 把阶段层级映射到角色文案（与团队成员级别一致）。 */
+/** 把阶段层级映射成角色文案。 */
 @Composable
-private fun stageRoleLabel(level: Int): String = when (level) {
-    1 -> stringResource(R.string.team_level_role_1)
-    2 -> stringResource(R.string.team_level_role_2)
-    3 -> stringResource(R.string.team_level_role_3)
-    else -> stringResource(R.string.team_level_role_default, level)
-}
+private fun stageRoleLabel(level: Int): String = stringResource(R.string.team_level_label, level)
 
 /**
  * 团队流程节点卡片：左侧竖向连线 + 右侧摘要；展开后内嵌 StageEditor 继续编辑。

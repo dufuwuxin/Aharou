@@ -1630,11 +1630,6 @@
     <string name="team_new">Create team</string>
     <string name="team_create_member">Create member</string>
     <string name="team_level_label">Level %1$d member group</string>
-    <string name="team_level_role_1">Level 1 · Executive</string>
-    <string name="team_level_role_2">Level 2 · Lead</string>
-    <string name="team_level_role_3">Level 3 · Member</string>
-    <string name="team_level_role_default">Level %1$d</string>
-    <string name="team_level_editor_desc">Level defines role: 1=Executive (plan/dissect/design), 2=Lead (execute), 3+=Member</string>
     <string name="team_editor_add_members">Select members</string>
     <string name="team_editor_selected_members">Selected members</string>
     <string name="team_select_members_title">Select members</string>
