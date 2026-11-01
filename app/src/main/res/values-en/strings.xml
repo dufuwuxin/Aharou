@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Aharou</string>
+    <string name="app_name">Aharou Fork</string>
 
     <!-- Settings menu titles -->
     <string name="settings_title">Settings</string>
@@ -722,7 +722,7 @@
 
     <!-- Subagent -->
     <string name="subagent_tab_sessions">Chats</string>
-    <string name="subagent_card_title">Subagent task</string>
+    <string name="subagent_card_title">Member task</string>
     <string name="subagent_card_status_running">Running</string>
     <string name="subagent_card_status_completed">Completed</string>
     <string name="subagent_card_status_failed">Failed</string>
@@ -1587,10 +1587,27 @@
     <string name="scheduled_tasks_failed">Last run failed</string>
 
     <!-- Subagent Settings -->
-    <string name="settings_subagents">Subagents</string>
+    <string name="settings_subagents">Experts</string>
     <string name="subagent_max_running">Concurrency limit</string>
     <string name="subagent_max_running_hint">Max subagents running at the same time, %1$d to %2$d. The quota is shared by the whole app, not per session.</string>
-    <string name="settings_teams">Team presets</string>
+    <string name="settings_teams">Teams</string>
+    <string name="settings_team_experts">Expert members</string>
+    <string name="settings_team_experts_desc">Team members are these experts: a team strings several experts together stage by stage, and whoever the team names for a stage does that work</string>
+    <string name="settings_team_experts_manage">Manage experts</string>
+
+    <!-- Tools Settings -->
+    <string name="settings_tools">Tools</string>
+    <string name="settings_tools_desc">%1$d tools are registered right now, grouped by capability; only the allowed ones are actually sent to the model each turn</string>
+    <string name="settings_tools_empty">No tools registered yet</string>
+    <string name="settings_tools_auto">Auto</string>
+    <string name="settings_tools_need_approval">Asks</string>
+    <string name="settings_tools_category_file">Files &amp; workspace</string>
+    <string name="settings_tools_category_command">Commands &amp; terminal</string>
+    <string name="settings_tools_category_network">Network</string>
+    <string name="settings_tools_category_device">Device &amp; host</string>
+    <string name="settings_tools_category_agent">Agent itself</string>
+    <string name="settings_tools_category_external">External services</string>
+    <string name="settings_tools_category_other">Other</string>
     <string name="settings_experiments">Experiments</string>
     <string name="experiment_quote_reply">Long-press quote</string>
     <string name="experiment_quote_reply_desc">Long-press a message bubble to copy it or quote it whole; quoting puts a short excerpt into the input box</string>
@@ -1600,22 +1617,46 @@
     <string name="experiment_default_on">on</string>
     <string name="experiment_default_off">off</string>
     <string name="subagent_teams_entry_desc">Chain triage, parallel implementation and review into one reusable flow</string>
-    <string name="team_list_empty">No team presets yet. Create ~/.aharou/teams/&lt;name&gt;.md in the container: stages in the frontmatter, team charter in the body. The format is documented under Subagents → Team presets.</string>
+    <string name="team_list_empty">No teams yet. Tap \"Create team\" above: pick members, pick admins, lay out the flow and write the charter — four steps to a runnable team.</string>
     <string name="team_scope_global">Global</string>
     <string name="team_scope_project">Current project</string>
     <string name="team_stage_summary">%1$d stages · %2$d tasks</string>
-    <string name="team_delete_title">Delete team preset</string>
-    <string name="team_delete_message">This deletes the preset file of \"%1$s\" and cannot be undone. Delete it?</string>
-    <string name="team_detail_file">Preset file</string>
+    <string name="team_members_summary">%1$d members · %2$d admins · %3$d stages</string>
+    <string name="team_delete_title">Delete team</string>
+    <string name="team_delete_message">This deletes the definition file of \"%1$s\" and cannot be undone. Delete it?</string>
+    <string name="team_detail_file">Team file</string>
     <string name="team_run_hint">Just say \"use the %1$s team to …\" in chat; the AI can also call the task tool with action team_run and this team name.</string>
-    <string name="team_new">New team preset</string>
-    <string name="team_editor_title_new">New team preset</string>
-    <string name="team_editor_title_edit">Edit team preset</string>
+    <string name="team_new">Create team</string>
+    <string name="team_create_member">Create member</string>
+    <string name="team_level_label">Level %1$d member group</string>
+    <string name="team_reject_to">Rejects back to %1$s when failing</string>
+    <string name="team_detail_admins">Admins</string>
+    <string name="team_detail_members">Members</string>
+    <string name="team_detail_process">Flow</string>
+    <string name="team_detail_charter">Charter</string>
+    <string name="team_editor_title_new">Create team</string>
+    <string name="team_editor_title_edit">Edit team</string>
+    <string name="team_editor_name">Team name</string>
+    <string name="team_editor_description">Team summary</string>
+    <string name="team_editor_members">Members</string>
+    <string name="team_editor_members_hint">Only members listed here reach the main agent; members outside any team stay invisible</string>
+    <string name="team_editor_members_empty">No members yet — create one first</string>
+    <string name="team_editor_admins">Admins</string>
+    <string name="team_editor_admins_hint">Pick several: every admin reasons on its own, then the main agent merges them into one recommendation</string>
+    <string name="team_editor_process">Flow</string>
+    <string name="team_editor_process_hint">Stages run in order, tasks in parallel; a failing review stage rejects back to the chosen stage</string>
+    <string name="team_editor_preset_standard">Use the standard five: split → design → assign → execute → review</string>
     <string name="team_editor_stages">Stages</string>
     <string name="team_editor_add_stage">Add stage</string>
     <string name="team_editor_add_task">Add task</string>
     <string name="team_editor_stage_title">Stage name</string>
     <string name="team_editor_stage_title_hint">Stage %1$d</string>
+    <string name="team_editor_stage_level">Level</string>
+    <string name="team_editor_stage_members">Members on this stage</string>
+    <string name="team_editor_stage_prompt">Stage instruction</string>
+    <string name="team_editor_stage_review">Mark as a review gate</string>
+    <string name="team_editor_stage_reject">Reject back to</string>
+    <string name="team_editor_stage_reject_none">Final gate, no rollback</string>
     <string name="team_editor_task_agent">Member role</string>
     <string name="team_editor_task_agent_hint">Role name such as Code Reviewer; leave empty to use department + keywords</string>
     <string name="team_editor_task_department">Department (optional)</string>
@@ -1632,6 +1673,9 @@
     <string name="team_editor_error_empty_stages">Needs at least one stage with a task</string>
     <string name="team_editor_error_incomplete_task">Every task needs a description and either a role name or department + keywords</string>
     <string name="team_editor_error_name_conflict">A team with this name already exists in the same scope</string>
+    <string name="team_editor_error_unknown_member">A stage references a member that is not on the roster</string>
+    <string name="team_editor_error_admin_not_member">Admins must be on the member roster</string>
+    <string name="team_editor_error_bad_reject">The reject target must be an earlier stage</string>
     <string name="team_editor_error_io">Write failed, check that storage is writable</string>
     <string name="subagents_empty">No custom subagents yet</string>
     <string name="subagents_empty_hint">Tap + in the top bar to create one, or drop an agent\'s .md definition into ~/.aharou/agents/</string>
@@ -1679,7 +1723,7 @@
     <string name="subagent_editor_error_empty_prompt">The agent prompt cannot be empty</string>
     <string name="subagent_editor_error_name_conflict">A subagent with this name already exists in this scope</string>
     <string name="subagent_editor_error_io">Failed to write the definition file, please try again</string>
-    <string name="subagent_inject_base">Subagent baseline</string>
+    <string name="subagent_inject_base">Member baseline</string>
     <string name="subagent_inject_base_hint">Tool usage and path conventions, lightweight</string>
     <string name="subagent_inject_main_rules">Full common rules</string>
     <string name="subagent_inject_main_rules_hint">Pick either this or the subagent baseline; enabling both injects overlapping rules</string>
@@ -2977,7 +3021,28 @@
     <string name="settings_voice_model_download">Download</string>
     <string name="settings_voice_model_downloading">Downloading %1$d%%</string>
     <string name="settings_voice_model_downloading_short">Downloading</string>
-    <string name="settings_voice_model_download_failed">Download failed — check your network and try again</string>
+    <string name="settings_voice_model_download_failed">Download or installation failed — tap to retry</string>
+    <string name="settings_voice_model_download_failed_detail">Download or installation failed: %1$s. Tap to retry</string>
+
+    <!-- Local model (on-device LLM inference): runtime ships in the APK, weights are downloaded on demand -->
+    <string name="settings_local_model_section_title">Local model (offline inference)</string>
+    <string name="settings_local_model_section_desc">Tap download to fetch and install the model onto this device; then add a provider of type \"Local model (offline)\" to chat with it — everything stays on-device and works offline</string>
+    <string name="settings_local_model_download">Download</string>
+    <string name="settings_local_model_downloading">Downloading %1$d%%</string>
+    <string name="settings_local_model_verifying">Verifying</string>
+    <string name="settings_local_model_ready">Ready</string>
+    <string name="settings_local_model_delete">Delete</string>
+    <string name="settings_local_model_not_downloaded">Not downloaded</string>
+    <string name="settings_local_model_partial">Incomplete %1$s</string>
+    <string name="settings_local_model_failed">Download failed — tap to retry</string>
+    <string name="settings_local_model_failed_detail">Download failed: %1$s. Tap to retry</string>
+    <string name="settings_local_model_hash_mismatch">Model file failed verification, please download again</string>
+    <string name="settings_local_model_disk_low">Not enough storage — about %1$s needed</string>
+    <string name="settings_local_model_not_supported">This device architecture does not support on-device inference (arm64 required)</string>
+    <string name="settings_local_model_ram_hint">%1$d GB RAM or more recommended</string>
+    <string name="settings_local_model_delete_confirm">This requires re-downloading later. Delete anyway?</string>
+    <string name="settings_voice_model_install_failed">Unable to install model. Check available storage and retry</string>
+    <string name="settings_voice_model_invalid_archive">Model archive has missing files or incorrect sizes. Download again</string>
     <string name="settings_voice_model_missing">Missing</string>
     <string name="settings_voice_model_size_mismatch">Size mismatch</string>
     <string name="chat_long_session_hint">This session is about %1$d0k tokens; it gets slower the longer it runs — consider starting a new one</string>

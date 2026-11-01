@@ -42,6 +42,8 @@ fun providerBrandKey(provider: AIProviderConfig?): String? {
         com.aharou.feature.settings.domain.model.ProviderType.OPENAI -> "openai"
         com.aharou.feature.settings.domain.model.ProviderType.ANTHROPIC -> "anthropic"
         com.aharou.feature.settings.domain.model.ProviderType.GEMINI -> "google"
+        // 端侧模型没有品牌 logo，靠名称匹配；匹配不到就不显示。
+        com.aharou.feature.settings.domain.model.ProviderType.LOCAL -> null
     }
 }
 

@@ -51,16 +51,57 @@ class AgentTeamRepository @Inject constructor(
         val name = form.name.trim()
         if (!AgentDefinitionRepository.isValidName(name)) return AgentTeamSaveError.INVALID_NAME
 
-        val validStages = form.stages.filter { it.tasks.isNotEmpty() }
-        if (validStages.isEmpty()) return AgentTeamSaveError.EMPTY_STAGES
+        // 名单是唯一真源：阶段点名的成员必须在名单里，否则主代理看到的名单和实际调用会对不上。
+        val roster = form.members.map { it.name.trim() }.filter { it.isNotEmpty() }
+        val rosterLower = roster.map { it.lowercase() }.toSet()
+        form.admins.map { it.trim() }.filter { it.isNotEmpty() }.forEach { admin ->
+            if (admin.lowercase() !in rosterLower) return AgentTeamSaveError.ADMIN_NOT_MEMBER
+        }
         form.stages.forEach { stage ->
+            stage.members.map { it.trim() }.filter { it.isNotEmpty() }.forEach { member ->
+                if (member.lowercase() !in rosterLower) return AgentTeamSaveError.UNKNOWN_MEMBER
+            }
+            stage.tasks.forEach { task ->
+                val agent = task.agent.trim()
+                if (agent.isNotEmpty() && agent.lowercase() !in rosterLower) {
+                    return AgentTeamSaveError.UNKNOWN_MEMBER
+                }
+            }
+        }
+        // 驳回边只能往回指：指到不存在的阶段或自己之后的阶段，执行时就变成死循环或空等。
+        val stageTitles = form.stages.map { it.title.trim() }.filter { it.isNotEmpty() }
+        form.stages.forEachIndexed { index, stage ->
+            val target = stage.rejectTo.trim()
+            if (target.isEmpty()) return@forEachIndexed
+            val targetIndex = stageTitles.indexOfFirst { it.equals(target, ignoreCase = true) }
+            if (targetIndex < 0 || targetIndex >= index) return AgentTeamSaveError.BAD_REJECT_TARGET
+        }
+
+        // 成员名单 + 阶段指令 → 一人一条任务；界面只填名单与共享指令，不手写 tasks。
+        // 两边都有时以名单为准（改名单就得真的改执行人），只在没写阶段指令时才回退到旧 tasks。
+        val normalized = form.copy(stages = form.stages.map { stage ->
+            val members = stage.members.map { it.trim() }.filter { it.isNotEmpty() }
+            val prompt = stage.prompt.trim()
+            val keepTasks = stage.tasks.filter { it.prompt.isNotBlank() }
+            val tasks = when {
+                prompt.isNotEmpty() && members.isNotEmpty() ->
+                    members.map { AgentTeamTaskForm(agent = it, prompt = prompt) }
+                keepTasks.isNotEmpty() -> keepTasks
+                else -> emptyList()
+            }
+            stage.copy(members = members, tasks = tasks)
+        })
+
+        val validStages = normalized.stages.filter { it.tasks.isNotEmpty() }
+        if (validStages.isEmpty()) return AgentTeamSaveError.EMPTY_STAGES
+        normalized.stages.forEach { stage ->
             stage.tasks.forEach { task ->
                 val hasMember = task.agent.isNotBlank() || task.department.isNotBlank() || task.agentQuery.isNotBlank()
                 if (task.prompt.isBlank() || !hasMember) return AgentTeamSaveError.INCOMPLETE_TASK
             }
         }
 
-        val scope = form.scope
+        val scope = normalized.scope
         // 作用域是文件所在目录，编辑时不允许换：改名但换了目录等于搬文件，界面已按新建时锁住。
         val overwritingSelf = originalName != null && originalName.equals(name, ignoreCase = true)
         if (!overwritingSelf) {
@@ -81,7 +122,7 @@ class AgentTeamRepository @Inject constructor(
             // 名字未改时写回原文件，不能按 name 重拼：文件名可能与 frontmatter 的 name 大小写不同。
             val target = existingFile?.takeIf { overwritingSelf && fileAccess.isFile(it) }
                 ?: "$root/$name.md"
-            fileAccess.writeFile(target, AgentTeamParser.serialize(form), overwrite = true)
+            fileAccess.writeFile(target, AgentTeamParser.serialize(normalized), overwrite = true)
             if (!overwritingSelf && existingFile != null && existingFile != target && fileAccess.isFile(existingFile)) {
                 runCatching { fileAccess.delete(existingFile) }.onFailure {
                     FileLogger.w(TAG, "重命名后删除旧团队预设失败: $existingFile")

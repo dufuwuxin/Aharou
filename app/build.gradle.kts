@@ -107,7 +107,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.aharou.agent"
+        applicationId = "com.aharou.agent.fork"
         minSdk = 26
         // targetSdk 从 28 升到 35：28 是当年为了绕开 proot 的 W^X / SELinux 限制而锁的，后来 proot 全套
         // 改由 jniLibs 装进 nativeLibraryDir（apk_data_file，允许 execve），就不再需要锁这么低。
@@ -173,9 +173,9 @@ android {
     }
 
     buildTypes {
-        // debug 加包名后缀 .debug → applicationId 变 com.aharou.agent.debug，与 release（com.aharou.agent）
+        // debug 加包名后缀 .debug → applicationId 变 com.aharou.agent.fork.debug，与 release（com.aharou.agent.fork）
         // 可同机共存、互不覆盖。IDE 跑 debug 不再因签名不同卸载已装的正式版。
-        // 注意：因 applicationId 不同，debug 变体私有目录为 /data/data/com.aharou.agent.debug/，
+        // 注意：因 applicationId 不同，debug 变体私有目录为 /data/data/com.aharou.agent.fork.debug/，
         // release 已解压的容器 rootfs 与工作区项目在 debug 下不可见（需重新解压/clone），属预期隔离行为。
         debug {
             applicationIdSuffix = ".debug"
@@ -195,7 +195,7 @@ android {
             }
         }
         // beta 测试版：继承 release 的全部配置（签名/R8/资源压缩/proguard），仅包名后缀 .beta
-        // → applicationId 变 com.aharou.agent.beta，可与正式版同机共存、互不覆盖。
+        // → applicationId 变 com.aharou.agent.fork.beta，可与正式版同机共存、互不覆盖。
         // 由 .github/workflows/beta.yml 在 push main 时构建并上传 Artifacts，供测机验证。
         create("beta") {
             initWith(getByName("release"))
@@ -237,6 +237,16 @@ android {
                 "**/libproot-loader32.so",
                 "**/libtalloc.so",
                 "**/libandroid-shmem.so"
+            )
+            // 端侧 LLM 推理只支持 arm64（SmolChatAndroidLib 的 NEON 变体只给 arm64/v7a，
+            // x86_64 上是通用回退库，跑不动 1B 级模型）。x86_64 变体本来就不提供本地模型，
+            // 这里直接把那份 .so 挡在包外，省 ~12MB。
+            excludes += setOf(
+                "lib/x86_64/libllama*.so",
+                "lib/x86_64/libggml*.so",
+                "lib/x86_64/libsmollm*.so",
+                "lib/x86_64/libggufreader*.so",
+                "lib/x86_64/libomp.so"
             )
         }
         resources {
@@ -373,6 +383,11 @@ dependencies {
     implementation("commons-net:commons-net:3.10.0")
     implementation("org.apache.ftpserver:ftpserver-core:1.2.0")
     implementation("org.slf4j:slf4j-simple:2.0.9")
+
+    // 本地模型（端侧 LLM 推理）：SmolChatAndroidLib 内含预编译 llama.cpp JNI + 多档 NEON .so，
+    // 免 NDK、免 CMake。核心是 streaming 的 getResponseAsFlow()，换成“自家编译”要拉 NDK，
+    // 与本项目“免 NDK”前提相抵，所以直接吃现成 AAR（Apache-2.0，JitPack）。
+    implementation("com.github.woheller69:SmolChatAndroidLib:V2.1")
 
     // 容器：解压 Alpine rootfs tar.gz（正确处理 symlink/hardlink/权限位）
     implementation("org.apache.commons:commons-compress:1.26.2")

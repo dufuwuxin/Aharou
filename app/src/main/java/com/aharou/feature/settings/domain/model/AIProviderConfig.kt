@@ -86,7 +86,8 @@ data class AIProviderConfig(
      * 是否可用于发起请求。除了配了 Key 的常规供应商，**空 Key 的免鉴权供应商**也算可用：
      * 这类供应商（本地网关、部分公益站等）本就不需要 Key，请求会不带鉴权头发出去。
      */
-    val hasUsableApiKey: Boolean get() = effectiveApiKeys.isNotEmpty() || baseUrl.isNotBlank()
+    val hasUsableApiKey: Boolean
+        get() = type == ProviderType.LOCAL || effectiveApiKeys.isNotEmpty() || baseUrl.isNotBlank()
 
     /** 实际生效的切换状态码：留空回退默认集合。 */
     val effectiveKeySwitchStatusCodes: Set<Int>
@@ -150,7 +151,13 @@ fun AIProviderConfig.sanitized(): AIProviderConfig = copy(
 )
 
 enum class ProviderType {
-    OPENAI, ANTHROPIC, GEMINI
+    OPENAI, ANTHROPIC, GEMINI,
+
+    /**
+     * 端侧推理：不走网络，由 [com.aharou.feature.localmodel.runtime.LocalProvider] 直接驱动
+     * 本机 GGUF 权重。模型不是从 API 拉列表得来的，而是设置页「本地模型」里已下载的那几个。
+     */
+    LOCAL
 }
 
 /** 默认触发多 Key 自动切换的 HTTP 状态码：鉴权（401）、计费/额度（402）、权限（403）、限流（429）。 */

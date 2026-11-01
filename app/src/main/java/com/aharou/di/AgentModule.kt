@@ -124,6 +124,7 @@ import com.aharou.feature.agent.domain.workflow.GeneratedImagePersister
 import com.aharou.feature.agent.domain.ocr.TesseractOcrEngine
 import com.aharou.feature.agent.domain.provider.ProviderFailoverCoordinator
 import com.aharou.feature.agent.domain.workflow.StatefulAgentWorkflow
+import com.aharou.feature.localmodel.runtime.LocalLlmEngine
 import com.aharou.feature.remotedevice.domain.RemoteDeviceSettings
 import com.aharou.feature.settings.data.repository.CompactionModelSettingsRepository
 import com.aharou.feature.settings.data.repository.DefaultModelSettingsRepository
@@ -516,6 +517,7 @@ object AgentModule {
         openAIApi: OpenAIApi,
         anthropicApi: AnthropicApi,
         geminiApi: GeminiApi,
+        localLlmEngine: LocalLlmEngine,
         promptProvider: SystemPromptProvider,
         permissionManager: ToolPermissionManager,
         remoteDeviceSettings: RemoteDeviceSettings,
@@ -550,6 +552,7 @@ object AgentModule {
             openAIApi,
             anthropicApi,
             geminiApi,
+            localLlmEngine,
             promptProvider,
             permissionManager,
             remoteDeviceSettings,

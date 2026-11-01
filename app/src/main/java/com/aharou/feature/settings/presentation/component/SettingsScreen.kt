@@ -150,6 +150,7 @@ internal enum class SettingsSection(@param:StringRes val titleRes: Int) {
     SubAgentDetail(R.string.settings_subagents),
     SubAgentEditor(R.string.settings_subagents),
     Teams(R.string.settings_teams),
+    Tools(R.string.settings_tools),
     Experiments(R.string.settings_experiments),
     Prompts(R.string.prompts_title),
     Rules(R.string.rules_title),
@@ -433,7 +434,7 @@ fun SettingsScreen(
         SettingsSection.Container,
         SettingsSection.Proxy,
         SettingsSection.ShadowScreen,
-        SettingsSection.SubAgents,
+        SettingsSection.Teams,
         SettingsSection.RemoteServers,
         SettingsSection.RemoteDevice,
         SettingsSection.EnvVars,
@@ -443,6 +444,7 @@ fun SettingsScreen(
         SettingsSection.Backup,
         SettingsSection.Experiments -> SettingsSection.MoreGroup
         SettingsSection.About -> SettingsSection.HelpGroup
+        SettingsSection.Tools -> SettingsSection.AharouGroup
         SettingsSection.Prompts -> SettingsSection.AharouGroup
         SettingsSection.Rules -> SettingsSection.AharouGroup
         SettingsSection.ProviderEditor -> SettingsSection.Providers
@@ -451,7 +453,9 @@ fun SettingsScreen(
         SettingsSection.SkillMarketDetail -> SettingsSection.SkillMarket
         SettingsSection.SkillEditor -> skillEditorReturn
         SettingsSection.SubAgentDetail -> SettingsSection.SubAgents
-        SettingsSection.Teams -> SettingsSection.SubAgents
+        // 角色改称「专家成员」并收进团队页：子代理页只能从团队页进去，不再是并行菜单项。
+        SettingsSection.SubAgents -> SettingsSection.Teams
+        SettingsSection.Teams -> SettingsSection.MoreGroup
         SettingsSection.SubAgentEditor -> subAgentEditorReturn
         SettingsSection.PromptDetail -> SettingsSection.Prompts
         SettingsSection.PromptEditor -> promptEditorReturn
@@ -548,14 +552,10 @@ fun SettingsScreen(
         section = target
     }
 
-    // 菜单内容：窄窗当首页用，大屏当常驻左栏用，共用同一份。
-    // 滚动位置必须提到 AnimatedContent 之外持有：菜单页作为分区分支被切走时会被 dispose，
-    // 内部 rememberScrollState 一并丢弃，从二级页返回就跳回顶部。
+    // 菜单内容：窄窗当首页用，大屏当常驻左栏用，共用同一份。滚动位置必须提到 AnimatedContent 之外持有，
+    // 否则菜单页被切走时 dispose 掉的 rememberScrollState 会让返回时跳回顶部。
     val menuScrollState = rememberScrollState()
-    // 一级 / 详情页整块内容被 AnimatedContent 切走后会被 dispose，内部的 rememberScrollState /
-    // rememberLazyListState 一并丢失，从下一级页面返回就跳回顶部（供应商、MCP、技能等列表全中招）。
-    // 用 SaveableStateHolder 按分区名接住这些 rememberSaveable 状态；编辑类页面在 AnimatedContent
-    // 里走独立分支、不进 Holder，保证每次进编辑器都是干净表单，不会恢复上次未提交的草稿。
+    // 同理，各分区的列表滚动用 SaveableStateHolder 按分区名接住；编辑类页面走独立分支不接，保证每次都是干净表单。
     val sectionStateHolder = rememberSaveableStateHolder()
     val menuBody: @Composable () -> Unit = {
         SettingsMenu(
@@ -1160,15 +1160,15 @@ fun SettingsScreen(
                 SettingsSection.ScheduledTasks -> ScheduledTasksSection()
                 SettingsSection.SubAgents -> SubAgentsSection(
                     projectName = currentProjectName,
-                    entries = subAgents,
-                    onDelete = { subAgentToDelete = it },
+                    entries = subAgents,                    onDelete = { subAgentToDelete = it },
                     onOpenDetail = {
                         selectedSubAgent = it
                         section = SettingsSection.SubAgentDetail
                     },
                     onOpenTeams = { section = SettingsSection.Teams }
                 )
-                SettingsSection.Teams -> SubAgentTeamsSection()
+                SettingsSection.Teams -> SubAgentTeamsSection(expertCount = subAgents.size, onOpenExperts = { section = SettingsSection.SubAgents })
+                SettingsSection.Tools -> ToolsSection()
                 SettingsSection.Prompts -> {
                     val promptsViewModel: PromptsViewModel =
                         androidx.hilt.navigation.compose.hiltViewModel()

@@ -466,6 +466,8 @@ class MobileOperator @Inject constructor(
         val config = resolveConfig(sessionId, modelOverride) ?: return null
         if (config.effectiveModel.isBlank()) return null
         val provider: AIProvider = when (config.type) {
+            // 手机操作靠 function-calling 驱动，端侧模型给不了，明确报错而不是发一个空 URL 的请求。
+            ProviderType.LOCAL -> throw IllegalStateException("端侧模型不支持手机操作，请换用云端供应商")
             ProviderType.ANTHROPIC -> AnthropicAdapter(anthropicApi).also { it.cacheBreakpointsEnabled = config.anthropicCacheBreakpoints }
             ProviderType.GEMINI -> GeminiAdapter(geminiApi)
             else -> OpenAIAdapter(openAIApi).also { it.chatCacheKeyEnabled = config.openaiChatCacheKey }

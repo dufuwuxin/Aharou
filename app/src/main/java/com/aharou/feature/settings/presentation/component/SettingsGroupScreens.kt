@@ -46,6 +46,7 @@ import compose.icons.feathericons.Lock
 import compose.icons.feathericons.MessageSquare
 import compose.icons.feathericons.MessageCircle
 import compose.icons.feathericons.Monitor
+import compose.icons.feathericons.Tool
 import compose.icons.feathericons.Moon
 import compose.icons.feathericons.PieChart
 import compose.icons.feathericons.Power
@@ -96,6 +97,13 @@ internal fun SettingsAharouGroupScreen(onOpen: (SettingsSection) -> Unit) {
                 icon = FeatherIcons.BookOpen,
                 title = stringResource(SettingsSection.Memory.titleRes),
                 onClick = { onOpen(SettingsSection.Memory) }
+            )
+            SettingsDivider()
+            // 工具与记忆、技能同级：都是 agent 的「能力面」，单列一页才看得到到底有哪些能用。
+            SettingsRow(
+                icon = FeatherIcons.Tool,
+                title = stringResource(SettingsSection.Tools.titleRes),
+                onClick = { onOpen(SettingsSection.Tools) }
             )
             SettingsDivider()
             SettingsRow(
@@ -382,10 +390,11 @@ internal fun SettingsMoreGroupScreen(onOpen: (SettingsSection) -> Unit) {
                 onClick = { onOpen(SettingsSection.ShadowScreen) }
             )
             SettingsDivider()
+            // 团队取代原子代理入口：角色现在叫「专家成员」，收在团队页里（点进去管理）。
             SettingsRow(
                 icon = FeatherIcons.Users,
-                title = stringResource(SettingsSection.SubAgents.titleRes),
-                onClick = { onOpen(SettingsSection.SubAgents) }
+                title = stringResource(SettingsSection.Teams.titleRes),
+                onClick = { onOpen(SettingsSection.Teams) }
             )
             SettingsDivider()
             SettingsRow(

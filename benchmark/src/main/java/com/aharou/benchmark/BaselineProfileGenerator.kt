@@ -26,15 +26,17 @@ class BaselineProfileGenerator {
 
     @Test
     fun generateStartupProfile() {
+        // fork 的 applicationId 与原版不同，写死包名会在同装时采到原版上。
+        val targetPackage = InstrumentationRegistry.getInstrumentation().targetContext.packageName
         rule.collect(
-            packageName = "com.aharou.agent",
+            packageName = targetPackage,
             includeInStartupProfile = true,
         ) {
             val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
             pressHome()
             startActivityAndWait()
             // 等首帧后的主内容（会话列表或空态提示）出来，别只采样到闪屏。
-            device.wait(Until.hasObject(By.pkg("com.aharou.agent").depth(0)), 5_000)
+            device.wait(Until.hasObject(By.pkg(targetPackage).depth(0)), 5_000)
             device.waitForIdle()
         }
     }

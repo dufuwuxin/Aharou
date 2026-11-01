@@ -112,6 +112,8 @@ class CrossCheckCoordinator @Inject constructor(
     private suspend fun buildProvider(config: AIProviderConfig, model: String, sessionId: String?): AIProvider {
         val target = config.copy(selectedModel = model)
         val provider: AIProvider = when (target.type) {
+            // 交叉复审要跑完整工具循环，端侧模型没有 function-calling，直接说清楚而不是去请求一个空 URL。
+            ProviderType.LOCAL -> throw IllegalStateException("端侧模型不支持交叉复审，请换用云端供应商")
             ProviderType.ANTHROPIC -> AnthropicAdapter(anthropicApi).also {
                 it.cacheBreakpointsEnabled = target.anthropicCacheBreakpoints
             }

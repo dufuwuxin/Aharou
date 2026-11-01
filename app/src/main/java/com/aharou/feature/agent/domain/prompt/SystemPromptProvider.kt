@@ -121,12 +121,28 @@ class SystemPromptProvider @Inject constructor(
                 FileLogger.w(TAG, "扫描子代理定义失败: ${e.message}", e)
                 return null
             }
-            if (entries.isEmpty()) {
+            // 成员只是名单：只有被某个团队引用到的成员才进主提示词，没入团的成员主代理看不到。
+            // 例外：一个团队都还没建时退回全量（否则新装的 App 派发体系直接空掉）。
+            val roster = try {
+                agentTeamRepository.listAll()
+                    .flatMap { it.team.referencedMembers }
+                    .map { it.lowercase() }
+                    .toSet()
+            } catch (e: Exception) {
+                FileLogger.w(TAG, "扫描团队名单失败: ${e.message}", e)
+                emptySet()
+            }
+            val visible = if (roster.isEmpty()) {
+                entries
+            } else {
+                entries.filter { it.definition.name.lowercase() in roster }
+            }
+            if (visible.isEmpty()) {
                 cachedByKey[key] = ""
                 return null
             }
 
-            val content = SubAgentProfileMatcher.renderIndex(entries.map { it.definition })
+            val content = SubAgentProfileMatcher.renderIndex(visible.map { it.definition })
             if (content.isEmpty()) {
                 cachedByKey[key] = ""
                 return null

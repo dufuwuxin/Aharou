@@ -164,6 +164,14 @@
                 tools:node="remove" />
         </provider>
 
+        <!-- 用同 id 的动态快捷方式覆盖 res/xml/shortcuts.xml 的静态快捷方式：
+             静态那份为兼容 flavor 只能写隐式 action，同机装原版与 fork 时会互相抢；
+             动态这份用显式组件，applicationId 随 flavor 自动正确。 -->
+        <provider
+            android:name=".core.util.LauncherShortcutOverrides"
+            android:authorities="${applicationId}.shortcutinit"
+            android:exported="false" />
+
         <provider
             android:name=".feature.workspace.data.provider.WorkspaceDocumentsProvider"
             android:authorities="${applicationId}.documents"

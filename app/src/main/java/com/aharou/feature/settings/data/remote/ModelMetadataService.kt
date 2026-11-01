@@ -396,6 +396,8 @@ class ModelMetadataService @Inject constructor(
             )
             ProviderType.ANTHROPIC -> listOf("anthropic", "google-vertex-anthropic")
             ProviderType.GEMINI -> listOf("google", "google-vertex")
+            // 端侧 GGUF 不在 models.dev 目录里，元数据一律走内置兼底。
+            ProviderType.LOCAL -> emptyList()
         }
 
         /** 在 [catalog]（键大小写已由调用方对齐）里按候选顺序查找：先偏好 provider，再全目录同名键。 */

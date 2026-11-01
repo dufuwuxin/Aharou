@@ -3,6 +3,8 @@ package com.aharou.feature.settings.data.remote
 import android.content.Context
 import com.aharou.R
 import com.aharou.feature.agent.domain.provider.joinUrl
+import com.aharou.feature.localmodel.domain.LocalModelManager
+import com.aharou.feature.localmodel.domain.LocalModels
 import com.aharou.feature.settings.domain.model.ProviderType
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.InterruptedIOException
@@ -66,6 +68,7 @@ data class ModelTestResult(
 @Singleton
 class ModelApiService @Inject constructor(
     private val client: OkHttpClient,
+    private val localModelManager: LocalModelManager,
     @param:ApplicationContext private val context: Context
 ) {
     private val json = Json { ignoreUnknownKeys = true }
@@ -78,6 +81,8 @@ class ModelApiService @Inject constructor(
         useFullUrl: Boolean = false,
         customHeaders: Map<String, String> = emptyMap()
     ): Result<FetchModelsResult> = withContext(Dispatchers.IO) {
+        // 端侧模型的「模型列表」就是本地已下载的那几份 GGUF，不请求任何接口。
+        if (type == ProviderType.LOCAL) return@withContext fetchLocalModels()
         val start = System.nanoTime()
         // recoverCatching 在外层作用域，看不到块内的 url 与请求头；
         // 排错时最需要的恰好是「请求发到哪了」，所以先带出来再兜底。
@@ -200,6 +205,8 @@ class ModelApiService @Inject constructor(
         model: String,
         customHeaders: Map<String, String> = emptyMap()
     ): ModelTestResult = withContext(Dispatchers.IO) {
+        // 端侧模型不经过网络，连通性测试就变成「权重在不在、能不能加载」。
+        if (type == ProviderType.LOCAL) return@withContext testLocalModel(model)
         val start = System.nanoTime()
         val first = testModelOnce(start, baseUrl, apiKey, type, useFullUrl, useResponseApi, model, customHeaders)
         if (!first.retryable) return@withContext first.result
@@ -374,6 +381,39 @@ class ModelApiService @Inject constructor(
             code.isNullOrBlank() -> desc
             else -> "$desc (code=$code)"
         }
+    }
+
+    /**
+     * 端侧模型的「可用模型列表」：只列已完整下载并校验过的。
+     * 没下载的列出来只会让人点一次就报错，不如让用户先去「默认模型 → 本地模型」里下。
+     */
+    private fun fetchLocalModels(): Result<FetchModelsResult> {
+        val models = LocalModels.ALL.filter { localModelManager.isReady(it.id) }.map { it.id }
+        if (models.isEmpty()) {
+            val message = context.getString(R.string.settings_local_model_not_downloaded)
+            return Result.failure(
+                FetchModelsException(message, ModelTestResult(success = false, latencyMs = 0, message = message))
+            )
+        }
+        return Result.success(
+            FetchModelsResult(
+                models = models,
+                debugInfo = ModelTestResult(success = true, latencyMs = 0, message = "端侧模型就绪 ${models.size} 个，无需联网")
+            )
+        )
+    }
+
+    /** 端侧模型的「连通性测试」：不碰网络，只看架构支不支持、权重在不在。 */
+    private fun testLocalModel(model: String): ModelTestResult {
+        if (!localModelManager.isSupportedOnThisDevice()) {
+            val message = context.getString(R.string.settings_local_model_not_supported)
+            return ModelTestResult(success = false, latencyMs = 0, message = message)
+        }
+        if (model.isBlank() || !localModelManager.isReady(model)) {
+            val message = context.getString(R.string.settings_local_model_not_downloaded)
+            return ModelTestResult(success = false, latencyMs = 0, message = message)
+        }
+        return ModelTestResult(success = true, latencyMs = 0, message = "端侧模型已就绪，无需联网")
     }
 
     private fun Request.Builder.applyAuth(apiKey: String, type: ProviderType): Request.Builder =

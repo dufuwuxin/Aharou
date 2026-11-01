@@ -97,45 +97,90 @@ object TeamRunner {
 
     /** 全部团队的一行式清单。 */
     fun renderList(entries: List<AgentTeamEntry>): String = buildString {
-        append("团队预设（共 ").append(entries.size).append(" 个）：\n")
+        append("团队（共 ").append(entries.size).append(" 个）：\n")
         entries.forEach { entry ->
             val team = entry.team
             append("- ").append(team.name).append("（").append(scopeLabel(entry.scope)).append("，")
+                .append(team.members.size).append(" 成员 / ").append(team.admins.size).append(" 管理员 / ")
                 .append(team.stages.size).append(" 阶段 / ").append(team.taskCount).append(" 任务）")
             val summary = team.description.lineSequence().first().trim().take(LIST_DESCRIPTION_MAX)
             if (summary.isNotEmpty()) append("：").append(summary)
             append("\n  流程：").append(team.stages.joinToString(" → ") { it.title }).append("\n")
+            if (team.rejectEdges.isNotEmpty()) {
+                append("  驳回边：")
+                    .append(team.rejectEdges.joinToString("；") { (from, to) -> "$from ⇠ $to" })
+                    .append("\n")
+            }
         }
         append("执行：task(action=\"team_run\", team=\"<名>\", goal=\"<本次目标>\"）；")
-            .append("看单个预设的成员与文件路径用 task(action=\"teams\", team=\"<名>\")。")
+            .append("看单个团队的名单与流程用 task(action=\"teams\", team=\"<名>\")。")
     }
 
-    /** 单个团队的阶段与成员详情。 */
+    /** 单个团队的名单、层级、管理员与流程详情。 */
     fun renderDetail(entry: AgentTeamEntry): String = buildString {
         val team = entry.team
         append("团队「").append(team.name).append("」（").append(scopeLabel(entry.scope)).append("）")
         if (team.description.isNotBlank()) append("：").append(team.description)
+        if (team.admins.isNotEmpty()) {
+            append("\n管理员组：").append(team.admins.joinToString("、"))
+            if (team.admins.size > 1) append("（并行思考，结论由主代理汇总成策略建议）")
+        }
+        if (team.members.isNotEmpty()) {
+            append("\n成员名单：")
+            team.levels.forEach { level ->
+                val names = team.members.filter { it.level == level }.map { it.name }
+                if (names.isNotEmpty()) {
+                    append("\n  ").append(levelLabel(level)).append("：").append(names.joinToString("、"))
+                }
+            }
+        }
         append("\n共 ").append(team.stages.size).append(" 个阶段、").append(team.taskCount).append(" 个任务：\n")
         team.stages.forEachIndexed { index, stage ->
-            append(index + 1).append(". ").append(stage.title).append("（")
-            append(if (stage.tasks.size > 1) "并行 ${stage.tasks.size} 个" else "1 个").append("）：")
+            append(index + 1).append(". ").append(stage.title)
+                .append("（").append(levelLabel(stage.level))
+                .append(if (stage.tasks.size > 1) "，并行 ${stage.tasks.size} 个" else "，1 个")
+                .append(if (stage.isReview) "，关卡" else "").append("）：")
             append(stage.tasks.joinToString("、") { it.memberLabel() })
+            stage.rejectTo?.let { append("；不通过则驳回→").append(it) }
             append("\n")
         }
+        if (team.charter.isNotBlank()) append("公约：").append(team.charter.lineSequence().first().take(LIST_DESCRIPTION_MAX)).append("\n")
         append("文件：").append(team.filePath ?: "-").append("\n")
         append("执行：task(action=\"team_run\", team=\"").append(team.name).append("\", goal=\"<本次目标>\")")
+    }
+
+    fun levelLabel(level: Int): String = when (level) {
+        1 -> "一级成员组"
+        2 -> "二级成员组"
+        3 -> "三级成员组"
+        else -> "${level}级成员组"
     }
 
     fun scopeLabel(scope: AgentDefinitionScope): String =
         if (scope == AgentDefinitionScope.GLOBAL) "全局" else "项目"
 
-    /** 单个团队成员的任务指令：团队公约 + 本次目标 + 本阶段任务。 */
+    /** 单个团队成员的任务指令：团队公约 + 本次目标 + 本阶段任务 + 关系链（执行/驳回）。 */
     private fun taskPrompt(team: AgentTeam, stage: TeamStage, task: TeamTask, goal: String): String =
         buildString {
-            append("你是团队「").append(team.name).append("」在阶段「").append(stage.title).append("」的成员。\n")
+            append("你是团队「").append(team.name).append("」的").append(levelLabel(stage.level))
+            append("成员，现在处于阶段「").append(stage.title).append("」。\n")
+            append("关系链：执行——接下分配下来的内容并完成，产出交回主代理。\n")
             append("本次团队目标：").append(goal).append("\n")
             if (team.charter.isNotBlank()) append("\n团队公约：\n").append(team.charter).append("\n")
+            if (task.agent != null && task.agent in team.admins) {
+                append("你是本团队管理员之一：先独立给出判断，不要预设其他管理员会怎么想。\n")
+            }
             append("\n你的任务：\n").append(task.prompt)
+            if (stage.isReview) {
+                append("\n\n本阶段是关卡。逐条核对验收标准后，结论首行必须是：\n")
+                append("- 通过：写「通过」，然后列出验收依据；\n")
+                if (stage.rejectTo != null) {
+                    append("- 不通过：写「驳回→").append(stage.rejectTo)
+                        .append("」，再逐条列出必改点（谁改、改什么），交回主代理重排。\n")
+                } else {
+                    append("- 不通过：写「驳回」，列出必改点（本关是终审，没有可回退的阶段）。\n")
+                }
+            }
         }
 
     private fun TeamTask.memberLabel(): String =

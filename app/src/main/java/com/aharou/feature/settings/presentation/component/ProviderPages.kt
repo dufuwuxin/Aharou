@@ -269,3 +269,19 @@ internal fun ProviderTypeSelectionSheet(
         }
     }
 }
+
+/** 供应商类型的展示名；端侧推理单独一档，用户一眼能看出它不联网。 */
+internal fun providerTypeLabel(type: ProviderType): String = when (type) {
+    ProviderType.OPENAI -> "OpenAI"
+    ProviderType.ANTHROPIC -> "Anthropic"
+    ProviderType.GEMINI -> "Gemini"
+    ProviderType.LOCAL -> "本地模型（离线）"
+}
+
+/** 各类型的默认 Base URL；端侧模型不走 HTTP，留空。 */
+internal fun defaultProviderBaseUrl(type: ProviderType): String = when (type) {
+    ProviderType.ANTHROPIC -> "https://api.anthropic.com/"
+    ProviderType.GEMINI -> "https://generativelanguage.googleapis.com/"
+    ProviderType.LOCAL -> ""
+    else -> "https://api.openai.com/"
+}

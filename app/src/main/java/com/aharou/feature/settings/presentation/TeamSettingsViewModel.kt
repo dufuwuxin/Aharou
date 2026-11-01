@@ -3,6 +3,7 @@ package com.aharou.feature.settings.presentation
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.aharou.core.util.FileLogger
+import com.aharou.feature.agent.domain.subagent.AgentDefinitionRepository
 import com.aharou.feature.agent.domain.subagent.AgentTeamEntry
 import com.aharou.feature.agent.domain.subagent.AgentTeamForm
 import com.aharou.feature.agent.domain.subagent.AgentTeamRepository
@@ -31,11 +32,16 @@ sealed interface AgentTeamSaveState {
  */
 @HiltViewModel
 class TeamSettingsViewModel @Inject constructor(
-    private val repository: AgentTeamRepository
+    private val repository: AgentTeamRepository,
+    private val agentDefinitionRepository: AgentDefinitionRepository
 ) : ViewModel() {
 
     private val _teams = MutableStateFlow<List<AgentTeamEntry>>(emptyList())
     val teams: StateFlow<List<AgentTeamEntry>> = _teams.asStateFlow()
+
+    /** 全部成员（含未入团的）：创建团队时用来挑人，未入团的成员主代理看不到。 */
+    private val _members = MutableStateFlow<List<String>>(emptyList())
+    val members: StateFlow<List<String>> = _members.asStateFlow()
 
     private val _saveState = MutableStateFlow<AgentTeamSaveState>(AgentTeamSaveState.Idle)
     val saveState: StateFlow<AgentTeamSaveState> = _saveState.asStateFlow()
@@ -77,7 +83,13 @@ class TeamSettingsViewModel @Inject constructor(
 
     private suspend fun load() {
         _teams.value = runCatching { repository.listAll() }.getOrElse { e ->
-            FileLogger.w(TAG, "读取团队预设失败: ${e.message}", e)
+            FileLogger.w(TAG, "读取团队失败: ${e.message}", e)
+            emptyList()
+        }
+        _members.value = runCatching {
+            agentDefinitionRepository.listEnabled().map { it.definition.name }.sorted()
+        }.getOrElse { e ->
+            FileLogger.w(TAG, "读取成员名单失败: ${e.message}", e)
             emptyList()
         }
     }

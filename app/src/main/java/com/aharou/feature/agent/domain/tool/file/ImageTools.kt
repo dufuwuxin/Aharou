@@ -341,6 +341,8 @@ class ViewImageTool @Inject constructor(
 
     private suspend fun createStandaloneProvider(config: AIProviderConfig, sessionId: String?): AIProvider {
         val provider: AIProvider = when (config.type) {
+            // 生图/图像分析走云端多模态模型，端侧这条线目前只有文本推理。
+            ProviderType.LOCAL -> throw IllegalStateException("端侧模型不支持图像生成与分析，请换用云端供应商")
             ProviderType.ANTHROPIC -> AnthropicAdapter(anthropicApi).also {
                 it.cacheBreakpointsEnabled = config.anthropicCacheBreakpoints
             }

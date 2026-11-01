@@ -39,6 +39,8 @@ import com.aharou.feature.agent.domain.provider.AIProvider
 import com.aharou.feature.agent.domain.provider.AIResponse
 import com.aharou.feature.agent.domain.provider.AIStreamChunk
 import com.aharou.feature.agent.domain.provider.ProviderFailoverCoordinator
+import com.aharou.feature.localmodel.runtime.LocalLlmEngine
+import com.aharou.feature.localmodel.runtime.LocalProvider
 import com.aharou.feature.agent.domain.tool.AgentTool
 import com.aharou.feature.agent.domain.tool.PendingPermissionBatch
 import com.aharou.feature.agent.domain.tool.StreamingAgentTool
@@ -116,6 +118,7 @@ class StatefulAgentWorkflow @Inject constructor(
     private val openAIApi: OpenAIApi,
     private val anthropicApi: AnthropicApi,
     private val geminiApi: GeminiApi,
+    private val localLlmEngine: LocalLlmEngine,
     private val promptProvider: SystemPromptProvider,
     private val permissionManager: ToolPermissionManager,
     private val remoteDeviceSettings: RemoteDeviceSettings,
@@ -266,10 +269,7 @@ class StatefulAgentWorkflow @Inject constructor(
         return createStandaloneProvider(config, sessionId)
     }
 
-    /**
-     * 解析当前生效的 provider 配置：优先用 session 绑定的 providerId/model，回退全局 active provider。
-     * session 绑定的 provider 不存在或已禁用时回退全局，保证老会话与异常数据不中断。
-     */
+    /** 解析当前生效的 provider 配置：优先 session 绑定的 providerId/model，回退全局 active provider；绑定失效也回退，保老会话不中断。 */
     private suspend fun resolveProviderConfig(sessionId: String?): AIProviderConfig? {
         // 回退覆盖优先：主供应商已因额度/鉴权/限流失败过，不要每轮再撞一次
         failoverCoordinator.overrideConfig(sessionId)?.let { return it }
@@ -328,12 +328,12 @@ class StatefulAgentWorkflow @Inject constructor(
     }
 
     /**
-     * 根据 [config] 创建一个全新的、独立的 [AIProvider] 实例。
-     * 用于上下文压缩等独立请求场景，完全不占用或修改主对话所用的 Provider 单例。
-     * 同时把提供商级 LLM 缓存开关（Anthropic 断点 / OpenAI cache key）应用到实例。
+     * 根据 [config] 新建独立 [AIProvider]（压缩、标题等旁路用），不占用主对话单例，同时套上提供商级缓存开关。
      */
     private suspend fun createStandaloneProvider(config: AIProviderConfig, sessionId: String?): AIProvider {
         val provider: AIProvider = when (config.type) {
+            // 端侧模型：不起 HTTP，直接驱动本机 GGUF；工具调用不支持，由 LocalProvider 自己忽略。
+            ProviderType.LOCAL -> LocalProvider(localLlmEngine)
             ProviderType.ANTHROPIC -> AnthropicAdapter(anthropicApi).also {
                 it.cacheBreakpointsEnabled = config.anthropicCacheBreakpoints
             }

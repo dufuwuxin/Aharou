@@ -1,6 +1,7 @@
 package com.aharou.feature.voice.domain
 
 import android.content.Context
+import com.aharou.R
 import com.aharou.core.net.AppProxy
 import com.aharou.core.util.FileLogger
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -13,6 +14,8 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -94,28 +97,49 @@ class VoiceModelManager @Inject constructor(
         )
     }
 
-    /**
-     * 强制重新下载（设置页那个「下载」按钮点第二次时走它）：
-     * 先删掉现存的，再走一遍 [ensureModel]。文件看着在、内容坏了时用它。
-     */
+    /** 强制重新下载；新文件校验通过之前保留现有模型。 */
     suspend fun redownload(
         spec: VoiceModelSpec,
         onState: (VoiceModelState) -> Unit = {},
-    ): File {
-        mutex.withLock { modelDir(spec).deleteRecursively() }
-        return ensureModel(spec, onState = onState)
-    }
+    ): File = prepareModel(spec, allowDownload = true, forceDownload = true, onState = onState)
 
     /** 全部模型的聚合状态（设置页那一行照它显示）。 */
     fun statusAll(): VoiceModelStatus = VoiceModelStatus(VoiceModels.ALL.flatMap { status(it).files })
 
-    /** 依次重新下载全部模型；有一个失败就返回 false，但不半途停下。 */
-    suspend fun redownloadAll(onState: (VoiceModelState) -> Unit = {}): Boolean {
-        var ok = true
+    /** 已就绪的模型命中本地；重试只补齐缺失或损坏的模型。 */
+    suspend fun ensureAll(onState: (VoiceModelState) -> Unit = {}): Boolean =
+        downloadAll(forceDownload = false, onState = onState)
+
+    /** 依次重新下载全部模型；保留失败原因，取消时立即终止后续模型。 */
+    suspend fun redownloadAll(onState: (VoiceModelState) -> Unit = {}): Boolean =
+        downloadAll(forceDownload = true, onState = onState)
+
+    private suspend fun downloadAll(
+        forceDownload: Boolean,
+        onState: (VoiceModelState) -> Unit,
+    ): Boolean {
+        val failures = mutableListOf<String>()
         VoiceModels.ALL.forEach { spec ->
-            if (runCatching { redownload(spec, onState) }.isFailure) ok = false
+            currentCoroutineContext().ensureActive()
+            try {
+                prepareModel(spec, allowDownload = true, forceDownload = forceDownload) { state ->
+                    // 单个模型就绪不代表整批安装结束，避免设置页提前解除下载锁。
+                    if (state is VoiceModelState.Downloading || state is VoiceModelState.Extracting) {
+                        onState(state)
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                failures += e.message ?: context.getString(R.string.settings_voice_model_download_failed)
+            }
         }
-        return ok
+        val ready = failures.isEmpty() && statusAll().ready
+        onState(
+            if (ready) VoiceModelState.Ready
+            else VoiceModelState.Failed(failures.joinToString("\n"))
+        )
+        return ready
     }
 
     /**
@@ -131,45 +155,75 @@ class VoiceModelManager @Inject constructor(
         spec: VoiceModelSpec,
         allowDownload: Boolean = true,
         onState: (VoiceModelState) -> Unit = {},
+    ): File = prepareModel(spec, allowDownload, forceDownload = false, onState = onState)
+
+    private suspend fun prepareModel(
+        spec: VoiceModelSpec,
+        allowDownload: Boolean,
+        forceDownload: Boolean,
+        onState: (VoiceModelState) -> Unit,
     ): File = withContext(Dispatchers.IO) {
         mutex.withLock {
             val dir = modelDir(spec)
-            if (isReady(spec)) {
+            val backup = File(modelRoot(), "${spec.dirName}.backup")
+            // 进程可能在两次 rename 之间退出；先恢复上一份，再判断是否需要联网。
+            if (backup.exists()) {
+                if (isReady(spec)) {
+                    backup.deleteRecursively()
+                } else {
+                    if (dir.exists()) dir.deleteRecursively()
+                    if (!backup.renameTo(dir)) {
+                        throw IOException(context.getString(R.string.settings_voice_model_install_failed))
+                    }
+                }
+            }
+            if (!forceDownload && isReady(spec)) {
                 onState(VoiceModelState.Ready)
                 return@withLock dir
             }
             if (!allowDownload) {
                 // 调用方（语音会话）明确不下载：没下过就当不可用，让上层提示去设置页手动下，
                 // 不在用户点麦克风时背地里拉几百 MB。
-                throw IOException("${spec.displayName}尚未下载，请到设置 → 默认模型 → 离线语音模型处下载")
+                throw IOException(context.getString(R.string.settings_voice_model_not_downloaded))
             }
             val staging = File(modelRoot(), "${spec.dirName}.staging")
             val archive = File(modelRoot(), "${spec.dirName}.tar.bz2")
             try {
                 staging.deleteRecursively()
-                staging.mkdirs()
+                if (!staging.mkdirs() && !staging.isDirectory) {
+                    throw IOException(context.getString(R.string.settings_voice_model_install_failed))
+                }
                 onState(VoiceModelState.Downloading(0f))
                 downloadArchive(spec, archive) { progress ->
                     onState(VoiceModelState.Downloading(progress))
                 }
                 onState(VoiceModelState.Extracting)
                 extractArchive(spec, archive, staging)
-                dir.deleteRecursively()
+                currentCoroutineContext().ensureActive()
+                if (dir.exists() && !dir.renameTo(backup)) {
+                    throw IOException(context.getString(R.string.settings_voice_model_install_failed))
+                }
                 if (!staging.renameTo(dir)) {
-                    throw IOException("模型目录改名失败")
+                    if (backup.exists()) backup.renameTo(dir)
+                    throw IOException(context.getString(R.string.settings_voice_model_install_failed))
                 }
                 if (!isReady(spec)) {
                     dir.deleteRecursively()
-                    throw IOException("模型文件不完整，下载可能被截断")
+                    if (backup.exists()) backup.renameTo(dir)
+                    throw IOException(context.getString(R.string.settings_voice_model_invalid_archive))
                 }
+                backup.deleteRecursively()
                 onState(VoiceModelState.Ready)
                 dir
             } catch (e: Exception) {
                 // CancellationException 也走这里：半成品必须清掉，否则下次启动会认为已就绪
                 staging.deleteRecursively()
+                if (!dir.exists() && backup.exists()) backup.renameTo(dir)
                 if (e !is CancellationException) {
                     FileLogger.e(TAG, "下载语音模型失败：${spec.displayName}", e)
-                    onState(VoiceModelState.Failed(e.message ?: "下载失败"))
+                    onState(VoiceModelState.Failed(
+                        e.message ?: context.getString(R.string.settings_voice_model_download_failed)
+                    ))
                 }
                 throw e
             } finally {
@@ -202,7 +256,7 @@ class VoiceModelManager @Inject constructor(
                 lastError = e
             }
         }
-        throw IOException(lastError?.message ?: "没有可用的下载源")
+        throw IOException(lastError?.message ?: context.getString(R.string.settings_voice_model_download_failed))
     }
 
     /**
@@ -217,41 +271,42 @@ class VoiceModelManager @Inject constructor(
         onProgress: (Float) -> Unit,
     ) {
         val call = client.newCall(Request.Builder().url(url).build())
-        suspendCancellableCoroutine { cont ->
+        val response = suspendCancellableCoroutine<Response> { cont ->
             cont.invokeOnCancellation { call.cancel() }
             call.enqueue(object : Callback {
                 override fun onFailure(call: Call, e: IOException) {
-                    dest.delete()
                     if (!cont.isCancelled) cont.resumeWithException(e)
                 }
 
                 override fun onResponse(call: Call, response: Response) {
-                    try {
-                        if (!response.isSuccessful) throw IOException("HTTP ${response.code}")
-                        val body = response.body ?: throw IOException("响应体为空")
-                        val total = body.contentLength()
-                        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-                        var read = 0L
-                        body.byteStream().use { input ->
-                            dest.outputStream().use { output ->
-                                while (true) {
-                                    val n = input.read(buffer)
-                                    if (n < 0) break
-                                    output.write(buffer, 0, n)
-                                    read += n
-                                    if (total > 0) {
-                                        onProgress((read.toFloat() / total).coerceIn(0f, 1f))
-                                    }
-                                }
-                            }
-                        }
-                        cont.resume(Unit)
-                    } catch (e: Exception) {
-                        dest.delete()
-                        if (!cont.isCancelled) cont.resumeWithException(e)
-                    }
+                    cont.resume(response) { _, unusedResponse, _ -> unusedResponse.close() }
                 }
             })
+        }
+        // 写文件留在持锁协程内，取消后的网络回调不能再覆盖下一次安装的临时包。
+        response.use {
+            if (!it.isSuccessful) throw IOException("HTTP ${it.code}")
+            val body = it.body ?: throw IOException(
+                context.getString(R.string.settings_voice_model_invalid_archive)
+            )
+            val total = body.contentLength()
+            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+            var read = 0L
+            body.byteStream().use { input ->
+                dest.outputStream().use { output ->
+                    while (true) {
+                        currentCoroutineContext().ensureActive()
+                        val n = input.read(buffer)
+                        if (n < 0) break
+                        output.write(buffer, 0, n)
+                        read += n
+                        if (total > 0) onProgress((read.toFloat() / total).coerceIn(0f, 1f))
+                    }
+                }
+            }
+            if (total >= 0 && read != total) {
+                throw IOException(context.getString(R.string.settings_voice_model_invalid_archive))
+            }
         }
     }
 
@@ -261,16 +316,33 @@ class VoiceModelManager @Inject constructor(
      * 只按 basename 匹配：包内是 `<模型目录>/<文件名>` 的单层结构，取 basename 顺带挡掉
      * 压缩包里可能出现的路径穿越（`../`）。
      */
-    private fun extractArchive(spec: VoiceModelSpec, archive: File, destDir: File) {
+    private suspend fun extractArchive(spec: VoiceModelSpec, archive: File, destDir: File) {
         val wanted = spec.requiredFiles.toSet()
         val found = mutableSetOf<String>()
         BZip2CompressorInputStream(BufferedInputStream(archive.inputStream())).use { bz ->
             TarArchiveInputStream(bz).use { tar ->
                 var entry = tar.nextEntry
                 while (entry != null) {
+                    currentCoroutineContext().ensureActive()
                     val name = entry.name.substringAfterLast('/')
                     if (entry.isFile && name in wanted && found.add(name)) {
-                        File(destDir, name).outputStream().use { out -> tar.copyTo(out) }
+                        val expected = spec.fileSizes[name]
+                        if (expected == null || entry.size != expected) {
+                            throw IOException(context.getString(R.string.settings_voice_model_invalid_archive))
+                        }
+                        val target = File(destDir, name)
+                        target.outputStream().use { out ->
+                            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                            while (true) {
+                                currentCoroutineContext().ensureActive()
+                                val count = tar.read(buffer)
+                                if (count < 0) break
+                                out.write(buffer, 0, count)
+                            }
+                        }
+                        if (target.length() != expected) {
+                            throw IOException(context.getString(R.string.settings_voice_model_invalid_archive))
+                        }
                     }
                     entry = tar.nextEntry
                 }
@@ -278,7 +350,7 @@ class VoiceModelManager @Inject constructor(
         }
         val missing = wanted - found
         if (missing.isNotEmpty()) {
-            throw IOException("模型包里找不到文件：" + missing.joinToString("、"))
+            throw IOException(context.getString(R.string.settings_voice_model_invalid_archive))
         }
     }
 

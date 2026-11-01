@@ -562,12 +562,15 @@ fun ProviderEditorScreen(
                             onCheckedChange = { isEnabled = it }
                         )
                         SettingsDivider()
+                        // 端侧模型不走 HTTP：完整 URL、新版端点、缓存这些开关对它们没有意义。
+                        if (type != ProviderType.LOCAL) {
                         ProviderSwitchRow(
                             title = stringResource(R.string.provider_full_url),
                             subtitle = stringResource(R.string.provider_full_url_desc),
                             checked = useFullUrl,
                             onCheckedChange = { useFullUrl = it }
                         )
+                        }
                         // 新版端点开关：OpenAI 是 Responses API，Gemini 是 Interactions API，
                         // 共用 useResponseApi 一个字段（语义一致：切到该家的新版统一端点）。
                         if (type == ProviderType.OPENAI || type == ProviderType.GEMINI) {
@@ -1166,12 +1169,6 @@ internal fun ProviderIconDialog(
     )
 }
 
-internal fun defaultProviderBaseUrl(type: ProviderType): String = when (type) {
-    ProviderType.ANTHROPIC -> "https://api.anthropic.com/"
-    ProviderType.GEMINI -> "https://generativelanguage.googleapis.com/"
-    else -> "https://api.openai.com/"
-}
-
 /** 分组内输入行：全宽 AppTextField，可选密文转换与尾随操作。 */
 @Composable
 internal fun ProviderTextFieldRow(
@@ -1234,12 +1231,6 @@ private fun ProviderSwitchRow(
 }
 
 /** 提供商类型选择底部弹窗，样式与主题选择弹窗一致。 */
-
-internal fun providerTypeLabel(type: ProviderType): String = when (type) {
-    ProviderType.OPENAI -> "OpenAI"
-    ProviderType.ANTHROPIC -> "Anthropic"
-    ProviderType.GEMINI -> "Gemini"
-}
 
 @Composable
 internal fun keyRotationStrategyLabel(strategy: KeyRotationStrategy): String = stringResource(

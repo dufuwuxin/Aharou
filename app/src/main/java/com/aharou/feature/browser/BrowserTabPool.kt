@@ -376,18 +376,6 @@ class BrowserTabPool(private val context: Context) {
     }
 
     /** name.ext → name-1.ext → name-2.ext … until unused. */
-    private fun uniqueFile(dir: File, name: String): File {
-        var f = File(dir, name)
-        if (!f.exists()) return f
-        val base = name.substringBeforeLast('.', name)
-        val ext = name.substringAfterLast('.', "")
-        var i = 1
-        while (f.exists()) {
-            f = File(dir, if (ext.isEmpty()) "$base-$i" else "$base-$i.$ext")
-            i++
-        }
-        return f
-    }
 
     /** Stream an http/https download into the session workspace with progress. */
     internal fun startUrlDownload(
@@ -459,13 +447,23 @@ class BrowserTabPool(private val context: Context) {
         }
         // guessFileName on a blob: URL yields "downloadfile.bin" — refine the
         // extension from the blob's actual MIME type when we have one.
-        var name = filename
+        // 文件名来自网页（bridge 的参数是页面自己传的），必须先归一到 basename 再落盘，
+        // 否则 `../../.aharou/scripts/x.sh` 这类名字能直接写到私有目录任意位置。
+        var name = sanitizeBlobName(filename)
         if ((name.endsWith(".bin") || !name.contains('.')) && mimeType != null) {
             android.webkit.MimeTypeMap.getSingleton().getExtensionFromMimeType(mimeType)?.let { ext ->
                 name = name.substringBeforeLast('.') + "." + ext
             }
         }
         val dest = uniqueFile(dir, name)
+        // 归一之后仍然再断言一次：目录穿越就丢弃，宁可少一个文件也不写到工作区外。
+        run {
+            val root = dir.canonicalPath + File.separator
+            if (!dest.canonicalPath.startsWith(root)) {
+                Log.w(TAG, "blob download rejected: path escapes workspace (${dest.name})")
+                return
+            }
+        }
         val id = registerDownload(dest, data.size.toLong())
         val job = downloadScope.launch {
             try {

@@ -48,22 +48,30 @@ import compose.icons.feathericons.Plus
 import compose.icons.feathericons.Users
 
 /**
- * 设置 → 子代理 → 团队预设：新建/编辑预设、点行看阶段与成员、左滑删除。
+ * 设置 → 团队：入口只有两条（创建团队 / 创建成员）+ 已创建团队列表。
+ *
+ * 团队 = 成员名单 + 管理员组 + 流程（阶段与驳回边）+ 公约。成员只是名单，
+ * 没被任何团队引用的成员不会进主代理的视野，所以「建人」和「建队」是两件分开的事。
  *
  * 表单保存后写回 teams 目录下的 .md，与手写完全等价；文件路径在详情里给出，方便直接改文本。
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun SubAgentTeamsSection(
+    /** 已有成员数量：只用于「创建成员」这行的摘要。 */
+    expertCount: Int = 0,
+    /** 打开成员管理页（创建/编辑/删除成员）。 */
+    onOpenExperts: () -> Unit = {},
     viewModel: TeamSettingsViewModel = hiltViewModel()
 ) {
     val teams by viewModel.teams.collectAsStateWithLifecycle()
+    val availableMembers by viewModel.members.collectAsStateWithLifecycle()
     val saveState by viewModel.saveState.collectAsStateWithLifecycle()
     var detail by remember { mutableStateOf<AgentTeamEntry?>(null) }
     var pendingDelete by remember { mutableStateOf<AgentTeamEntry?>(null) }
     var editorTarget by remember { mutableStateOf<EditorTarget?>(null) }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        // 新建入口常驻：空列表时更需要它，所以不放在列表判定里面。
         Column(modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.sm)) {
             SettingsGroup {
                 SettingsRow(
@@ -73,6 +81,20 @@ internal fun SubAgentTeamsSection(
                         viewModel.resetSaveState()
                         editorTarget = EditorTarget(null)
                     }
+                )
+                SettingsDivider()
+                SettingsRow(
+                    icon = FeatherIcons.Users,
+                    title = stringResource(R.string.team_create_member),
+                    subtitle = stringResource(R.string.settings_team_experts_desc),
+                    trailing = {
+                        Text(
+                            text = expertCount.toString(),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    },
+                    onClick = onOpenExperts
                 )
             }
         }
@@ -132,6 +154,7 @@ internal fun SubAgentTeamsSection(
     editorTarget?.let { target ->
         TeamEditorSheet(
             initial = target.entry,
+            availableMembers = availableMembers,
             saveState = saveState,
             onSave = { form, originalName -> viewModel.save(form, originalName) },
             onSaved = {
@@ -168,7 +191,10 @@ internal fun SubAgentTeamsSection(
     }
 }
 
-/** 单个团队行：图标 + 名称/阶段摘要 + 右箭头。 */
+/** 编辑目标：新建时 entry 为 null；编辑时带上原条目，保存后按原名改文件。 */
+private data class EditorTarget(val entry: AgentTeamEntry?)
+
+/** 单个团队行：图标 + 名称/规模摘要 + 右箭头。 */
 @Composable
 private fun TeamRow(entry: AgentTeamEntry) {
     val team = entry.team
@@ -201,40 +227,47 @@ private fun TeamRow(entry: AgentTeamEntry) {
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = team.name,
-                style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Medium,
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
             Text(
-                text = stringResource(R.string.team_stage_summary, team.stages.size, team.taskCount) +
-                    " · " + team.stages.joinToString(" → ") { it.title },
-                style = MaterialTheme.typography.bodyMedium,
+                text = stringResource(
+                    R.string.team_members_summary,
+                    team.members.size,
+                    team.admins.size,
+                    team.stages.size
+                ),
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
         }
 
-        Spacer(modifier = Modifier.width(Spacing.sm))
-
         Icon(
             imageVector = FeatherIcons.ChevronRight,
             contentDescription = null,
-            tint = MaterialTheme.semanticColors.subtleText,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.size(18.dp)
         )
     }
 }
 
-/** 详情弹层：阶段与成员、预设文件路径、在对话里的触发方式。 */
+/** 团队详情：名单按层级分组、流程按阶段列出驳回边、公约与文件路径。 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun TeamDetailSheet(entry: AgentTeamEntry, onEdit: () -> Unit, onDismiss: () -> Unit) {
+private fun TeamDetailSheet(
+    entry: AgentTeamEntry,
+    onEdit: () -> Unit,
+    onDismiss: () -> Unit
+) {
     val team = entry.team
     AdaptiveModalBottomSheet(
         onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(),
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = MaterialTheme.colorScheme.surface
     ) {
         Column(
@@ -243,7 +276,7 @@ private fun TeamDetailSheet(entry: AgentTeamEntry, onEdit: () -> Unit, onDismiss
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = Spacing.lg)
                 .padding(bottom = Spacing.xl),
-            verticalArrangement = Arrangement.spacedBy(Spacing.sm)
+            verticalArrangement = Arrangement.spacedBy(Spacing.xs)
         ) {
             Text(
                 text = team.name,
@@ -259,68 +292,70 @@ private fun TeamDetailSheet(entry: AgentTeamEntry, onEdit: () -> Unit, onDismiss
                 )
             }
 
-            SettingsGroup {
-                team.stages.forEachIndexed { index, stage ->
-                    if (index > 0) SettingsDivider()
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = Spacing.lg, vertical = 12.dp)
-                    ) {
-                        Text(
-                            text = "${index + 1}. ${stage.title}",
-                            style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        stage.tasks.forEach { task ->
-                            val member = task.agent
-                                ?: listOfNotNull(task.department, task.agentQuery).joinToString("/")
-                            Text(
-                                text = "· $member：${task.prompt.lineSequence().first().take(60)}",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                }
-            }
-
-            team.filePath?.let { path ->
-                SettingsGroup {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = Spacing.lg, vertical = 12.dp)
-                    ) {
-                        Text(
-                            text = stringResource(R.string.team_detail_file),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = path,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                }
-            }
-
-            SettingsGroup {
-                SettingsRow(
-                    title = stringResource(R.string.team_editor_edit),
-                    onClick = onEdit
+            if (team.admins.isNotEmpty()) {
+                SettingsGroupHeader(text = stringResource(R.string.team_detail_admins))
+                Text(
+                    text = team.admins.joinToString("、"),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface
                 )
             }
 
+            if (team.members.isNotEmpty()) {
+                SettingsGroupHeader(text = stringResource(R.string.team_detail_members))
+                team.levels.forEach { level ->
+                    val names = team.members.filter { it.level == level }.map { it.name }
+                    if (names.isEmpty()) return@forEach
+                    Text(
+                        text = stringResource(R.string.team_level_label, level) + "：" + names.joinToString("、"),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+            }
+
+            SettingsGroupHeader(text = stringResource(R.string.team_detail_process))
+            team.stages.forEachIndexed { index, stage ->
+                val members = stage.tasks.mapNotNull { it.agent }.joinToString("、")
+                Text(
+                    text = buildString {
+                        append(index + 1).append(". ").append(stage.title)
+                        append("（").append(stringResource(R.string.team_level_label, stage.level)).append("）")
+                        if (members.isNotEmpty()) append("：").append(members)
+                        if (stage.isReview) append(" · ").append(stringResource(R.string.team_editor_stage_review))
+                        stage.rejectTo?.let {
+                            append("\n   ").append(stringResource(R.string.team_reject_to, it))
+                        }
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+
+            if (team.charter.isNotBlank()) {
+                SettingsGroupHeader(text = stringResource(R.string.team_detail_charter))
+                Text(
+                    text = team.charter,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            SettingsGroupHeader(text = stringResource(R.string.team_detail_file))
+            Text(
+                text = team.filePath ?: "-",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
             Text(
                 text = stringResource(R.string.team_run_hint, team.name),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+
+            TextButton(onClick = onEdit) {
+                Text(stringResource(R.string.team_editor_edit))
+            }
         }
     }
 }
-
-/** 编辑器目标：entry 为 null 表示新建，非 null 表示编辑已有预设。 */
-private data class EditorTarget(val entry: AgentTeamEntry?)

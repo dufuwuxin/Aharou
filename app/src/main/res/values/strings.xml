@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Aharou</string>
+    <string name="app_name">Aharou Fork</string>
 
     <!-- 设置页菜单标题 -->
     <string name="settings_title">设置</string>
@@ -716,7 +716,7 @@
 
     <!-- Subagent -->
     <string name="subagent_tab_sessions">会话</string>
-    <string name="subagent_card_title">子代理任务</string>
+    <string name="subagent_card_title">成员任务</string>
     <string name="subagent_card_status_running">运行中</string>
     <string name="subagent_card_status_completed">已完成</string>
     <string name="subagent_card_status_failed">失败</string>
@@ -728,8 +728,8 @@
     <string name="drawer_tab_files">文件</string>
     <string name="drawer_tab_workflow">工作流</string>
     <string name="workflow_empty">暂无工作流</string>
-    <string name="drawer_expand_subagents">展开子代理</string>
-    <string name="drawer_collapse_subagents">收起子代理</string>
+    <string name="drawer_expand_subagents">展开成员</string>
+    <string name="drawer_collapse_subagents">收起成员</string>
     <string name="file_browser_error">读取目录失败</string>
     <string name="file_browser_refresh">刷新</string>
     <string name="file_browser_expand">展开</string>
@@ -855,7 +855,7 @@
     <string name="chat_status_asking_user">正在询问用户</string>
     <string name="chat_status_generating_image">正在生成图片</string>
     <string name="chat_status_updating_todo">正在整理待办</string>
-    <string name="chat_status_starting_subagent">正在启动子代理</string>
+    <string name="chat_status_starting_subagent">正在启动成员</string>
     <string name="chat_status_reading_memory">正在读取记忆</string>
     <string name="chat_tool_running">工具执行中</string>
     <string name="chat_tool_succeeded">工具执行成功</string>
@@ -1586,10 +1586,27 @@
     <string name="scheduled_tasks_failed">上次执行失败</string>
 
     <!-- Subagent Settings -->
-    <string name="settings_subagents">子代理</string>
+    <string name="settings_subagents">专家成员</string>
     <string name="subagent_max_running">并发上限</string>
-    <string name="subagent_max_running_hint">同时运行的子代理数量上限，范围 %1$d~%2$d。名额整个应用共享，不按会话分组。</string>
-    <string name="settings_teams">团队预设</string>
+    <string name="subagent_max_running_hint">同时运行的成员数量上限，范围 %1$d~%2$d。名额整个应用共享，不按会话分组。</string>
+    <string name="settings_teams">团队</string>
+    <string name="settings_team_experts">专家成员</string>
+    <string name="settings_team_experts_desc">团队成员就是这些专家：一个团队由若干专家按阶段串起来，派活时团队名点到哪个专家就由谁上</string>
+    <string name="settings_team_experts_manage">管理专家成员</string>
+
+    <!-- Tools Settings -->
+    <string name="settings_tools">工具</string>
+    <string name="settings_tools_desc">当前已注册 %1$d 个工具，按能力分类列出；每轮对话真正发给模型的只有被允许的那些</string>
+    <string name="settings_tools_empty">还没有注册任何工具</string>
+    <string name="settings_tools_auto">自动放行</string>
+    <string name="settings_tools_need_approval">需确认</string>
+    <string name="settings_tools_category_file">文件与工作区</string>
+    <string name="settings_tools_category_command">命令与终端</string>
+    <string name="settings_tools_category_network">网络</string>
+    <string name="settings_tools_category_device">设备与宿主</string>
+    <string name="settings_tools_category_agent">Agent 自身</string>
+    <string name="settings_tools_category_external">外部服务</string>
+    <string name="settings_tools_category_other">其他</string>
     <string name="settings_experiments">实验开关</string>
     <string name="experiment_quote_reply">长按引用回复</string>
     <string name="experiment_quote_reply_desc">长按消息气泡弹出菜单，可复制或引用整条消息；引用会把该条摘要带进输入框</string>
@@ -1599,22 +1616,46 @@
     <string name="experiment_default_on">开</string>
     <string name="experiment_default_off">关</string>
     <string name="subagent_teams_entry_desc">把拆解、并行实现与审查串成一条可复用的流程</string>
-    <string name="team_list_empty">还没有团队预设。在容器里新建 ~/.aharou/teams/&lt;名&gt;.md：frontmatter 写 stages、正文写团队公约，格式见文档「子代理 → 团队预设」。</string>
+    <string name="team_list_empty">还没有团队。点上面「创建团队」：选成员、选管理员、排流程、写公约，四步就有一个能跑的团队。</string>
     <string name="team_scope_global">全局</string>
     <string name="team_scope_project">当前项目</string>
     <string name="team_stage_summary">%1$d 个阶段 · %2$d 个任务</string>
-    <string name="team_delete_title">删除团队预设</string>
-    <string name="team_delete_message">将删除「%1$s」的预设文件，此操作不可恢复。确定删除？</string>
-    <string name="team_detail_file">预设文件</string>
+    <string name="team_members_summary">%1$d 成员 · %2$d 管理员 · %3$d 阶段</string>
+    <string name="team_delete_title">删除团队</string>
+    <string name="team_delete_message">将删除团队「%1$s」的定义文件，此操作不可恢复。确定删除？</string>
+    <string name="team_detail_file">团队文件</string>
     <string name="team_run_hint">在对话里说「用%1$s做…」即可；AI 也可以直接调用 task 工具，action 用 team_run、team 填这个团队名。</string>
-    <string name="team_new">新建团队预设</string>
-    <string name="team_editor_title_new">新建团队预设</string>
-    <string name="team_editor_title_edit">编辑团队预设</string>
+    <string name="team_new">创建团队</string>
+    <string name="team_create_member">创建成员</string>
+    <string name="team_level_label">%1$d 级成员组</string>
+    <string name="team_reject_to">不通过则驳回→%1$s</string>
+    <string name="team_detail_admins">管理员组</string>
+    <string name="team_detail_members">成员名单</string>
+    <string name="team_detail_process">团队流程</string>
+    <string name="team_detail_charter">团队公约</string>
+    <string name="team_editor_title_new">创建团队</string>
+    <string name="team_editor_title_edit">编辑团队</string>
+    <string name="team_editor_name">团队名称</string>
+    <string name="team_editor_description">团队简介</string>
+    <string name="team_editor_members">成员名单</string>
+    <string name="team_editor_members_hint">只在这里的成员会进主代理视野；没入团的成员主代理看不到</string>
+    <string name="team_editor_members_empty">还没有成员，先去「创建成员」建一个</string>
+    <string name="team_editor_admins">管理员组</string>
+    <string name="team_editor_admins_hint">可多选；多个管理员并行给出各自判断，结论由主代理汇总成策略建议</string>
+    <string name="team_editor_process">团队流程</string>
+    <string name="team_editor_process_hint">阶段按顺序执行，阶段内并行；关卡判定不通过就驳回回退到指定阶段重做</string>
+    <string name="team_editor_preset_standard">用标准五步：拆解 → 设计 → 分配 → 执行 → 审核</string>
     <string name="team_editor_stages">阶段</string>
     <string name="team_editor_add_stage">添加阶段</string>
     <string name="team_editor_add_task">添加任务</string>
     <string name="team_editor_stage_title">阶段名称</string>
     <string name="team_editor_stage_title_hint">第 %1$d 阶段</string>
+    <string name="team_editor_stage_level">执行层级</string>
+    <string name="team_editor_stage_members">本阶段成员</string>
+    <string name="team_editor_stage_prompt">阶段指令</string>
+    <string name="team_editor_stage_review">设为关卡（审核 / 验收）</string>
+    <string name="team_editor_stage_reject">驳回回退到</string>
+    <string name="team_editor_stage_reject_none">终审，不回退</string>
     <string name="team_editor_task_agent">成员角色</string>
     <string name="team_editor_task_agent_hint">角色名，如 Code Reviewer；留空则改用部门 + 关键词</string>
     <string name="team_editor_task_department">部门（可选）</string>
@@ -1631,12 +1672,15 @@
     <string name="team_editor_error_empty_stages">至少要有一个带任务的阶段</string>
     <string name="team_editor_error_incomplete_task">每个任务都要写任务说明，并且填角色名或部门 + 关键词</string>
     <string name="team_editor_error_name_conflict">同作用域已有同名团队</string>
+    <string name="team_editor_error_unknown_member">阶段里有成员不在名单里</string>
+    <string name="team_editor_error_admin_not_member">管理员必须在成员名单里</string>
+    <string name="team_editor_error_bad_reject">驳回目标必须是本阶段之前的阶段</string>
     <string name="team_editor_error_io">写入失败，请检查存储是否可写</string>
-    <string name="subagents_empty">还没有自定义子代理</string>
+    <string name="subagents_empty">还没有自定义成员</string>
     <string name="subagents_empty_hint">点右上角「+」新建一个，或把 agent 的 .md 定义放进 ~/.aharou/agents/</string>
-    <string name="subagents_no_project">当前项目暂无子代理</string>
-    <string name="subagents_no_global">暂无全局子代理</string>
-    <string name="subagents_delete_confirm_title">删除子代理</string>
+    <string name="subagents_no_project">当前项目暂无成员</string>
+    <string name="subagents_no_global">暂无全局成员</string>
+    <string name="subagents_delete_confirm_title">删除成员</string>
     <string name="subagents_delete_confirm_message">将删除「%1$s」的定义文件，此操作不可恢复。确定删除？</string>
     <string name="subagent_model">模型</string>
     <string name="subagent_tools">工具集</string>
@@ -1648,12 +1692,12 @@
     <string name="subagent_tools_allow">仅允许：%1$s</string>
     <string name="subagent_tools_deny">禁用：%1$s</string>
     <string name="subagent_inject_none">不注入任何额外提示词</string>
-    <string name="subagent_add">新建子代理</string>
-    <string name="subagent_edit">编辑子代理</string>
-    <string name="subagent_enable">启用该子代理</string>
+    <string name="subagent_add">新建成员</string>
+    <string name="subagent_edit">编辑成员</string>
+    <string name="subagent_enable">启用该成员</string>
     <string name="subagent_enable_hint">关闭后 AI 不再能派发它，已在运行的子会话不受影响</string>
-    <string name="subagent_editor_new">新建子代理</string>
-    <string name="subagent_editor_edit">编辑子代理</string>
+    <string name="subagent_editor_new">新建成员</string>
+    <string name="subagent_editor_edit">编辑成员</string>
     <string name="subagent_editor_basic">基本信息</string>
     <string name="subagent_editor_description">用途描述</string>
     <string name="subagent_editor_scope">作用域</string>
@@ -1676,12 +1720,12 @@
     <string name="subagent_no_models">暂无可用模型。请先在「AI 供应商」中添加并配置模型。</string>
     <string name="subagent_editor_error_invalid_name">名称不合法：不能为空，也不能包含路径分隔符等特殊字符</string>
     <string name="subagent_editor_error_empty_prompt">提示词正文不能为空</string>
-    <string name="subagent_editor_error_name_conflict">该作用域下已存在同名子代理</string>
+    <string name="subagent_editor_error_name_conflict">该作用域下已存在同名成员</string>
     <string name="subagent_editor_error_io">写入定义文件失败，请稍后重试</string>
-    <string name="subagent_inject_base">子代理基线</string>
+    <string name="subagent_inject_base">成员基线</string>
     <string name="subagent_inject_base_hint">工具用法与路径约定，轻量、节省 Token</string>
     <string name="subagent_inject_main_rules">完整通用规则</string>
-    <string name="subagent_inject_main_rules_hint">与「子代理基线」二选一即可；两个都开会重复注入规则、多占上下文</string>
+    <string name="subagent_inject_main_rules_hint">与「成员基线」二选一即可；两个都开会重复注入规则、多占上下文</string>
     <string name="subagent_inject_skills">技能清单</string>
     <string name="subagent_inject_skills_hint">允许它加载并执行项目技能</string>
     <string name="subagent_inject_memory">记忆摘要</string>
@@ -2701,7 +2745,7 @@
     <string name="pet_agent_done">干完了，你去看看？</string>
     <string name="pet_agent_waiting">我卡在等你点确认……看一眼屏幕嘛。</string>
     <string name="pet_bg_named">%1$s · %2$s</string>
-    <string name="pet_bg_subagents">子代理 %1$d 个 · %2$s</string>
+    <string name="pet_bg_subagents">成员 %1$d 个 · %2$s</string>
     <string name="pet_bg_count">后台 %1$d 个任务 · %2$s</string>
     <string name="pet_bg_task">后台任务</string>
     <string name="pet_bg_done">%1$s 干完了。</string>
@@ -2975,7 +3019,28 @@
     <string name="settings_voice_model_download">下载</string>
     <string name="settings_voice_model_downloading">下载中 %1$d%%</string>
     <string name="settings_voice_model_downloading_short">下载中</string>
-    <string name="settings_voice_model_download_failed">下载失败，检查网络后重试</string>
+    <string name="settings_voice_model_download_failed">下载或安装失败，点按重试</string>
+    <string name="settings_voice_model_download_failed_detail">下载或安装失败：%1$s。点按重试</string>
+
+    <!-- 本地模型（端侧 LLM 推理）：运行时随包、权重按需下载 -->
+    <string name="settings_local_model_section_title">本地模型（离线推理）</string>
+    <string name="settings_local_model_section_desc">点下载后自动下载并安装到本机；装好后到「供应商 → 添加」里选「本地模型（离线）」即可用它对话，全程不出设备、断网也能用</string>
+    <string name="settings_local_model_download">下载</string>
+    <string name="settings_local_model_downloading">下载中 %1$d%%</string>
+    <string name="settings_local_model_verifying">校验中</string>
+    <string name="settings_local_model_ready">已就绪</string>
+    <string name="settings_local_model_delete">删除</string>
+    <string name="settings_local_model_not_downloaded">未下载</string>
+    <string name="settings_local_model_partial">未下完 %1$s</string>
+    <string name="settings_local_model_failed">下载失败，点按重试</string>
+    <string name="settings_local_model_failed_detail">下载失败：%1$s。点按重试</string>
+    <string name="settings_local_model_hash_mismatch">模型文件校验不通过，请重新下载</string>
+    <string name="settings_local_model_disk_low">存储空间不足，本项需要约 %1$s</string>
+    <string name="settings_local_model_not_supported">当前设备架构不支持端侧推理（需要 arm64）</string>
+    <string name="settings_local_model_ram_hint">建议 %1$d GB 以上内存</string>
+    <string name="settings_local_model_delete_confirm">删除后需重新下载，确定删除？</string>
+    <string name="settings_voice_model_install_failed">无法安装模型，请检查可用存储空间后重试</string>
+    <string name="settings_voice_model_invalid_archive">模型包缺失文件或大小不符，请重新下载</string>
     <string name="settings_voice_model_missing">缺失</string>
     <string name="settings_voice_model_size_mismatch">大小不符</string>
     <string name="chat_long_session_hint">本会话上下文已约 %1$d 万 token，越往后越慢，建议开新会话</string>

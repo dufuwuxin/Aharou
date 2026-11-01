@@ -59,6 +59,7 @@ import com.aharou.core.theme.Spacing
 import com.aharou.core.ui.AppTextField
 import com.aharou.feature.onboarding.domain.OnboardingStep
 import com.aharou.feature.onboarding.presentation.onboardingTarget
+import com.aharou.feature.localmodel.presentation.LocalModelSection
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.aharou.feature.settings.data.local.ModelSheetCollapseStore
@@ -400,15 +401,21 @@ internal fun DefaultModelsSection(
                         (voiceDownloading.progress * 100).toInt()
                     )
                     voiceState is VoiceModelState.Extracting -> stringResource(R.string.voice_model_extracting)
-                    voiceState is VoiceModelState.Failed -> stringResource(R.string.settings_voice_model_download_failed)
+                    voiceState is VoiceModelState.Failed -> if (voiceState.message.isBlank()) {
+                        stringResource(R.string.settings_voice_model_download_failed)
+                    } else {
+                        stringResource(R.string.settings_voice_model_download_failed_detail, voiceState.message)
+                    }
                     voiceModelProblem != null -> voiceModelProblem
                     else -> stringResource(R.string.settings_voice_model_ready)
                 },
-                onClick = onDownloadVoiceModel,
+                onClick = { if (!voiceBusy) onDownloadVoiceModel() },
                 trailing = {
                     Text(
                         text = if (voiceBusy) stringResource(R.string.settings_voice_model_downloading_short)
-                        else stringResource(R.string.settings_voice_model_download),
+                        else if (voiceState is VoiceModelState.Failed || !voiceModelStatus.ready) {
+                            stringResource(R.string.settings_voice_model_download)
+                        } else stringResource(R.string.settings_voice_model_ready),
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.primary,
                         maxLines = 1
@@ -416,6 +423,7 @@ internal fun DefaultModelsSection(
                 }
             )
         }
+        LocalModelSection()
     }
 
     if (showVisionSheet) {

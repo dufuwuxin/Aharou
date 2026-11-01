@@ -584,19 +584,19 @@ class SettingsViewModel @Inject constructor(
             refreshTessdataStatus()
         }
     }
-
-    /** 下载（已下载则重新下载）全部离线语音模型；进度与结果都走 [voiceModelState]。 */
     fun downloadVoiceModel() {
         val running = _voiceModelState.value
         if (running is VoiceModelState.Downloading || running is VoiceModelState.Extracting) return
+        _voiceModelState.value = VoiceModelState.Downloading(0f)
         viewModelScope.launch {
-            val ok = voiceModelManager.redownloadAll { _voiceModelState.value = it }
-            // 中途失败的模型会被后面成功那个的回调冲成 Ready，这里保留失败态让界面提示重试
-            if (!ok) _voiceModelState.value = VoiceModelState.Failed("")
-            refreshVoiceModelStatus()
+            try { voiceModelManager.ensureAll { _voiceModelState.value = it } }
+            catch (e: CancellationException) {
+                _voiceModelState.value = VoiceModelState.Idle
+                throw e
+            } catch (e: Exception) { _voiceModelState.value = VoiceModelState.Failed(e.message.orEmpty()) }
+            finally { refreshVoiceModelStatus() }
         }
     }
-
     private val _logLevel = MutableStateFlow(LogLevel.VERBOSE)
     val logLevel: StateFlow<LogLevel> = _logLevel.asStateFlow()
 
