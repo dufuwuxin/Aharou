@@ -1181,7 +1181,8 @@ fun SettingsScreen(
                         },
                         onDeleteFragment = promptsViewModel::deleteFragment,
                         onReorder = promptsViewModel::reorderFragments,
-                        onToggleBuiltinDisabled = promptsViewModel::setBuiltinDisabled
+                        onToggleBuiltinDisabled = promptsViewModel::setBuiltinDisabled,
+                        onToggleFragment = promptsViewModel::setFragmentEnabled
                     )
                 }
                 SettingsSection.Rules -> {

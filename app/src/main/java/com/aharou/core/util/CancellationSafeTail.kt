@@ -1,5 +1,6 @@
 package com.aharou.core.util
 
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
@@ -17,11 +18,17 @@ import kotlinx.coroutines.withContext
  * 优化后不经过那个检查点，所以只在测试包上看得到。
  *
  * 阻塞只在取消路径上发生一次，代价是调用线程停一下；正常路径行为不变。
+ *
+ * [dispatcher] 默认 IO；调用方有自己的后台调度器时可以传入，测试里传虚拟时间调度器，
+ * 否则这次真实线程跳转会让 runTest 把虚拟时钟推过截止点，后续重试还没来得及发起就被取消。
  */
-suspend fun runCancellationSafeTail(block: suspend () -> Unit) {
+suspend fun runCancellationSafeTail(
+    dispatcher: CoroutineDispatcher = Dispatchers.IO,
+    block: suspend () -> Unit
+) {
     if (currentCoroutineContext().isActive) {
-        withContext(NonCancellable + Dispatchers.IO) { block() }
+        withContext(NonCancellable + dispatcher) { block() }
     } else {
-        runBlocking(NonCancellable + Dispatchers.IO) { block() }
+        runBlocking(NonCancellable + dispatcher) { block() }
     }
 }
