@@ -40,7 +40,6 @@ import com.aharou.core.ui.SegmentedTabs
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import com.aharou.core.ui.AppSwitch
-import com.aharou.feature.workspace.domain.UriPathResolver
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import com.aharou.core.ui.AppTextField

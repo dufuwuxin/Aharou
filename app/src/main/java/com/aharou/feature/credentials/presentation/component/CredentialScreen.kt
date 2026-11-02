@@ -65,7 +65,6 @@ import com.aharou.feature.settings.presentation.component.SettingsDivider
 import com.aharou.feature.settings.presentation.component.SettingsEmptyState
 import com.aharou.feature.settings.presentation.component.SettingsGroup
 import com.aharou.feature.settings.presentation.component.SettingsRow
-import com.aharou.feature.settings.presentation.component.settingsLightMode
 import com.aharou.feature.settings.presentation.component.settingsPageBackground
 import compose.icons.FeatherIcons
 import compose.icons.feathericons.ArrowLeft

@@ -72,7 +72,6 @@ import com.aharou.feature.agent.domain.provider.RetryErrorKind
 import com.aharou.feature.agent.presentation.RetryState
 import compose.icons.FeatherIcons
 import com.aharou.core.ui.ExpandableChevronIcon
-import compose.icons.feathericons.Clock
 import compose.icons.feathericons.Key
 import compose.icons.feathericons.RefreshCw
 import kotlinx.coroutines.delay

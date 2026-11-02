@@ -25,14 +25,11 @@ import com.aharou.feature.agent.domain.container.CommandEngine
 import com.aharou.feature.agent.domain.memory.MemoryCompactor
 import com.aharou.feature.agent.domain.memory.MemoryCurator
 import com.aharou.feature.agent.domain.container.DelegatingCommandEngine
-import com.aharou.feature.agent.domain.container.LinuxContainerEngine
 import com.aharou.feature.agent.domain.container.RemoteSshConnection
-import com.aharou.feature.agent.domain.container.RemoteSshEngine
 import com.aharou.feature.agent.domain.container.SharedPrefsSshHostKeyStore
 import com.aharou.feature.agent.domain.container.SharedPrefsSshLoginKeyStore
 import com.aharou.feature.agent.domain.container.SshHostKeyStore
 import com.aharou.feature.agent.domain.container.SshLoginKeyStore
-import com.aharou.feature.settings.data.repository.ExecutionMode
 import com.aharou.feature.settings.data.repository.ExecutionModeHolder
 import com.aharou.feature.agent.domain.tool.file.ReadFileTool
 import com.aharou.feature.agent.domain.tool.pet.PetAvatarTool
@@ -61,7 +58,6 @@ import com.aharou.feature.agent.domain.tool.subagent.MessageParentTool
 import com.aharou.feature.agent.domain.tool.subagent.ObserveTool
 import com.aharou.feature.agent.domain.subagent.SessionTranscriptSource
 import com.aharou.feature.agent.domain.subagent.SessionTreeSource
-import com.aharou.feature.agent.domain.subagent.SubAgentEventBus
 import com.aharou.feature.agent.domain.personal.PersonalContextTool
 import com.aharou.feature.agent.domain.prompt.SystemPromptProvider
 import com.aharou.feature.agent.domain.workflow.AgentWorkflow
@@ -78,7 +74,6 @@ import com.aharou.feature.terminal.domain.TerminalSessionManager
 import com.aharou.feature.terminal.domain.TerminalSessionProvider
 import com.aharou.feature.workspace.domain.FileAccessProvider
 import com.aharou.feature.workspace.domain.DelegatingFileAccess
-import com.aharou.feature.workspace.domain.LocalFileAccess
 import com.aharou.feature.workspace.domain.RemoteSftpFileAccess
 import dagger.Lazy
 import dagger.Module

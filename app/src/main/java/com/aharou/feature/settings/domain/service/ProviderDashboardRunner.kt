@@ -6,7 +6,6 @@ import com.aharou.feature.agent.domain.container.CommandEngine
 import com.aharou.feature.agent.domain.container.ContainerInstaller
 import com.aharou.feature.settings.data.repository.ProviderKeyRotator
 import com.aharou.feature.settings.domain.model.AIProviderConfig
-import com.aharou.feature.settings.domain.model.AdaptiveCardAction
 import com.aharou.feature.settings.domain.model.AdaptiveCardElement
 import com.aharou.feature.settings.domain.model.AdaptiveCardRoot
 import com.aharou.feature.settings.domain.model.ActionButtonElement

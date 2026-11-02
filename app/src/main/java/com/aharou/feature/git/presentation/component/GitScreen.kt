@@ -72,7 +72,6 @@ import com.aharou.core.ui.dialogTextFieldColors
 import com.aharou.core.ui.FloatingTabBar
 import com.aharou.core.ui.FloatingTabItem
 import com.aharou.feature.settings.presentation.component.settingsPageBackground
-import com.aharou.feature.git.domain.model.GitStatus
 import com.aharou.feature.git.domain.model.GitTab
 import com.aharou.feature.git.presentation.GitViewModel
 import com.aharou.feature.git.presentation.PreCommitCheckController

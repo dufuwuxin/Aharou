@@ -55,7 +55,6 @@ import com.aharou.core.theme.Spacing
 import com.aharou.core.theme.semanticColors
 import com.aharou.feature.settings.presentation.component.SettingsDivider
 import com.aharou.feature.settings.presentation.component.SettingsGroup
-import com.aharou.feature.settings.presentation.component.settingsLightMode
 import com.aharou.feature.workspace.domain.model.RemoteConnection
 import com.aharou.feature.workspace.domain.model.RemoteMount
 import com.aharou.feature.workspace.domain.model.RemoteProtocol

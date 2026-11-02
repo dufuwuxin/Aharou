@@ -74,7 +74,6 @@ import com.aharou.feature.git.domain.model.GraphEdge
 import compose.icons.FeatherIcons
 import compose.icons.feathericons.ChevronRight
 import compose.icons.feathericons.Cloud
-import compose.icons.feathericons.Copy
 import compose.icons.feathericons.GitBranch
 import compose.icons.feathericons.Tag
 import compose.icons.feathericons.RotateCcw

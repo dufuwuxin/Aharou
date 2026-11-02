@@ -433,14 +433,6 @@ class McpManager @Inject constructor(
         return profiles.firstOrNull { it.id == id } ?: ContainerProfile.BUILTIN_ALPINE
     }
 
-    /** 默认容器：设置的 id 且为本地 PRoot 模式；找不到/被删/是远程则回退内置 Alpine。 */
-    private suspend fun resolveDefaultContainerProfile(): ContainerProfile {
-        val id = containerSettingsRepository.defaultContainerIdFlow.first()
-        val profiles = containerSettingsRepository.customProfilesFlow.first()
-        return profiles.firstOrNull { it.id == id && it.mode == ExecutionMode.LOCAL_PROOT }
-            ?: ContainerProfile.BUILTIN_ALPINE
-    }
-
     /**
      * 容器相关配置变化后重建所有工作区的 stdio server（HTTP 不依赖容器，不动）。
      * 旧进程钉在旧容器的 rootfs 上，必须 teardown 后才能用新容器拉起；单个 server 失败不影响其它。

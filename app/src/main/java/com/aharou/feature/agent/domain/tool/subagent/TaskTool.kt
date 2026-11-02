@@ -18,7 +18,6 @@ import com.aharou.feature.agent.domain.subagent.SubAgentResultInspector
 import com.aharou.feature.agent.domain.subagent.SubAgentWriteLease
 import com.aharou.feature.agent.domain.subagent.WriteLease
 import com.aharou.feature.agent.domain.tool.AbstractContextualTool
-import com.aharou.feature.agent.domain.tool.ParameterType
 import com.aharou.feature.agent.domain.tool.ToolCapability
 import com.aharou.feature.agent.domain.tool.ToolParameter
 import com.aharou.feature.agent.domain.tool.ToolPermissionPolicy

@@ -73,7 +73,6 @@ import compose.icons.FeatherIcons
 import compose.icons.feathericons.Check
 import compose.icons.feathericons.ChevronLeft
 import compose.icons.feathericons.ChevronRight
-import com.aharou.core.ui.ChevronRotationStyle
 import com.aharou.core.ui.ExpandableChevronIcon
 import compose.icons.feathericons.Clock
 import compose.icons.feathericons.Copy

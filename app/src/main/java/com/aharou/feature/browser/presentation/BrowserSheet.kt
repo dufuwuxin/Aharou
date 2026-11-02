@@ -83,7 +83,6 @@ import androidx.compose.ui.unit.sp
 import com.aharou.feature.browser.BrowserHistoryStore
 import com.aharou.feature.browser.BrowserTabPool
 import com.aharou.core.ui.ChatColors
-import com.aharou.feature.browser.BrowserUiSession
 import kotlinx.coroutines.launch
 
 /**

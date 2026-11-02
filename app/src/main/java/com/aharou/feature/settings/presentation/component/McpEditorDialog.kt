@@ -60,7 +60,6 @@ import compose.icons.FeatherIcons
 import compose.icons.feathericons.Check
 import compose.icons.feathericons.FileText
 import compose.icons.feathericons.RefreshCw
-import compose.icons.feathericons.Shield
 import compose.icons.feathericons.Tool
 import kotlinx.serialization.json.JsonObject
 import androidx.compose.ui.res.stringResource

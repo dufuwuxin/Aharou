@@ -74,7 +74,6 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aharou.R
 import com.aharou.core.theme.Spacing
-import com.aharou.core.theme.semanticColors
 import com.aharou.core.ui.rememberImeBottomInset
 import com.aharou.feature.agent.domain.container.ContainerInitState
 import com.aharou.feature.terminal.data.repository.TerminalSettings
@@ -86,7 +85,6 @@ import com.termux.terminal.TerminalColors
 import com.termux.terminal.TextStyle
 import com.termux.view.TerminalView
 import compose.icons.FeatherIcons
-import compose.icons.feathericons.ArrowLeft
 import compose.icons.feathericons.Plus
 import compose.icons.feathericons.Settings
 import compose.icons.feathericons.X
