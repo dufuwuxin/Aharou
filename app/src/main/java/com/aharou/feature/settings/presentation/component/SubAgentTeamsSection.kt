@@ -40,7 +40,9 @@ import com.aharou.core.theme.semanticColors
 import com.aharou.core.ui.AdaptiveModalBottomSheet
 import com.aharou.core.ui.SwipeToDeleteRow
 import com.aharou.feature.agent.domain.subagent.AgentDefinitionScope
+import com.aharou.feature.agent.domain.subagent.AgentTeam
 import com.aharou.feature.agent.domain.subagent.AgentTeamEntry
+import com.aharou.feature.agent.domain.subagent.TeamStage
 import com.aharou.feature.settings.presentation.TeamSettingsViewModel
 import compose.icons.FeatherIcons
 import compose.icons.feathericons.ChevronRight
@@ -320,7 +322,7 @@ private fun TeamDetailSheet(
                 Text(
                     text = buildString {
                         append(index + 1).append(". ").append(stage.title)
-                        append("（").append(teamRoleLabel(stage.level)).append("）")
+                        append("（").append(stageTitleLabel(stage, index)).append("）")
                         if (members.isNotEmpty()) append("：").append(members)
                         if (stage.isReview) append(" · ").append(stringResource(R.string.team_editor_stage_review))
                         stage.rejectTo?.let {
@@ -361,6 +363,10 @@ private fun TeamDetailSheet(
 
 
 }
+
+@Composable
+private fun stageTitleLabel(stage: TeamStage, index: Int): String =
+    stringResource(R.string.team_stage_index_label, index + 1)
 
 @Composable
 private fun teamRoleLabel(level: Int): String = stringResource(R.string.team_level_label, level)

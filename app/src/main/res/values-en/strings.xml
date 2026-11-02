@@ -1638,6 +1638,7 @@
     <string name="team_new">Create team</string>
     <string name="team_create_member">Create member</string>
     <string name="team_level_label">Level %1$d member group</string>
+    <string name="team_stage_index_label">Stage %1$d</string>
     <string name="team_editor_add_members">Select members</string>
     <string name="team_editor_selected_members">Selected members</string>
     <string name="team_select_members_title">Select members</string>

@@ -368,7 +368,9 @@ internal fun TeamEditorSheet(
     }
 }
 
-/** 一个阶段的编辑块：标题 / 层级 / 成员 / 指令 / 关卡 / 驳回目标。 */
+/** 一个阶段的编辑块：标题 / 成员 / 指令 / 关卡 / 驳回目标。
+ * 阶段顺序就是列表顺序，不再单独维护“执行层级”——第几阶段由 index 体现。
+ */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun StageEditor(
@@ -408,15 +410,6 @@ private fun StageEditor(
             label = stringResource(R.string.team_editor_stage_title),
             singleLine = true
         )
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = stringResource(R.string.team_editor_stage_level),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.weight(1f)
-            )
-            LevelStepper(level = stage.level, onChange = { onChange(stage.copy(level = it)) })
-        }
         FlowRow(horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
             members.forEach { memberName ->
                 val picked = stage.members.contains(memberName)
@@ -656,7 +649,7 @@ private fun AgentTeamSaveError.messageRes(): Int = when (this) {
 
 /** 把阶段层级映射成角色文案。 */
 @Composable
-private fun stageRoleLabel(level: Int): String = stringResource(R.string.team_level_label, level)
+private fun stageRoleLabel(stageIndex: Int): String = stringResource(R.string.team_stage_index_label, stageIndex)
 
 /**
  * 团队流程节点卡片：左侧竖向连线 + 右侧摘要；展开后内嵌 StageEditor 继续编辑。

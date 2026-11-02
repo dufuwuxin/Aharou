@@ -58,6 +58,7 @@ import compose.icons.feathericons.Shield
 import compose.icons.feathericons.Sliders
 import compose.icons.feathericons.Smile
 import compose.icons.feathericons.Terminal
+import compose.icons.feathericons.Zap
 import compose.icons.feathericons.Users
 
 /**
@@ -159,6 +160,8 @@ private fun rulesSummary(state: RulesUiState): String {
 
 @Composable
 internal fun SettingsAiGroupScreen(onOpen: (SettingsSection) -> Unit) {
+    // 配置页：只展用户直接可操作的子页面入口，不再有「AI 配置」分组标题。
+    // 顺序：记忆 / 技能 / 团队 / 知识库 / 工具 / 提示词，与用户的日常使用顺序对齐。
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -166,64 +169,41 @@ internal fun SettingsAiGroupScreen(onOpen: (SettingsSection) -> Unit) {
             .padding(bottom = Spacing.xl),
         verticalArrangement = Arrangement.spacedBy(Spacing.sm)
     ) {
-        SettingsGroupHeader(text = stringResource(R.string.settings_category_ai))
         SettingsGroup {
             SettingsRow(
-                icon = FeatherIcons.User,
-                title = stringResource(SettingsSection.AccountCenter.titleRes),
-                onClick = { onOpen(SettingsSection.AccountCenter) }
+                icon = FeatherIcons.Smile,
+                title = stringResource(R.string.memory_settings_title),
+                onClick = { onOpen(SettingsSection.Memory) }
             )
             SettingsDivider()
             SettingsRow(
-                icon = FeatherIcons.Cloud,
-                title = stringResource(SettingsSection.Providers.titleRes),
-                onClick = { onOpen(SettingsSection.Providers) },
-                modifier = Modifier.onboardingTarget(OnboardingStep.CONFIG_PROVIDER)
+                icon = FeatherIcons.Zap,
+                title = stringResource(SettingsSection.Skills.titleRes),
+                onClick = { onOpen(SettingsSection.Skills) }
             )
             SettingsDivider()
             SettingsRow(
-                icon = FeatherIcons.Cpu,
-                title = stringResource(SettingsSection.DefaultModels.titleRes),
-                onClick = { onOpen(SettingsSection.DefaultModels) }
+                icon = FeatherIcons.Users,
+                title = stringResource(SettingsSection.Teams.titleRes),
+                onClick = { onOpen(SettingsSection.Teams) }
             )
             SettingsDivider()
             SettingsRow(
-                icon = FeatherIcons.Box,
-                title = stringResource(SettingsSection.Extensions.titleRes),
-                onClick = { onOpen(SettingsSection.Extensions) }
+                icon = FeatherIcons.BookOpen,
+                title = stringResource(R.string.settings_knowledge_base),
+                onClick = { onOpen(SettingsSection.Knowledge) }
             )
             SettingsDivider()
             SettingsRow(
-                icon = FeatherIcons.Clock,
-                title = stringResource(SettingsSection.ScheduledTasks.titleRes),
-                onClick = { onOpen(SettingsSection.ScheduledTasks) }
-            )
-        }
-
-        SettingsGroupHeader(text = stringResource(R.string.settings_category_bots))
-        SettingsGroup {
-            SettingsRow(
-                icon = FeatherIcons.MessageCircle,
-                title = stringResource(SettingsSection.TelegramBot.titleRes),
-                onClick = { onOpen(SettingsSection.TelegramBot) }
+                icon = FeatherIcons.Tool,
+                title = stringResource(SettingsSection.Tools.titleRes),
+                onClick = { onOpen(SettingsSection.Tools) }
             )
             SettingsDivider()
             SettingsRow(
-                icon = FeatherIcons.MessageCircle,
-                title = stringResource(SettingsSection.WeixinBot.titleRes),
-                onClick = { onOpen(SettingsSection.WeixinBot) }
-            )
-            SettingsDivider()
-            SettingsRow(
-                icon = FeatherIcons.Globe,
-                title = stringResource(SettingsSection.FeishuBot.titleRes),
-                onClick = { onOpen(SettingsSection.FeishuBot) }
-            )
-            SettingsDivider()
-            SettingsRow(
-                icon = FeatherIcons.HardDrive,
-                title = stringResource(SettingsSection.QqBot.titleRes),
-                onClick = { onOpen(SettingsSection.QqBot) }
+                icon = FeatherIcons.FileText,
+                title = stringResource(SettingsSection.Prompts.titleRes),
+                onClick = { onOpen(SettingsSection.Prompts) }
             )
         }
     }

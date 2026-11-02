@@ -1637,6 +1637,7 @@
     <string name="team_new">创建团队</string>
     <string name="team_create_member">创建成员</string>
     <string name="team_level_label">%1$d 级成员组</string>
+    <string name="team_stage_index_label">第%1$d阶段</string>
     <string name="team_editor_add_members">选择成员</string>
     <string name="team_editor_selected_members">已选成员</string>
     <string name="team_select_members_title">选择成员</string>
