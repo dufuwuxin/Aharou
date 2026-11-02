@@ -6,7 +6,7 @@
     "app/src/main/java/com/aharou/feature/agent/presentation/AIAgentViewModel.kt": 3452,
     "app/src/main/java/com/aharou/feature/agent/presentation/component/AIChatPanel.kt": 1923,
     "app/src/main/java/com/aharou/feature/browser/BrowserUseManager.kt": 1908,
-    "app/src/main/java/com/aharou/feature/settings/presentation/component/SettingsScreen.kt": 1766,
+    "app/src/main/java/com/aharou/feature/settings/presentation/component/SettingsScreen.kt": 1778,
     "app/src/main/java/com/aharou/feature/pet/PetOverlay.kt": 1709,
     "app/src/main/java/com/aharou/feature/agent/presentation/component/ChatDrawer.kt": 1570,
     "app/src/main/java/com/aharou/feature/agent/domain/workflow/StatefulAgentWorkflow.kt": 1545,
