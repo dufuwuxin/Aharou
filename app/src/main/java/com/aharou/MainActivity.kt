@@ -45,7 +45,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -83,7 +85,8 @@ import com.aharou.core.ui.SplitPaneLayout
 import com.aharou.core.ui.drawerWidth
 import com.aharou.core.ui.isExpandedWidth
 import com.aharou.core.ui.pageEnter
-import com.aharou.core.ui.BottomNavBar
+import com.aharou.core.ui.FloatingTabBar
+import com.aharou.core.ui.FloatingTabItem
 import com.aharou.core.ui.pageExit
 import com.aharou.core.ui.rememberImageViewerState
 import com.aharou.core.ui.rememberViewerDecodeSpec
@@ -132,6 +135,10 @@ import com.aharou.feature.terminal.presentation.component.TerminalScreen
 import com.aharou.feature.workspace.presentation.WorkspaceViewModel
 import com.aharou.feature.widget.WidgetActions
 import dagger.hilt.android.AndroidEntryPoint
+import compose.icons.FeatherIcons
+import compose.icons.feathericons.Home
+import compose.icons.feathericons.Settings
+import compose.icons.feathericons.Sliders
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -1269,9 +1276,9 @@ fun AppNavigation(
             modifier = Modifier.fillMaxSize(),
             contentAlignment = androidx.compose.ui.Alignment.BottomCenter
         ) {
-            BottomNavBar(
-                selectedTab = 0,
-                onClick = { i ->
+            FloatingTabBar(
+                selected = 0,
+                onSelect = { i ->
                     // 已在会话列表页，0 不做跳转；1/2 分别跳配置/设置（导航后底栏随路由隐藏）。
                     if (i > 0) {
                         val route = when (i) {
@@ -1285,9 +1292,15 @@ fun AppNavigation(
                         }
                     }
                 },
+                items = listOf(
+                    FloatingTabItem(FeatherIcons.Home, stringResource(R.string.bottom_tab_home)),
+                    FloatingTabItem(FeatherIcons.Sliders, stringResource(R.string.bottom_tab_config)),
+                    FloatingTabItem(FeatherIcons.Settings, stringResource(R.string.bottom_tab_settings)),
+                ),
+                maskColor = settingsPageBackground(),
                 modifier = Modifier
                     .align(androidx.compose.ui.Alignment.BottomCenter)
-                    .padding(bottom = 8.dp)
+                    .padding(bottom = 8.dp),
             )
         }
     }
