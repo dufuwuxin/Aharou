@@ -3610,7 +3610,11 @@
     <string name="observe_session_missing">会话不存在：%1$s</string>
     <string name="observe_error_tree">读取会话树失败：%1$s</string>
 
-    <string name="bottom_tab_home">首页</string>
+    <string name="bottom_tab_home">会话列表</string>
     <string name="bottom_tab_config">配置</string>
     <string name="bottom_tab_settings">设置</string>
+    <string name="session_list_title">会话列表</string>
+    <string name="session_list_empty">没有会话。点击右上角 + 新建一个。</string>
+    <string name="session_delete_confirm">是否删除这个会话？此操作不可撤销。</string>
+    <string name="chat_back_to_session_list">返回会话列表</string>
 </resources>

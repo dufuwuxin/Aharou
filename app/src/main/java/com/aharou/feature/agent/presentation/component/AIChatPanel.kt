@@ -172,6 +172,8 @@ fun AIChatPanel(
     workspaceViewModel: WorkspaceViewModel? = null,
     onOpenDrawer: () -> Unit,
     showMenuButton: Boolean = true,
+    /** 从会话详情页顶部返回到会话列表页；null 表示当前没有该入口（如大屏常驻侧栏场景）。 */
+    onBackToSessions: (() -> Unit)? = null,
     /** 大屏右栏当前开的是终端 / Git 时，顶栏对应图标高亮。 */
     terminalActive: Boolean = false,
     gitActive: Boolean = false,
@@ -448,8 +450,37 @@ fun AIChatPanel(
     }
     val activeModel = activeProvider?.effectiveModel.orEmpty()
     val activeModelMetadata = activeProvider?.let { modelMetadata[modelMetadataKey(it.id, activeModel)] }
-    val canUploadFiles = projectRoot.isNotBlank() && activeModelMetadata?.supportsTools == true
+    val canUploadFiles = projectRoot.isNotBlank()
     val canUploadImages = projectRoot.isNotBlank()
+
+    // 未建会话时点击附件入口：先触发 newSession（协程内异步建好会话），同时记录意图；
+    // LaunchedEffect 监听 projectRoot，一旦 workspace 就绪立刻自动 launch 对应 picker。
+    // 这比直接「launch → 等」更安全：picker 弹出前一定保证 projectRoot 非空，避免
+    // handlePickedAttachments 读到空 workspace 而直接 toast 退回。
+    var pendingUploadType by remember { mutableStateOf<UploadIntent?>(null) }
+    enum class UploadIntent { FILE, IMAGE, PHOTO }
+    fun requestUploadFile() {
+        if (projectRoot.isBlank()) { viewModel.newSession(); pendingUploadType = UploadIntent.FILE }
+        else filePicker.launch(arrayOf("*/*"))
+    }
+    fun requestUploadImage() {
+        if (projectRoot.isBlank()) { viewModel.newSession(); pendingUploadType = UploadIntent.IMAGE }
+        else imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+    }
+    fun requestTakePhoto() {
+        if (projectRoot.isBlank()) { viewModel.newSession(); pendingUploadType = UploadIntent.PHOTO }
+        else takePhoto()
+    }
+    LaunchedEffect(projectRoot, pendingUploadType) {
+        if (projectRoot.isNotBlank() && pendingUploadType != null) {
+            when (val intent = pendingUploadType!!) {
+                UploadIntent.FILE -> filePicker.launch(arrayOf("*/*"))
+                UploadIntent.IMAGE -> imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                UploadIntent.PHOTO -> takePhoto()
+            }
+            pendingUploadType = null
+        }
+    }
     val reasoningEffort by viewModel.currentSessionReasoningEffort.collectAsStateWithLifecycle()
 
     val providerDashboards by (settingsViewModel?.providerDashboards?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(emptyMap()) })
@@ -1220,6 +1251,7 @@ fun AIChatPanel(
                 inputTokens = sessionInputTokens,
                 outputTokens = sessionOutputTokens,
                 sessionId = currentSessionId,
+                onBackToSessions = onBackToSessions,
                 onOpenDrawer = {
                     keyboardController?.hide()
                     onOpenDrawer()
@@ -1541,13 +1573,9 @@ fun AIChatPanel(
                     onRemovePaste = { viewModel.removePastedText(it) },
                     canUploadFiles = canUploadFiles,
                     canUploadImages = canUploadImages,
-                    onUploadFile = { filePicker.launch(arrayOf("*/*")) },
-                    onUploadImage = {
-                        imagePicker.launch(
-                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                        )
-                    },
-                    onTakePhoto = ::takePhoto,
+                    onUploadFile = ::requestUploadFile,
+                    onUploadImage = ::requestUploadImage,
+                    onTakePhoto = ::requestTakePhoto,
                     slashCommands = slashCommands,
                     queuedRequests = queuedRequests,
                     onRemoveQueued = { viewModel.removeQueuedRequest(it) },

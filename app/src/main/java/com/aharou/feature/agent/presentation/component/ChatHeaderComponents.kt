@@ -49,6 +49,7 @@ import com.aharou.feature.onboarding.presentation.onboardingTarget
 import compose.icons.FeatherIcons
 import compose.icons.feathericons.Folder
 import compose.icons.feathericons.Archive
+import compose.icons.feathericons.ChevronLeft
 import compose.icons.feathericons.ChevronRight
 import compose.icons.feathericons.Clock
 import compose.icons.feathericons.Eye
@@ -65,6 +66,8 @@ internal fun ChatHeader(
     outputTokens: Int,
     /** 当前会话 id：定时任务胶囊据此判断本会话是不是某个任务的目标。 */
     sessionId: String? = null,
+    /** 从会话详情页顶部返回到会话列表页；仅在小屏入口场景下传非空。 */
+    onBackToSessions: (() -> Unit)? = null,
     onOpenDrawer: () -> Unit,
     onNewChat: () -> Unit,
     onNavigateToTerminal: () -> Unit,
@@ -101,7 +104,19 @@ internal fun ChatHeader(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 // 大屏常驻侧栏时隐掉汉堡键：侧栏已经摆在左边，再给个开关反而困惑。
-                if (showMenuButton) {
+                // 当提供了回会话列表回调（小屏从列表进会话的场景）时显示左箭头；
+                // 否则保留汉堡键（打开侧边栏）+ 新建按钮。
+                if (onBackToSessions != null) {
+                    IconButton(
+                        onClick = onBackToSessions,
+                        modifier = Modifier.onboardingTarget(OnboardingStep.OPEN_SIDEBAR)
+                    ) {
+                        Icon(
+                            FeatherIcons.ChevronLeft,
+                            contentDescription = stringResource(R.string.chat_back_to_session_list),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                } else if (showMenuButton) {
                     IconButton(
                         onClick = onOpenDrawer,
                         modifier = Modifier.onboardingTarget(OnboardingStep.OPEN_SIDEBAR)

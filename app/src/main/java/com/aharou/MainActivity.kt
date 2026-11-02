@@ -90,6 +90,7 @@ import com.aharou.core.ui.rememberViewerDecodeSpec
 import com.aharou.feature.agent.presentation.AIAgentViewModel
 import com.aharou.feature.agent.presentation.AgentAttachment
 import com.aharou.feature.agent.presentation.component.AIChatPanel
+import com.aharou.feature.agent.presentation.component.SessionListScreen
 import com.aharou.feature.agent.presentation.component.ChatDrawerContent
 import com.aharou.feature.agent.presentation.component.DrawerSearchOpenRequest
 import com.aharou.feature.agent.presentation.component.chatImageLoader
@@ -865,7 +866,7 @@ fun AppNavigation(
     val navBody: @Composable () -> Unit = {
         NavHost(
             navController = navController,
-            startDestination = "chat",
+            startDestination = "sessions",
             // 过渡期间退场页会向左移出自身区域，大屏下不夹住会画到左侧常驻会话侧栏上。
             modifier = Modifier.fillMaxSize().clipToBounds(),
             enterTransition = { pageEnter(forward = true) },
@@ -874,6 +875,8 @@ fun AppNavigation(
             popExitTransition = { pageExit(forward = false) }
         ) {
             composable("chat") {
+                // 从会话详情页按返回键回到会话列表页（不再是退出 App）。
+                BackHandler(enabled = true) { navController.navigate("sessions") { popUpTo("chat") { inclusive = true } } }
                 // 聊天区内覆盖 LocalUriHandler：Markdown 链接点击默认经此 handler 派发。
                 // http/https 链接与本地 .html 文件都送内置浏览器预览；其它文件路径跳编辑器；
                 // mailto/tel 等非 http 网址仍走系统外部处理。
@@ -943,6 +946,7 @@ fun AppNavigation(
                                 workspaceViewModel = workspaceViewModel,
                                 onOpenDrawer = { scope.launch { drawerState.open() } },
                                 showMenuButton = !permanentDrawer,
+                                onBackToSessions = { navController.navigate("sessions") { popUpTo(navController.graph.startDestinationId) { inclusive = true } } },
                                 onNavigateToTerminal = { openWorkbench(WorkbenchPaneKind.TERMINAL) },
                                 onNavigateToGit = { openWorkbench(WorkbenchPaneKind.GIT) },
                                 onNavigateToBrowser = { openWorkbench(WorkbenchPaneKind.BROWSER) },
@@ -975,6 +979,34 @@ fun AppNavigation(
                             )
                         }
                     },
+                )
+            }
+            composable("sessions") {
+                // 会话列表首页：启动先落在这里，点进任意会话才进「chat」。
+                val currentWsPath = currentWorkspace?.path.orEmpty()
+                val workspaceLabel = currentWsPath
+                    .removePrefix("~/workspace/")
+                    .removePrefix("/")
+                    .substringAfterLast('/')
+                SessionListScreen(
+                    sessions = sessionsByWorkspace[currentWsPath].orEmpty(),
+                    currentSessionId = currentSessionId,
+                    agentStates = agentStates,
+                    awaitingPermissionSessionIds = awaitingPermissionSessionIds,
+                    workspaceName = workspaceLabel,
+                    onSelect = { session ->
+                        agentViewModel.selectSession(session.id)
+                        navController.navigate("chat") {
+                            launchSingleTop = true
+                        }
+                    },
+                    onDelete = { session -> agentViewModel.deleteSession(session.id) },
+                    onNewSession = {
+                        agentViewModel.newSession()
+                        navController.navigate("chat") {
+                            launchSingleTop = true
+                        }
+                    }
                 )
             }
             composable("config") {
@@ -1229,27 +1261,23 @@ fun AppNavigation(
         }
     }
 
-    // 底部主导航：「首页 / 配置 / 设置」三标签；仅主路由可见，聊天/配置/设置三个目标页会显示，其余子页（编辑器/终端/浏览器等）隐藏。
-    val isMainTab = currentRoute in listOf("chat", "config", "settings")
-    if (isMainTab) {
-        val navBarIndex = when (currentRoute) {
-            "chat" -> 0
-            "config" -> 1
-            else -> 2
-        }
+    // 底部主导航：悬浮玻璃圆角卡片，仅「会话列表」页显示（符合用户要求：只有返回会话列表页才出现悬浮底栏）。
+    // 配置/设置/聊天等子路由不显示，避免遮挡内容区。
+    val isOnSessions = currentRoute == "sessions"
+    if (isOnSessions) {
         Box(
             modifier = Modifier.fillMaxSize(),
             contentAlignment = androidx.compose.ui.Alignment.BottomCenter
         ) {
             BottomNavBar(
-                selectedTab = navBarIndex,
+                selectedTab = 0,
                 onClick = { i ->
-                    val route = when (i) {
-                        0 -> "chat"
-                        1 -> "config"
-                        else -> "settings"
-                    }
-                    if (route != currentRoute) {
+                    // 已在会话列表页，0 不做跳转；1/2 分别跳配置/设置（导航后底栏随路由隐藏）。
+                    if (i > 0) {
+                        val route = when (i) {
+                            1 -> "config"
+                            else -> "settings"
+                        }
                         navController.navigate(route) {
                             popUpTo(navController.graph.startDestinationId) { saveState = true }
                             launchSingleTop = true
