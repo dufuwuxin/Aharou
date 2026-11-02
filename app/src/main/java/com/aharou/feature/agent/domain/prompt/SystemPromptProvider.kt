@@ -682,11 +682,6 @@ class SystemPromptProvider @Inject constructor(
     private val customDir: File
         get() = File(containerInstaller.aharouDir, "prompts.custom")
 
-    /** 自定义目录顶层数字片段（数字身份 → 文件），进程内只扫一次（重启 App 才刷新）。 */
-    private val customFragmentsByNumber: Map<Int, File> by lazy {
-        PromptFragmentResolver.numberedFragments(customDir).toMap()
-    }
-
     fun findAgentDefinitionIncludingDisabled(name: String): AgentDefinition? =
         agentDefinitionRepository.findIncludingDisabled(name)
 
@@ -977,16 +972,6 @@ class SystemPromptProvider @Inject constructor(
     /** 失效记忆清单的会话级缓存：整理器写入新记忆后调用，让下一轮 system prompt 看到新清单。 */
     fun invalidateMemoryCache(sessionId: String?, projectRoot: String?) {
         memoryListSource.invalidate(SourceCacheKey(sessionId, projectRoot.orEmpty()))
-    }
-
-    private fun readFileOrNull(file: File?): String? {
-        if (file == null || !file.isFile) return null
-        return try {
-            file.bufferedReader().use { it.readText() }
-        } catch (e: Exception) {
-            FileLogger.w(TAG, "读取提示词失败 ${file.name}: ${e.message}", e)
-            null
-        }
     }
 
     private companion object {

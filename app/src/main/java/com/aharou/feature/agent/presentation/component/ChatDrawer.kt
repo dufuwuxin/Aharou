@@ -84,7 +84,6 @@ import com.aharou.core.ui.SegmentedTabs
 import com.aharou.core.ui.rememberImeBottomInset
 import com.aharou.feature.settings.presentation.component.SettingsDivider
 import com.aharou.feature.settings.presentation.component.SettingsGroup
-import com.aharou.feature.settings.presentation.component.SettingsGroupHeader
 import com.aharou.feature.settings.presentation.component.SettingsRow
 import com.aharou.feature.settings.presentation.component.settingsPageBackground
 import com.aharou.feature.agent.domain.model.ChatSession
@@ -93,7 +92,6 @@ import com.aharou.feature.agent.presentation.ChatSearchHit
 import com.aharou.feature.agent.presentation.ChatSearchState
 import com.aharou.feature.agent.presentation.BrowseClipboard
 import com.aharou.feature.agent.presentation.FileBrowseState
-import com.aharou.feature.agent.presentation.FileSearchState
 import com.aharou.feature.agent.presentation.FileSearchViewModel
 import com.aharou.feature.agent.presentation.FileTreeNode
 import com.aharou.feature.agent.presentation.displayName

@@ -76,7 +76,6 @@ import com.aharou.feature.agent.domain.tool.extractToolTitle
 import com.aharou.feature.agent.presentation.AgentUIMessage
 import compose.icons.FeatherIcons
 import compose.icons.feathericons.ChevronDown
-import compose.icons.feathericons.ChevronRight
 import compose.icons.feathericons.ChevronUp
 import compose.icons.feathericons.ExternalLink
 import compose.icons.feathericons.Globe

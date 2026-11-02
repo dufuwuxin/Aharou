@@ -40,7 +40,6 @@ import com.aharou.feature.settings.data.repository.KeepaliveSettingsRepository
 import com.aharou.feature.settings.data.repository.ModelReasoningEffortRepository
 import com.aharou.feature.settings.data.repository.StartupSessionMode
 import com.aharou.feature.agent.domain.model.AgentImage
-import com.aharou.feature.agent.domain.model.AgentMessage
 import com.aharou.feature.agent.domain.model.AgentMode
 import com.aharou.feature.agent.domain.model.ChatSession
 import com.aharou.feature.agent.domain.model.ReasoningEffort

@@ -1,7 +1,5 @@
 package com.aharou.feature.settings.presentation.component
 
-import com.aharou.feature.onboarding.domain.OnboardingStep
-import com.aharou.feature.onboarding.presentation.onboardingTarget
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -57,7 +55,6 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import com.aharou.core.ui.AppSwitch
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -67,7 +64,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
-import com.aharou.core.util.PanelScriptImporter
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -75,7 +71,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateList
-import kotlinx.coroutines.delay
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -101,53 +96,23 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.aharou.core.theme.Radius
 import com.aharou.core.theme.Spacing
 import com.aharou.core.theme.semanticColors
 import com.aharou.core.ui.AppTextField
-import com.aharou.core.ui.FloatingTabBar
-import com.aharou.core.ui.FloatingTabItem
-import com.aharou.feature.settings.data.local.CustomModelMetadataStore
-import com.aharou.feature.settings.data.local.ProviderPreset
-import com.aharou.feature.settings.domain.model.AIProviderConfig
-import com.aharou.feature.settings.domain.model.KeyRotationStrategy
-import com.aharou.feature.settings.domain.model.ModelMetadata
-import com.aharou.feature.settings.domain.model.MAX_KEY_WEIGHT
-import com.aharou.feature.settings.domain.model.ProviderKey
-import com.aharou.feature.settings.domain.model.ProviderType
-import com.aharou.feature.settings.data.repository.ProxyConfig
-import com.aharou.feature.settings.domain.model.ProxyType
-import com.aharou.feature.settings.domain.model.mergeModelMetadata
-import com.aharou.feature.settings.domain.model.modelMetadataKey
-import com.aharou.feature.settings.domain.model.sanitized
-import com.aharou.feature.settings.presentation.FetchState
-import com.aharou.feature.settings.presentation.SettingsViewModel
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import com.aharou.core.ui.ExpandableChevronIcon
 import compose.icons.FeatherIcons
 import compose.icons.feathericons.AlertCircle
-import compose.icons.feathericons.ArrowLeft
 import compose.icons.feathericons.Check
-import compose.icons.feathericons.CheckSquare
 import compose.icons.feathericons.ChevronDown
-import compose.icons.feathericons.ChevronRight
 import compose.icons.feathericons.ChevronUp
 import android.content.Intent
 import android.widget.Toast
 import compose.icons.feathericons.Copy
 import compose.icons.feathericons.Terminal
-import compose.icons.feathericons.Cpu
-import compose.icons.feathericons.DownloadCloud
-import compose.icons.feathericons.Eye
-import compose.icons.feathericons.EyeOff
 import compose.icons.feathericons.FileText
-import compose.icons.feathericons.Folder
-import compose.icons.feathericons.Minus
-import compose.icons.feathericons.Play
 import compose.icons.feathericons.Plus
-import compose.icons.feathericons.Sliders
 import compose.icons.feathericons.Trash2
 import compose.icons.feathericons.Upload
 import compose.icons.feathericons.X
@@ -156,8 +121,6 @@ import com.aharou.feature.settings.domain.model.ProviderDashboardResult
 import com.aharou.feature.settings.domain.model.ProviderDashboardState
 import androidx.compose.ui.res.stringResource
 import com.aharou.R
-import sh.calvin.reorderable.ReorderableItem
-import sh.calvin.reorderable.rememberReorderableLazyListState
 
 
 @OptIn(ExperimentalMaterial3Api::class)

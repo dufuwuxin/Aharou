@@ -1,6 +1,5 @@
 package com.aharou.feature.git.domain
 
-import com.aharou.core.util.FileLogger
 import com.aharou.feature.agent.domain.container.CommandEngine
 import com.aharou.feature.agent.domain.container.CommandEvent
 import com.aharou.feature.git.domain.model.GitBranch

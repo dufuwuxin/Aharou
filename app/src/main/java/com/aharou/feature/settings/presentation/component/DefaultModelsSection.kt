@@ -57,8 +57,6 @@ import androidx.compose.ui.unit.sp
 import com.aharou.R
 import com.aharou.core.theme.Spacing
 import com.aharou.core.ui.AppTextField
-import com.aharou.feature.onboarding.domain.OnboardingStep
-import com.aharou.feature.onboarding.presentation.onboardingTarget
 import com.aharou.feature.localmodel.presentation.LocalModelSection
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.hilt.navigation.compose.hiltViewModel

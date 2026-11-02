@@ -25,7 +25,6 @@ import com.aharou.feature.agent.domain.model.AgentMode
 import com.aharou.feature.agent.domain.notification.AgentEventInjector
 import com.aharou.feature.agent.domain.notification.AgentNotificationCenter
 import com.aharou.feature.agent.domain.notification.AgentNotificationKind
-import com.aharou.feature.agent.domain.notification.PendingNotification
 import com.aharou.feature.agent.domain.ocr.TesseractOcrEngine
 import com.aharou.feature.agent.domain.subagent.AgentDefinition
 import com.aharou.feature.agent.domain.session.SessionUseCase
@@ -53,7 +52,6 @@ import com.aharou.feature.agent.domain.tool.ToolResult
 import com.aharou.feature.agent.domain.tool.ToolOutputStore
 import com.aharou.feature.agent.domain.tool.ToolStreamEvent
 import com.aharou.feature.agent.domain.tool.foldStoredToolResults
-import com.aharou.feature.agent.domain.tool.modelToolResultText
 import com.aharou.feature.agent.domain.tool.toTransportString
 import com.aharou.feature.agent.presentation.AgentAttachment
 import com.aharou.feature.vault.VaultRepository
