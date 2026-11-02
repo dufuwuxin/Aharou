@@ -7,6 +7,8 @@ import com.aharou.feature.agent.domain.prompt.PromptAuxFragment
 import com.aharou.feature.agent.domain.prompt.PromptFragment
 import com.aharou.feature.agent.domain.prompt.PromptFragmentCatalog
 import com.aharou.feature.agent.domain.prompt.PromptFragmentSource
+import com.aharou.feature.agent.domain.subagent.InjectPart
+import com.aharou.feature.agent.domain.subagent.KeywordInjection
 import com.aharou.feature.workspace.data.repository.WorkspaceRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
@@ -78,7 +80,9 @@ class PromptsViewModel @Inject constructor(
         title: String,
         scope: PromptFragmentSource,
         content: String,
-        previousNumber: Int? = null
+        previousNumber: Int? = null,
+        keywordInjections: List<KeywordInjection> = emptyList(),
+        injectParts: Set<InjectPart> = emptySet()
     ) {
         viewModelScope.launch {
             val projectRoot = workspaceRepository.currentPath()
@@ -89,7 +93,9 @@ class PromptsViewModel @Inject constructor(
                     content,
                     projectRoot,
                     target = scope,
-                    previousNumber = previousNumber
+                    previousNumber = previousNumber,
+                    keywordInjections = keywordInjections,
+                    injectParts = injectParts
                 )
             }
             refresh()

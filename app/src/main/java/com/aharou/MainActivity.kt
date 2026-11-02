@@ -1268,20 +1268,27 @@ fun AppNavigation(
         }
     }
 
-    // 底部主导航：悬浮玻璃圆角卡片，仅「会话列表」页显示（符合用户要求：只有返回会话列表页才出现悬浮底栏）。
-    // 配置/设置/聊天等子路由不显示，避免遮挡内容区。
-    val isOnSessions = currentRoute == "sessions"
-    if (isOnSessions) {
+    // 底部主导航：悬浮玻璃圆角卡片。会话列表 / 配置 / 设置 三个一级页都常显（它们是并列的「首页」，
+    // 互相切换不回退、不收起底栏）；其他子路由（聊天详情、日志、容器等）隐藏，避免遮挡内容区。
+    val isPrimaryPage = currentRoute == "sessions" || currentRoute == "config" || currentRoute == "settings"
+    // 三个一级页各对应一个 tab：会话=0 / 配置=1 / 设置=2，高亮当前所在页。
+    val activeTab = when (currentRoute) {
+        "config" -> 1
+        "settings" -> 2
+        else -> 0
+    }
+    if (isPrimaryPage) {
         Box(
             modifier = Modifier.fillMaxSize(),
             contentAlignment = androidx.compose.ui.Alignment.BottomCenter
         ) {
             FloatingTabBar(
-                selected = 0,
+                selected = activeTab,
                 onSelect = { i ->
-                    // 已在会话列表页，0 不做跳转；1/2 分别跳配置/设置（导航后底栏随路由隐藏）。
-                    if (i > 0) {
+                    // 点当前 tab 不重复导航；点其它一级 tab 切过去（popUpTo 起点，不叠加返回栈）。
+                    if (i != activeTab) {
                         val route = when (i) {
+                            0 -> "sessions"
                             1 -> "config"
                             else -> "settings"
                         }

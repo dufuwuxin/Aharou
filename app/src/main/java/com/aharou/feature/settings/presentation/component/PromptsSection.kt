@@ -183,7 +183,7 @@ internal fun PromptsSection(
             PromptList(
                 fragments = state.fragments,
                 auxFragments = state.auxFragments,
-                blocks = state.blocks,
+                blocks = emptyList(),
                 selection = selection,
                 builtinDisabled = state.builtinDisabled,
                 onOpenFragment = onOpenFragment,
@@ -282,20 +282,6 @@ private fun PromptList(
         contentPadding = PaddingValues(top = Spacing.xs),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        if (blocks.isNotEmpty()) {
-            item(key = "blocks-header") {
-                SettingsGroupHeader(text = stringResource(R.string.prompts_blocks_title))
-            }
-            items(items = blocks, key = { state -> "block:${state.block.key}" }) { blockState ->
-                BlockSwitchRow(
-                    state = blockState,
-                    onToggle = { onToggleBlock(blockState.block, it) }
-                )
-            }
-            item(key = "fragments-header") {
-                SettingsGroupHeader(text = stringResource(R.string.prompts_fragments_title))
-            }
-        }
         itemsIndexed(
             items = localFragments,
             key = { index, fragment ->
@@ -404,7 +390,7 @@ private fun BlockSwitchRow(
     }
 }
 
-/** 区块的名字；[InjectionBlock] 新增条目时这里要同步补一条。 */
+/** 区块的名字：[InjectionBlock] 新增条目时这里要同步补一条。（动态注入开关已移除，此函数随块一起废弃，暂保留以避免编译误报。） */
 @Composable
 private fun blockLabel(block: InjectionBlock): String = stringResource(
     when (block) {

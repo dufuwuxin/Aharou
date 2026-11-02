@@ -317,7 +317,10 @@ fun SettingsScreen(
             ?: stringResource(R.string.language_follow_system)
     }
 
-    var section by remember { mutableStateOf(SettingsSection.Menu) }
+    // 单组页（如「配置」只展 AI 组）直接落到该组内容页，不再多一层可点的分组标题行；全量设置页从菜单开始。
+    var section by remember { mutableStateOf(if (menuGroups.size == 1) menuGroups.first() else SettingsSection.Menu) }
+    // 单组页的「主页」= 该组：组内子页返回一律回这个组，不落到其它组（全量设置页 configHome=null，行为不变）。
+    val configHome = if (menuGroups.size == 1) menuGroups.first() else null
     // 市场列表的滚动位置：放在这一层，进技能详情页再返回时不会跳回第一条
     val marketListState = rememberLazyListState()
     var logReturnSection by remember { mutableStateOf(SettingsSection.Menu) }
@@ -431,20 +434,20 @@ fun SettingsScreen(
         SettingsSection.GeneralGroup,
         SettingsSection.PermissionsGroup,
         SettingsSection.MoreGroup,
-        SettingsSection.HelpGroup -> SettingsSection.Menu
+        SettingsSection.HelpGroup -> if (section == configHome) null else (configHome ?: SettingsSection.Menu)
         SettingsSection.Soul,
         SettingsSection.ConfigAudit,
         SettingsSection.Memory,
-        SettingsSection.Pet -> SettingsSection.AharouGroup
-        SettingsSection.AccountCenter -> SettingsSection.AiGroup
+        SettingsSection.Pet -> (configHome ?: SettingsSection.AharouGroup)
+        SettingsSection.AccountCenter -> (configHome ?: SettingsSection.AiGroup)
         SettingsSection.Providers, SettingsSection.DefaultModels, SettingsSection.ScheduledTasks, SettingsSection.Extensions,
-        SettingsSection.TelegramBot, SettingsSection.WeixinBot, SettingsSection.FeishuBot, SettingsSection.QqBot -> SettingsSection.AiGroup
-        SettingsSection.Mcp, SettingsSection.Connectors, SettingsSection.Skills, SettingsSection.Plugins, SettingsSection.Knowledge -> SettingsSection.Extensions
-        SettingsSection.General, SettingsSection.Theme -> SettingsSection.GeneralGroup
+        SettingsSection.TelegramBot, SettingsSection.WeixinBot, SettingsSection.FeishuBot, SettingsSection.QqBot -> (configHome ?: SettingsSection.AiGroup)
+        SettingsSection.Mcp, SettingsSection.Connectors, SettingsSection.Skills, SettingsSection.Plugins, SettingsSection.Knowledge -> (configHome ?: SettingsSection.Extensions)
+        SettingsSection.General, SettingsSection.Theme -> (configHome ?: SettingsSection.GeneralGroup)
         SettingsSection.Permissions,
         SettingsSection.AppPermissions,
         SettingsSection.Accessibility,
-        SettingsSection.BackgroundRun -> SettingsSection.PermissionsGroup
+        SettingsSection.BackgroundRun -> (configHome ?: SettingsSection.PermissionsGroup)
         SettingsSection.Container,
         SettingsSection.Proxy,
         SettingsSection.ShadowScreen,
@@ -456,11 +459,11 @@ fun SettingsScreen(
         SettingsSection.Storage,
         SettingsSection.TokenStats,
         SettingsSection.Backup,
-        SettingsSection.Experiments -> SettingsSection.MoreGroup
-        SettingsSection.About -> SettingsSection.HelpGroup
-        SettingsSection.Tools -> SettingsSection.AharouGroup
-        SettingsSection.Prompts -> SettingsSection.AharouGroup
-        SettingsSection.Rules -> SettingsSection.AharouGroup
+        SettingsSection.Experiments -> (configHome ?: SettingsSection.MoreGroup)
+        SettingsSection.About -> (configHome ?: SettingsSection.HelpGroup)
+        SettingsSection.Tools -> (configHome ?: SettingsSection.AharouGroup)
+        SettingsSection.Prompts -> (configHome ?: SettingsSection.AharouGroup)
+        SettingsSection.Rules -> (configHome ?: SettingsSection.AharouGroup)
         SettingsSection.ProviderEditor -> SettingsSection.Providers
         SettingsSection.Log -> logReturnSection.takeUnless { expanded && it == SettingsSection.Menu }
         SettingsSection.SkillDetail, SettingsSection.SkillMarket -> SettingsSection.Skills
@@ -696,9 +699,19 @@ fun SettingsScreen(
                     initialDescription = fragment?.description.orEmpty(),
                     initialContent = fragment?.body.orEmpty(),
                     initialScope = fragment?.source ?: PromptFragmentSource.GLOBAL,
+                    initialKeywordInjections = fragment?.keywordInjections ?: emptyList(),
+                    initialInjectParts = fragment?.injectParts ?: emptySet(),
                     hasWorkspace = promptsState.hasWorkspace,
-                    onSave = { savedNumber, title, scope, content ->
-                        promptsViewModel.saveFragment(savedNumber, title, scope, content, previousNumber = number)
+                    onSave = { savedNumber, title, scope, content, keywordInjections, injectParts ->
+                        promptsViewModel.saveFragment(
+                            savedNumber,
+                            title,
+                            scope,
+                            content,
+                            previousNumber = number,
+                            keywordInjections = keywordInjections,
+                            injectParts = injectParts
+                        )
                         section = promptEditorReturn
                     },
                     onNavigateBack = { section = promptEditorReturn }

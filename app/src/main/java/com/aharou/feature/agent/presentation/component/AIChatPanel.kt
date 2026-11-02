@@ -226,6 +226,9 @@ fun AIChatPanel(
     val pendingScroll by viewModel.pendingScrollMessage.collectAsStateWithLifecycle()
 
     val currentSessionId by viewModel.currentSessionId.collectAsStateWithLifecycle()
+    // 顶栏中轴展示的会话标题：取当前会话在会话列表里的标题，未命中（新会话未命名）则不显示。
+    val allSessions by viewModel.sessions.collectAsStateWithLifecycle()
+    val activeSessionTitle = allSessions.firstOrNull { it.id == currentSessionId }?.title
     // 软打断后 agentState 立即回到 Idle，但协程仍在后台跑当前这一步；长按强打断的入口要靠它保底。
     val activeAgentSessions by viewModel.activeAgentSessions.collectAsStateWithLifecycle()
     // 工具卡片入场调度：只排本次浏览期间新追加到尾部的 TOOL 消息，逐个错开淡入。
@@ -1260,6 +1263,7 @@ fun AIChatPanel(
                 inputTokens = sessionInputTokens,
                 outputTokens = sessionOutputTokens,
                 sessionId = currentSessionId,
+                sessionTitle = activeSessionTitle,
                 onBackToSessions = onBackToSessions,
                 onOpenDrawer = {
                     keyboardController?.hide()

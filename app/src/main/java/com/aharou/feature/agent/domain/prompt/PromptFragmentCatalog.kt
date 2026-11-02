@@ -3,11 +3,74 @@ package com.aharou.feature.agent.domain.prompt
 import android.content.Context
 import com.aharou.core.util.FileLogger
 import com.aharou.feature.agent.domain.container.ContainerInstaller
+import com.aharou.feature.agent.domain.subagent.InjectPart
+import com.aharou.feature.agent.domain.subagent.KeywordInjection
 import com.aharou.feature.workspace.domain.ProjectAharouRoot
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
+import org.json.JSONArray
+import org.json.JSONObject
+
+/**
+ * 提示词片段的元数据块（正文尾部 `<!-- ah:meta {...} -->`）编解码工具。
+ * 关键词注入 / 成员注入通过 JSON 编码塞进这个块；旧片段没有该块时默认空，不崩。
+ */
+internal object PromptFragmentMeta {
+    private val TRAILING_META = Regex("(?s)\\n\\n<!-- ah:meta (.*?)-->\\s*$")
+
+    fun stripTrailingMeta(text: String): String = TRAILING_META.replace(text, "")
+
+    /** 解析正文尾部 meta 块：返回 (keywordInjections, injectParts)。 */
+    fun parse(content: String): Pair<List<KeywordInjection>, Set<InjectPart>> {
+        val json = TRAILING_META.find(content)?.groupValues?.get(1) ?: return emptyList<KeywordInjection>() to emptySet<InjectPart>()
+        return try {
+            val root = JSONObject(json)
+            val injections: List<KeywordInjection> = if (root.has("keyword_injections")) {
+                val arr = root.getJSONArray("keyword_injections")
+                (0 until arr.length()).map { i ->
+                    val item = arr.getJSONObject(i)
+                    val kws = item.getJSONArray("keywords").let { a -> (0 until a.length()).map { a.getString(it) } }
+                    KeywordInjection(kws, item.getString("content"))
+                }
+            } else {
+                emptyList()
+            }
+            val parts: Set<InjectPart> = if (root.has("inject_parts")) {
+                val arr = root.getJSONArray("inject_parts")
+                (0 until arr.length()).mapNotNull { i -> InjectPart.fromToken(arr.getString(i)) }.toSet()
+            } else {
+                emptySet()
+            }
+            injections to parts
+        } catch (e: Exception) {
+            FileLogger.e("PromptFragmentMeta", "解析 prompt meta 失败", e)
+            emptyList<KeywordInjection>() to emptySet<InjectPart>()
+        }
+    }
+
+    /**
+     * 把两字段编码成末尾的 HTML 注释块。
+     * 两个都为空时返回空串（不落噪音），方便旧片段无需重写过一遍。
+     */
+    fun encode(keywordInjections: List<KeywordInjection>, injectParts: Set<InjectPart>): String {
+        if (keywordInjections.isEmpty() && injectParts.isEmpty()) return ""
+        val root = JSONObject()
+        val arr = JSONArray()
+        keywordInjections.forEach { inj ->
+            val item = JSONObject()
+            item.put("keywords", JSONArray(inj.keywords.toMutableList()))
+            item.put("content", inj.injectContent)
+            arr.put(item)
+        }
+        root.put("keyword_injections", arr)
+        val partArr = JSONArray()
+        injectParts.forEach { part -> partArr.put(part.token) }
+        root.put("inject_parts", partArr)
+        return "\n\n<!-- ah:meta ${root.toString()} -->"
+    }
+}
 
 /** 片段来源，优先级从高到低：项目 > 全局 > 本地 > 内置。 */
 enum class PromptFragmentSource { PROJECT, GLOBAL, LOCAL, BUILTIN }
@@ -23,7 +86,11 @@ data class PromptFragment(
     /** 正文开头的 `<!-- ... -->` 注释，作为列表摘要。 */
     val description: String,
     /** 该片段本轮是否会被注入：关掉的片段仍在列表里，只是不进系统提示词。 */
-    val enabled: Boolean = true
+    val enabled: Boolean = true,
+    /** 关键词注入：用户输入命中任一 keyword 时把对应正文追加进提示词（旧片段无此字段，默认空）。 */
+    val keywordInjections: List<KeywordInjection> = emptyList(),
+    /** 成员注入：该片段对应的提示词片段开关（旧片段无此字段，默认空）。 */
+    val injectParts: Set<InjectPart> = emptySet()
 ) {
     val stableReorderKey: String
         get() = "$title:${content.hashCode()}"
@@ -33,7 +100,7 @@ data class PromptFragment(
         get() = source == PromptFragmentSource.PROJECT || source == PromptFragmentSource.GLOBAL
 
     val body: String
-        get() = content.replace(LEADING_COMMENT, "")
+        get() = PromptFragmentMeta.stripTrailingMeta(content.replace(LEADING_COMMENT, "")).trim()
 
     companion object {
         private val LEADING_COMMENT = Regex("(?s)^\\s*<!--.*?-->\\s*")
@@ -113,18 +180,18 @@ class PromptFragmentCatalog @Inject constructor(
         numberedFragments(globalDir)
     )
 
-    /** 静态基线正文：所有启用的片段去掉前导注释后按编号拼接。 */
+    /** 静态基线正文：所有启用的片段去掉前导注释与尾部元数据块后按编号拼接。 */
     fun renderStatic(projectRoot: String?): String =
         list(projectRoot)
             .filter { it.enabled }
-            .mapNotNull { it.content.replace(LEADING_COMMENT, "").trim().takeIf { text -> text.isNotEmpty() } }
+            .mapNotNull { it.body.takeIf { text -> text.isNotEmpty() } }
             .joinToString("\n\n")
 
-    /** 「仅自定义片段」模式：只取项目层与全局层的自定义片段正文。 */
+    /** 「仅自定义片段」模式：只取项目层与全局层的自定义片段正文（已去掉元数据块）。 */
     fun renderCustomOnly(projectRoot: String?): String =
         list(projectRoot)
             .filter { it.custom && it.enabled }
-            .mapNotNull { it.content.replace(LEADING_COMMENT, "").trim().takeIf { text -> text.isNotEmpty() } }
+            .mapNotNull { it.body.takeIf { text -> text.isNotEmpty() } }
             .joinToString("\n\n")
 
     /** 是否存在「完全禁用内置提示词」标记（全局层）。 */
@@ -228,7 +295,9 @@ class PromptFragmentCatalog @Inject constructor(
         content: String,
         projectRoot: String?,
         target: PromptFragmentSource? = null,
-        previousNumber: Int? = null
+        previousNumber: Int? = null,
+        keywordInjections: List<KeywordInjection> = emptyList(),
+        injectParts: Set<InjectPart> = emptySet()
     ): Boolean {
         val project = projectDir(projectRoot)
         val dir = when (target) {
@@ -246,7 +315,9 @@ class PromptFragmentCatalog @Inject constructor(
             deleteOverridesFor(number, dir)
             if (project != null && project != dir) deleteOverridesFor(number, project)
             if (globalDir != dir) deleteOverridesFor(number, globalDir)
-            File(dir, "%02d-%s.md".format(number, sanitizeTitle(title))).writeText(content)
+            // 关键词注入与成员注入编码进正文尾部的 ah:meta 块（JSON）；旧片段没有该块，读时默认空
+            File(dir, "%02d-%s.md".format(number, sanitizeTitle(title)))
+                .writeText(content + PromptFragmentMeta.encode(keywordInjections, injectParts))
             true
         } catch (e: Exception) {
             FileLogger.e(TAG, "写提示词覆盖失败: $number", e)
@@ -347,7 +418,17 @@ class PromptFragmentCatalog @Inject constructor(
 
     private fun readFragment(file: File, number: Int, source: PromptFragmentSource): PromptFragment? =
         readText(file)?.let { content ->
-            PromptFragment(number, titleOf(file.name), source, content, file, extractDescription(content))
+            val meta = PromptFragmentMeta.parse(content)
+            PromptFragment(
+                number,
+                titleOf(file.name),
+                source,
+                content,
+                file,
+                extractDescription(content),
+                keywordInjections = meta.first,
+                injectParts = meta.second
+            )
         }
 
     /** 目录顶层 `<两位数字>-<名称>.md`，按编号去重（同编号取字典序首个）。 */

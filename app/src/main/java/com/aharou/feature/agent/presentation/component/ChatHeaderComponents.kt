@@ -66,6 +66,8 @@ internal fun ChatHeader(
     outputTokens: Int,
     /** 当前会话 id：定时任务胶囊据此判断本会话是不是某个任务的目标。 */
     sessionId: String? = null,
+    /** 当前会话标题（单行截断居中展示）；调用方不传时留空以维持三列布局。 */
+    sessionTitle: String? = null,
     /** 从会话详情页顶部返回到会话列表页；仅在小屏入口场景下传非空。 */
     onBackToSessions: (() -> Unit)? = null,
     onOpenDrawer: () -> Unit,
@@ -105,7 +107,7 @@ internal fun ChatHeader(
             ) {
                 // 大屏常驻侧栏时隐掉汉堡键：侧栏已经摆在左边，再给个开关反而困惑。
                 // 当提供了回会话列表回调（小屏从列表进会话的场景）时显示左箭头；
-                // 否则保留汉堡键（打开侧边栏）+ 新建按钮。
+                // 否则保留汉堡键（打开侧边栏）；新建会话入口已移到右列末端。
                 if (onBackToSessions != null) {
                     IconButton(
                         onClick = onBackToSessions,
@@ -129,15 +131,33 @@ internal fun ChatHeader(
                 } else {
                     Spacer(modifier = Modifier.width(Spacing.sm))
                 }
-                // 新建会话常驻菜单键旁边，不跟着右侧那组图标走
-                IconButton(onClick = onNewChat) {
-                    Icon(
-                        FeatherIcons.Plus,
-                        contentDescription = stringResource(R.string.chat_new_session),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                // 会话模式标识：紧凑徽标（AUTO/PLAN/BUILD/ALLOW）在左列一眼可见
+                Text(
+                    text = currentMode.name,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = Spacing.xs)
+                )
+
+                // 中轴：当前会话标题（单行截断、weight 居中）；调用方未传时留空，三列布局保持不变
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(horizontal = Spacing.xs),
+                    contentAlignment = Alignment.Center
+                ) {
+                    sessionTitle?.takeIf { it.isNotBlank() }?.let { title ->
+                        Text(
+                            text = title,
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.onBackground,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
                 }
-                // 会话标题已从顶栏移除：侧边栏可重命名，顶栏把空间留给按钮。
-                Spacer(modifier = Modifier.weight(1f))
+
                 if (toolsExpanded) {
                     // 展开态：只有工具三入口 + 收起，其余一律让位
                     WorkbenchIconButton(
@@ -197,6 +217,16 @@ internal fun ChatHeader(
                             contentDescription = stringResource(R.string.chat_tools_expand),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
+                }
+                // 新会话：全顶栏唯一入口，放右列末端；48dp 保证可点区，不与状态栏/手势条冲突。
+                IconButton(
+                    onClick = onNewChat,
+                    modifier = Modifier.size(48.dp)
+                ) {
+                    Icon(
+                        FeatherIcons.Plus,
+                        contentDescription = stringResource(R.string.chat_new_session),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
             // 远程模式：左边 SSH 连接状态，右边 token 累计统计

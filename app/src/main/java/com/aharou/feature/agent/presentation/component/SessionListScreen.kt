@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -25,6 +26,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -125,7 +127,7 @@ fun SessionListScreen(
                 horizontal = Spacing.lg,
                 vertical = Spacing.sm
             ),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             if (sessions.isEmpty()) {
                 item {
@@ -133,16 +135,32 @@ fun SessionListScreen(
                 }
             }
             items(sessions, key = { it.id }) { session ->
-                ChatSessionRow(
-                    session = session,
-                    selected = session.id == currentSessionId,
-                    isExecuting = agentStates[session.id] is AgentUIState.Loading || agentStates[session.id] is AgentUIState.Streaming,
-                    awaitingPermission = session.id in awaitingPermissionSessionIds,
-                    pinned = session.isPinned,
-                    onClick = { onSelect(session) },
-                    onLongClick = { pendingDelete = session },
-                    trailing = null
-                )
+                // 圆角卡片容器：整 item 最小 56dp（icon+标题+padding），卡片间距 8.dp
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.semanticColors.cardSurface,
+                    tonalElevation = 1.dp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 56.dp)
+                ) {
+                    // 垂直居中：让 icon+标题+padding 在 56dp 卡片里均匀分布
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        ChatSessionRow(
+                            session = session,
+                            selected = session.id == currentSessionId,
+                            isExecuting = agentStates[session.id] is AgentUIState.Loading || agentStates[session.id] is AgentUIState.Streaming,
+                            awaitingPermission = session.id in awaitingPermissionSessionIds,
+                            pinned = session.isPinned,
+                            onClick = { onSelect(session) },
+                            onLongClick = { pendingDelete = session },
+                            trailing = null
+                        )
+                    }
+                }
             }
         }
     }
