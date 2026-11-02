@@ -1188,7 +1188,19 @@ fun SettingsScreen(
                     onOpenTeams = { section = SettingsSection.Teams }
                 )
                 SettingsSection.Teams -> SubAgentTeamsSection(expertCount = subAgents.size, onOpenExperts = { section = SettingsSection.SubAgentEditor; editingSubAgent = null; subAgentEditorReturn = SettingsSection.Teams })
-                SettingsSection.Tools -> ToolsSection()
+                SettingsSection.Tools -> McpToolsSection(
+                    entries = mcpEntries,
+                    statuses = mcpStatuses,
+                    onToggle = { entry, enabled ->
+                        viewModel.setMcpServerEnabled(entry.server.name, enabled, entry.scope)
+                    },
+                    onDelete = { entry ->
+                        viewModel.deleteMcpServer(entry.server.name, entry.scope)
+                    },
+                    onEdit = { entry ->
+                        mcpDialogRequest = McpDialogRequest(editing = entry.server, prefill = null)
+                    }
+                )
                 SettingsSection.Prompts -> {
                     val promptsViewModel: PromptsViewModel =
                         androidx.hilt.navigation.compose.hiltViewModel()
