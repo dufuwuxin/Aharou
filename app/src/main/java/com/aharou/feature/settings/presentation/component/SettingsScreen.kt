@@ -1198,7 +1198,7 @@ fun SettingsScreen(
                         viewModel.deleteMcpServer(entry.server.name, entry.scope)
                     },
                     onEdit = { entry ->
-                        mcpDialogRequest = McpDialogRequest(editing = entry.server, prefill = null)
+                        mcpDialogRequest = McpDialogRequest(editing = entry, prefill = null)
                     }
                 )
                 SettingsSection.Prompts -> {
