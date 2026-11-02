@@ -78,6 +78,13 @@ class ContextCompactor @Inject constructor(
     /** 墙钟 seam：黑名单 TTL 判断用它取「现在」；测试可固定为常量，避免真实时钟让用例在慢机器/CI 上飘。 */
     internal var nowMs: () -> Long = { System.currentTimeMillis() }
 
+    /**
+     * 裁剪 / 软裁剪 / forceTrim 的调度器 seam：生产默认 [Dispatchers.IO]（行为不变），
+     * 测试替换成虚拟时间调度器后使所有 dispatching 路径都能被 runTest 统一推进，
+     * 消除本地/CI 时序漂移（issue 复现：failedMaterial / noModelTrim 在 CI 上与本地行为不同）。
+     */
+    internal var trimDispatcher: CoroutineDispatcher = Dispatchers.IO
+
     /** 分级裁剪的规划与执行（级别定义、最小够用前缀、落盘/骨架化都在 [ContextTrimPlanner]）。 */
     private val trimPlanner = ContextTrimPlanner(fileAccess, pathHomeResolver)
     internal companion object {
@@ -371,7 +378,7 @@ class ContextCompactor @Inject constructor(
                 // 既不调模型、也不改写历史正文——旧消息的字节与上一轮一致，供应商的前缀缓存仍能命中。
                 if (!force && squeezableBudget > 0 && (reachedHard || currentTokens >= softThreshold)) {
                     val ladderTarget = if (reachedHard) targetTokens else softThreshold
-                    val ladder = withContext(Dispatchers.IO) {
+                    val ladder = withContext(trimDispatcher) {
                         trimPlanner.planTrim(messages, ladderTarget, sendsImages, systemPrompt, tools, ContextTrimPlanner.TRIM_KEEP_RECENT_ITERATIONS)
                     }
                     if (ladder.changed && ladder.after <= ladderTarget) {
@@ -381,7 +388,7 @@ class ContextCompactor @Inject constructor(
                     FileLogger.i(TAG, "分级裁剪收益不足：${ladder.before} → ${ladder.after} tokens（目标 $ladderTarget，${ladder.steps.joinToString(" ")}），继续摘要压缩")
                 }
                 if (!force && !reachedHard && currentTokens >= softThreshold) {
-                    val trimmed = withContext(Dispatchers.IO) {
+                    val trimmed = withContext(trimDispatcher) {
                         softTrimToolOutputs(messages, trimPlanner::storeOriginalToolOutput)
                     }
                     if (trimmed !== messages) {
@@ -413,7 +420,7 @@ class ContextCompactor @Inject constructor(
                 fun tailOverBudget() = CompactionText.tokensOf(projectImagesForEstimate(tail, sendsImages)) >= tailBudget
                 if (tailOverBudget()) {
                     // 保留段内部也要裁：长任务里保留段本身就是整个任务，只往外推切分点永远压不到预算内。
-                    val trimmedTail = withContext(Dispatchers.IO) {
+                    val trimmedTail = withContext(trimDispatcher) {
                         trimPlanner.planTrim(tail, tailBudget, sendsImages, "", emptyList(), ContextTrimPlanner.TRIM_KEEP_RECENT_IN_TAIL)
                     }
                     if (trimmedTail.changed && trimmedTail.after < trimmedTail.before) {
@@ -429,7 +436,7 @@ class ContextCompactor @Inject constructor(
                         if (splitIndex <= 0) return@withTimeoutOrNull unchanged
                         tail = messages.drop(splitIndex)
                     }
-                    tail = withContext(Dispatchers.IO) { foldStoredToolResults(tail, keepRecent = 0) }
+                    tail = withContext(trimDispatcher) { foldStoredToolResults(tail, keepRecent = 0) }
                 }
                 val head = messages.take(splitIndex)
                 val material = removeCompactionPairs(head)
@@ -640,7 +647,7 @@ class ContextCompactor @Inject constructor(
      * 压进输入预算就直接用——摘要模型挂了也不至于整轮跑不下去。压不下或没可精简内容返回 null（不拉黑）。
      */
     private suspend fun forceTrim(plan: CompactionPlan): CompactionResult? {
-        val trimmed = withContext(Dispatchers.IO) {
+        val trimmed = withContext(trimDispatcher) {
             keepNewestImages(softTrimToolOutputs(plan.messages, trimPlanner::storeOriginalToolOutput), FORCED_TRIM_IMAGES)
         }
         if (trimmed === plan.messages) return null

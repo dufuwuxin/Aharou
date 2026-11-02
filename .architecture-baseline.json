@@ -20,7 +20,7 @@
         "app/src/main/java/com/aharou/AIEditorApp.kt": 1010,
         "app/src/main/java/com/aharou/feature/settings/presentation/component/DefaultModelsSection.kt": 1006,
         "app/src/main/java/com/aharou/feature/agent/domain/prompt/SystemPromptProvider.kt": 1031,
-        "app/src/main/java/com/aharou/feature/agent/domain/workflow/ContextCompactor.kt": 1005
+        "app/src/main/java/com/aharou/feature/agent/domain/workflow/ContextCompactor.kt": 1012
     },
     "bannedImports": {
         "androidx.compose.material3.ModalBottomSheet": [
