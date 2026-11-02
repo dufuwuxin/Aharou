@@ -19,6 +19,7 @@ import com.aharou.feature.agent.domain.provider.ProviderFailoverCoordinator
 import com.aharou.feature.agent.domain.session.MessagePersistenceUseCase
 import com.aharou.feature.agent.domain.session.SessionUseCase
 import com.aharou.feature.agent.domain.subagent.AgentDefinition
+import com.aharou.feature.localmodel.runtime.LocalLlmEngine
 import com.aharou.feature.agent.domain.tool.AgentTool
 import com.aharou.feature.agent.domain.tool.ToolCall
 import com.aharou.feature.agent.domain.tool.ToolOutputStore
@@ -122,7 +123,8 @@ class StatefulAgentWorkflowTest {
         // 协作开关：这些用例不碰跨设备协作，relaxed mock 下 current().enabled 为 false（等价关闭）。
         remoteDeviceSettings = mockk(relaxed = true),
         // 记忆整理入口：这些用例不会走到自动整理，Lazy 里放个 relaxed mock 即可（注入形式是 dagger.Lazy 为了断环）。
-        memoryCompactor = Lazy { mockk<MemoryCompactor>(relaxed = true) }
+        memoryCompactor = Lazy { mockk<MemoryCompactor>(relaxed = true) },
+        localLlmEngine = mockk()
     ), recordPrivateCalls = true)
 
     init {
