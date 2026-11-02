@@ -190,6 +190,7 @@ class ContextCompactorTest {
 
     @Test
     fun multipleBlocksFusePreviousSummaryAndRetainLatestGoal() = runTest {
+        compactor.backgroundDispatcher = StandardTestDispatcher(testScheduler)
         prepare()
         val requests = mutableListOf<List<AgentMessage>>()
         coEvery { provider.complete(any(), capture(requests), any(), any()) } returns AIResponse("Concise handoff", stopReason = "stop")
@@ -206,6 +207,7 @@ class ContextCompactorTest {
 
     @Test
     fun currentUsageTriggersBeforeSending() = runTest {
+        compactor.backgroundDispatcher = StandardTestDispatcher(testScheduler)
         prepare()
         val small = history(100)
         assertFalse(compactor.compactIfNeeded(small, provider).compacted)
@@ -218,6 +220,7 @@ class ContextCompactorTest {
 
     @Test
     fun forcedCompactionWithoutMaterialStaysSilent() = runTest {
+        compactor.backgroundDispatcher = StandardTestDispatcher(testScheduler)
         prepare()
         val onlySummaryPair = listOf(
             AgentMessage.UserMessage(id = "marker", content = CONTEXT_COMPACTION_MARKER),
@@ -233,6 +236,7 @@ class ContextCompactorTest {
 
     @Test
     fun invalidResponsesDoNotCommitAndCountFailedCalls() = runTest {
+        compactor.backgroundDispatcher = StandardTestDispatcher(testScheduler)
         prepare()
         // 空正文与拒答都不属于「输出预算不够」，不重试：每种只记一次失败调用
         for ((index, response) in listOf(AIResponse(""), AIResponse("blocked", stopReason = "refusal")).withIndex()) {
@@ -248,6 +252,7 @@ class ContextCompactorTest {
 
     @Test
     fun truncatedSummaryRetriesOnceWithLargerBudget() = runTest {
+        compactor.backgroundDispatcher = StandardTestDispatcher(testScheduler)
         prepare()
         coEvery { provider.complete(any(), any(), any(), any()) } returnsMany listOf(
             AIResponse("partial", stopReason = "length"),
@@ -266,6 +271,7 @@ class ContextCompactorTest {
 
     @Test
     fun blockLimitReturnsOriginalWithoutCommitting() = runTest {
+        compactor.backgroundDispatcher = StandardTestDispatcher(testScheduler)
         prepare(2_000)
         val original = history(100_000)
         val result = compactor.compactIfNeeded(original, provider, force = true)
@@ -277,6 +283,7 @@ class ContextCompactorTest {
 
     @Test
     fun missingPersistedAnchorFailsBeforeSummaryCall() = runTest {
+        compactor.backgroundDispatcher = StandardTestDispatcher(testScheduler)
         prepare()
         coEvery { dao.getMessagesBySessionOnce("session") } returns emptyList()
         val original = history()
@@ -286,6 +293,7 @@ class ContextCompactorTest {
 
     @Test
     fun commitUsesHeadIdsAndEarliestTailTimestamp() = runTest {
+        compactor.backgroundDispatcher = StandardTestDispatcher(testScheduler)
         prepare()
         coEvery { dao.getMessagesBySessionOnce("session") } returns listOf(
             AgentMessageEntity(id = "old", sessionId = "session", role = "USER", content = "history", timestamp = 50),
@@ -302,6 +310,7 @@ class ContextCompactorTest {
 
     @Test
     fun adjustedEmptyHeadSkipsSilentlyWithoutCallingModel() = runTest {
+        compactor.backgroundDispatcher = StandardTestDispatcher(testScheduler)
         prepare()
         val original = listOf(
             AgentMessage.AssistantMessage(id = "assistant", content = "", toolCalls = listOf(ToolCall("call", "read", emptyMap()))),
@@ -317,6 +326,7 @@ class ContextCompactorTest {
 
     @Test
     fun mainSystemBudgetIsIncludedInFinalValidation() = runTest {
+        compactor.backgroundDispatcher = StandardTestDispatcher(testScheduler)
         prepare()
         val original = history()
         val result = compactor.compactIfNeeded(original, provider, force = true, systemPrompt = "汉".repeat(20_000))
@@ -326,6 +336,7 @@ class ContextCompactorTest {
 
     @Test
     fun transactionFailureReturnsOriginal() = runTest {
+        compactor.backgroundDispatcher = StandardTestDispatcher(testScheduler)
         prepare()
         coEvery { dao.getMessagesBySessionOnce("session") } returns listOf(
             AgentMessageEntity(id = "old", sessionId = "session", role = "USER", content = "history", timestamp = 50),
@@ -341,6 +352,7 @@ class ContextCompactorTest {
 
     @Test
     fun cancellationPropagatesAndRecordsFailure() = runTest {
+        compactor.backgroundDispatcher = StandardTestDispatcher(testScheduler)
         prepare()
         coEvery { provider.complete(any(), any(), any(), any()) } throws CancellationException("cancelled")
         try {
@@ -354,6 +366,7 @@ class ContextCompactorTest {
 
     @Test
     fun onlyValidatedSummaryIsCommittedAtomicallyAndInvalidatesHistory() = runTest {
+        compactor.backgroundDispatcher = StandardTestDispatcher(testScheduler)
         prepare()
         coEvery { dao.getMessagesBySessionOnce("session") } returns listOf(
             AgentMessageEntity(id = "old", sessionId = "session", role = "USER", content = "history", timestamp = 50),
@@ -372,6 +385,7 @@ class ContextCompactorTest {
 
     @Test
     fun oversizedTailIsRetainedAndFailsBeforeCallingSummary() = runTest {
+        compactor.backgroundDispatcher = StandardTestDispatcher(testScheduler)
         prepare()
         val original = history() + AgentMessage.AssistantMessage(content = "",
             toolCalls = listOf(ToolCall("latest", "readFile", emptyMap()))) +
@@ -481,6 +495,7 @@ class ContextCompactorTest {
 
     @Test
     fun failedMaterialIsNotSummarizedAgainWhileTransientFailureIsFresh() = runTest {
+        compactor.backgroundDispatcher = StandardTestDispatcher(testScheduler)
         prepare()
         coEvery { provider.complete(any(), any(), any(), any()) } returns AIResponse("", stopReason = "refusal")
         val original = history()
@@ -497,6 +512,7 @@ class ContextCompactorTest {
 
     @Test
     fun forcedCompactionBypassesTransientFailureBlacklist() = runTest {
+        compactor.backgroundDispatcher = StandardTestDispatcher(testScheduler)
         prepare()
         coEvery { provider.complete(any(), any(), any(), any()) } returns AIResponse("", stopReason = "refusal")
         val original = history()
@@ -508,6 +524,7 @@ class ContextCompactorTest {
 
     @Test
     fun fallsBackToChatModelWhenCompactionModelFails() = runTest {
+        compactor.backgroundDispatcher = StandardTestDispatcher(testScheduler)
         prepare()
         val chat = mockk<AIProvider>(relaxed = true)
         every { chat.providerId } returns "chat-provider"
@@ -525,6 +542,7 @@ class ContextCompactorTest {
 
     @Test
     fun noModelTrimRescuesTheTurnWhenSummaryKeepsFailing() = runTest {
+        compactor.backgroundDispatcher = StandardTestDispatcher(testScheduler)
         prepare()
         coEvery { provider.complete(any(), any(), any(), any()) } returns AIResponse("", stopReason = "refusal")
         val messages = listOf(
@@ -547,6 +565,7 @@ class ContextCompactorTest {
 
     @Test
     fun failureCardListsAttemptedFallbackLevels() = runTest {
+        compactor.backgroundDispatcher = StandardTestDispatcher(testScheduler)
         prepare()
         coEvery { provider.complete(any(), any(), any(), any()) } returns AIResponse("", stopReason = "refusal")
         val events = mutableListOf<AgentEvent>()
@@ -561,6 +580,7 @@ class ContextCompactorTest {
 
     @Test
     fun summaryBelowHardThresholdButAboveTargetDoesNotCommit() = runTest {
+        compactor.backgroundDispatcher = StandardTestDispatcher(testScheduler)
         prepare()
         coEvery { provider.complete(any(), any(), any(), any()) } returns AIResponse("汉".repeat(10_200), stopReason = "stop")
         val original = history(12_000)
@@ -574,6 +594,7 @@ class ContextCompactorTest {
 
     @Test
     fun targetHasTenPointGapBelowConfiguredHardLine() = runTest {
+        compactor.backgroundDispatcher = StandardTestDispatcher(testScheduler)
         prepare()
         coEvery { settings.compactionThresholdPercent() } returns 75
         coEvery { provider.complete(any(), any(), any(), any()) } returns AIResponse("汉".repeat(9_500), stopReason = "stop")
@@ -586,6 +607,7 @@ class ContextCompactorTest {
 
     @Test
     fun targetCountsSystemToolsSummaryAndTail() = runTest {
+        compactor.backgroundDispatcher = StandardTestDispatcher(testScheduler)
         prepare()
         val tool = mockk<AgentTool>()
         every { tool.name } returns "largeTool"
@@ -605,6 +627,7 @@ class ContextCompactorTest {
 
     @Test
     fun successfulSummaryFitsTargetAndKeepsLargeLatestBatch() = runTest {
+        compactor.backgroundDispatcher = StandardTestDispatcher(testScheduler)
         prepare()
         val latest = AgentMessage.AssistantMessage(content = "", toolCalls = listOf(ToolCall("latest", "readFile", emptyMap())))
         val output = AgentMessage.ToolResultMessage(id = "latest", toolName = "readFile", result = "汉".repeat(6_000))
@@ -638,6 +661,7 @@ class ContextCompactorTest {
 
     @Test
     fun oversizedTailFailsWithoutReplacingHistory() = runTest {
+        compactor.backgroundDispatcher = StandardTestDispatcher(testScheduler)
         prepare()
         val original = history() + AgentMessage.UserMessage(id = "huge-tail", content = "汉".repeat(30_000))
         val result = compactor.compactIfNeeded(original, provider, force = true)
