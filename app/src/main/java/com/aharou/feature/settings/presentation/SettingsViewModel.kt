@@ -16,7 +16,6 @@ import com.aharou.feature.voice.domain.VoiceModelState
 import com.aharou.feature.voice.domain.VoiceModelStatus
 import com.aharou.core.util.FileLogger
 import com.aharou.core.util.LogLevel
-import com.aharou.feature.agent.data.local.dao.RecentCallRecord
 import com.aharou.feature.agent.domain.container.ConnectionState
 import com.aharou.feature.agent.domain.container.ContainerImageEntry
 import com.aharou.feature.agent.domain.container.ContainerInstaller
@@ -24,7 +23,6 @@ import com.aharou.feature.agent.domain.container.ContainerOsDetector
 import com.aharou.feature.agent.domain.container.ContainerProfile
 import com.aharou.feature.agent.domain.container.RemoteSshConnection
 import com.aharou.feature.agent.domain.container.RootfsSource
-import com.aharou.feature.agent.domain.container.sha256For
 import com.aharou.feature.agent.domain.mcp.McpConfigRepository
 import com.aharou.feature.agent.domain.mcp.McpManager
 import com.aharou.feature.agent.domain.mcp.McpScope
@@ -43,10 +41,7 @@ import com.aharou.feature.agent.domain.skill.SkillMoveResult
 import com.aharou.feature.agent.domain.skill.SkillRepository
 import com.aharou.feature.agent.domain.skill.SkillScope
 import com.aharou.feature.agent.domain.skill.market.MarketSkill
-import com.aharou.feature.agent.domain.skill.market.SkillRepoAccess
 import com.aharou.feature.agent.domain.skill.market.SkillTranslation
-import com.aharou.feature.agent.domain.skill.market.needsTranslation
-import com.aharou.feature.agent.domain.skill.market.translationKey
 import com.aharou.feature.agent.domain.subagent.AgentDefinitionConfigRepository
 import com.aharou.feature.agent.domain.subagent.AgentDefinitionForm
 import com.aharou.feature.agent.domain.subagent.AgentDefinitionRepository
@@ -115,13 +110,13 @@ import com.aharou.feature.settings.domain.repository.AIProviderRepository
 import com.aharou.feature.terminal.data.repository.TerminalSettings
 import com.aharou.feature.terminal.data.repository.TerminalSettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -830,6 +825,14 @@ class SettingsViewModel @Inject constructor(
     val remoteConnections: StateFlow<List<RemoteConnection>> = remoteRepository.getConnections()
         .stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.Eagerly, emptyList())
 
+    /**
+     * 把某个 [flow] 的最新值持续写入一个 [MutableStateFlow]（配置项订阅的样板收敛）：
+     * collectLatest 挂起后永不返回，每个订阅各起一个协程；这里统一用 viewModelScope 直接起，不必再嵌套 launch。
+     */
+    private fun <T> syncFlow(flow: Flow<T>, target: MutableStateFlow<T>) {
+        viewModelScope.launch { flow.collectLatest { target.value = it } }
+    }
+
     init {
         // Token 统计自己订阅 Room 的调用记录：首次建 ViewModel 才启动，避免开机就挂一串 Flow。
         tokenStatsController.ensureStarted()
@@ -843,328 +846,74 @@ class SettingsViewModel @Inject constructor(
                 _containerAnnouncementOutdated.value = storedHash != sha256(text)
             }.collect {}
         }
+        // 每个配置 Flow 各订阅一个协程（collectLatest 永不返回，同协程内串行会饿死后面的），样板收敛到 [syncFlow]。
+        syncFlow(repository.getAllProviders(), _providers)
+        syncFlow(visionModelSettingsRepository.providerIdFlow, _visionProviderId)
+        syncFlow(visionModelSettingsRepository.modelFlow, _visionModel)
+        syncFlow(compactionModelSettingsRepository.providerIdFlow, _compactionProviderId)
+        syncFlow(compactionModelSettingsRepository.modelFlow, _compactionModel)
+        syncFlow(titleModelSettingsRepository.providerIdFlow, _titleProviderId)
+        syncFlow(titleModelSettingsRepository.modelFlow, _titleModel)
+        syncFlow(imageGenModelSettingsRepository.providerIdFlow, _imageGenProviderId)
+        syncFlow(imageGenModelSettingsRepository.modelFlow, _imageGenModel)
+        syncFlow(memoryModelSettingsRepository.providerIdFlow, _memoryProviderId)
+        syncFlow(memoryModelSettingsRepository.modelFlow, _memoryModel)
+        syncFlow(voiceSttSettingsRepository.providerIdFlow, _voiceSttProviderId)
+        syncFlow(voiceSttSettingsRepository.modelFlow, _voiceSttModel)
+        syncFlow(voiceTtsSettingsRepository.providerIdFlow, _voiceTtsProviderId)
+        syncFlow(voiceTtsSettingsRepository.modelFlow, _voiceTtsModel)
+        syncFlow(voiceTtsSettingsRepository.voiceFlow, _voiceTtsVoice)
+        syncFlow(voiceTtsSettingsRepository.autoReadAloudFlow, _autoReadAloud)
+        syncFlow(voiceWakeSettingsRepository.enabledFlow, _voiceWakeEnabled)
+        refreshDefaultAssistant()
+        syncFlow(generalSettingsRepository.ocrForTextOnlyModelsFlow, _ocrForTextOnlyModels)
+        syncFlow(logSettingsRepository.levelFlow, _logLevel)
+        syncFlow(keepaliveSettingsRepository.enabledFlow, _keepaliveEnabled)
+        syncFlow(screenOnSettingsRepository.enabledFlow, _screenOnEnabled)
+        syncFlow(agentSoundSettingsRepository.enabledFlow, _agentSoundEnabled)
+        syncFlow(generalSettingsRepository.contextTrimRoundsFlow, _contextTrimRounds)
+        syncFlow(generalSettingsRepository.autoRemoveStaleModelsFlow, _autoRemoveStaleModels)
+        syncFlow(generalSettingsRepository.startupSessionModeFlow, _startupSessionMode)
+        syncFlow(generalSettingsRepository.firstByteTimeoutSecFlow, _firstByteTimeoutSec)
+        syncFlow(generalSettingsRepository.streamIdleTimeoutSecFlow, _streamIdleTimeoutSec)
+        syncFlow(generalSettingsRepository.maxNetworkRetriesFlow, _maxNetworkRetries)
+        syncFlow(generalSettingsRepository.enterToSendFlow, _enterToSend)
+        syncFlow(generalSettingsRepository.compactionThresholdPercentFlow, _compactionThresholdPercent)
+        syncFlow(generalSettingsRepository.softCompactionThresholdPercentFlow, _softCompactionThresholdPercent)
+        syncFlow(generalSettingsRepository.sendFileMaxSizeMbFlow, _sendFileMaxSizeMb)
+        syncFlow(generalSettingsRepository.deleteExternalWorkspaceSessionsFlow, _deleteExternalWorkspaceSessions)
+        syncFlow(themeSettingsRepository.themeModeFlow, _themeMode)
+        syncFlow(themeSettingsRepository.themePresetIdFlow, _themePresetId)
+        syncFlow(themeSettingsRepository.dynamicColorFlow, _dynamicColorEnabled)
+        syncFlow(backgroundSettingsRepository.imagePathFlow, _backgroundImagePath)
+        syncFlow(backgroundSettingsRepository.alphaFlow, _backgroundAlpha)
+        syncFlow(languageSettingsRepository.languageFlow, _languageTag)
+        syncFlow(containerSettingsRepository.activeProfileIdFlow, _activeProfileId)
+        syncFlow(containerSettingsRepository.defaultContainerIdFlow, _defaultContainerId)
+        // 存量顺序归一：先补内置项 + 把历史「新建在前」的显示序写回存储，再开始收集，避开升级后第一帧闪出旧顺序。
         viewModelScope.launch {
-            launch {
-                repository.getAllProviders().collectLatest {
-                    _providers.value = it
-                }
-            }
-
-            launch {
-                visionModelSettingsRepository.providerIdFlow.collectLatest {
-                    _visionProviderId.value = it
-                }
-            }
-
-            launch {
-                visionModelSettingsRepository.modelFlow.collectLatest {
-                    _visionModel.value = it
-                }
-            }
-
-            launch {
-                compactionModelSettingsRepository.providerIdFlow.collectLatest {
-                    _compactionProviderId.value = it
-                }
-            }
-
-            launch {
-                compactionModelSettingsRepository.modelFlow.collectLatest {
-                    _compactionModel.value = it
-                }
-            }
-
-            launch {
-                titleModelSettingsRepository.providerIdFlow.collectLatest {
-                    _titleProviderId.value = it
-                }
-            }
-
-            launch {
-                titleModelSettingsRepository.modelFlow.collectLatest {
-                    _titleModel.value = it
-                }
-            }
-
-            launch {
-                imageGenModelSettingsRepository.providerIdFlow.collectLatest {
-                    _imageGenProviderId.value = it
-                }
-            }
-
-            launch {
-                imageGenModelSettingsRepository.modelFlow.collectLatest {
-                    _imageGenModel.value = it
-                }
-            }
-
-            launch {
-                memoryModelSettingsRepository.providerIdFlow.collectLatest {
-                    _memoryProviderId.value = it
-                }
-            }
-
-            launch {
-                memoryModelSettingsRepository.modelFlow.collectLatest {
-                    _memoryModel.value = it
-                }
-            }
-
-            launch {
-                voiceSttSettingsRepository.providerIdFlow.collectLatest {
-                    _voiceSttProviderId.value = it
-                }
-            }
-
-            launch {
-                voiceSttSettingsRepository.modelFlow.collectLatest {
-                    _voiceSttModel.value = it
-                }
-            }
-
-            launch {
-                voiceTtsSettingsRepository.providerIdFlow.collectLatest {
-                    _voiceTtsProviderId.value = it
-                }
-            }
-
-            launch {
-                voiceTtsSettingsRepository.modelFlow.collectLatest {
-                    _voiceTtsModel.value = it
-                }
-            }
-
-            launch {
-                voiceTtsSettingsRepository.voiceFlow.collectLatest {
-                    _voiceTtsVoice.value = it
-                }
-            }
-
-            // 每个 flow 必须各起一个协程：collectLatest 挂起后永不返回，
-            // 串在同一个 launch 里的话，后面的根本不会执行——
-            // 表现就是开关值回不到界面，界面显示的永远是初始值（与真实状态相反）。
-            launch {
-                voiceTtsSettingsRepository.autoReadAloudFlow.collectLatest {
-                    _autoReadAloud.value = it
-                }
-            }
-            launch {
-                voiceWakeSettingsRepository.enabledFlow.collectLatest {
-                    _voiceWakeEnabled.value = it
-                }
-            }
-
-            refreshDefaultAssistant()
-
-            launch {
-                generalSettingsRepository.ocrForTextOnlyModelsFlow.collectLatest {
-                    _ocrForTextOnlyModels.value = it
-                }
-            }
-
-            launch {
-                logSettingsRepository.levelFlow.collectLatest {
-                    _logLevel.value = it
-                }
-            }
-
-            launch {
-                keepaliveSettingsRepository.enabledFlow.collectLatest {
-                    _keepaliveEnabled.value = it
-                }
-            }
-
-            launch {
-                screenOnSettingsRepository.enabledFlow.collectLatest {
-                    _screenOnEnabled.value = it
-                }
-            }
-
-            launch {
-                agentSoundSettingsRepository.enabledFlow.collectLatest {
-                    _agentSoundEnabled.value = it
-                }
-            }
-
-            launch {
-                generalSettingsRepository.contextTrimRoundsFlow.collectLatest {
-                    _contextTrimRounds.value = it
-                }
-                generalSettingsRepository.autoRemoveStaleModelsFlow.collectLatest {
-                    _autoRemoveStaleModels.value = it
-                }
-            }
-
-            launch {
-                generalSettingsRepository.startupSessionModeFlow.collectLatest {
-                    _startupSessionMode.value = it
-                }
-            }
-
-            launch {
-                generalSettingsRepository.firstByteTimeoutSecFlow.collectLatest {
-                    _firstByteTimeoutSec.value = it
-                }
-            }
-
-            launch {
-                generalSettingsRepository.streamIdleTimeoutSecFlow.collectLatest {
-                    _streamIdleTimeoutSec.value = it
-                }
-            }
-
-            launch {
-                generalSettingsRepository.maxNetworkRetriesFlow.collectLatest {
-                    _maxNetworkRetries.value = it
-                }
-            }
-
-            launch {
-                generalSettingsRepository.enterToSendFlow.collectLatest {
-                    _enterToSend.value = it
-                }
-            }
-
-            launch {
-                generalSettingsRepository.compactionThresholdPercentFlow.collectLatest {
-                    _compactionThresholdPercent.value = it
-                }
-            }
-
-            launch {
-                generalSettingsRepository.softCompactionThresholdPercentFlow.collectLatest {
-                    _softCompactionThresholdPercent.value = it
-                }
-            }
-
-            launch {
-                generalSettingsRepository.sendFileMaxSizeMbFlow.collectLatest {
-                    _sendFileMaxSizeMb.value = it
-                }
-            }
-
-            launch {
-                generalSettingsRepository.deleteExternalWorkspaceSessionsFlow.collectLatest {
-                    _deleteExternalWorkspaceSessions.value = it
-                }
-            }
-
-            launch {
-                themeSettingsRepository.themeModeFlow.collectLatest {
-                    _themeMode.value = it
-                }
-            }
-
-            launch {
-                themeSettingsRepository.themePresetIdFlow.collectLatest {
-                    _themePresetId.value = it
-                }
-            }
-
-            launch {
-                themeSettingsRepository.dynamicColorFlow.collectLatest {
-                    _dynamicColorEnabled.value = it
-                }
-            }
-
-            launch {
-                backgroundSettingsRepository.imagePathFlow.collectLatest {
-                    _backgroundImagePath.value = it
-                }
-            }
-
-            launch {
-                backgroundSettingsRepository.alphaFlow.collectLatest {
-                    _backgroundAlpha.value = it
-                }
-            }
-
-            launch {
-                languageSettingsRepository.languageFlow.collectLatest {
-                    _languageTag.value = it
-                }
-            }
-
-            launch {
-                containerSettingsRepository.activeProfileIdFlow.collectLatest {
-                    _activeProfileId.value = it
-                }
-            }
-
-            launch {
-                containerSettingsRepository.defaultContainerIdFlow.collectLatest {
-                    _defaultContainerId.value = it
-                }
-            }
-
-            launch {
-                // 先做存量顺序归一，再开始收集，避开升级后第一帧闪出旧顺序：补内置项 + 把历史「新建在前」的显示序写回存储。
-                containerSettingsRepository.ensureBuiltinDefault()
-                containerSettingsRepository.ensureProfileDisplayOrder()
-                // 此后存储顺序即显示顺序：新增插到最前、编辑原地替换、拖拽重排由 reorderCustomProfiles 落库
-                containerSettingsRepository.customProfilesFlow.collectLatest { _customProfiles.value = it }
-            }
-
-            launch {
-                mcpConfigRepository.effectiveEntriesFlow.collectLatest {
-                    _mcpEntries.value = it
-                }
-            }
-
-            launch {
-                // 技能配置文件变更（含外部改动）→ 刷新列表；数据源在 [SkillSettingsController]。
-                skillController.changes.collectLatest {
-                    refreshSkills()
-                }
-            }
-
-            launch {
-                agentDefinitionConfigRepository.changes.collectLatest {
-                    refreshSubAgents()
-                }
-            }
-
-            // 全局技能/子代理在远程模式下以远端为源，本地目录监听（skills.changes）不会触发；
-            // 执行模式切换或远程连接就绪后需重扫，否则列表停留在旧环境的内容。
-            launch {
-                executionMode.collectLatest {
-                    refreshSkills()
-                    refreshSubAgents()
-                }
-            }
-
-            launch {
-                connectionState.collectLatest { state ->
-                    if (state == ConnectionState.CONNECTED) {
-                        refreshSkills()
-                        refreshSubAgents()
-                    }
-                }
-            }
-
-            launch {
-                refreshSkills()
-            }
-
-            launch {
-                permissionRulesRepository.globalRulesFlow.collectLatest {
-                    _globalRules.value = it
-                }
-            }
-
-            launch {
-                permissionRulesRepository.currentProjectRulesFlow.collectLatest {
-                    _projectRules.value = it
-                }
-            }
-
-            launch {
-                toolSafetySettingsRepository.disableSafetyInterceptionFlow.collectLatest {
-                    _disableSafetyInterception.value = it
-                }
-            }
-
+            containerSettingsRepository.ensureBuiltinDefault()
+            containerSettingsRepository.ensureProfileDisplayOrder()
+            containerSettingsRepository.customProfilesFlow.collectLatest { _customProfiles.value = it }
         }
+        syncFlow(mcpConfigRepository.effectiveEntriesFlow, _mcpEntries)
+        // 技能配置变更（含外部改动）→ 刷新列表；数据源在 SkillSettingsController。
+        viewModelScope.launch { skillController.changes.collectLatest { refreshSkills() } }
+        viewModelScope.launch { agentDefinitionConfigRepository.changes.collectLatest { refreshSubAgents() } }
+        // 全局技能/子代理在远程模式以远端为源，本地目录监听不触发；执行模式切换或远程就绪后重扫。
+        viewModelScope.launch { executionMode.collectLatest { refreshSkills(); refreshSubAgents() } }
+        viewModelScope.launch {
+            connectionState.collectLatest { state ->
+                if (state == ConnectionState.CONNECTED) {
+                    refreshSkills()
+                    refreshSubAgents()
+                }
+            }
+        }
+        viewModelScope.launch { refreshSkills() }
+        syncFlow(permissionRulesRepository.globalRulesFlow, _globalRules)
+        syncFlow(permissionRulesRepository.currentProjectRulesFlow, _projectRules)
+        syncFlow(toolSafetySettingsRepository.disableSafetyInterceptionFlow, _disableSafetyInterception)
     }
 
     fun upsertMcpServer(originalName: String?, initialScope: McpScope?, config: McpServerConfig, scope: McpScope) {

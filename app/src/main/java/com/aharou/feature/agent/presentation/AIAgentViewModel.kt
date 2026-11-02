@@ -12,7 +12,6 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.aharou.MainActivity
 import com.aharou.R
 import com.aharou.core.util.FileLogger
 import com.aharou.core.util.toUserMessage
@@ -40,7 +39,6 @@ import com.aharou.feature.settings.data.repository.GeneralSettingsRepository
 import com.aharou.feature.settings.data.repository.KeepaliveSettingsRepository
 import com.aharou.feature.settings.data.repository.ModelReasoningEffortRepository
 import com.aharou.feature.settings.data.repository.StartupSessionMode
-import com.aharou.feature.agent.domain.model.AgentContext
 import com.aharou.feature.agent.domain.model.AgentImage
 import com.aharou.feature.agent.domain.model.AgentMessage
 import com.aharou.feature.agent.domain.model.AgentMode
@@ -63,12 +61,8 @@ import com.aharou.feature.agent.domain.mention.FileMentionState
 import com.aharou.feature.agent.domain.mention.fileMentionQuery
 import com.aharou.feature.agent.domain.runner.AgentTurnRequest
 import com.aharou.feature.agent.domain.runner.AgentTurnRunner
-import com.aharou.feature.agent.domain.subagent.AgentDefinition
-import com.aharou.feature.agent.domain.subagent.AgentDefinitionRepository
 import com.aharou.feature.agent.domain.subagent.SubAgentEvent
 import com.aharou.feature.agent.domain.subagent.SubAgentEventBus
-import com.aharou.core.watch.FileChangeHub
-import com.aharou.core.watch.asDirtySignal
 import com.aharou.feature.agent.domain.subagent.SubAgentEventType
 import com.aharou.feature.agent.domain.subagent.SubAgentResultInspector
 import com.aharou.feature.agent.domain.schedule.ScheduledPendingRunner
@@ -80,15 +74,12 @@ import com.aharou.feature.terminal.domain.TerminalKeepaliveService
 import com.aharou.feature.terminal.domain.TerminalSessionManager
 import com.aharou.feature.terminal.domain.TerminalSessionProvider
 import com.aharou.feature.terminal.domain.renewWakeLockUntilIdle
-import com.aharou.feature.terminal.domain.takeTailLines
 import com.aharou.feature.workspace.domain.FileAccessProvider
 import com.aharou.feature.workspace.domain.WorkspacePathMapper
-import com.aharou.feature.workspace.domain.isValidFileEntryName
 import com.aharou.feature.agent.domain.workflow.AgentEvent
 import com.aharou.feature.agent.domain.tool.PendingToolPermission
 import com.aharou.feature.agent.domain.tool.ToolCall
 import com.aharou.feature.agent.domain.tool.ToolPermissionManager
-import com.aharou.feature.agent.domain.tool.ToolRegistry
 import com.aharou.feature.agent.domain.tool.mode.PlanApprovalChoice
 import com.aharou.feature.agent.domain.tool.mode.PlanApprovalManager
 import com.aharou.feature.agent.domain.tool.mode.PlanApprovalRequest
@@ -148,7 +139,6 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.serialization.Serializable
@@ -173,7 +163,6 @@ import javax.inject.Inject
 @HiltViewModel
 class AIAgentViewModel @Inject constructor(
     private val agentWorkflow: AgentWorkflow,
-    private val toolRegistry: ToolRegistry,
     private val agentMessageDao: AgentMessageDao,
     private val agentTaskDao: AgentTaskDao,
     private val chatSessionDao: ChatSessionDao,
@@ -207,14 +196,11 @@ class AIAgentViewModel @Inject constructor(
     private val sharedInboxDelivery: SharedInboxDelivery,
     private val inboxDirectory: InboxDirectory,
     private val agentPermissionNotifier: AgentPermissionNotifier,
-    private val agentDefinitionRepository: AgentDefinitionRepository,
     private val agentTurnRunner: AgentTurnRunner,
     private val turnEndBridge: AgentTurnEndBridge,
     private val sessionPanels: SessionPanelController,
     private val scheduledTaskDao: ScheduledTaskDao,
     val fileAccess: FileAccessProvider,
-    private val fileChangeHub: FileChangeHub,
-    private val fileTreeRoots: ContainerTreeRootProvider,
     private val fileBrowse: FileBrowseController,
     /** Aharou：浏览器池 —— 聊天页“自动围观”面板与 browser 工具共用同一池。 */
     val browserTabPool: com.aharou.feature.browser.BrowserTabPool,
@@ -1465,18 +1451,15 @@ class AIAgentViewModel @Inject constructor(
         const val BROWSE_DEBOUNCE_MS = 300L
     }
 
-    init {
-        // 冷启动收尾：上次进程被杀时残留的「执行中」工具回填为「已中断」。在后台执行，不阻塞首屏与会话展示。
+    private fun initColdStartCleanup() {
         viewModelScope.launch(Dispatchers.IO) {
             sessionUseCase.initColdStartCleanup()
         }
+    }
 
-        // 附件按会话隔离：用户主动切换会话时清空。原本挂在聊天面板的 collect 里，
-        // 面板被销毁时清不掉，且分享投递与面板组合时序耦合，这里提到 VM 统一处理。
+    private fun initSessionSwitchAttachmentCleanup() {
         viewModelScope.launch {
             _sessionSwitchEvents.collect {
-                // 分享投递进来的附件要留住：冷启动时「会话就绪」紧接着分享投递，一律清空会让
-                // 用户刚点进来的文件凭空消失（退出重进才看到）。
                 val before = _pendingAttachments.value
                 val kept = before.filter { it.fromShare }
                 _pendingAttachments.value = kept
@@ -1485,14 +1468,15 @@ class AIAgentViewModel @Inject constructor(
                 }
             }
         }
+    }
 
-        // 会话就绪后接管「无会话期间」打的草稿（见 adoptPendingDraft）。
+    private fun initPendingDraftAdoption() {
         viewModelScope.launch {
             _currentSessionId.filterNotNull().collect { adoptPendingDraft(it) }
         }
+    }
 
-        // 错误横幅持久化：会话末条消息带着错误文本时恢复 Error 状态，重开 App / 切会话后
-        // 横幅与一键重试仍在；末条不再是错误行（已重试或继续对话）时清除该会话的错误态。
+    private fun initErrorBannerPersistence() {
         viewModelScope.launch {
             _currentSessionId.filterNotNull().flatMapLatest { id ->
                 agentMessageDao.getMessagesBySessionPaged(id, 1)
@@ -1509,25 +1493,23 @@ class AIAgentViewModel @Inject constructor(
                 }
             }
         }
+    }
 
-        // 启动与工作区切换时重新扫描技能（项目级技能随工作区变化），刷新 `/` 命令菜单。
+    private fun initSlashCommandRefresh() {
         viewModelScope.launch {
             _currentWorkspace.collect { slashCommandRegistry.refresh() }
         }
+    }
 
+    private fun initWorkspaceSessionBinding() {
         viewModelScope.launch {
             _currentWorkspace.collectLatest { path ->
                 if (path.isBlank()) return@collectLatest
-                // 当前会话本就挂在这个工作区上（由 selectSession 驱动切过来的），不必重挑，
-                // 否则会把用户刚点开的会话又换掉。只在会话与工作区对不上时才按工作区选会话。
                 val existing = _currentSessionId.value
                     ?.let { sessionUseCase.getSessionById(it) }
                     ?.workspacePath
                 if (existing == path) return@collectLatest
                 val recent = sessionUseCase.getMostRecentSessionOfWorkspace(path)
-                // 从别的工作区切过来时直接进该文件夹的最近会话：用户点的是文件夹，想看的就是上次
-                // 在那儿聊的东西。startupSessionMode 只管冷启动（_currentSessionId 为 null），否则
-                // 默认的「新开会话」设置会让每次切文件夹都开一个新会话。
                 val switchingWorkspace = _currentSessionId.value != null
                 val targetId = when {
                     recent == null -> createAndUpsertSession(path)
@@ -1537,8 +1519,6 @@ class AIAgentViewModel @Inject constructor(
                     else -> createAndUpsertSession(path)
                 }
                 _currentSessionId.value = targetId
-
-                // 异步回收多余的空会话（保留当前 targetId），在后台执行，不卡主线程与首帧渲染。
                 if (recent != null) {
                     launch(Dispatchers.IO) {
                         sessionUseCase.recycleEmptySessions(path, keepId = targetId)
@@ -1546,41 +1526,39 @@ class AIAgentViewModel @Inject constructor(
                 }
             }
         }
+    }
 
-        // 进入/切换工作区就把信箱未读投到该工作区的「默认会话」（最近更新的那个），
-        // 不必用户先在这个工作区发一句话、由那一轮去捞。没有会话就不投，不凭空造空会话。
-        // 来信不必等切工作区：写入工具与目录监听发出信号后，直接投到目标工作区的默认会话。
+    private fun initInboxDelivery() {
         sharedInboxDelivery.bind { path -> deliverInboxToDefaultSession(path) }
         viewModelScope.launch {
             _currentWorkspace.collect { path ->
                 if (path.isNotBlank()) withContext(Dispatchers.IO) { deliverInboxToDefaultSession(path) }
             }
         }
+    }
 
-        // 工作区列表或当前工作区变化时刷新共享区通讯录（幂等：内容没变不写盘）。
+    private fun initSharedInboxRefresh() {
         viewModelScope.launch {
             combine(workspaceRepository.workspaces, _currentWorkspace) { list, _ -> list }
                 .collect { list -> withContext(Dispatchers.IO) { inboxDirectory.refresh(list) } }
         }
+    }
 
-        // 订阅后台命令完成事件：notify=true 的命令结束后自动注入消息并触发 AI 新一轮。
-        // 会话忙碌期间到达的事件会被缓存，待本轮结束后合并成一条发送（见 [flushMergedNotifications]）。
+    private fun initBackgroundCommandEvents() {
         viewModelScope.launch {
             terminalSessionProvider.tabFinishedEvents.collect { handleBackgroundCommandFinished(it) }
         }
+    }
 
+    private fun initKeepaliveSettings() {
         viewModelScope.launch {
             keepaliveSettings.enabledFlow.collect { userKeepaliveEnabled = it }
         }
+    }
 
-        // 订阅子代理生命周期事件（类比 terminal 的 notify=true 异步回调）：
-        // - SPAWNED：task 工具已创建子会话并替用户发消息，这里在子会话上自动启动 AI 工作流；
-        // - STOPPED：task(action="stop") 请求停止子代理，取消对应会话的 AI 任务；
-        // - COMPLETED/FAILED：由子会话工作流结束时发出（见 handleSubAgentFinished），注入父会话通知；
-        // - DELETED：task(action="del") 已删库，只清运行时状态，不做任何停止收尾。
+    private fun initSubAgentLifecycleEvents() {
         viewModelScope.launch {
             subAgentEventBus.events.collect { event ->
-                // 卡片状态先按事件即时翻过去（落库慢一步），终态再补一次读库拿摘要与改动文件。
                 noteSubAgentCardEvent(event)
                 when (event.type) {
                     SubAgentEventType.SPAWNED -> spawnSubAgentWorkflow(event)
@@ -1594,16 +1572,36 @@ class AIAgentViewModel @Inject constructor(
                 }
             }
         }
+    }
 
-        // 定时任务：Worker 认领后交给前台服务后台跑，这里只负责捡「服务没起来」时落库的活。
+    private fun initScheduledTaskDrain() {
         viewModelScope.launch {
             ScheduledPendingRunner(scheduledTaskDao) { request -> runScheduledTask(request) }.drain()
         }
+    }
+
+    private fun initPermissionNotifier() {
         viewModelScope.launch { awaitingPermissionSessionIds.collect { agentPermissionNotifier.sync(it) } }
         viewModelScope.launch {
             combine(askUserQuestionManager.pendingQuestion, planApprovalManager.pendingApproval) { q, p -> q to p }.collect { (question, plan) -> agentPermissionNotifier.syncPrompts(question, plan) }
         }
         viewModelScope.launch { agentPermissionNotifier.replies.collect { r -> enqueueAgentRequest(request = r.text, projectRoot = workspaceOf(r.sessionId), targetSessionId = r.sessionId) } }
+    }
+
+    init {
+        initColdStartCleanup()
+        initSessionSwitchAttachmentCleanup()
+        initPendingDraftAdoption()
+        initErrorBannerPersistence()
+        initSlashCommandRefresh()
+        initWorkspaceSessionBinding()
+        initInboxDelivery()
+        initSharedInboxRefresh()
+        initBackgroundCommandEvents()
+        initKeepaliveSettings()
+        initSubAgentLifecycleEvents()
+        initScheduledTaskDrain()
+        initPermissionNotifier()
     }
 
     /**
