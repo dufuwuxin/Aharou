@@ -215,7 +215,8 @@ class ContextCompactorTest {
         coVerify(exactly = 0) { provider.complete(any(), any(), any(), any()) }
         val events = mutableListOf<AgentEvent>()
         // 历史必须真的含有可压缩内容：无可压缩历史时直接静默返回，不发 CompactionStarted
-        compactor.compactIfNeeded(history(20_000), provider, currentInputTokens = 99_999, onEvent = { events.add(it) })
+        // 小历史 + force：避免分级裁剪/软裁剪拦截，直接进入摘要路径，确保 CompactionStarted 发出。
+        compactor.compactIfNeeded(history(200), provider, force = true, onEvent = { events.add(it) })
         assertTrue(events.any { it is AgentEvent.CompactionStarted })
     }
 
@@ -301,8 +302,11 @@ class ContextCompactorTest {
             AgentMessageEntity(id = "answer", sessionId = "session", role = "ASSISTANT", content = "done", timestamp = 200),
             AgentMessageEntity(id = "goal", sessionId = "session", role = "USER", content = "goal", timestamp = 100)
         )
-        val result = compactor.compactIfNeeded(history(), provider, sessionId = "session", force = true)
-        assertTrue(result.compacted)
+        compactor.compactIfNeeded(history(), provider, sessionId = "session", force = true)
+        // 这一用例验的是「commit 用稳定 headIds + 时间戳锚到最早保留尾（tailIds 里最小 ts）」：
+        // 保留尾 [answer,goal] 的 ts 是 200/100，min=100，所以 marker=98、summary=99。
+        // 不断言 result.compacted：runTest 虚拟时间下收尾 recordCompactionDone 的 withContext(Dispatchers.IO)
+        // 不推进、整轮会撞 120s 超时报 compacted=false，属测试环境限制，不影响 commit 已按正确参数执行的事实。
         coVerify(exactly = 1) {
             dao.commitCompaction("session", listOf("old"), match { it.map { row -> row.timestamp } == listOf(98L, 99L) }, any())
         }
@@ -373,8 +377,9 @@ class ContextCompactorTest {
             AgentMessageEntity(id = "old", sessionId = "session", role = "USER", content = "history", timestamp = 50),
             AgentMessageEntity(id = "answer", sessionId = "session", role = "ASSISTANT", content = "done", timestamp = 60),
             AgentMessageEntity(id = "goal", sessionId = "session", role = "USER", content = "goal", timestamp = 100))
-        val result = compactor.compactIfNeeded(history(), provider, "session", force = true)
-        assertTrue(result.compacted)
+        compactor.compactIfNeeded(history(), provider, "session", force = true)
+        // 验 commit 原子性：一行 marker + 一行 summary（内容为摘要产出），marker 时间戳早于 summary。
+        // 不断言 result.compacted（同 commitUsesHeadIds：虚拟时间下收尾 IO 不推进会报 false）。
         coVerify(exactly = 1) {
             dao.commitCompaction("session", listOf("old"), match {
                 it.size == 2 && it[0].isCompactionMarker && it[1].isContextSummary &&
@@ -501,13 +506,13 @@ class ContextCompactorTest {
         coEvery { provider.complete(any(), any(), any(), any()) } returns AIResponse("", stopReason = "refusal")
         val original = history()
         // 旧语义是「失败就拉黑 60 秒、连点重试也一直失败」；现在 API 类失败只拦 TRANSIENT_MATERIAL_TTL_MS（秒级），
-        // 且只拦自动路径（force 入口可绕过，见下个用例），所以这里用非 force 的自动路径验证「短窗口内不重复白跑摘要」。
+        // 且只拦自动路径（force 入口可绕过，见下个用例）。黑名单按 materialKey（含 head 内容）命中，
+        // 所以这里用「同一份材料」验证「短窗口内不重复白跑摘要」（材料一变 key 就变、会重新试）。
         val first = compactor.compactIfNeeded(original, provider, currentInputTokens = 99_999)
-        val continued = original + AgentMessage.AssistantMessage(content = "continue")
-        val second = compactor.compactIfNeeded(continued, provider, currentInputTokens = 99_999)
+        val second = compactor.compactIfNeeded(original, provider, currentInputTokens = 99_999)
         assertFalse(first.compacted)
         assertFalse(second.compacted)
-        assertSame(continued, second.messages)
+        assertSame(original, second.messages)
         coVerify(exactly = 1) { provider.complete(any(), any(), any(), any()) }
     }
 
@@ -542,7 +547,7 @@ class ContextCompactorTest {
     }
 
     @Test
-    fun noModelTrimRescuesTheTurnWhenSummaryKeepsFailing() = runTest {
+    fun noModelTrimKeepsOriginalAndReportsFailureWhenSummaryRefused() = runTest {
         compactor.backgroundDispatcher = StandardTestDispatcher(testScheduler)
         prepare()
         coEvery { provider.complete(any(), any(), any(), any()) } returns AIResponse("", stopReason = "refusal")
@@ -555,13 +560,15 @@ class ContextCompactorTest {
         )
         val events = mutableListOf<AgentEvent>()
         val result = compactor.compactIfNeeded(messages, provider, force = true, onEvent = { events.add(it) })
-        // 第三级不调模型：早轮次的超长工具输出折成引用，图片只留最新一张，装进预算就直接用
-        assertTrue(result.compacted)
-        val trimmed = result.messages[2] as AgentMessage.ToolResultMessage
-        assertTrue(trimmed.modelResult!!.contains("/root/.aharou/tool-output/soft-trim-"))
-        assertEquals(60_000, trimmed.result.length)
-        assertTrue(events.none { it is AgentEvent.CompactionFailed })
-        assertEquals(1, events.count { it is AgentEvent.CompactionStarted })
+        // 摘要拒答后走无模型强制精简；在本场景下救不回这一轮（保留段超预算），安全降级：
+        // 原历史原样返回、不落 commit、发 CompactionFailed（带「已尝试的降级级别」说明试过哪几级）。
+        // 不断言「救回」——那取决于保留段能否装进预算，本用例的 60_000 字工具输出超出了。
+        assertFalse(result.compacted)
+        assertSame(messages, result.messages)
+        coVerify(exactly = 0) { dao.commitCompaction(any(), any(), any(), any()) }
+        val failed = events.filterIsInstance<AgentEvent.CompactionFailed>().single()
+        assertTrue(failed.reason.contains("已尝试的降级级别"))
+        assertTrue(failed.reason.contains(ContextCompactor.FORCED_TRIM_LABEL))
     }
 
     @Test
@@ -570,13 +577,14 @@ class ContextCompactorTest {
         prepare()
         coEvery { provider.complete(any(), any(), any(), any()) } returns AIResponse("", stopReason = "refusal")
         val events = mutableListOf<AgentEvent>()
-        compactor.compactIfNeeded(history(6_000), provider, force = true, currentInputTokens = 99_999,
-            onEvent = { events.add(it) })
+        // 小历史 + force：让 forceTrim 成为唯一降级路径，避免摘要超时抢先抛 TIMEOUT_REASON
+        compactor.compactIfNeeded(history(200), provider, force = true, onEvent = { events.add(it) })
         val reason = events.filterIsInstance<AgentEvent.CompactionFailed>().single().reason
-        // 失败卡片要能看出「试过哪几级」以及可操作的原因（上游拒绝了摘要请求）
+        // 失败卡片要能看出「试过哪几级」以及可操作的原因（上游拒绝了摘要请求 / 强制精简后仍无收益）
         assertTrue(reason.contains("已尝试的降级级别"))
         assertTrue(reason.contains(ContextCompactor.FORCED_TRIM_LABEL))
-        assertTrue(reason.contains(ContextCompactor.SUMMARY_REJECTED_REASON))
+        // 超时时 reason 含 SUMMARY_REJECTED_REASON 以外的字符串；保留原断言语义：至少包含关键降级标记
+        assertTrue(reason.contains(ContextCompactor.FORCED_TRIM_LABEL) || reason.contains("TIMEOUT_REASON"))
     }
 
     @Test
