@@ -132,6 +132,9 @@ import kotlinx.coroutines.sync.withLock
  */
 private enum class TailKind { THINKING, STREAMING, COMPACTING, RETRYING, KEY_SWITCHED, NONE }
 
+/** 附件上传意图：决定拉起哪个 picker（文件/图片/相机），供 [requestUploadFile/Image/TakePhoto] 驱动。 */
+private enum class UploadIntent { FILE, IMAGE, PHOTO }
+
 /** 悬浮层（横幅/面板/输入框）与最后一条消息的间距。 */
 private val FLOATING_LAYER_GAP_DP = 8.dp
 
@@ -458,30 +461,6 @@ fun AIChatPanel(
     // LaunchedEffect 监听 projectRoot，一旦 workspace 就绪立刻自动 launch 对应 picker。
     // 这比直接「launch → 等」更安全：picker 弹出前一定保证 projectRoot 非空，避免
     // handlePickedAttachments 读到空 workspace 而直接 toast 退回。
-    var pendingUploadType by remember { mutableStateOf<UploadIntent?>(null) }
-    enum class UploadIntent { FILE, IMAGE, PHOTO }
-    fun requestUploadFile() {
-        if (projectRoot.isBlank()) { viewModel.newSession(); pendingUploadType = UploadIntent.FILE }
-        else filePicker.launch(arrayOf("*/*"))
-    }
-    fun requestUploadImage() {
-        if (projectRoot.isBlank()) { viewModel.newSession(); pendingUploadType = UploadIntent.IMAGE }
-        else imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-    }
-    fun requestTakePhoto() {
-        if (projectRoot.isBlank()) { viewModel.newSession(); pendingUploadType = UploadIntent.PHOTO }
-        else takePhoto()
-    }
-    LaunchedEffect(projectRoot, pendingUploadType) {
-        if (projectRoot.isNotBlank() && pendingUploadType != null) {
-            when (val intent = pendingUploadType!!) {
-                UploadIntent.FILE -> filePicker.launch(arrayOf("*/*"))
-                UploadIntent.IMAGE -> imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                UploadIntent.PHOTO -> takePhoto()
-            }
-            pendingUploadType = null
-        }
-    }
     val reasoningEffort by viewModel.currentSessionReasoningEffort.collectAsStateWithLifecycle()
 
     val providerDashboards by (settingsViewModel?.providerDashboards?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(emptyMap()) })
@@ -716,6 +695,34 @@ fun AIChatPanel(
         }
         cameraPhotoUri = uri
         takePictureLauncher.launch(uri)
+    }
+
+    // 未建会话时点击附件入口：先触发 newSession（协程内异步建好会话），同时记录意图；
+    // LaunchedEffect 监听 projectRoot，一旦 workspace 就绪立刻自动 launch 对应 picker。
+    // 这比直接「launch → 等」更安全：picker 弹出前一定保证 projectRoot 非空，避免
+    // handlePickedAttachments 读到空 workspace 而直接 toast 退回。
+    var pendingUploadType by remember { mutableStateOf<UploadIntent?>(null) }
+    fun requestUploadFile() {
+        if (projectRoot.isBlank()) { viewModel.newSession(); pendingUploadType = UploadIntent.FILE }
+        else filePicker.launch(arrayOf("*/*"))
+    }
+    fun requestUploadImage() {
+        if (projectRoot.isBlank()) { viewModel.newSession(); pendingUploadType = UploadIntent.IMAGE }
+        else imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+    }
+    fun requestTakePhoto() {
+        if (projectRoot.isBlank()) { viewModel.newSession(); pendingUploadType = UploadIntent.PHOTO }
+        else takePhoto()
+    }
+    LaunchedEffect(projectRoot, pendingUploadType) {
+        if (projectRoot.isNotBlank() && pendingUploadType != null) {
+            when (val intent = pendingUploadType!!) {
+                UploadIntent.FILE -> filePicker.launch(arrayOf("*/*"))
+                UploadIntent.IMAGE -> imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                UploadIntent.PHOTO -> takePhoto()
+            }
+            pendingUploadType = null
+        }
     }
 
     // 缓冲流式文本与思考过程：流式期间跟随 streamingText / streamingReasoning；流式刚结束而数据库尚未完成派发期间（messages 末尾仍是 USER/TOOL 消息），

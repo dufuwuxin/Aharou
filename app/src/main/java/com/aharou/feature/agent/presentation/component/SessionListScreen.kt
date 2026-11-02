@@ -1,0 +1,203 @@
+package com.aharou.feature.agent.presentation.component
+
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
+import com.aharou.R
+import com.aharou.core.theme.Radius
+import com.aharou.core.theme.Spacing
+import com.aharou.core.theme.semanticColors
+import com.aharou.feature.agent.presentation.AgentUIState
+import com.aharou.feature.agent.domain.model.ChatSession
+import compose.icons.FeatherIcons
+import compose.icons.feathericons.MessageSquare
+import compose.icons.feathericons.Plus
+import java.util.Locale
+
+/**
+ * 独立会话列表页（主路由首页）。启动后先进这里，点进任意会话才会切换到聊天页。
+ *
+ * 展示逻辑：
+ * - 仅列出当前工作区的顶层会话（不展开子代理子会话，避免与侧边栏双重展示）。
+ * - 每条行显示标题/时间/状态点（等待权限 / 正在执行 / 空闲）；当前会话高亮。
+ * - 「新建会话」按钮在右上角固定位置。
+ * - 长按可删除（与原侧边栏的长按菜单保留同样语义，但本页只暴露删除，重命名/置顶走侧边栏）。
+ */
+@Composable
+fun SessionListScreen(
+    sessions: List<ChatSession>,
+    currentSessionId: String?,
+    agentStates: Map<String, AgentUIState>,
+    awaitingPermissionSessionIds: Set<String>,
+    workspaceName: String,
+    onSelect: (ChatSession) -> Unit,
+    onDelete: (ChatSession) -> Unit,
+    onNewSession: () -> Unit,
+) {
+    // 长按触发删除二次确认。
+    var pendingDelete by remember { mutableStateOf<ChatSession?>(null) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background),
+        verticalArrangement = Arrangement.spacedBy(Spacing.xs)
+    ) {
+        // 顶栏：标题 + 新建按钮。
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = Spacing.lg)
+                .padding(top = Spacing.md, bottom = Spacing.sm),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column {
+                Text(
+                    text = stringResource(com.aharou.R.string.session_list_title),
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = MaterialTheme.colorScheme.onBackground,
+                    fontWeight = FontWeight.SemiBold
+                )
+                if (workspaceName.isNotBlank()) {
+                    Text(
+                        text = workspaceName,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.semanticColors.subtleText,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+            androidx.compose.material3.FloatingActionButton(
+                onClick = onNewSession,
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
+                modifier = Modifier.size(44.dp)
+            ) {
+                Icon(
+                    FeatherIcons.Plus,
+                    contentDescription = stringResource(com.aharou.R.string.chat_new_session),
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        }
+
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                horizontal = Spacing.lg,
+                vertical = Spacing.sm
+            ),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            if (sessions.isEmpty()) {
+                item {
+                    EmptyStateRow()
+                }
+            }
+            items(sessions, key = { it.id }) { session ->
+                ChatSessionRow(
+                    session = session,
+                    selected = session.id == currentSessionId,
+                    isExecuting = agentStates[session.id] is AgentUIState.Loading || agentStates[session.id] is AgentUIState.Streaming,
+                    awaitingPermission = session.id in awaitingPermissionSessionIds,
+                    pinned = session.isPinned,
+                    onClick = { onSelect(session) },
+                    onLongClick = { pendingDelete = session },
+                    trailing = null
+                )
+            }
+        }
+    }
+
+    // 删除确认弹窗。
+    pendingDelete?.let { pending ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text(stringResource(com.aharou.R.string.chat_batch_delete_title)) },
+            text = {
+                Text(
+                    stringResource(com.aharou.R.string.session_delete_confirm),
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    onDelete(pending)
+                    pendingDelete = null
+                }) {
+                    Text(
+                        stringResource(com.aharou.R.string.common_delete),
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { pendingDelete = null }) {
+                    Text(stringResource(com.aharou.R.string.common_cancel))
+                }
+            }
+        )
+    }
+}
+
+@Composable
+private fun EmptyStateRow() {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = Spacing.xxl),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            FeatherIcons.MessageSquare,
+            contentDescription = null,
+            tint = MaterialTheme.semanticColors.subtleText,
+            modifier = Modifier.size(28.dp)
+        )
+        Spacer(Modifier.width(Spacing.md))
+        Text(
+            text = stringResource(com.aharou.R.string.session_list_empty),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.semanticColors.subtleText
+        )
+    }
+}
