@@ -75,6 +75,9 @@ class ContextCompactor @Inject constructor(
      */
     internal var backgroundDispatcher: CoroutineDispatcher = Dispatchers.Default
 
+    /** 墙钟 seam：黑名单 TTL 判断用它取「现在」；测试可固定为常量，避免真实时钟让用例在慢机器/CI 上飘。 */
+    internal var nowMs: () -> Long = { System.currentTimeMillis() }
+
     /** 分级裁剪的规划与执行（级别定义、最小够用前缀、落盘/骨架化都在 [ContextTrimPlanner]）。 */
     private val trimPlanner = ContextTrimPlanner(fileAccess, pathHomeResolver)
     internal companion object {
@@ -263,23 +266,25 @@ class ContextCompactor @Inject constructor(
     private fun recordFailure(key: String?, reason: String, sessionId: String?) {
         if (key == null) return
         val deterministic = reason == RETAINED_REASON || reason == OVER_BUDGET_REASON
+        val now = nowMs()
         synchronized(failedMaterials) {
-            failedMaterials[key] = FailedMaterial(System.currentTimeMillis(), deterministic)
+            failedMaterials[key] = FailedMaterial(now, deterministic)
             if (failedMaterials.size > 64) failedMaterials.remove(failedMaterials.keys.first())
         }
         // 历史太长压不下与「哪一份材料」无关，按会话记才不会因切分点移动而失效（线上曾连续重做上百次）。
         if (deterministic && !sessionId.isNullOrBlank()) {
-            failedSessions[sessionId] = System.currentTimeMillis()
+            failedSessions[sessionId] = now
             if (failedSessions.size > 64) failedSessions.remove(failedSessions.keys.first())
         }
     }
 
     private fun isBlacklisted(key: String, sessionId: String?): Boolean {
+        val now = nowMs()
         val failedAt = if (sessionId.isNullOrBlank()) 0L else failedSessions[sessionId] ?: 0L
-        if (failedAt > 0L && System.currentTimeMillis() - failedAt <= FAILED_MATERIAL_TTL_MS) return true
+        if (failedAt > 0L && now - failedAt <= FAILED_MATERIAL_TTL_MS) return true
         val failed = synchronized(failedMaterials) { failedMaterials[key] } ?: return false
         val ttl = if (failed.deterministic) FAILED_MATERIAL_TTL_MS else TRANSIENT_MATERIAL_TTL_MS
-        return System.currentTimeMillis() - failed.failedAt <= ttl
+        return now - failed.failedAt <= ttl
     }
 
     private fun materialFingerprint(sessionId: String?, provider: AIProvider, head: List<AgentMessage>): String {

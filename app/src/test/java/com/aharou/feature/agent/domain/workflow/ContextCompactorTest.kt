@@ -504,6 +504,9 @@ class ContextCompactorTest {
         compactor.backgroundDispatcher = StandardTestDispatcher(testScheduler)
         prepare()
         coEvery { provider.complete(any(), any(), any(), any()) } returns AIResponse("", stopReason = "refusal")
+        // 固定墙钟 seam：黑名单 TTL 判断不再依赖 System.currentTimeMillis()（真实时钟在慢机器/CI 上
+        // 会让两次调用间隔超 5s、瞬态黑名单过期而用例飘），固定为常量后行为确定。
+        compactor.nowMs = { 0L }
         val original = history()
         // 旧语义是「失败就拉黑 60 秒、连点重试也一直失败」；现在 API 类失败只拦 TRANSIENT_MATERIAL_TTL_MS（秒级），
         // 且只拦自动路径（force 入口可绕过，见下个用例）。黑名单按 materialKey（含 head 内容）命中，
