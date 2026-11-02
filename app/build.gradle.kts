@@ -294,6 +294,10 @@ android {
             it.testLogging {
                 exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
             }
+            // MockK 基于 ByteBuddy agent self-attach（字节码注入生成 mock）；在受限容器（PRoot/部分 Docker）里
+            // JVM 默认禁止自 attach，会抛 "Could not self-attach to current VM" 让所有 MockK 用例挂在初始化。
+            // 显式允许 self-attach，标准 Linux/CI 上无副作用。
+            it.jvmArgs("-Djdk.attach.allowAttachSelf=true")
         }
     }
 
