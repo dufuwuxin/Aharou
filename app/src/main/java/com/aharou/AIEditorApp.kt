@@ -18,6 +18,7 @@ import com.aharou.core.util.TombstoneParser
 import com.aharou.core.util.WorkManagerFileLogger
 import net.schmizz.sshj.common.SecurityUtils
 import com.aharou.feature.agent.domain.container.ContainerInstaller
+import com.aharou.feature.agent.domain.container.ContainerProfileResolver
 import com.aharou.feature.agent.domain.mcp.McpManager
 import com.aharou.feature.editor.lsp.EditorLspManager
 import com.aharou.feature.settings.data.repository.KeepaliveSettingsRepository
@@ -167,6 +168,14 @@ class AIEditorApp : Application(), Configuration.Provider {
     /** MCP 生命周期总管：启动即连接已配置的远程 server。 */
     @Inject
     lateinit var mcpManager: McpManager
+
+    /** 容器安装器：启动即静默解压当前默认容器的 rootfs，用户进终端时基本已就绪。 */
+    @Inject
+    lateinit var containerInstaller: ContainerInstaller
+
+    /** 默认容器解析器：预热按当前激活 profile 执行，不猜远程/本地。 */
+    @Inject
+    lateinit var containerProfileResolver: ContainerProfileResolver
 
     /** 编辑器语言服务器管理器：冷启动时按进程账本清扫上次进程被杀后遗留的语言服务器。 */
     @Inject
@@ -504,6 +513,13 @@ class AIEditorApp : Application(), Configuration.Provider {
             containerImageCatalog.refreshFromNetworkIfStale()
             skillMarketCatalog.refreshFromNetworkIfStale()
             pluginMarketCatalog.refreshFromNetworkIfStale()
+        }
+        // 容器预热：后台静默解压当前默认容器的 rootfs（已安装走快路径立即跳过），
+        // 用户首次进终端不必再等解压 + 探针验证；SSH / 自定义容器基本是 no-op，失败只留日志，终端页仍会按需重试。
+        appScope.launch(Dispatchers.IO) {
+            runCatching {
+                containerInstaller.installRootfsIfNeed(containerProfileResolver.defaultProfile())
+            }.onFailure { FileLogger.w(TAG, "容器启动预热预装失败，进终端时重试", it) }
         }
         // 启动即刷新知识库源清单并同步本地副本（失败静默，沿用上次同步到的内容）。
         appScope.launch {
