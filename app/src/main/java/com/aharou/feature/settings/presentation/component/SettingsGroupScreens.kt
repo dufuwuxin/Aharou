@@ -363,13 +363,7 @@ internal fun SettingsMoreGroupScreen(onOpen: (SettingsSection) -> Unit) {
                 onClick = { onOpen(SettingsSection.ShadowScreen) }
             )
             SettingsDivider()
-            // 团队取代原子代理入口：角色现在叫「专家成员」，收在团队页里（点进去管理）。
-            SettingsRow(
-                icon = FeatherIcons.Users,
-                title = stringResource(SettingsSection.Teams.titleRes),
-                onClick = { onOpen(SettingsSection.Teams) }
-            )
-            SettingsDivider()
+            // 团队入口已收进「配置」页（AiGroup），这里不再重复；角色在团队页里管理。
             SettingsRow(
                 icon = FeatherIcons.Users,
                 title = stringResource(SettingsSection.Experiments.titleRes),

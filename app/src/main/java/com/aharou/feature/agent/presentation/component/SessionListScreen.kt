@@ -19,6 +19,10 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -42,6 +46,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.aharou.R
+import com.aharou.core.theme.Brand
 import com.aharou.core.theme.Radius
 import com.aharou.core.theme.Spacing
 import com.aharou.core.theme.semanticColors
@@ -58,7 +63,7 @@ import java.util.Locale
  * 展示逻辑：
  * - 仅列出当前工作区的顶层会话（不展开子代理子会话，避免与侧边栏双重展示）。
  * - 每条行显示标题/时间/状态点（等待权限 / 正在执行 / 空闲）；当前会话高亮。
- * - 「新建会话」按钮在右上角固定位置。
+ * - 「新建会话」按钮改为右下角悬浮（棕黄色），符合 Material 惯例。
  * - 长按可删除（与原侧边栏的长按菜单保留同样语义，但本页只暴露删除，重命名/置顶走侧边栏）。
  */
 @Composable
@@ -75,60 +80,57 @@ fun SessionListScreen(
     // 长按触发删除二次确认。
     var pendingDelete by remember { mutableStateOf<ChatSession?>(null) }
 
-    Column(
+    // 根用 Box：内层 Column 铺满（标题 + 会话列表），右下角叠加一个棕黄色悬浮「新建会话」按钮。
+    // 之前它顶在右上角、蓝色，不符合 Material「悬浮按钮在右下角」的惯例，也容易被当成操作菜单。
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background),
-        verticalArrangement = Arrangement.spacedBy(Spacing.xs)
+            .background(MaterialTheme.colorScheme.background)
     ) {
-        // 顶栏：标题 + 新建按钮。
-        Row(
+        Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = Spacing.lg)
-                .padding(top = Spacing.md, bottom = Spacing.sm),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+                .fillMaxSize()
+                .windowInsetsPadding(WindowInsets.systemBars.only(WindowInsetsSides.Top)),
+            verticalArrangement = Arrangement.spacedBy(Spacing.xs)
         ) {
-            Column {
-                Text(
-                    text = stringResource(com.aharou.R.string.session_list_title),
-                    style = MaterialTheme.typography.headlineSmall,
-                    color = MaterialTheme.colorScheme.onBackground,
-                    fontWeight = FontWeight.SemiBold
-                )
-                if (workspaceName.isNotBlank()) {
+            // 顶栏：标题 + 当前工作区名（新建会话按钮已移到右下角悬浮）。
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = Spacing.lg)
+                    .padding(top = Spacing.md, bottom = Spacing.sm),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
                     Text(
-                        text = workspaceName,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.semanticColors.subtleText,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        text = stringResource(com.aharou.R.string.session_list_title),
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = MaterialTheme.colorScheme.onBackground,
+                        fontWeight = FontWeight.SemiBold
                     )
+                    if (workspaceName.isNotBlank()) {
+                        Text(
+                            text = workspaceName,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.semanticColors.subtleText,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
             }
-            androidx.compose.material3.FloatingActionButton(
-                onClick = onNewSession,
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-                modifier = Modifier.size(44.dp)
-            ) {
-                Icon(
-                    FeatherIcons.Plus,
-                    contentDescription = stringResource(com.aharou.R.string.chat_new_session),
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-        }
 
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                horizontal = Spacing.lg,
-                vertical = Spacing.sm
-            ),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .windowInsetsPadding(WindowInsets.systemBars.only(WindowInsetsSides.Bottom)),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                    horizontal = Spacing.lg,
+                    vertical = Spacing.sm
+                ),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
             if (sessions.isEmpty()) {
                 item {
                     EmptyStateRow()
@@ -162,6 +164,21 @@ fun SessionListScreen(
                     }
                 }
             }
+        }
+        androidx.compose.material3.FloatingActionButton(
+            onClick = onNewSession,
+            containerColor = Brand.Orange,
+            contentColor = androidx.compose.ui.graphics.Color.White,
+            modifier = Modifier
+                .align(androidx.compose.ui.Alignment.BottomEnd)
+                .padding(Spacing.lg)
+                .size(56.dp),
+        ) {
+            Icon(
+                FeatherIcons.Plus,
+                contentDescription = stringResource(com.aharou.R.string.chat_new_session),
+                modifier = Modifier.size(24.dp),
+            )
         }
     }
 
