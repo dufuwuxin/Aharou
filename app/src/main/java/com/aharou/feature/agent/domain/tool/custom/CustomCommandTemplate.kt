@@ -9,7 +9,7 @@ sealed interface CustomCommandRender {
 }
 
 /**
- * 自定义工具的命令模板渲染：把 `{{参数名}}` 换成 shell 单引号转义后的参数值。
+ * 自定义工具的命令模板渲染：按占位符所在 shell 引用上下文转义参数值。
  *
  * 几条硬规则（都是「宁可报错也不执行半条命令」的体现）：
  * - 模板为空 → 拒绝；
@@ -36,8 +36,8 @@ object CustomCommandTemplate {
     /**
      * 渲染命令。[values] 按参数名给字符串值（已由调用方从工具入参里取好）。
      *
-     * 替换通过 [Regex.replace] 的一次性求值完成：参数值里即便含 `{{x}}` 也不会被二次展开，
-     * 值一律整段套单引号，空格、单引号、中文都不需要调用方自己操心转义。
+     * 只扫描模板，不重新扫描参数：值里的 `{{x}}` 不会二次展开。
+     * 无引用时使用 shellQuote；单 / 双引号中只转义该引用上下文的特殊字符。
      */
     fun render(
         template: String,
@@ -66,9 +66,98 @@ object CustomCommandTemplate {
             )
         }
 
-        val command = PLACEHOLDER_REGEX.replace(template) { match ->
-            shellQuote(values[match.groupValues[1]].orEmpty())
+        return CustomCommandRender.Success(renderQuoted(template, values))
+    }
+
+    /**
+     * 执行入口：模板作为 sh -c 的脚本，参数仅通过 argv 绑定。即使模板含 heredoc 等复杂语法，
+     * 用户输入也不会进入 shell 源码；引用状态只决定参数引用如何拼接，不决定输入能否执行。
+     * render 保留原有可读预览与回归字符串；真实审批 / 执行统一使用此命令。
+     */
+    fun renderForExecution(
+        template: String,
+        parameters: List<CustomToolParameter>,
+        values: Map<String, String?>
+    ): CustomCommandRender {
+        val checked = render(template, parameters, values)
+        if (checked is CustomCommandRender.Failure) return checked
+        val used = placeholders(template)
+        if (used.isEmpty()) return checked
+        val bindings = used.withIndex().associate { it.value to it.index + 1 }
+        val script = renderQuoted(template, emptyMap(), bindings)
+        val arguments = used.joinToString(" ") { shellQuote(values[it].orEmpty()) }
+        return CustomCommandRender.Success("sh -c ${shellQuote(script)} custom-tool $arguments")
+    }
+
+    private data class ShellFrame(var quote: Char? = null, val closing: Char? = null, var depth: Int = 0)
+
+    /**
+     * POSIX shell 的单引号中只需处理单引号；双引号中必须处理 $、反引号、双引号与反斜线。
+     * $() / 反引号内部是新的命令引用域，不能沿用外层双引号状态。
+     * 旧式反引号先进行一次反斜线处理，故其内的替换还需逐层保护 $、`、\。
+     */
+    private fun renderQuoted(
+        template: String,
+        values: Map<String, String?>,
+        bindings: Map<String, Int>? = null
+    ): String {
+        val frames = mutableListOf(ShellFrame())
+        val result = StringBuilder()
+        var index = 0
+        while (index < template.length) {
+            val frame = frames.last()
+            val match = PLACEHOLDER_REGEX.find(template, index)?.takeIf { it.range.first == index }
+            if (match != null) {
+                val value = values[match.groupValues[1]].orEmpty()
+                val reference = bindings?.get(match.groupValues[1])?.let { "\${${it}}" }
+                var literal = if (reference != null) when (frame.quote) {
+                    '\'' -> "'\"$reference\"'"
+                    '"' -> reference
+                    else -> "\"$reference\""
+                } else when (frame.quote) {
+                    '\'' -> value.replace("'", "'\"'\"'")
+                    '"' -> value.replace("\\", "\\\\").replace("$", "\\$")
+                        .replace("`", "\\`").replace("\"", "\\\"")
+                    else -> shellQuote(value)
+                }
+                repeat(frames.count { it.closing == '`' }) {
+                    literal = literal.replace("\\", "\\\\").replace("$", "\\$").replace("`", "\\`")
+                }
+                result.append(literal)
+                index = match.range.last + 1
+                continue
+            }
+            val char = template[index]
+            if (char == '\\' && frame.quote != '\'' && index + 1 < template.length) {
+                // A backslash before a placeholder escapes its opening brace, not the quoted value.
+                if (PLACEHOLDER_REGEX.find(template, index + 1)?.range?.first == index + 1) {
+                    index++
+                } else {
+                    result.append(char).append(template[index + 1])
+                    index += 2
+                }
+                continue
+            }
+            when {
+                frame.quote == '\'' -> if (char == '\'') frame.quote = null
+                char == '\'' && frame.quote == null -> frame.quote = '\''
+                char == '"' -> frame.quote = if (frame.quote == '"') null else '"'
+                char == '$' && template.getOrNull(index + 1) == '(' -> {
+                    result.append("$(")
+                    frames.add(ShellFrame(closing = ')'))
+                    index += 2
+                    continue
+                }
+                char == '`' && frame.closing == '`' -> frames.removeAt(frames.lastIndex)
+                char == '`' -> frames.add(ShellFrame(closing = '`'))
+                char == '(' && frame.quote == null && frame.closing == ')' -> frame.depth++
+                char == ')' && frame.quote == null && frame.closing == ')' -> {
+                    if (frame.depth == 0) frames.removeAt(frames.lastIndex) else frame.depth--
+                }
+            }
+            result.append(char)
+            index++
         }
-        return CustomCommandRender.Success(command)
+        return result.toString()
     }
 }

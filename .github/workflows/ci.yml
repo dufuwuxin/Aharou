@@ -5,7 +5,7 @@ name: CI
 # 打 v* tag 的发版构建走 android-release.yml，不在这里。
 on:
   push:
-    branches: [ master ]
+    branches: [ master, main ]
     # 纯文档/资源改动不影响构建产物，跳过 CI 省时间（public 仓库虽不扣额度，但省 11 分钟等待）。
     # 注意：只要本次 push 含任一非忽略路径的改动，CI 仍会触发。
     paths-ignore:
@@ -16,7 +16,7 @@ on:
       - 'LICENSE'
       - '.gitignore'
   pull_request:
-    branches: [ master ]
+    branches: [ master, main ]
     paths-ignore:
       - '**.md'
       - 'docs/**'
@@ -80,7 +80,9 @@ jobs:
       # 迁移版本号对账：编号连续、SCHEMA_VERSION 一致、已发布迁移未被篡改/复用
       # （hotfix 合流后 master 未把未发布迁移后移会在这里被拦）。
       - name: Check migration versions
-        run: python3 scripts/check_migrations.py
+        run: |
+          python3 scripts/check_migrations.py
+          python3 scripts/test_check_migrations.py
 
       # 官方技能自检：frontmatter 与命名、description 长度、验收用例是否齐全、
       # 市场配置两处是否一致、展示名有没有同步进文档。
@@ -103,7 +105,7 @@ jobs:
       - name: Build armsolo debug (smoke)
         run: ./gradlew :app:assembleArmsoloDebug --stacktrace
 
-      # 单元测试（app/src/test 下的 Kotlin 单测）。
+      # 单元测试（app/src/test 与 core-agent/src/test 下的 Kotlin 单测）。
       # 只跑 ARM64 debug 变体：
       # 跑全 flavor 6 变体是重复编译，无额外覆盖。
       - name: Run unit tests
@@ -115,7 +117,7 @@ jobs:
         # 本地复现：./gradlew :app:testArmsoloDebugUnitTest --no-build-cache
         run: |
           set -o pipefail
-          ./gradlew :app:testArmsoloDebugUnitTest \
+          ./gradlew :core-agent:test :app:testArmsoloDebugUnitTest \
             --console=plain 2>&1 | tee /tmp/unit.log || touch /tmp/unit-tests-failed
 
       - name: Upload unit test log
@@ -156,7 +158,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: unit-test-results
-          path: app/build/test-results/testArmsoloDebugUnitTest/**
+          path: |
+            app/build/test-results/testArmsoloDebugUnitTest/**
+            core-agent/build/test-results/test/**
           retention-days: 7
           if-no-files-found: warn
 

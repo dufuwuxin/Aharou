@@ -300,8 +300,8 @@ class AgentTurnRunner @Inject constructor(
                 ?.let { ModelIdentity(modelId = it, providerId = sessionEntity.providerId) },
         )
 
-        toolInjectionGate.refresh()
-        val allTools = toolRegistry.getAvailableTools()
+        val toolSnapshot = toolInjectionGate.snapshotForProject(effectiveProjectRoot)
+        val allTools = toolRegistry.getAvailableTools(toolSnapshot)
         val permittedTools = when {
             agentDefinition != null -> {
                 val allowed = agentDefinition.filterToolNames(allTools.map { it.name }).toSet()
@@ -311,7 +311,7 @@ class AgentTurnRunner @Inject constructor(
             else -> allTools.filterNot { it.name == AgentDefinition.PARENT_MESSAGE_TOOL }
         }
 
-        val tools = toolInjectionGate.visible(permittedTools, agentContext.currentUserText)
+        val tools = toolInjectionGate.visible(permittedTools, agentContext.currentUserText, toolSnapshot)
 
         // 工具参数预览：结束时只有部分事件带 argsPreview，缺失时回退到开始时记下的那份
         val toolArgsByMsgId = mutableMapOf<String, String>()

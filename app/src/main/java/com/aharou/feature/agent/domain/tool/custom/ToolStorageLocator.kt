@@ -20,6 +20,10 @@ interface ToolStorageLocator {
 
     /** 项目层工具目录（`<workspace>/.aharou/tools`，远程走 [ProjectAharouRoot] 私有目录）；无工作区为 null。 */
     fun projectToolsDir(): File?
+
+    /** 运行期必须传会话工作区，空路径只加载全局层，不读取 UI 当前工作区。 */
+    fun projectToolsDir(projectRoot: String): File? = projectRoot.takeIf { it.isNotBlank() }
+        ?.let { File(it, ".aharou/tools") }
 }
 
 /** 生产实现：照抄 `PromptFragmentCatalog` 的两级来源解析（项目 > 全局）。 */
@@ -35,6 +39,9 @@ class AharouToolStorageLocator @Inject constructor(
     override fun projectToolsDir(): File? =
         workspaceRepository.currentPath().takeIf { it.isNotBlank() }
             ?.let { File(projectAharouRoot.forPath(it), TOOLS_DIR) }
+
+    override fun projectToolsDir(projectRoot: String): File? =
+        projectRoot.takeIf { it.isNotBlank() }?.let { File(projectAharouRoot.forPath(it), TOOLS_DIR) }
 
     private companion object {
         const val TOOLS_DIR = "tools"

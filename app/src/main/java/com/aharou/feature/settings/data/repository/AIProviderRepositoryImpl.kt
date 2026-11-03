@@ -201,9 +201,9 @@ class AIProviderRepositoryImpl @Inject constructor(
             scriptParams = KeystoreCipher.encryptString(encodeMap(scriptParams)),
             customIcon = customIcon,
             // 备用链是唯一真相，旧的单选列只镜像链上第一条：老版本 App 与旧配置通道读到的仍是「一个有效回退量」
-            fallbackProviderId = fallbackChain.firstOrNull()?.providerId ?: "",
-            fallbackModel = fallbackChain.firstOrNull()?.model ?: "",
-            fallbackChain = encodeFallbackChain(fallbackChain),
+            fallbackProviderId = effectiveFallbackChain.firstOrNull()?.providerId ?: "",
+            fallbackModel = effectiveFallbackChain.firstOrNull()?.model ?: fallbackModel,
+            fallbackChain = encodeFallbackChain(effectiveFallbackChain),
             requestMiddleware = requestMiddleware
         )
     }

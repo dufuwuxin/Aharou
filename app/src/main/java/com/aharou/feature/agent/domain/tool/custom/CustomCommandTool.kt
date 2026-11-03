@@ -119,7 +119,7 @@ class CustomCommandTool(
         val values = definition.parameters.associate { param ->
             param.name to (args[param.name] as? JsonPrimitive)?.contentOrNull
         }
-        return CustomCommandTemplate.render(definition.command, definition.parameters, values)
+        return CustomCommandTemplate.renderForExecution(definition.command, definition.parameters, values)
     }
 
     /**

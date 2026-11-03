@@ -1,5 +1,7 @@
 package com.aharou.feature.settings.domain.model
 
+import kotlinx.serialization.Serializable
+
 data class AIProviderConfig(
     val id: String,
     val name: String,
@@ -78,6 +80,24 @@ data class AIProviderConfig(
             listOf(FallbackTarget(fallbackProviderId.trim(), fallbackModel.trim()))
                 .filter { it.providerId.isNotEmpty() }
         }
+
+    /** 旧 config 写入口更新链首项，保留后续项；清空供应商仍表示关闭回退。 */
+    fun withLegacyFallback(
+        providerId: String = effectiveFallbackChain.firstOrNull()?.providerId ?: fallbackProviderId,
+        model: String = effectiveFallbackChain.firstOrNull()?.model ?: fallbackModel
+    ): AIProviderConfig = if (providerId.isBlank()) {
+        // 旧 config 可先写模型再写供应商；空供应商不生效，但不能丢掉已填模型。
+        copy(fallbackProviderId = "", fallbackModel = model.trim(), fallbackChain = emptyList())
+    } else {
+        withFallbackChain(listOf(FallbackTarget(providerId.trim(), model.trim())) + effectiveFallbackChain.drop(1))
+    }
+
+    /** 显式链编辑同时镜像旧列，避免清空链后旧值复活。 */
+    fun withFallbackChain(chain: List<FallbackTarget>): AIProviderConfig = copy(
+        fallbackChain = chain,
+        fallbackProviderId = chain.firstOrNull()?.providerId.orEmpty(),
+        fallbackModel = chain.firstOrNull()?.model.orEmpty()
+    )
 
     /** 实际生效的模型：优先 selectedModel，其次 defaultModel。 */
     val effectiveModel: String
@@ -173,7 +193,7 @@ fun AIProviderConfig.sanitized(): AIProviderConfig = copy(
     models = models.map { it.stripLineBreaks() }.filter { it.isNotEmpty() }.distinct(),
     selectedModel = selectedModel.stripLineBreaks(),
     // 备用链去空白、去重（同供应商同模型只留一条），丢掉供应商标识为空的残条
-    fallbackChain = fallbackChain
+    fallbackChain = effectiveFallbackChain
         .map { FallbackTarget(it.providerId.stripAllWhitespace(), it.model.stripLineBreaks()) }
         .filter { it.providerId.isNotEmpty() }
         .distinct(),
@@ -191,6 +211,8 @@ fun AIProviderConfig.sanitized(): AIProviderConfig = copy(
         .filterKeys { it.isNotEmpty() }
 )
 
+// 桌面端的本地配置直接以枚举存 provider 类型，需要它自带序列化器
+@Serializable
 enum class ProviderType {
     OPENAI, ANTHROPIC, GEMINI,
 

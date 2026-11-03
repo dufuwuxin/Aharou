@@ -164,7 +164,11 @@ data class ProviderDto(
     /** 多 Key 自动切换状态码（逗号分隔）；null 表示旧备份无此字段，导入时回退空串（即默认码表）。 */
     val keySwitchStatusCodes: String? = null,
     /** 自定义图标（本地路径或 http(s) 链接）；null 表示旧备份无此字段，导入时回退空串（按品牌名匹配内置图标）。 */
-    val customIcon: String? = null
+    val customIcon: String? = null,
+    /** 回退字段只增不减；旧备份缺失时按空值导入，旧单项可由领域层归一。 */
+    val fallbackProviderId: String? = null,
+    val fallbackModel: String? = null,
+    val fallbackChain: String? = null
 )
 
 @Serializable

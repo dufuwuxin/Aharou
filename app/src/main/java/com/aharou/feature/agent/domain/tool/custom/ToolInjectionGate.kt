@@ -31,9 +31,16 @@ class ToolInjectionGate @Inject constructor(
 
     suspend fun refresh() = store.refresh()
 
-    fun visible(tools: List<AgentTool>, userText: String?): List<AgentTool> {
-        val customs = store.snapshotCustomTools().associateBy { it.name }
-        val overrides = store.snapshotOverrides()
+    suspend fun snapshotForProject(projectRoot: String): ToolSettingsStore.Snapshot =
+        store.snapshotForProject(projectRoot)
+
+    fun visible(tools: List<AgentTool>, userText: String?): List<AgentTool> = visible(
+        tools, userText, ToolSettingsStore.Snapshot(store.snapshotCustomTools(), store.snapshotOverrides())
+    )
+
+    fun visible(tools: List<AgentTool>, userText: String?, snapshot: ToolSettingsStore.Snapshot): List<AgentTool> {
+        val customs = snapshot.tools.associateBy { it.name }
+        val overrides = snapshot.overrides
         if (customs.isEmpty() && overrides.isEmpty()) return tools
 
         return tools.mapNotNull { tool ->

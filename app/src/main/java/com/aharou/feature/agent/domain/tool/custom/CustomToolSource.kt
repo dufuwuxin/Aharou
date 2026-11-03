@@ -16,6 +16,8 @@ import javax.inject.Singleton
  */
 fun interface CustomToolSource {
     fun customTools(): List<AgentTool>
+
+    fun customTools(snapshot: ToolSettingsStore.Snapshot): List<AgentTool> = customTools()
 }
 
 /** 生产实现：从 [ToolSettingsStore] 的内存快照即时构建工具实例（不做磁盘 IO）。 */
@@ -27,8 +29,12 @@ class CustomToolRuntime @Inject constructor(
     @param:ApplicationContext private val context: Context,
 ) : CustomToolSource {
 
-    override fun customTools(): List<AgentTool> =
-        store.snapshotCustomTools().map { definition ->
+    override fun customTools(): List<AgentTool> = toolsFrom(store.snapshotCustomTools())
+
+    override fun customTools(snapshot: ToolSettingsStore.Snapshot): List<AgentTool> = toolsFrom(snapshot.tools)
+
+    private fun toolsFrom(definitions: List<CustomToolDefinition>): List<AgentTool> =
+        definitions.map { definition ->
             CustomCommandTool(definition, commandEngine, workspaceRepository, context)
         }
 }

@@ -237,22 +237,22 @@ class ConfigProviderFields @Inject constructor(
                     desc = "旧字段：本供应商请求失败（额度耗尽 / 鉴权 / 限流）时自动切到它继续本轮；留空不回退。填的是供应商 id（可用 config list 查）。" +
                         "现在只镜像备用链第一条，多条轮询请用 fallback_chain。",
                     read = { it.fallbackProviderId },
-                    write = { p, s -> p.copy(fallbackProviderId = s.trim()) },
+                    write = { p, s -> p.withLegacyFallback(providerId = s.trim()) },
                 ),
                 str(
                     field = "fallback_model",
                     name = "回退模型",
                     desc = "旧字段：回退时使用的模型名；留空则用回退供应商自己的有效模型。现在只镜像备用链第一条，新配置请用 fallback_chain。",
                     read = { it.fallbackModel },
-                    write = { p, s -> p.copy(fallbackModel = s.trim()) },
+                    write = { p, s -> p.withLegacyFallback(model = s.trim()) },
                 ),
                 str(
                     field = "fallback_chain",
                     name = "备用模型链",
                     desc = "按顺序轮询的备用模型列表，每行 `供应商 id|模型名`（模型可省，省略表示用该供应商自己的有效模型）。" +
                         "第一条失败切第二条，依此往下；留空表示不回退。这是备用链的唯一真相，fallback_provider_id / fallback_model 只镜像第一条。",
-                    read = { encodeFallbackChain(it.fallbackChain) },
-                    write = { p, s -> p.copy(fallbackChain = parseFallbackChain(s)) },
+                    read = { encodeFallbackChain(it.effectiveFallbackChain) },
+                    write = { p, s -> p.withFallbackChain(parseFallbackChain(s)) },
                 ),
                 ClosureField(
                     path = "$basePath.$forId.model_metadata",

@@ -42,7 +42,7 @@ class ToolSettingsStore @Inject constructor(
     private val locator: ToolStorageLocator
 ) {
 
-    private data class Snapshot(
+    data class Snapshot(
         val tools: List<CustomToolDefinition> = emptyList(),
         val overrides: Map<String, ToolOverride> = emptyMap()
     )
@@ -82,6 +82,11 @@ class ToolSettingsStore @Inject constructor(
         mutex.withLock {
             snapshot = withContext(Dispatchers.IO) { loadSnapshot() }
         }
+    }
+
+    /** 独立运行快照：返回给调用轮，不发布到 UI 快照，也不会被后来的 refresh 替换。 */
+    suspend fun snapshotForProject(projectRoot: String): Snapshot = mutex.withLock {
+        withContext(Dispatchers.IO) { loadSnapshot(locator.projectToolsDir(projectRoot)) }
     }
 
     suspend fun saveCustomTool(definition: CustomToolDefinition): Boolean {
@@ -191,13 +196,13 @@ class ToolSettingsStore @Inject constructor(
 
     // ---- 读盘 ----
 
-    private fun loadSnapshot(): Snapshot {
+    private fun loadSnapshot(projectDir: File? = projectToolsDir()): Snapshot {
         val tools = LinkedHashMap<String, CustomToolDefinition>()
-        customDirs().forEach { dir ->
+        listOfNotNull(globalToolsDir(), projectDir).map { File(it, CUSTOM_DIR) }.forEach { dir ->
             readCustomTools(dir).forEach { tools[it.name] = it }
         }
         val overrides = LinkedHashMap<String, ToolOverride>()
-        overrideFiles().forEach { file ->
+        listOfNotNull(globalToolsDir(), projectDir).map { File(it, OVERRIDES_FILE) }.forEach { file ->
             readOverridesFile(file)?.forEach { (name, override) ->
                 if (!override.isEmpty) overrides[name] = override
             }

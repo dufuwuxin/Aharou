@@ -830,7 +830,10 @@ class BackupManagerImpl @Inject constructor(
         keyCooldownMinutes = keyCooldownMinutes,
         scriptParams = KeystoreCipher.decryptString(scriptParams),
         keySwitchStatusCodes = keySwitchStatusCodes,
-        customIcon = customIcon
+        customIcon = customIcon,
+        fallbackProviderId = fallbackProviderId,
+        fallbackModel = fallbackModel,
+        fallbackChain = fallbackChain
     )
 
     private fun ProviderDto.toEntity() = AIProviderEntity(
@@ -857,7 +860,10 @@ class BackupManagerImpl @Inject constructor(
         keyCooldownMinutes = keyCooldownMinutes ?: 5,
         scriptParams = KeystoreCipher.encryptString(scriptParams ?: ""),
         keySwitchStatusCodes = keySwitchStatusCodes ?: "",
-        customIcon = customIcon ?: ""
+        customIcon = customIcon ?: "",
+        fallbackProviderId = fallbackProviderId ?: "",
+        fallbackModel = fallbackModel ?: "",
+        fallbackChain = fallbackChain ?: ""
     )
 
     private fun RemoteConnectionEntity.toDto() = RemoteConnectionDto(

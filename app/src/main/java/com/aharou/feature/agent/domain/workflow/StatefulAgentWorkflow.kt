@@ -312,13 +312,14 @@ class StatefulAgentWorkflow @Inject constructor(
             history = history, sessionId = sessionId, mode = domain?.mode ?: AgentMode.BUILD,
             modeBeforePlan = domain?.modeBeforePlan, reasoningEffort = domain?.reasoningEffort?.apiValue,
             lastInputTokens = session?.lastInputTokens ?: 0, agentDefinition = definition)
-        toolInjectionGate.refresh(); val allTools = toolRegistry.getAvailableTools()
+        val toolSnapshot = toolInjectionGate.snapshotForProject(context.projectRoot)
+        val allTools = toolRegistry.getAvailableTools(toolSnapshot)
         val tools = toolInjectionGate.visible(when {
             definition != null -> definition.filterToolNames(allTools.map { it.name }).toSet()
                 .let { allowed -> allTools.filter { it.name in allowed } }
             session?.parentId != null -> allTools // 子代理可再派子代理，递归由 MAX_SUBAGENT_DEPTH 兜底
             else -> allTools.filterNot { it.name == AgentDefinition.PARENT_MESSAGE_TOOL }
-        }, null)
+        }, null, toolSnapshot)
         val compactionProvider = resolveCompactionFallbackProvider(sessionId) ?: provider
         val reuseMainPrefix = compactionProvider.providerId == provider.providerId && compactionProvider.model == provider.model  // 前缀缓存只同 provider 同 model 内生效，配了独立压缩模型就不复用主前缀
         return contextCompactor.compactIfNeeded(history, compactionProvider, sessionId, force = true, windowProvider = provider,

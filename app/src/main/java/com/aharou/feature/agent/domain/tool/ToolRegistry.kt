@@ -1,6 +1,7 @@
 package com.aharou.feature.agent.domain.tool
 
 import com.aharou.feature.agent.domain.tool.custom.CustomToolSource
+import com.aharou.feature.agent.domain.tool.custom.ToolSettingsStore
 import java.util.Collections
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -39,7 +40,13 @@ class ToolRegistry @Inject constructor(
      * 返回可用工具列表。PLAN 模式下仍返回全部工具定义（让 AI 知道这些工具存在，可在计划中引用），
      * 写操作工具由 [com.aharou.feature.agent.domain.permission.ToolPermissionPolicyEngine] 在运行时拦截并返回 PLAN_MODE_REJECTED。
      */
-    fun getAvailableTools(): List<AgentTool> {
+    fun getAvailableTools(): List<AgentTool> = availableTools(customTools())
+
+    /** 定义与注入策略都来自调用轮持有的同一份会话快照。 */
+    fun getAvailableTools(snapshot: ToolSettingsStore.Snapshot): List<AgentTool> =
+        availableTools(customToolSource?.customTools(snapshot).orEmpty().map { guard?.wrap(it) ?: it })
+
+    private fun availableTools(custom: List<AgentTool>): List<AgentTool> {
         synchronized(tools) {
             // 按名字排序，而不是只靠注册顺序：内建工具在 `AgentModule` 里注册顺序固定，
             // 但 **MCP 工具是各服务器连上后异步追加的**，哪个服务器先回就先注册。
@@ -47,7 +54,7 @@ class ToolRegistry @Inject constructor(
             // 是整条前缀里最靠前的一段，顺序一变整段缓存全废。
             val registered = tools.values.toList()
             val names = registered.mapTo(HashSet()) { it.name }
-            return (registered + customTools().filterNot { it.name in names }).sortedBy { it.name }
+            return (registered + custom.filterNot { it.name in names }).sortedBy { it.name }
         }
     }
 

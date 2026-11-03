@@ -21,7 +21,12 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MIGRATIONS_REL = "app/src/main/assets/migrations"
-DB_REL = "app/src/main/java/com/aharou/feature/agent/data/local/database/AgentDatabase.kt"
+DB_REL = "core-storage/src/commonMain/kotlin/com/aharou/feature/agent/data/local/database/AgentDatabase.kt"
+# 发布标签仍使用模块拆分前的路径，不能只按当前布局读取历史 schema。
+TAG_DB_RELS = (
+    DB_REL,
+    "app/src/main/java/com/aharou/feature/agent/data/local/database/AgentDatabase.kt",
+)
 MIGRATIONS_DIR = os.path.join(ROOT, MIGRATIONS_REL)
 DB_FILE = os.path.join(ROOT, DB_REL)
 
@@ -92,13 +97,15 @@ tags = [t.strip() for t in tags_out.splitlines() if t.strip()]
 published_max = 0
 tag_schema = {}  # tag -> schema version
 for tag in tags:
-    rc, content = git(["show", "%s:%s" % (tag, DB_REL)])
-    if rc != 0:
-        continue
-    m = re.search(r"const val SCHEMA_VERSION = (\d+)", content)
-    if m:
-        tag_schema[tag] = int(m.group(1))
-        published_max = max(published_max, int(m.group(1)))
+    for db_rel in TAG_DB_RELS:
+        rc, content = git(["show", "%s:%s" % (tag, db_rel)])
+        if rc != 0:
+            continue
+        m = re.search(r"const val SCHEMA_VERSION = (\d+)", content)
+        if m:
+            tag_schema[tag] = int(m.group(1))
+            published_max = max(published_max, int(m.group(1)))
+            break
 
 if tags and not tag_schema:
     notes.append("找到 v* tag 但未能解析其中的 SCHEMA_VERSION，跳过已发布冻结校验")
