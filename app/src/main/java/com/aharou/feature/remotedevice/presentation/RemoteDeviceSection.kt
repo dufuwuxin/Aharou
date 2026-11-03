@@ -353,7 +353,7 @@ private fun AcceptAssistDialog(
                             host = raw
                         }
                     },
-                    label = stringResource(R.string.settings_remote_device_assist_address),
+                    label = stringResource(R.string.settings_remote_device_peer_address),
                     singleLine = true
                 )
                 AppTextField(
@@ -366,7 +366,7 @@ private fun AcceptAssistDialog(
                 AppTextField(
                     value = code,
                     onValueChange = { code = it.uppercase().take(6) },
-                    label = stringResource(R.string.settings_remote_device_pair_code),
+                    label = stringResource(R.string.settings_remote_device_peer_code),
                     singleLine = true
                 )
                 if (state is AssistUiState.Done) {
