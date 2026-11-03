@@ -3681,4 +3681,12 @@
     <string name="session_list_empty">No sessions. Tap + to create one.</string>
     <string name="session_delete_confirm">Delete this session? This cannot be undone.</string>
     <string name="chat_back_to_session_list">Back to session list</string>
+
+    <!-- 技能详情页新增：绑定成员入口 -->
+    <string name="skills_bound_members">Bound Members</string>
+    <string name="skills_bound_members_hint">Tap a member to open its editor where you can bind this skill and configure keyword injection.</string>
+    <string name="skills_bound_members_empty">No member has bound this skill yet. Open an expert member editor and add this skill to its bound skills, then configure keyword injection there.</string>
+    <string name="skills_keyword_inject_guide">Keyword injection is configured at the member level, not on the skill itself. Tap "Bound Members" above to go to the editor.</string>
+
 </resources>
+    <!-- 技能详情页新增：绑定成员入口 -->

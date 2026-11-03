@@ -3679,4 +3679,13 @@
     <string name="session_list_empty">没有会话。点击右上角 + 新建一个。</string>
     <string name="session_delete_confirm">是否删除这个会话？此操作不可撤销。</string>
     <string name="chat_back_to_session_list">返回会话列表</string>
+
+    <!-- 技能详情页新增：绑定成员入口 -->
+    <string name="skills_bound_members">绑定成员</string>
+    <string name="skills_bound_members_hint">点击可前往该成员的「专属技能」设置页面，完成绑定或配置关键词注入。</string>
+    <string name="skills_bound_members_empty">暂未绑定任何成员；请在「专家成员」页为成员添加此技能，并设置关键词注入。</string>
+    <string name="skills_keyword_inject_guide">关键词注入由成员配置，不在技能本身。请在上方「绑定成员」进入专家成员编辑器配置。</string>
+
 </resources>
+
+    <!-- 技能详情页新增：绑定成员入口 -->

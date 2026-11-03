@@ -1186,6 +1186,8 @@ fun SettingsScreen(
                     }
                 }
                 SettingsSection.SkillDetail -> selectedSkill?.let { entry ->
+                    // 反向查：哪些专家成员已把本技能加进专属 skills（该成员 skills 列表含本技能名）。
+                    val boundMembers = subAgents.filter { it.skills.contains(entry.name) }
                     SkillDetailSection(
                         entry = entry,
                         cache = skillMarkdownCache,
@@ -1199,7 +1201,14 @@ fun SettingsScreen(
                             viewModel.moveSkill(entry.name, entry.scope, target)
                         },
                         onExport = { viewModel.exportSkill(entry) },
-                        exporting = skillExportState is SkillExportState.Running
+                        exporting = skillExportState is SkillExportState.Running,
+                        boundMembers = boundMembers,
+                        onOpenMember = { member ->
+                            // 进该成员的编辑器：改专属技能绑定 / 配关键词注入都在这里
+                            editingSubAgent = member
+                            subAgentEditorReturn = SettingsSection.SubAgents
+                            section = SettingsSection.SubAgentEditor
+                        }
                     )
                 }
                 SettingsSection.ScheduledTasks -> ScheduledTasksSection()
