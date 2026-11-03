@@ -20,8 +20,7 @@
       "match": "all",
       "message": "直连推不动，按记忆 gh_api_push_script 改走 GitHub API 推送，最多再重试 1 次，推上去之前不许停手等网络。",
       "refs": [
-        "gh_api_push_script",
-        "release_push_fallback_to_api"
+        "40-git-release"
       ]
     },
     {
@@ -66,8 +65,7 @@
       "match": "all",
       "message": "本轮 push 失败后还没推上去，不许收尾，按 gh_api_push_script 走 API 继续推。",
       "refs": [
-        "gh_api_push_script",
-        "release_push_fallback_to_api"
+        "40-git-release"
       ]
     },
     {
@@ -86,7 +84,7 @@
       "match": "all",
       "message": "打 tag 前先 git ls-remote --tags 确认远端最新 tag，读 aharou_release_flow。",
       "refs": [
-        "aharou_release_flow"
+        "40-git-release"
       ]
     },
     {
@@ -123,7 +121,7 @@
       "match": "all",
       "message": "改提示词前必须征得主人明确同意（记忆 no_prompt_edits_without_approval）。",
       "refs": [
-        "no_prompt_edits_without_approval"
+        "50-safety"
       ]
     },
     {
@@ -161,7 +159,7 @@
       "match": "all",
       "message": "中英两份 strings.xml 同批改，英文里的撇号要转义成 \\'。",
       "refs": [
-        "aharou_strings_xml_ownership"
+        "30-assets-sync"
       ]
     }
   ]
