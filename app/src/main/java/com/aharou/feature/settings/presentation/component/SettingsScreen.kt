@@ -865,6 +865,18 @@ fun SettingsScreen(
                                 modifier = Modifier.size(22.dp)
                             )
                         }
+                        // 工具页（McpToolsSection）与 Mcp 页共用同一套创建对话框：在列表页直接 + 就能新增 MCP 工具，
+                        // 不必跳去 Mcp 页找入口。保存后对话框关闭会回到 Mcp 管理页（完整视图）。
+                        SettingsSection.Tools -> IconButton(onClick = {
+                            mcpDialogRequest = McpDialogRequest(editing = null, prefill = null)
+                        }) {
+                            Icon(
+                                FeatherIcons.Plus,
+                                contentDescription = stringResource(R.string.settings_add_mcp_server),
+                                tint = MaterialTheme.colorScheme.onBackground,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
                         SettingsSection.SkillDetail -> selectedSkill?.let { entry ->
                             // 内置技能只读，不给编辑入口
                             if (!entry.builtin) {

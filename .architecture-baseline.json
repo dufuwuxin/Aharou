@@ -6,7 +6,7 @@
     "app/src/main/java/com/aharou/feature/agent/presentation/AIAgentViewModel.kt": 3449,
     "app/src/main/java/com/aharou/feature/agent/presentation/component/AIChatPanel.kt": 1870,
     "app/src/main/java/com/aharou/feature/browser/BrowserUseManager.kt": 1908,
-    "app/src/main/java/com/aharou/feature/settings/presentation/component/SettingsScreen.kt": 1792,
+    "app/src/main/java/com/aharou/feature/settings/presentation/component/SettingsScreen.kt": 1804,
     "app/src/main/java/com/aharou/feature/pet/PetOverlay.kt": 1709,
     "app/src/main/java/com/aharou/feature/agent/presentation/component/ChatDrawer.kt": 1568,
     "app/src/main/java/com/aharou/feature/agent/domain/workflow/StatefulAgentWorkflow.kt": 1547,
@@ -19,7 +19,7 @@
     "app/src/main/java/com/aharou/feature/agent/presentation/component/AdaptiveCardRenderer.kt": 1194,
     "app/src/main/java/com/aharou/AIEditorApp.kt": 1026,
     "app/src/main/java/com/aharou/feature/settings/presentation/component/DefaultModelsSection.kt": 1004,
-    "app/src/main/java/com/aharou/feature/agent/domain/prompt/SystemPromptProvider.kt": 1016,
+    "app/src/main/java/com/aharou/feature/agent/domain/prompt/SystemPromptProvider.kt": 1015,
     "app/src/main/java/com/aharou/feature/agent/domain/workflow/ContextCompactor.kt": 1012
   },
   "bannedImports": {
