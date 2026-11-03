@@ -102,10 +102,7 @@ class ContainerImageCatalogParseTest {
                 data.sources.values.any { it.distros[entry.distro]?.isNotBlank() == true }
             )
             assertTrue("${entry.id} 缺 abiNames 的 arm64", entry.abiNames.containsKey("arm64"))
-            // 只在 official 源提供的条目要求 x86_64；Arch/Manjaro 只有 aarch64 的 rootfs
-            if (data.sources.getValue("official").distros[entry.distro]?.isNotBlank() == true) {
-                assertTrue("${entry.id} 缺 abiNames 的 x86_64", entry.abiNames.containsKey("x86_64"))
-            }
+            assertEquals("${entry.id} 必须仅声明受支持的 ARM64 ABI", setOf("arm64"), entry.abiNames.keys)
             for (sourceId in entry.paths.keys) {
                 assertTrue("${entry.id} 的 paths 引用了 sources 表里没有的源 $sourceId", sourceId in sourceIds)
             }

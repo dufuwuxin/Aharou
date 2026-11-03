@@ -1,5 +1,6 @@
 package com.aharou.feature.agent.domain.knowledge
 
+import android.app.Application
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.aharou.feature.agent.domain.container.ContainerInstaller
@@ -15,8 +16,10 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
+@Config(application = Application::class)
 class LocalKnowledgeTest {
     private lateinit var repository: KnowledgeRepository
     private lateinit var sources: KnowledgeSourceRepository
@@ -102,8 +105,9 @@ class LocalKnowledgeTest {
         assertThrows(IllegalArgumentException::class.java) {
             sources.add(id, KnowledgeSourceDef(repo = "owner/repository"))
         }
+        val builtIn = catalog.load().sources.values.first { !it.isLocal }
         assertThrows(IllegalArgumentException::class.java) {
-            repository.createLocal(catalog.load().sources.getValue("aharou-kb").displayName("en"), "", "duplicate")
+            repository.createLocal(builtIn.displayName("en"), "", "duplicate")
         }
         assertTrue(sources.all().getValue(id).isLocal)
     }
@@ -114,8 +118,9 @@ class LocalKnowledgeTest {
         assertEquals(null, repository.sync(id))
         assertEquals(null, repository.remoteDigest(id))
         assertEquals("retain me", File(repository.sourceDir(id), "index.md").readText())
+        val remoteId = catalog.load().sources.entries.first { !it.value.isLocal }.key
         assertThrows(IllegalArgumentException::class.java) {
-            repository.addLocalDocument("aharou-kb", "new.md", "not local")
+            repository.addLocalDocument(remoteId, "new.md", "not local")
         }
         assertThrows(IllegalArgumentException::class.java) { repository.sourceDir("../outside") }
         assertFalse(repository.search("missing").isNotEmpty())

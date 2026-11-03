@@ -1,5 +1,6 @@
 package com.aharou.feature.backup.domain
 
+import android.content.Context
 import com.aharou.core.security.KeystoreCipher
 import com.aharou.feature.backup.data.BackupManagerImpl
 import com.aharou.feature.settings.data.local.entity.AIProviderEntity
@@ -12,9 +13,12 @@ import io.mockk.unmockkObject
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.TemporaryFolder
 
 class ProviderBackupFallbackChainTest {
+    @get:Rule val folder = TemporaryFolder()
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
     @Test fun multipleHopsSurviveActualExportSerializationAndImportMapping() {
@@ -22,7 +26,7 @@ class ProviderBackupFallbackChainTest {
         try {
             every { KeystoreCipher.encryptString(any()) } answers { firstArg() }
             every { KeystoreCipher.decryptString(any()) } answers { firstArg() }
-            val manager = mockk<BackupManagerImpl>(relaxed = true)
+            val manager = createManager()
             val export = BackupManagerImpl::class.java.getDeclaredMethod("toDto", AIProviderEntity::class.java)
                 .apply { isAccessible = true }
             val source = AIProviderEntity(id = "p", name = "P", type = "OPENAI", apiKey = "", baseUrl = "", defaultModel = "m",
@@ -42,11 +46,39 @@ class ProviderBackupFallbackChainTest {
         mockkObject(KeystoreCipher)
         try {
             every { KeystoreCipher.encryptString(any()) } answers { firstArg() }
-            val restored = import(mockk(relaxed = true), dto)
+            val restored = import(createManager(), dto)
             assertEquals("", restored.fallbackChain)
             assertEquals("", restored.fallbackProviderId)
             assertEquals("", restored.fallbackModel)
         } finally { unmockkObject(KeystoreCipher) }
+    }
+
+    // Only collaborators are mocked; reflection must invoke the real private mapping methods.
+    private fun createManager(): BackupManagerImpl {
+        val context = mockk<Context>()
+        every { context.cacheDir } returns folder.root
+        return BackupManagerImpl(
+            context = context,
+            aiProviderDao = mockk(),
+            remoteConnectionDao = mockk(),
+            chatSessionDao = mockk(),
+            agentMessageDao = mockk(),
+            messageArchiveStore = mockk(),
+            todoItemDao = mockk(),
+            mcpConfigRepository = mockk(),
+            mcpManager = mockk(),
+            permissionRulesRepository = mockk(),
+            themeSettingsRepository = mockk(),
+            keepaliveSettingsRepository = mockk(),
+            screenOnSettingsRepository = mockk(),
+            agentSoundSettingsRepository = mockk(),
+            generalSettingsRepository = mockk(),
+            logSettingsRepository = mockk(),
+            visionModelSettingsRepository = mockk(),
+            compactionModelSettingsRepository = mockk(),
+            syncSettingsRepository = mockk(),
+            workspaceRepository = mockk()
+        )
     }
 
     private fun import(manager: BackupManagerImpl, dto: ProviderDto): AIProviderEntity =

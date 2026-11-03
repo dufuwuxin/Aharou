@@ -1,5 +1,6 @@
 package com.aharou.feature.agent.domain.prompt
 
+import android.app.Application
 import android.content.Context
 import com.aharou.feature.agent.domain.container.ContainerInstaller
 import com.aharou.feature.agent.domain.subagent.InjectPart
@@ -14,8 +15,14 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 import java.io.File
 
+// Metadata uses Android's org.json implementation, not the default-value JVM stubs.
+@RunWith(RobolectricTestRunner::class)
+@Config(application = Application::class)
 class PromptFragmentPolicySaveTest {
     @get:Rule val folder = TemporaryFolder()
 
