@@ -7,6 +7,8 @@ import com.aharou.feature.settings.data.local.dao.AIProviderDao
 import com.aharou.feature.settings.data.local.entity.AIProviderEntity
 import com.aharou.feature.settings.domain.model.AIProviderConfig
 import com.aharou.feature.settings.domain.model.DEFAULT_KEY_WEIGHT
+import com.aharou.feature.settings.domain.model.encodeFallbackChain
+import com.aharou.feature.settings.domain.model.parseFallbackChain
 import com.aharou.feature.settings.domain.model.KeyRotationStrategy
 import com.aharou.feature.settings.domain.model.MAX_KEY_WEIGHT
 import com.aharou.feature.settings.domain.model.ProviderKey
@@ -160,6 +162,7 @@ class AIProviderRepositoryImpl @Inject constructor(
             customIcon = customIcon,
             fallbackProviderId = fallbackProviderId,
             fallbackModel = fallbackModel,
+            fallbackChain = parseFallbackChain(fallbackChain),
             requestMiddleware = requestMiddleware
         ).sanitized()
     }
@@ -197,8 +200,10 @@ class AIProviderRepositoryImpl @Inject constructor(
             customHeaders = KeystoreCipher.encryptString(encodeMap(customHeaders)),
             scriptParams = KeystoreCipher.encryptString(encodeMap(scriptParams)),
             customIcon = customIcon,
-            fallbackProviderId = fallbackProviderId,
-            fallbackModel = fallbackModel,
+            // 备用链是唯一真相，旧的单选列只镜像链上第一条：老版本 App 与旧配置通道读到的仍是「一个有效回退量」
+            fallbackProviderId = fallbackChain.firstOrNull()?.providerId ?: "",
+            fallbackModel = fallbackChain.firstOrNull()?.model ?: "",
+            fallbackChain = encodeFallbackChain(fallbackChain),
             requestMiddleware = requestMiddleware
         )
     }

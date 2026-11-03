@@ -67,6 +67,11 @@ data class AIProviderEntity(
     val fallbackProviderId: String = "",
     /** 回退时使用的模型；空串表示用回退供应商自己的有效模型。 */
     val fallbackModel: String = "",
+    /**
+     * 备用模型链，以换行分隔持久化，每行 `供应商 id|模型名`（模型可空）。
+     * 顺序即轮询顺序：[fallbackProviderId] / [fallbackModel] 只保留链上第一条，供旧版本与配置通道兼容。
+     */
+    val fallbackChain: String = "",
     /** 声明式请求中间件配置（JSON）；空串表示不启用。schema 见 domain/middleware/MiddlewareConfig。 */
     val requestMiddleware: String = ""
 )

@@ -64,9 +64,21 @@ data class AIProviderConfig(
     val fallbackProviderId: String = "",
     /** 回退时使用的模型；空=用回退供应商自己的有效模型。 */
     val fallbackModel: String = "",
+    /**
+     * 备用模型链（按列表顺序轮询）：本供应商失败时先切第 1 条，第 1 条也失败就切第 2 条，
+     * 依此往下。空列表=不回退，与旧的单选字段共用一套语义（见 [effectiveFallbackChain]）。
+     */
+    val fallbackChain: List<FallbackTarget> = emptyList(),
     /** 声明式请求中间件配置（JSON）：模型映射、参数覆盖、系统提示注入。空串=不启用。 */
     val requestMiddleware: String = ""
 ) {
+    /** 实际生效的备用链：新字段优先，旧单选字段（供应商 + 模型）兜底，老数据不用迁移也能用。 */
+    val effectiveFallbackChain: List<FallbackTarget>
+        get() = fallbackChain.ifEmpty {
+            listOf(FallbackTarget(fallbackProviderId.trim(), fallbackModel.trim()))
+                .filter { it.providerId.isNotEmpty() }
+        }
+
     /** 实际生效的模型：优先 selectedModel，其次 defaultModel。 */
     val effectiveModel: String
         get() = selectedModel.ifBlank { defaultModel }
@@ -97,6 +109,30 @@ data class AIProviderConfig(
     /** 拉取模型列表 / 连通性测试等无会话上下文的请求用第一个可用 Key。 */
     val firstUsableApiKey: String get() = effectiveApiKeys.firstOrNull()?.value ?: ""
 }
+
+/**
+ * 备用链上的一跳：某个供应商 + 模型名。
+ *
+ * 模型为空表示「用该供应商自己的有效模型」；供应商 id 为空表示这条不成立，选路时跳过。
+ */
+data class FallbackTarget(
+    val providerId: String,
+    val model: String = ""
+)
+
+/** 备用链的存储形态：每行 `供应商 id|模型名`，模型为空时只写供应商 id。 */
+fun encodeFallbackChain(chain: List<FallbackTarget>): String =
+    chain.joinToString("\n") { if (it.model.isBlank()) it.providerId else "${it.providerId}|${it.model}" }
+
+/** 解析备用链存储串；老库没有这列时读到空串，调用方按空链处理。 */
+fun parseFallbackChain(raw: String): List<FallbackTarget> =
+    raw.split("\n").mapNotNull { line ->
+        val trimmed = line.trim()
+        if (trimmed.isEmpty()) return@mapNotNull null
+        val sep = trimmed.indexOf('|')
+        if (sep < 0) FallbackTarget(trimmed)
+        else FallbackTarget(trimmed.substring(0, sep).trim(), trimmed.substring(sep + 1).trim())
+    }.filter { it.providerId.isNotEmpty() }
 
 /**
  * 多 Key 模式下的一条候选 Key：值 + 调度权重。
@@ -136,6 +172,11 @@ fun AIProviderConfig.sanitized(): AIProviderConfig = copy(
     defaultModel = defaultModel.stripLineBreaks(),
     models = models.map { it.stripLineBreaks() }.filter { it.isNotEmpty() }.distinct(),
     selectedModel = selectedModel.stripLineBreaks(),
+    // 备用链去空白、去重（同供应商同模型只留一条），丢掉供应商标识为空的残条
+    fallbackChain = fallbackChain
+        .map { FallbackTarget(it.providerId.stripAllWhitespace(), it.model.stripLineBreaks()) }
+        .filter { it.providerId.isNotEmpty() }
+        .distinct(),
     dashboardScriptPath = dashboardScriptPath.stripLineBreaks(),
     customHeaders = customHeaders
         .mapKeys { (k, _) -> k.trim() }

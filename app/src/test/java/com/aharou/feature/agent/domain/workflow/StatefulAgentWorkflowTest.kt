@@ -139,7 +139,7 @@ class StatefulAgentWorkflowTest {
         // relaxed mock 对「返回对象」的可空方法会给个空壳配置，导致 getEffectiveProvider 认为没填 Key；
         // 这些用例不覆盖跨供应商回退，显式打成未激活。
         coEvery { failoverCoordinator.overrideConfig(any()) } returns null
-        coEvery { failoverCoordinator.activate(any(), any()) } returns null
+        coEvery { failoverCoordinator.next(any(), any()) } returns null
         every { failoverCoordinator.isActive(any()) } returns false
     }
 
