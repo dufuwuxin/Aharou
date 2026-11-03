@@ -388,6 +388,8 @@ fun AIChatPanel(
         sessionId = currentSessionId,
         turnKeys = turnKeys,
     )
+    val injectedContextText = rememberInjectedContextText(currentSessionId)
+    val lastUserMessageId = remember(chatItems) { chatItems.lastOrNull { it.message.role == MessageRole.USER }?.message?.id }
     // 每轮任务的总耗时（用户发送 → 本轮 AI 收工）与 token 合计，都只挂在轮末助手气泡下方
     val taskDurations = remember(messages, isBusy) {
         computeTaskDurations(messages, lastTurnFinished = !isBusy)
@@ -1204,7 +1206,8 @@ fun AIChatPanel(
                     onReasoningExpandedChange = { viewModel.setReasoningExpanded(message.id, it) },
                     taskDurationMs = taskDurations[message.id],
                     turnUsage = turnUsages[message.id],
-                    entryDelayMs = messageEntryDelays[message.id]
+                    entryDelayMs = messageEntryDelays[message.id],
+                    injectedContextText = injectedContextText.takeIf { message.id == lastUserMessageId }
                 )
             }
         }

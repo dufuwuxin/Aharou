@@ -852,6 +852,9 @@
     <!-- Chat Message Bubbles -->
     <string name="chat_copied">Copied</string>
     <string name="chat_copy">Copy</string>
+    <string name="chat_show_injected">Show all</string>
+    <string name="chat_injected_title">What was injected this turn</string>
+    <string name="chat_injected_desc">None of this is text you typed. It is what the app automatically feeds into the model each turn: persona, rules, memory, skill index, current time and more.</string>
     <string name="chat_task_duration">Total time %1$s</string>
     <string name="chat_cache_hit_rate">Cache hit rate %1$s</string>
     <string name="chat_status_generating">Generating</string>

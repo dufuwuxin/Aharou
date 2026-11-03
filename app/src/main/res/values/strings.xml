@@ -851,6 +851,9 @@
     <!-- Chat Message Bubbles -->
     <string name="chat_copied">已复制</string>
     <string name="chat_copy">复制</string>
+    <string name="chat_show_injected">显示全部</string>
+    <string name="chat_injected_title">本轮默认注入的内容</string>
+    <string name="chat_injected_desc">下面这些不是你打的字，是系统每轮自动拼进模型上下文的内容（人格、规则、记忆、技能索引、当前时间等）。</string>
     <string name="chat_task_duration">本轮总耗时 %1$s</string>
     <string name="chat_cache_hit_rate">缓存命中率 %1$s</string>
     <string name="chat_status_generating">正在生成</string>
