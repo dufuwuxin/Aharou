@@ -25,8 +25,8 @@ EOL 标注：版本之外还同步每个分支的支持周期（endoflife.date �
 
 清单约定（动手改之前先读）：
   - `sizeBytes` 取 **arm64** 那份产物的字节数（现有 12 条的实测值全部等于 arm64 产物），不是两份之和
-  - `path` 与 `paths.*` 里的 {abi} 由 abiNames 替换（alpine aarch64 / ubuntu arm64+amd64 /
-    debian arm64v8+amd64）；cnb 上的资产名就是 `paths.aharou` 替换后的字符串
+  - `path` 与 `paths.*` 里的 {abi} 由 abiNames 替换（alpine aarch64 / ubuntu arm64 /
+    debian arm64v8）；cnb 上的资产名就是 `paths.aharou` 替换后的字符串
   - `eol` / `supportEnds` 为 `yyyy-MM-dd`；`supportEnds` 只在该发行版确有延伸支持期时下发
     （Alpine、非 LTS 的 Ubuntu 没有），且恒不早于 `eol`
   - 两份清单（assets 内置 + data 远端）必须逐字节一致，本脚本改完会自行比对
@@ -54,7 +54,7 @@ MANIFESTS = [
     os.path.join(ROOT, "app/src/main/assets/container-images.json"),
     os.path.join(ROOT, "data/container-images.json"),
 ]
-ABIS = ("arm64", "x86_64")
+ABIS = ("arm64",)
 DISTROS = ("alpine", "ubuntu", "debian", "arch", "manjaro")
 CNB_OWNER = os.environ.get("CNB_OWNER") or "huxiangli"
 CNB_REPO = os.environ.get("CNB_REPO") or "aharou-releases"
@@ -287,7 +287,7 @@ def discover(entry: dict, base: str) -> dict:
         rels = {a.get("relativePath") for a in (meta.get("artifacts") or [])}
         if f"{suite}/rootfs.tar.xz" not in rels:
             raise RuntimeError(f"本次构建里没有 {suite}/rootfs.tar.xz（套件名写错或该套件已停更）")
-        # 版本号只在 arm 那份构建里取一次：同一轮的 amd64/arm64v8 构建共享同一个 debian_version
+        # Debian 的发行版版本号取自 rootfs 内的 debian_version。
         ver = http_text(f"{job}/artifact/{suite}/rootfs.debian_version").strip()
         if not re.match(r"^\d+(\.\d+)*$", ver):
             raise RuntimeError(f"debian_version 内容异常：{ver!r}")
@@ -481,7 +481,7 @@ def fetch_checksums(entry: dict, info: dict) -> dict:
             if len(parts) >= 2:
                 table[parts[-1].lstrip("*")] = parts[0].lower()
         for abi in ABIS:
-            # SHA256SUMS 里的文件名带 .tar.gz（如 ubuntu-base-24.04.3-base-amd64.tar.gz），
+            # SHA256SUMS 里的文件名带 .tar.gz（如 ubuntu-base-24.04.3-base-arm64.tar.gz），
             # 少这个后缀 key 永远对不上，Ubuntu 会一直拿不到哈希。
             out[abi] = table.get(f"ubuntu-base-{ver}-base-{entry['abiNames'][abi]}.tar.gz")
         return out
@@ -668,6 +668,10 @@ def load_manifests():
 
 def save_manifests(data: dict) -> bool:
     """两份一起写（先临时文件再 rename），写完逐字节比对。"""
+    for entry in data.get("images", []):
+        for field in ("abiNames", "sha256ByAbi"):
+            if field in entry:
+                entry[field] = {abi: value for abi, value in entry[field].items() if abi in ABIS}
     text = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
     for p in MANIFESTS:
         tmp = p + ".tmp"
@@ -693,9 +697,12 @@ def parse_args():
         epilog="缺省是 dry-run，只打印差异；加 --apply 才会真下载（每份 4~40MB）、上传并改写清单。",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p.add_argument("--apply", action="store_true",
+    mode = p.add_mutually_exclusive_group()
+    mode.add_argument("--apply", action="store_true",
                    help="真下载 + 校验 + 上传 cnb + 改写清单（需要 CNB_TOKEN）")
     p.add_argument("--distro", choices=DISTROS, help="只处理某一类发行版；缺省三类都查")
+    mode.add_argument("--prune-unsupported-abis", action="store_true",
+                   help="仅离线移除清单中不支持的架构，不下载或上传")
     return p.parse_args()
 
 
@@ -704,6 +711,8 @@ def main() -> int:
     data = load_manifests()
     if data is None:
         return 1
+    if args.prune_unsupported_abis:
+        return 0 if save_manifests(data) else 1
     images = data.get("images") or []
     targets = [e for e in images if not args.distro or e.get("distro") == args.distro]
     mode = "apply" if args.apply else "dry-run"
@@ -760,8 +769,7 @@ def main() -> int:
             failures.append((eid, f"取产物体积失败：{err}"))
             continue
         print(f"[{eid}] {entry['version']} → {info['version']}"
-              f"（arm64 {info['sizes']['arm64'] / 1048576:.1f}MB / "
-              f"x86_64 {info['sizes']['x86_64'] / 1048576:.1f}MB，"
+              f"（arm64 {info['sizes']['arm64'] / 1048576:.1f}MB，"
               f"{urllib.parse.urlsplit(info['base']).netloc}，{info['extra']}）")
         changes.append({"entry": entry, "info": info})
 

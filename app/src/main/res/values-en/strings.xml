@@ -1759,9 +1759,9 @@
     <string name="subagent_editor_tools_allow">Allowed tools</string>
     <string name="subagent_editor_tools_allow_hint">Leave empty to allow every tool except task</string>
     <string name="subagent_editor_tools_deny">Denied tools</string>
-    <string name="subagent_editor_skills">Exclusive skills</string>
-    <string name="subagent_editor_skills_hint">Only this agent can load them; other members and the main agent do not see these to save tokens.</string>
-    <string name="subagent_editor_skills_empty">No exclusive skills bound (all public skills are visible)</string>
+    <string name="subagent_editor_skills">Bound skills</string>
+    <string name="subagent_editor_skills_hint">Read-only here. Select members on the skill detail page; multiple members can share a skill.</string>
+    <string name="subagent_editor_skills_empty">No skills bound yet</string>
     <string name="subagent_editor_keyword_inject">Keyword injections</string>
     <string name="subagent_editor_keyword_inject_hint">One rule per line: "trigger1,trigger2|content". Only injected when user text matches any trigger; invisible to main agent and other members to save tokens.</string>
     <string name="subagent_editor_keyword_inject_label">Keyword injections (trigger|content, one per line)</string>
@@ -3684,9 +3684,38 @@
 
     <!-- 技能详情页新增：绑定成员入口 -->
     <string name="skills_bound_members">Bound Members</string>
-    <string name="skills_bound_members_hint">Tap a member to open its editor where you can bind this skill and configure keyword injection.</string>
-    <string name="skills_bound_members_empty">No member has bound this skill yet. Open an expert member editor and add this skill to its bound skills, then configure keyword injection there.</string>
-    <string name="skills_keyword_inject_guide">Keyword injection is configured at the member level, not on the skill itself. Tap "Bound Members" above to go to the editor.</string>
+    <string name="skills_bound_members_hint">Enable switches to bind multiple members. Each change saves automatically. Tap a member name to configure keyword injection.</string>
+    <string name="skills_binding_failed">The binding change was not saved. Please retry; existing bindings are unchanged.</string>
+    <string name="skills_bound_members_empty">No members available. Create one on the Expert Members page first.</string>
+    <string name="skills_keyword_inject_guide">Keyword injection remains a member setting. Binding does not enable a disabled member or skill.</string>
 
+    <string name="rules_runtime_title">Runtime rules</string>
+    <string name="rules_runtime_trigger_plan">Injected in PLAN mode</string>
+    <string name="rules_runtime_trigger_auto">Injected in AUTO mode</string>
+    <string name="rules_runtime_trigger_subagent">Subagent baseline injected when a child session is created</string>
+    <string name="rules_runtime_trigger_memory">Injected when building memory context, subject to injection switches</string>
+    <string name="rules_runtime_trigger_stuck">Reminder injected when repeated actions or stalled execution are detected</string>
+    <string name="rules_runtime_trigger_workspace">Matching project rules injected based on detected project type</string>
+    <string name="rules_runtime_trigger_unknown">Trigger conditions are not documented</string>
+    <string name="script_tools_title">Script tools</string>
+    <string name="script_tools_add">Add script tool</string>
+    <string name="script_tools_name">Name (start with a letter; letters, digits and underscores; max 24)</string>
+    <string name="script_tools_description">Description</string>
+    <string name="script_tools_command">Container command (JSON input on stdin)</string>
+    <string name="script_tools_enabled">Enabled</string>
+    <string name="script_tools_save">Save</string>
+    <string name="script_tools_cancel">Cancel</string>
+    <string name="script_tools_edit">Edit</string>
+    <string name="script_tools_delete">Delete</string>
+    <string name="script_tools_empty">No script tools yet</string>
+    <string name="script_tools_save_failed">Could not update script tools. Check the fields and try again.</string>
+    <string name="prompts_injection_default">Default injection</string>
+    <string name="prompts_injection_default_hint">Inject every turn, including members that inherit main rules</string>
+    <string name="prompts_injection_keywords">Keyword injection</string>
+    <string name="prompts_injection_keywords_hint">When enabled, inject when the current request matches any keyword; separate with commas or new lines</string>
+    <string name="prompts_injection_members">Member injection</string>
+    <string name="prompts_injection_members_hint">When enabled, inject into the selected members; turning off keeps the selection</string>
+    <string name="tools_add_type">Choose tool type</string>
+    <string name="prompts_injection">Injection policy</string>
 </resources>
     <!-- 技能详情页新增：绑定成员入口 -->

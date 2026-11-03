@@ -221,6 +221,9 @@ class ToolCallGuard @Inject constructor(
         override fun isCallSensitive(args: Map<String, JsonElement>): Boolean =
             delegate.isCallSensitive(args)
 
+        override fun permissionCommand(args: Map<String, JsonElement>): String? =
+            delegate.permissionCommand(args)
+
         override fun buildPermissionRequest(
             callId: String,
             args: Map<String, JsonElement>,
@@ -271,6 +274,9 @@ class ToolCallGuard @Inject constructor(
 
         override fun isCallSensitive(args: Map<String, JsonElement>): Boolean =
             delegate.isCallSensitive(args)
+
+        override fun permissionCommand(args: Map<String, JsonElement>): String? =
+            delegate.permissionCommand(args)
 
         override fun buildPermissionRequest(
             callId: String,

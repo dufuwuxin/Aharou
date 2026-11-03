@@ -21,7 +21,7 @@
 
 ## Download
 
-- Get the latest `Aharou-*.apk` from [Releases](https://github.com/520huxiangli/Aharou/releases/latest), allow "install unknown apps", and install. Android 8.0+, no root required.
+- Get the latest `Aharou-arm64-*.apk` from [Releases](https://github.com/520huxiangli/Aharou/releases/latest), allow "install unknown apps", and install. Requires Android 8.0+ on ARMv8 (`arm64-v8a`); x86, x86-64 and 32-bit ARM packages are no longer provided. No root required.
 - The built-in Linux environment initializes automatically on first launch.
 - Bring your own models and keys — no built-in model, no provider lock-in.
 

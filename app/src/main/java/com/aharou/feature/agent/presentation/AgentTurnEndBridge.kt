@@ -1,13 +1,18 @@
 package com.aharou.feature.agent.presentation
 
 import com.aharou.core.util.FileLogger
+import com.aharou.feature.agent.domain.command.SlashCommandRegistry
+import com.aharou.feature.agent.domain.command.SlashCommandRegistry.ResolvedCommand
+import com.aharou.feature.agent.domain.steward.StewardTurnPolicy
 import com.aharou.feature.terminal.data.repository.TerminalSettingsRepository
 import com.aharou.feature.terminal.domain.TerminalSessionProvider
+import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -25,6 +30,7 @@ import kotlinx.coroutines.withContext
 @Singleton
 class AgentTurnEndBridge @Inject constructor(
     private val stewardBridge: StewardBridge,
+    private val slashCommands: SlashCommandRegistry,
     private val terminalSessions: TerminalSessionProvider,
     private val terminalSettings: TerminalSettingsRepository,
 ) {
@@ -37,11 +43,41 @@ class AgentTurnEndBridge @Inject constructor(
      * 挂在 viewModelScope 上会被连同取消，标签就留在那儿了。
      */
     private val cleanupScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val pendingSteward = mutableMapOf<String, Pair<() -> String?, String>>()
 
-    /** 一轮结束的收尾入口（语义与 [StewardBridge.onTurnFinished] 一致，多做了终端清理）。 */
-    fun onTurnFinished(scope: CoroutineScope, sessionId: String, send: (String) -> Unit) {
-        stewardBridge.onTurnFinished(scope, sessionId, send)
+    fun consumeDeferredInstruction(sessionId: String): String? = pendingSteward.remove(sessionId)?.first?.invoke()
+
+    fun onRequestStarted(sessionId: String, request: String, isAutoTrigger: Boolean) =
+        stewardBridge.onRequestStarted(sessionId, request, isAutoTrigger)
+
+    /** 终端清理仍独立存活，主管判定则必须等完才能放行普通队列。 */
+    suspend fun onTurnFinished(sessionId: String, allowSteward: Boolean): (() -> String?)? {
         closeFinishedAgentTabs(sessionId)
+        return if (allowSteward) stewardBridge.onTurnFinished(sessionId) else null
+    }
+
+    /** FIFO 只有本轮已排队请求；未来轮次通知不在这里领取，也不改变用户消息的落库正文。 */
+    fun takeNextRequest(
+        sessionId: String,
+        queues: MutableStateFlow<Map<String, List<QueuedRequest>>>,
+        nextInstruction: (() -> String?)?,
+        projectRoot: String,
+    ): QueuedRequest? {
+        if (nextInstruction != null) pendingSteward[sessionId] = nextInstruction to projectRoot
+        val queue = queues.value[sessionId].orEmpty()
+        val current = queue.firstOrNull()
+        if (current != null) {
+            queues.value = queues.value + (sessionId to queue.drop(1))
+            if (slashCommands.resolve(current.request) is ResolvedCommand.Action) return current
+            return current.copy(modelRequest = StewardTurnPolicy.mergeModelRequest(current.modelRequest, consumeDeferredInstruction(sessionId)))
+        }
+        val nextProjectRoot = pendingSteward[sessionId]?.second ?: projectRoot
+        return consumeDeferredInstruction(sessionId)?.let {
+            QueuedRequest(
+                id = UUID.randomUUID().toString(), request = it, currentFile = null,
+                selectedCode = null, projectRoot = nextProjectRoot, isAutoTrigger = true,
+            )
+        }
     }
 
     private fun closeFinishedAgentTabs(sessionId: String) {

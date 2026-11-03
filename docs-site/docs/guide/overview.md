@@ -105,3 +105,5 @@
 | 安装 Playwright 浏览器自动化 | 容器内装 Chromium 并接入 Playwright MCP，让 AI 操作网页 → [文档](/advanced/playwright-mcp) |
 | 用 adb 无线调试其他设备 | 在容器里用 adb 连接另一台手机或本机，安装应用、抓日志、截屏 → [文档](/advanced/adb-wireless-debug) |
 | 自定义面板 | 用脚本在输入框上方画余额或用量卡片 → [文档](/advanced/dashboard-cards) |
+
+配置导航中，工具、记忆、提示词和规则集中放在配置组，不再在 Aharou 助手组重复展示。数字助理与小染的独立设置页面已移除；底层语音和桌宠服务及其工具保留。

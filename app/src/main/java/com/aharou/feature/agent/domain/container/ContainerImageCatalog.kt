@@ -1,7 +1,6 @@
 package com.aharou.feature.agent.domain.container
 
 import android.content.Context
-import android.os.Build
 import com.aharou.core.net.RepoDataFetcher
 import com.aharou.core.util.FileLogger
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -35,10 +34,10 @@ data class ContainerImageEntry(
     val path: String,
     /** 按源覆盖的 [path]：源 id → 该源下的相对路径（缺省用 [path]）。用于结构不同的自建源。 */
     val paths: Map<String, String> = emptyMap(),
-    /** 标准架构键（arm64/x86_64）→ 该发行版实际目录名（如 aarch64/amd64）。 */
+    /** 架构键 arm64 → 该发行版实际目录名（如 aarch64/arm64v8）。 */
     val abiNames: Map<String, String> = emptyMap(),
     /**
-     * 标准架构键（arm64/x86_64）→ 官方公布的 SHA-256，下载完据此校验完整性。
+     * 架构键 arm64 → 官方公布的 SHA-256，下载完据此校验完整性。
      * 缺该 ABI 的键表示上游不提供校验和（如 Debian 的 Jenkins artifact），此时跳过校验。
      */
     val sha256ByAbi: Map<String, String> = emptyMap()
@@ -281,12 +280,6 @@ class ContainerImageCatalog @Inject constructor(
             }.getOrNull()
         }
 
-        /** 与 [com.aharou.feature.agent.domain.container.ContainerInstaller] 一致的架构判定：x86 设备走 x86_64，其余走 arm64。 */
-        /** 延迟到首次访问才解析：纯 JVM 单测里 Android 的 Build 是空壳，提前初始化会让整个类加载失败。 */
-        val CURRENT_ABI: String by lazy {
-            runCatching {
-                if (Build.SUPPORTED_ABIS.any { it.contains("x86") }) "x86_64" else "arm64"
-            }.getOrDefault("arm64")
-        }
+        const val CURRENT_ABI: String = "arm64"
     }
 }

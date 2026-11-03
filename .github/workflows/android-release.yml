@@ -1,10 +1,8 @@
 name: Android Release
 
-# 打 Tag（如 v1.0.0）时触发：构建两个单架构签名 Release APK
+# 打 Tag（如 v1.0.0）时触发：构建 ARM64 签名 Release APK
 #   - armsolo : 仅 arm64-v8a，仅含 arm 镜像（真机全部是 arm64）
-#   - x86solo : 仅 x86_64，仅含 x86 镜像（模拟器 / Chromebook）
-# 不发 universal（双套镜像体积翻倍）：App 按设备架构挑对应的单架构包，用户只下自己那份。
-# 创建 GitHub Release 并把两个 APK 与 R8 mapping 作为资产发布。
+# 创建 GitHub Release 并把 ARM64 APK 与 R8 mapping 作为资产发布。
 on:
   push:
     tags:
@@ -129,48 +127,41 @@ jobs:
 
       # 架构门禁：禁用组件 import、文件行数棘轮、双语 strings 一致性。
       - name: Check architecture rules
-        run: python3 scripts/check_architecture.py
+        run: |
+          python3 scripts/check_architecture.py
+          python3 -m unittest discover -s scripts -p test_arm64_assets.py
 
       # 发版质量门禁：跑单元测试，失败即中止，避免发出回归包。
-      # 只跑 universal debug 变体：单测逻辑与 flavor 无关，跑全 flavor 6 变体是重复编译。
+      # 只跑 armsolo debug 变体：与发布包使用相同的 ARM64 架构配置。
       - name: Authorize build (CI 例外)
         run: |
           mkdir -p .aharou
           printf 'authorized_by: CI\nquote: "workflow ${{ github.workflow }} run ${{ github.run_id }}"\nat: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > .aharou/build-allowed
 
       - name: Run unit tests
-        run: ./gradlew :app:testUniversalDebugUnitTest
+        run: ./gradlew :app:testArmsoloDebugUnitTest
 
-      # 只构建两个单架构包（已用 `:app:tasks --all` 核实过任务名）：
-      # universal 把两套镜像都塞进去，体积翻倍且不再发布，不构建它。
+      # 只构建 ARM64 安装包：
       # --stacktrace：构建失败时输出完整调用栈，便于在 CI 定位 OOM/内存类根因。
-      - name: Build single-arch Release APKs
-        run: ./gradlew :app:assembleArmsoloRelease :app:assembleX86soloRelease --stacktrace
+      - name: Build ARM64 Release APK
+        run: ./gradlew :app:assembleArmsoloRelease --stacktrace
 
-      # 只把两个单架构包拷进 dist（universal 把两套镜像都塞进去，体积翻倍，不再发布）：
+      # 保留 ARM64 发布包的文件名，兼容已有客户端的更新选择。
       #   Aharou-arm64-v1.0.0-rc1.apk      (armsolo)
-      #   Aharou-x86_64-v1.0.0-rc1.apk     (x86solo)
-      - name: Rename APKs by flavor
+      - name: Rename ARM64 APK
         run: |
           mkdir -p dist
           ver="${GITHUB_REF_NAME:-manual}"   # tag 如 v1.0.0-rc1；手动触发时为 manual-N
-          failed=0
-          for pair in "armsolo:arm64" "x86solo:x86_64"; do
-            f="${pair%%:*}"; abi="${pair##*:}"
-            src="app/build/outputs/apk/$f/release/app-$f-release.apk"
-            if [[ -f "$src" ]]; then
-              out="dist/Aharou-${abi}-${ver}.apk"
-              cp "$src" "$out"
-              echo "packaged $out"
-            else
-              echo "::error::missing $src"
-              failed=1
-            fi
-          done
-          [[ $failed -eq 0 ]] || exit 1
+          src="app/build/outputs/apk/armsolo/release/app-armsolo-release.apk"
+          if [[ ! -f "$src" ]]; then
+            echo "::error::missing $src"
+            exit 1
+          fi
+          out="dist/Aharou-arm64-${ver}.apk"
+          cp "$src" "$out"
+          echo "packaged $out"
 
           # 保留 R8 混淆映射（mapping.txt）到 dist/，随 Release 一起发布，供崩溃堆栈反混淆。
-          # 两个 flavor 共享同一份字节码与混淆结果，取 armsolo 一份即可；
           # gzip 压缩后只有几 MB（原始约 90MB），retrace/Android Studio 解析前 gunzip 一下。
           # AGP 8.x 的 mapping 输出目录是 variant 驼峰名（flavor + BuildType），
           # 即 outputs/mapping/armsoloRelease/，不是 outputs/mapping/armsolo/release/。
@@ -258,7 +249,6 @@ jobs:
           # R8 映射与 APK 同版本发布，反混淆崩溃报告的凭据（gzip 压缩，体积小），一并上传。
           files: |
             dist/Aharou-arm64-*.apk
-            dist/Aharou-x86_64-*.apk
             dist/Aharou-arm64-*mapping.txt.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -276,7 +266,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
           GH_MIRROR: https://gh-proxy.com/
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ASSET_FILTER: Aharou-(arm64|x86_64)-
+          ASSET_FILTER: Aharou-arm64-
           # 只同步当次发版的 tag：脚本默认的「最新 3 个正式版」策略不适合发版流水线——
           # 已发布但用户不想放上 cnb 的版本（如待重发的），下次发版会被这个策略又搬过去。
           RELEASE_FILTER: ^${{ github.ref_name }}$

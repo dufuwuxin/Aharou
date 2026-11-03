@@ -321,22 +321,7 @@ class ContainerInstaller @Inject constructor(
     }
 
     /** assets 内的架构特定目录 */
-    val ASSET_DIR: String
-        get() {
-            // 优先按设备 ABI 选对应镜像目录。
-            // 但 release 包按 flavor 拆分后，单架构包只含一套镜像（armsolo→arm、x86solo→x86）：
-            // 若该套不在 assets 里（例如 armsolo 包被装到只报 x86 的设备），下面会 fallback
-            // 到实际存在的那套，避免 open() 直接崩溃——proot 能否真正运行由设备 ABI 决定，
-            // 但至少 asset 查找层不会挂。
-            val preferX86 = android.os.Build.SUPPORTED_ABIS.any { it.contains("x86") }
-            val first = if (preferX86) "container/x86" else "container/arm"
-            val fallback = if (preferX86) "container/arm" else "container/x86"
-            return if (assetExists(first)) first else fallback
-        }
-
-    /** 轻量探测某 asset 路径是否被打进当前 APK（用于 [ASSET_DIR] 的 fallback 判断） */
-    private fun assetExists(path: String): Boolean =
-        context.assets.list(path.substringBeforeLast('/'))?.any { it == path.substringAfterLast('/') } == true
+    val ASSET_DIR: String = "container/arm"
 
     // 故意用中性的 .bin 后缀：AGP 的 asset 合并会把 .tar.gz/.tgz 当归档自动解压并改名，
     // 导致运行时 open("...tar.gz") 找不到文件。.bin 让它当普通二进制原样打包。

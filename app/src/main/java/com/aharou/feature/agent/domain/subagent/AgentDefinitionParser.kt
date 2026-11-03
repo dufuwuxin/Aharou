@@ -75,7 +75,7 @@ object AgentDefinitionParser {
 
     /** keywordInjection: [{keywords: [a,b], inject: "..."}] 列表。非法子项整体跳过。 */
     private fun parseKeywordInjections(raw: Any?): List<KeywordInjection> {
-        val list = stringList(raw)
+        val list = raw as? List<*> ?: return emptyList()
         if (list.isEmpty()) return emptyList()
         return list.mapNotNull { raw ->
             val map = raw as? Map<*, *> ?: return@mapNotNull null
@@ -128,9 +128,8 @@ object AgentDefinitionParser {
             appendLine("keywordInjection:")
             for (k in keywordInjections) {
                 appendLine("  - keywords: [${k.keywords.joinToString(", ") { Frontmatter.quote(it) }}]")
-                val lines = k.injectContent.trim().lines()
-                val firstLine = lines.firstOrNull()?.trim() ?: ""
-                appendLine("    inject: ${Frontmatter.quote(firstLine)}")
+                appendLine("    inject: |-")
+                k.injectContent.trim().lineSequence().forEach { appendLine("      $it") }
             }
         }
         val injectTokens = if (inject.isEmpty()) {

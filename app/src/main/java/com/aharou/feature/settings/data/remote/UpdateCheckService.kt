@@ -2,9 +2,9 @@ package com.aharou.feature.settings.data.remote
 
 import android.content.Context
 import android.os.Build
+import com.aharou.BuildConfig
 import com.aharou.R
 import com.aharou.feature.settings.data.repository.UpdateChannel
-import com.aharou.feature.settings.presentation.component.compareVersions
 import com.aharou.feature.settings.presentation.component.parseVersionTag
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
@@ -44,11 +44,7 @@ sealed interface UpdateCheckResult {
 /**
  * 拉取版本信息并生成更新日志。
  *
- * 来源有三个，按序尝试：**cnb 发布仓**（国内直连可用、含资产哈希，且包就在那儿，版本与下载源同源）
- * → **反代转发的 GitHub API**（直连被限速时的同源兜底）→ **GitHub 直连**。全失败才报网络错误。
- *
- * 历史上还挂过 GitCode 镜像当兑底，2026-10-18 已移除：那个镜像早停更，它「成功」返回旧列表
- * 会让检查更新误判成「已是最新」（真实假阴性）。
+ * 仅使用 Fork 的 GitHub Releases；反代只转发同一 GitHub API，禁止上游 CNB 混入。
  *
  * 两个通道各收各的：正式版通道只出正式版（且需严格高于当前版本），测试版通道只出预发布
  * （beta 与 RC）。更新日志按版本从高到低拼接（版本号 + 正文，轻量清理 markdown 标题/粗体）。
@@ -63,46 +59,29 @@ class UpdateCheckService @Inject constructor(
             // 正式版发两个单架构包，按设备架构挑对应的那个（装错架构的包起不来）
             val supportsArm64 = Build.SUPPORTED_ABIS.any { it == "arm64-v8a" }
             runCatching {
-                // 源顺序：cnb（国内直连可用、含资产哈希）→ 反代转发 GitHub → GitHub 直连。
-                // 不拿 GitCode 当兜底：那个镜像早已停更，它「成功」返回一份旧列表会让本函数
-                // 误判成「已是最新」—— 2026-10-18 就是这么坑了一次。
-                val releases = fetchCnbReleases()?.takeIf { it.isNotEmpty() }
-                    ?: fetchGithubProxiedReleases()?.takeIf { it.isNotEmpty() }
+                val releases = fetchGithubProxiedReleases()?.takeIf { it.isNotEmpty() }
                     ?: fetchGithubReleases()?.takeIf { it.isNotEmpty() }
                     ?: return@withContext UpdateCheckResult.Error(
                         context.getString(R.string.about_network_error)
                     )
 
-                // 两个通道各收各的：正式版通道只出正式版，测试版通道只出测试版（beta 与 RC）。
-                // 测试版不做版本比较 —— beta 的 tag 是固定名（beta-latest），不是版本号，
-                // 比不了；而且测试包本来就该每次都装最新的。
-                val updates = when (channel) {
-                    UpdateChannel.STABLE -> releases
-                        .filter { !it.prerelease }
-                        .filter { compareVersions(it.version, currentVersion) > 0 }
-                        .sortedWith { a, b -> compareVersions(b.version, a.version) }
-                    // 只取最近一个：预发布里混着大量历史 dev 版，全拼进更新日志没意义。
-                    UpdateChannel.LATEST -> releases.filter { it.prerelease }.take(1)
-                }
+                val selected = UpdateReleasePolicy.select(
+                    releases.map {
+                        UpdateReleasePolicy.Candidate(
+                            it.rawTag, it.prerelease,
+                            UpdateDownloadSource.pickApkAsset(it.assets.map { a -> a.name }, supportsArm64)
+                        )
+                    }, currentVersion, BuildConfig.GIT_COMMIT, channel == UpdateChannel.LATEST
+                )
+                val updates = selected.mapNotNull { candidate -> releases.firstOrNull { it.rawTag == candidate.tag } }
 
                 if (updates.isEmpty()) {
                     UpdateCheckResult.UpToDate
                 } else {
                     val versionUpdates = updates.map { toVersionUpdate(it) }
                     val latest = updates.first()
-                    var apkAsset = latest.assets.firstOrNull {
+                    val apkAsset = latest.assets.firstOrNull {
                         it.name == UpdateDownloadSource.pickApkAsset(latest.assets.map { a -> a.name }, supportsArm64)
-                    }
-                    // 主源（cnb）的资产可能晚于 release 创建几秒到几分钟同步到位：那一刻列表里有更新
-                    // 日志却没有包，直接弹「发现新版本」会让下载必然失败（报 no apk asset）。
-                    // 这里按 tag 回退到 GitHub 源再找一次。
-                    if (apkAsset == null) {
-                        val fallback = (fetchGithubProxiedReleases() ?: fetchGithubReleases())
-                            ?.firstOrNull { it.rawTag == latest.rawTag }
-                        val fallbackNames = fallback?.assets?.map { it.name }.orEmpty()
-                        apkAsset = fallback?.assets?.firstOrNull {
-                            it.name == UpdateDownloadSource.pickApkAsset(fallbackNames, supportsArm64)
-                        }
                     }
                     UpdateCheckResult.NewVersion(
                         UpdateInfo(
@@ -117,26 +96,6 @@ class UpdateCheckService @Inject constructor(
                 }
             }.getOrElse { UpdateCheckResult.Error(it.message ?: context.getString(R.string.about_network_error)) }
         }
-
-    /**
-     * 主源：cnb 发布仓的 release 列表。
-     *
-     * 选它当主源有两个实际原因：国内直连可用（GitHub 常被限流 / DNS 污染），以及包就在 cnb，
-     * 版本信息与下载源同源，不会出现「查到有新版、下载源却没有这个包」的错位。
-     *
-     * 用的是网页路由 `cnb.cool/{owner}/{repo}/-/releases`（匿名可读），不是 `api.cnb.cool`
-     * 那套（那套一律要令牌）。
-     */
-    private fun fetchCnbReleases(): List<ReleaseInfo>? = runCatching {
-        val req = Request.Builder()
-            .url(CNB_RELEASES_API)
-            .header("Accept", "application/json")
-            .build()
-        SHARED_CLIENT.newCall(req).execute().use { resp ->
-            if (!resp.isSuccessful) return@use null
-            parseReleases(resp.body?.string()) { cnbRelease(it) }
-        }
-    }.getOrNull()
 
     /** 二级源：反代转发的 GitHub API——数据与直连同源，用于直连被限速（403 / 429）时兜底。 */
     private fun fetchGithubProxiedReleases(): List<ReleaseInfo>? = runCatching {
@@ -188,39 +147,10 @@ class UpdateCheckService @Inject constructor(
                     name = name,
                     size = asset.get("size")?.asLong ?: 0L,
                     // GitHub 给每个资产带 digest（形如 sha256:xxxx），它来自 GitHub 自己的存储层，
-                    // 与 cnb / 反代这些下载源不同源，所以能当下载完整性校验的信任锚。
+                    // 与反代下载源不同源，所以能当下载完整性校验的信任锚。
                     digest = asset.get("digest")?.asString
                         ?.removePrefix("sha256:")
                         ?.takeIf { it.isNotBlank() }
-                )
-            } ?: emptyList()
-        )
-    }
-
-    /**
-     * cnb 的 release JSON：字段名与 GitHub 大致同名，资产另给 `hash_value` / `hash_algo`。
-     *
-     * 那个哈希来自 cnb 自己的存储层、与我们的下载源同源，所以**只能防传输损坏、不是信任锚**
-     * （GitHub 的 digest 才是）；有就带上，没有就留空跳过校验。
-     */
-    private fun cnbRelease(obj: JsonObject): ReleaseInfo? {
-        val tag = obj.get("tag_name")?.asString ?: return null
-        val version = parseVersionTag(tag) ?: return null
-        return ReleaseInfo(
-            version = version,
-            rawTag = tag,
-            notes = obj.get("body")?.asString.orEmpty(),
-            prerelease = obj.get("prerelease")?.asBoolean ?: false,
-            assets = obj.getAsJsonArray("assets")?.mapNotNull { a ->
-                val asset = a.asJsonObject
-                val name = asset.get("name")?.asString ?: return@mapNotNull null
-                val sha256 = asset.get("hash_value")?.asString
-                    ?.removePrefix("sha256:")
-                    ?.takeIf { it.isNotBlank() && asset.get("hash_algo")?.asString.equals("sha256", true) }
-                ReleaseAsset(
-                    name = name,
-                    size = asset.get("size")?.asLong ?: 0L,
-                    digest = sha256
                 )
             } ?: emptyList()
         )
@@ -263,10 +193,7 @@ class UpdateCheckService @Inject constructor(
     private data class ReleaseAsset(val name: String, val size: Long, val digest: String? = null)
 
     private companion object {
-        const val GITHUB_RELEASES_API = "https://api.github.com/repos/520huxiangli/Aharou/releases"
-
-        /** cnb 发布仓的 release 列表（网页路由，匿名可读；`api.cnb.cool` 那套要令牌，别用混）。 */
-        const val CNB_RELEASES_API = "https://cnb.cool/huxiangli/aharou-releases/-/releases"
+        const val GITHUB_RELEASES_API = UpdateDownloadSource.GITHUB_RELEASES_API
 
         /** GitHub API 反代前缀：直连被限速时用它拿同一份数据。 */
         const val GITHUB_PROXY_API = "https://gh-proxy.com/"

@@ -2053,13 +2053,10 @@ class AIAgentViewModel @Inject constructor(
         }
     }
 
-    private fun processNextInQueue(sessionId: String) {
-        // 已有活跃 job（可能是本次收尾前由通知合并/flush 等入口启动的）时不消费，
-        // 避免队列被多个收尾入口重复消费、同一会话并发跑两个 job。
+    private fun processNextInQueue(sessionId: String, stewardNext: (() -> String?)? = null, stewardProjectRoot: String = _currentWorkspace.value) {
+        // 通知/收尾入口共用占用检查，避免重复出队、并发起轮。
         if (sessionId in stoppingSessions || sessionJobs[sessionId]?.isCompleted == false || sessionId in _runningCommandSessions.value) return
-        val queue = _queuedRequests.value[sessionId] ?: return
-        val next = queue.firstOrNull() ?: return
-        _queuedRequests.value = _queuedRequests.value + (sessionId to queue.drop(1))
+        val next = turnEndBridge.takeNextRequest(sessionId, _queuedRequests, stewardNext, stewardProjectRoot) ?: return
         executeAgentRequestStream(
             request = next.request,
             modelRequest = next.modelRequest,
@@ -2074,28 +2071,22 @@ class AIAgentViewModel @Inject constructor(
         )
     }
 
-    /**
-     * 执行斜杠命令：按类型派发——内置命令先把命令文本落库再走本地动作；
-     * 技能则触发 agent 回合，用户消息由本轮 runner 统一落库（只落 `/技能名 参数`，正文仅喂模型）。
-     * 执行期间标记为命令占用（防新消息并行执行），结束后接续队列中排队的下一条。
-     */
-    private fun runResolvedCommand(resolved: ResolvedCommand, input: String, sessionId: String) {
-        viewModelScope.launch {
-            _runningCommandSessions.value = _runningCommandSessions.value + sessionId
-            try {
-                when (resolved) {
-                    is ResolvedCommand.Action -> {
-                        messagePersistenceUseCase.persist(sessionId, MessageRole.USER, input)
-                        sessionUseCase.touch(sessionId, messagePersistenceUseCase.nextTimestamp())
-                        resolved.handler.execute(this@AIAgentViewModel, resolved.args)
-                    }
-                    // 技能：用户消息由 runSkill 触发的本轮 runner 落库，此处不再预先落库，避免出现两条。
-                    is ResolvedCommand.SkillCommand -> runSkill(resolved.skill, resolved.args)
+    // 本地动作也必须占用会话，避免其挂起期间新消息与队列并行执行。
+    private fun runResolvedCommand(resolved: ResolvedCommand, input: String, sessionId: String, commandContext: SlashCommandContext = this) = viewModelScope.launch {
+        _runningCommandSessions.value = _runningCommandSessions.value + sessionId
+        try {
+            when (resolved) {
+                is ResolvedCommand.Action -> {
+                    messagePersistenceUseCase.persist(sessionId, MessageRole.USER, input)
+                    sessionUseCase.touch(sessionId, messagePersistenceUseCase.nextTimestamp())
+                    resolved.handler.execute(commandContext, resolved.args)
                 }
-            } finally {
-                _runningCommandSessions.value = _runningCommandSessions.value - sessionId
-                processNextInQueue(sessionId)
+                // 技能：用户消息由 runSkill 触发的本轮 runner 落库，此处不再预先落库，避免出现两条。
+                is ResolvedCommand.SkillCommand -> runSkill(resolved.skill, resolved.args)
             }
+        } finally {
+            _runningCommandSessions.value = _runningCommandSessions.value - sessionId
+            processNextInQueue(sessionId)
         }
     }
 
@@ -2122,6 +2113,8 @@ class AIAgentViewModel @Inject constructor(
             return@launch
         }
         val currentJob = requireNotNull(coroutineContext[Job])
+        var stewardNext: (() -> String?)? = null
+        var effectiveModelRequest = modelRequest
         try {
             while (true) {
                 stoppingSessions[sessionId]?.await()
@@ -2130,19 +2123,24 @@ class AIAgentViewModel @Inject constructor(
                 previousJob.join()
             }
             if (!skipCommandDispatch && request.startsWith("/")) {
-                slashCommandRegistry.resolve(request)?.let { command ->
-                    runResolvedCommand(command, request, sessionId)
-                    return@launch
+                when (val command = slashCommandRegistry.resolve(request)) {
+                    is ResolvedCommand.SkillCommand -> effectiveModelRequest = com.aharou.feature.agent.domain.steward.StewardTurnPolicy.skillModelRequest(request, modelRequest, SlashCommandRegistry.buildSkillPrompt(command.skill, command.args))
+                    is ResolvedCommand.Action -> { runResolvedCommand(command, request, sessionId, CommandRequestContext(this@AIAgentViewModel, QueuedRequest(sessionId, request, modelRequest, currentFile, selectedCode, projectRoot, inputImages, inputAttachments)) {
+                        executeAgentRequestStream(it.request, it.modelRequest, it.currentFile, it.selectedCode, it.projectRoot, it.inputImages, it.inputAttachments, sessionId, isAutoTrigger = true, persistUserMessage = false)
+                    }); return@launch }
+                    null -> Unit
                 }
             }
             sessionJobs[sessionId] = currentJob
+            turnEndBridge.onRequestStarted(sessionId, request, isAutoTrigger)
             _activeAgentSessions.value = _activeAgentSessions.value + sessionId
-            currentJob.invokeOnCompletion {
+            currentJob.invokeOnCompletion { cause ->
                 viewModelScope.launch {
                     if (sessionJobs[sessionId] !== currentJob) return@launch
                     sessionJobs.remove(sessionId)
                     _activeAgentSessions.value = _activeAgentSessions.value - sessionId
                     if (sessionId !in stoppingSessions) {
+                        if (cause == null) stewardNext?.let { processNextInQueue(sessionId, it, projectRoot) }
                         flushPendingNotifications(sessionId)
                         processNextInQueue(sessionId)
                     }
@@ -2172,7 +2170,7 @@ class AIAgentViewModel @Inject constructor(
                 AgentTurnRequest(
                     sessionId = sessionId,
                     text = request,
-                    modelRequest = modelRequest,
+                    modelRequest = com.aharou.feature.agent.domain.steward.StewardTurnPolicy.mergeModelRequest(effectiveModelRequest, turnEndBridge.consumeDeferredInstruction(sessionId)),
                     currentFile = currentFile,
                     selectedCode = selectedCode,
                     projectRoot = turnProjectRoot,
@@ -2327,7 +2325,7 @@ class AIAgentViewModel @Inject constructor(
                                 }
                             }
                         }
-                        turnEndBridge.onTurnFinished(viewModelScope, sessionId) { next -> enqueueAgentRequest(next, projectRoot = projectRoot, isAutoTrigger = true, targetSessionId = sessionId) }
+                        stewardNext = turnEndBridge.onTurnFinished(sessionId, !failed)
                     }
                     is AgentEvent.ModeChanged -> {
                         // 模式切换事件：PlanApprovalManager 已在 workflow 层面挂起等待用户批准
@@ -2359,6 +2357,7 @@ class AIAgentViewModel @Inject constructor(
             }
             throw e
         } catch (e: Exception) {
+             stewardNext = null
              FileLogger.e(TAG, "executeAgentRequestStream 失败: request=$request", e)
              if (sessionJobs[sessionId] === currentJob) {
                  val failureMessage = e.toUserMessage(context)

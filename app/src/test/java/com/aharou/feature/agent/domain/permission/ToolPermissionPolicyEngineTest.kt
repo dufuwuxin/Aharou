@@ -45,6 +45,23 @@ class ToolPermissionPolicyEngineTest {
         return t
     }
 
+    @Test
+    fun scriptExplicitBashDenyWinsOverTaintedEgress() = runTest {
+        val sessionId = "script-deny-tainted-egress"
+        val script = tool(ToolCapability.EXECUTE_COMMANDS)
+        every { script.permissionCommand(any()) } returns "curl https://example.invalid/upload"
+        val e = engine(PermissionRule("Bash", "curl", PermissionDecision.DENY))
+        TaintTracker.taint(sessionId)
+        try {
+            val result = e.evaluate(script, "script_test", emptyMap(), AgentMode.BUILD, TEST_WORKSPACE, sessionId)
+            assertEquals(ToolPermissionPolicyEngine.Verdict.DENY, result.verdict)
+            val auto = e.evaluate(script, "script_test", emptyMap(), AgentMode.AUTO, TEST_WORKSPACE, sessionId)
+            assertEquals(ToolPermissionPolicyEngine.Verdict.ALLOW, auto.verdict)
+        } finally {
+            TaintTracker.clear(sessionId)
+        }
+    }
+
     private fun bash(command: String) = mapOf("command" to JsonPrimitive(command))
 
     private fun terminal(action: String) = mapOf("action" to JsonPrimitive(action))

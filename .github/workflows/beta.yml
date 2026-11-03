@@ -1,6 +1,6 @@
 name: Beta Build
 
-# push 到 master 时自动构建一个测试包：universal flavor、正式签名、与 release 同配置（R8/资源压缩），
+# push 到 master 时自动构建一个测试包：armsolo flavor、正式签名、与 release 同配置（R8/资源压缩），
 # 仅 applicationId 后缀 .beta（com.aharou.agent.beta，可与正式版同机共存）。
 # 产物传 Actions Artifacts（保留 90 天），同时发/更新一个固定 tag 的 prerelease Release
 # （tag=beta-latest），App 的「测试版」通道能直接检测到并下载，不必手动摸 Actions。
@@ -94,9 +94,11 @@ jobs:
         run: python3 scripts/check_skills.py
 
       - name: Check architecture rules
-        run: python3 scripts/check_architecture.py
+        run: |
+          python3 scripts/check_architecture.py
+          python3 -m unittest discover -s scripts -p test_arm64_assets.py
 
-      # 构建 universal beta（arm64-v8a + x86_64，含两套容器镜像的通用包）。
+      # 构建 ARM64 beta。
       # --stacktrace：失败时输出完整调用栈，便于定位 OOM/内存类根因。
       - name: Authorize build (CI 例外)
         run: |
@@ -104,23 +106,23 @@ jobs:
           printf 'authorized_by: CI\nquote: "workflow ${{ github.workflow }} run ${{ github.run_id }}"\nat: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > .aharou/build-allowed
 
       - name: Build beta APK
-        run: ./gradlew :app:assembleUniversalBeta --stacktrace
+        run: ./gradlew :app:assembleArmsoloBeta --stacktrace
 
-      # 产物重命名为 Aharou-universal-beta-<sha7>.apk，短 sha 便于区分每次构建。
+      # 产物重命名为 Aharou-arm64-beta-<sha7>.apk，短 sha 便于区分每次构建。
       # 同时带上 R8 混淆映射（mapping.txt），供 beta 崩溃报告反混淆。
       - name: Rename APK & collect mapping
         run: |
           set -e
           mkdir -p dist
           sha7="${GITHUB_SHA::7}"
-          cp "app/build/outputs/apk/universal/beta/app-universal-beta.apk" \
-             "dist/Aharou-universal-beta-${sha7}.apk"
+          cp "app/build/outputs/apk/armsolo/beta/app-armsolo-beta.apk" \
+             "dist/Aharou-arm64-beta-${sha7}.apk"
           # AGP 8.x 的 mapping 输出目录是 variant 驼峰名（flavor + BuildType），
-          # 即 outputs/mapping/universalBeta/，不是 outputs/mapping/universal/beta/。
+          # 即 outputs/mapping/armsoloBeta/，不是 outputs/mapping/armsolo/beta/。
           # mapping.txt 未压缩有 130MB+，gzip 后不到 10MB（与 android-release.yml 一致）。
-          if [[ -f "app/build/outputs/mapping/universalBeta/mapping.txt" ]]; then
-            gzip -c "app/build/outputs/mapping/universalBeta/mapping.txt" \
-              > "dist/Aharou-universal-beta-${sha7}-mapping.txt.gz"
+          if [[ -f "app/build/outputs/mapping/armsoloBeta/mapping.txt" ]]; then
+            gzip -c "app/build/outputs/mapping/armsoloBeta/mapping.txt" \
+              > "dist/Aharou-arm64-beta-${sha7}-mapping.txt.gz"
           fi
           ls -lh dist/
 
@@ -130,8 +132,8 @@ jobs:
           name: Aharou-beta-${{ github.sha }}
           # Artifacts 默认保留 90 天，无需显式配置。
           path: |
-            dist/Aharou-universal-beta-*.apk
-            dist/Aharou-universal-beta-*-mapping.txt.gz
+            dist/Aharou-arm64-beta-*.apk
+            dist/Aharou-arm64-beta-*-mapping.txt.gz
           if-no-files-found: error
 
       # 固定 tag beta-latest：每次都覆盖同一个 Release，不累积历史版本。
@@ -150,6 +152,6 @@ jobs:
             --title "测试版 ${sha7}" \
             --notes "master 自动构建的测试包。提交 ${GITHUB_SHA}。\n\n应用内「设置 → 关于 → 更新通道 → 测试版」可直接检测并下载。" \
             --prerelease \
-            dist/Aharou-universal-beta-*.apk \
-            dist/Aharou-universal-beta-*-mapping.txt.gz
+            dist/Aharou-arm64-beta-*.apk \
+            dist/Aharou-arm64-beta-*-mapping.txt.gz
           echo "已更新 Release: $tag"

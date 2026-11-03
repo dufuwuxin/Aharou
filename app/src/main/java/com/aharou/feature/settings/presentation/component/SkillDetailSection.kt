@@ -8,10 +8,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import com.aharou.core.ui.AppSwitch
 import androidx.compose.material3.Text
@@ -29,9 +27,9 @@ import com.aharou.feature.agent.domain.skill.SkillScope
 import com.aharou.feature.agent.presentation.component.MarkdownContent
 import com.aharou.feature.agent.presentation.component.MarkdownRenderCache
 import com.aharou.feature.settings.presentation.SkillUiEntry
+import com.aharou.feature.settings.presentation.SkillBindingSaveState
 import com.aharou.feature.settings.presentation.SubAgentUiEntry
-import compose.icons.FeatherIcons
-import compose.icons.feathericons.ChevronRight
+import com.aharou.feature.settings.presentation.SubAgentSaveState
 
 /**
  * 技能详情页：分组卡片——「是否启用」开关行、「摘要」描述卡、「正文」指令卡（Markdown 渲染）。
@@ -48,9 +46,14 @@ internal fun SkillDetailSection(
     onExport: () -> Unit,
     exporting: Boolean,
     cache: MarkdownRenderCache? = null,
-    boundMembers: List<SubAgentUiEntry> = emptyList(),
-    onOpenMember: ((SubAgentUiEntry) -> Unit)? = null
+    members: List<SubAgentUiEntry> = emptyList(),
+    bindingSaveState: SkillBindingSaveState = SkillBindingSaveState(),
+    onSetMemberBinding: (SubAgentUiEntry, Boolean) -> Unit,
+    onOpenMember: (SubAgentUiEntry) -> Unit
 ) {
+    val bindingState = bindingSaveState.state.takeIf {
+        it is SubAgentSaveState.Saving || bindingSaveState.skillName == entry.name
+    } ?: SubAgentSaveState.Idle
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -120,59 +123,72 @@ internal fun SkillDetailSection(
             }
         }
 
-        // 卡片 1.5：绑定成员——哪些专家成员已把本技能加进专属 skills；点成员进其编辑器改绑 / 配关键词注入。
-        SettingsGroupHeader(text = stringResource(R.string.skills_bound_members))
-        SettingsGroup {
-            if (boundMembers.isEmpty()) {
+        if (!entry.builtin) {
+            SettingsGroupHeader(text = stringResource(R.string.skills_bound_members))
+            SettingsGroup {
                 Text(
-                    text = stringResource(R.string.skills_bound_members_empty),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.semanticColors.subtleText,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = Spacing.lg, vertical = 12.dp)
-                )
-            } else {
-                boundMembers.forEachIndexed { index, member ->
-                    if (index > 0) SettingsDivider()
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onOpenMember?.invoke(member) }
-                            .padding(horizontal = Spacing.lg, vertical = 11.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = member.name,
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                text = member.description.ifBlank { stringResource(R.string.mcp_no_description) },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.semanticColors.subtleText,
-                                maxLines = 1,
-                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                            )
-                        }
-                        Icon(
-                            imageVector = FeatherIcons.ChevronRight,
-                            contentDescription = stringResource(R.string.skills_bound_members_hint),
-                            tint = MaterialTheme.semanticColors.subtleText,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                }
-                SettingsDivider()
-                Text(
-                    text = stringResource(R.string.skills_keyword_inject_guide),
+                    text = stringResource(R.string.skills_bound_members_hint),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.semanticColors.subtleText,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = Spacing.lg, vertical = 8.dp)
+                    modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.sm)
                 )
+                if (bindingState is SubAgentSaveState.Failed) {
+                    Text(
+                        text = stringResource(R.string.skills_binding_failed),
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.sm)
+                    )
+                }
+                if (members.isEmpty()) {
+                    Text(
+                        text = stringResource(R.string.skills_bound_members_empty),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.semanticColors.subtleText,
+                        modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.sm)
+                    )
+                } else {
+                    members.forEachIndexed { index, member ->
+                        if (index > 0) SettingsDivider()
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = Spacing.lg, vertical = Spacing.sm),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(Spacing.md)
+                        ) {
+                            Column(
+                                modifier = Modifier.weight(1f).clickable(
+                                    enabled = bindingState !is SubAgentSaveState.Saving
+                                ) { onOpenMember(member) }
+                            ) {
+                                Text(
+                                    text = member.name,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = member.description.ifBlank { stringResource(R.string.mcp_no_description) },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.semanticColors.subtleText,
+                                    maxLines = 1,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                )
+                            }
+                            AppSwitch(
+                                checked = member.skills.any { it.equals(entry.name, ignoreCase = true) },
+                                onCheckedChange = { onSetMemberBinding(member, it) },
+                                enabled = bindingState !is SubAgentSaveState.Saving
+                            )
+                        }
+                    }
+                    SettingsDivider()
+                    Text(
+                        text = stringResource(R.string.skills_keyword_inject_guide),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.semanticColors.subtleText,
+                        modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.sm)
+                    )
+                }
             }
         }
 

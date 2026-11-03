@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -56,11 +55,8 @@ import com.aharou.core.ui.SelectionAction
 import com.aharou.core.ui.SelectionActionBar
 import com.aharou.core.ui.SwipeToDeleteRow
 import com.aharou.core.ui.rememberListSelectionState
-import com.aharou.feature.agent.domain.prompt.InjectionBlock
-import com.aharou.feature.agent.domain.prompt.PromptAuxFragment
 import com.aharou.feature.agent.domain.prompt.PromptFragment
 import com.aharou.feature.agent.domain.prompt.PromptFragmentSource
-import com.aharou.feature.settings.presentation.InjectionBlockState
 import com.aharou.feature.settings.presentation.PromptsUiState
 import com.aharou.feature.settings.presentation.PromptsViewModel
 import compose.icons.FeatherIcons
@@ -106,8 +102,6 @@ internal fun PromptsSection(
     val selectionIds = state.fragments.filter { it.editable }.map { it.number.toString() }
     LaunchedEffect(selectionIds) { selection.retain(selectionIds) }
     var showBatchDelete by remember { mutableStateOf(false) }
-    // 正在编辑的按需片段（底栏里改正文）
-    var editingAux by remember { mutableStateOf<PromptAuxFragment?>(null) }
 
     Column(modifier = Modifier.fillMaxSize()) {
         if (selection.selectionMode) {
@@ -182,17 +176,12 @@ internal fun PromptsSection(
         } else {
             PromptList(
                 fragments = state.fragments,
-                auxFragments = state.auxFragments,
-                blocks = emptyList(),
                 selection = selection,
                 builtinDisabled = state.builtinDisabled,
                 onOpenFragment = onOpenFragment,
                 onDeleteFragment = onDeleteFragment,
                 onReorder = onReorder,
-                onToggleFragment = onToggleFragment,
-                onToggleBlock = { block, enabled -> promptsViewModel.setBlockEnabled(block, enabled) },
-                onToggleAux = { aux, enabled -> promptsViewModel.setAuxEnabled(aux.name, enabled) },
-                onOpenAux = { aux -> editingAux = aux }
+                onToggleFragment = onToggleFragment
             )
         }
     }
@@ -230,19 +219,6 @@ internal fun PromptsSection(
         )
     }
 
-    editingAux?.let { aux ->
-        TextContentEditorSheet(
-            key = aux.name,
-            title = aux.name,
-            hint = stringResource(R.string.prompts_aux_editor_hint),
-            initialContent = aux.content,
-            onDismiss = { editingAux = null },
-            onSave = { content ->
-                promptsViewModel.saveAuxFragment(aux.name, content)
-                editingAux = null
-            }
-        )
-    }
 }
 
 /**
@@ -252,17 +228,12 @@ internal fun PromptsSection(
 @Composable
 private fun PromptList(
     fragments: List<PromptFragment>,
-    auxFragments: List<PromptAuxFragment>,
-    blocks: List<InjectionBlockState>,
     selection: ListSelectionState,
     builtinDisabled: Boolean,
     onOpenFragment: (PromptFragment) -> Unit,
     onDeleteFragment: (Int) -> Unit,
     onReorder: (List<PromptFragment>) -> Unit,
-    onToggleFragment: (Int, Boolean) -> Unit,
-    onToggleBlock: (InjectionBlock, Boolean) -> Unit,
-    onToggleAux: (PromptAuxFragment, Boolean) -> Unit,
-    onOpenAux: (PromptAuxFragment) -> Unit
+    onToggleFragment: (Int, Boolean) -> Unit
 ) {
     var localFragments by remember { mutableStateOf(fragments) }
     LaunchedEffect(fragments) { localFragments = fragments }
@@ -344,105 +315,6 @@ private fun PromptList(
             }
         }
 
-        // 按需片段（plan-mode / auto-mode / 子代理基线 / 工作区规约等）不进静态基线，单独一段列出
-        if (auxFragments.isNotEmpty()) {
-            item(key = "aux-header") {
-                SettingsGroupHeader(text = stringResource(R.string.prompts_aux_title))
-            }
-            items(items = auxFragments, key = { aux -> "aux:${aux.name}" }) { aux ->
-                AuxFragmentRow(
-                    fragment = aux,
-                    onOpen = { onOpenAux(aux) },
-                    onToggle = { onToggleAux(aux, it) }
-                )
-            }
-        }
-    }
-}
-
-/** 动态注入区块的开关行：技能清单、记忆索引、工作区等整段可一键停掉。 */
-@Composable
-private fun BlockSwitchRow(
-    state: InjectionBlockState,
-    onToggle: (Boolean) -> Unit
-) {
-    Surface(
-        shape = RoundedCornerShape(14.dp),
-        color = MaterialTheme.semanticColors.cardSurface,
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = Spacing.lg, end = Spacing.sm, top = 8.dp, bottom = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = blockLabel(state.block),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f)
-            )
-            AppSwitch(checked = state.enabled, onCheckedChange = onToggle)
-        }
-    }
-}
-
-/** 区块的名字：[InjectionBlock] 新增条目时这里要同步补一条。（动态注入开关已移除，此函数随块一起废弃，暂保留以避免编译误报。） */
-@Composable
-private fun blockLabel(block: InjectionBlock): String = stringResource(
-    when (block) {
-        InjectionBlock.SOUL -> R.string.prompts_block_soul
-        InjectionBlock.ARCHIVE -> R.string.prompts_block_archive
-        InjectionBlock.SKILLS -> R.string.prompts_block_skills
-        InjectionBlock.SUB_AGENTS -> R.string.prompts_block_sub_agents
-        InjectionBlock.TEAMS -> R.string.prompts_block_teams
-        InjectionBlock.MEMORIES -> R.string.prompts_block_memories
-        InjectionBlock.PROJECT_RULES -> R.string.prompts_block_project_rules
-        InjectionBlock.WORKSPACE -> R.string.prompts_block_workspace
-        InjectionBlock.RULES -> R.string.prompts_block_rules
-        InjectionBlock.WORKSPACE_TYPE -> R.string.prompts_block_workspace_type
-        InjectionBlock.MODEL_IDENTITY -> R.string.prompts_block_model_identity
-        InjectionBlock.INBOX -> R.string.prompts_block_inbox
-        InjectionBlock.TIME -> R.string.prompts_block_time
-        InjectionBlock.WORKSPACE_CHANGE -> R.string.prompts_block_workspace_change
-    }
-)
-
-/** 按需片段行：名称 + 来源徽章 + 开关；点行进底栏改正文。 */
-@Composable
-private fun AuxFragmentRow(
-    fragment: PromptAuxFragment,
-    onOpen: () -> Unit,
-    onToggle: (Boolean) -> Unit
-) {
-    Surface(
-        shape = RoundedCornerShape(14.dp),
-        color = MaterialTheme.semanticColors.cardSurface,
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable(onClick = onOpen)
-                .padding(start = Spacing.lg, end = Spacing.xs, top = 10.dp, bottom = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = fragment.title,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f)
-            )
-            Spacer(modifier = Modifier.width(Spacing.sm))
-            SourceBadge(fragment.source)
-            Spacer(modifier = Modifier.width(Spacing.sm))
-            AppSwitch(checked = fragment.enabled, onCheckedChange = onToggle)
-        }
     }
 }
 

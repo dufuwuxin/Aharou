@@ -33,16 +33,13 @@ import compose.icons.feathericons.Eye
 import compose.icons.feathericons.FileText
 import compose.icons.feathericons.Globe
 import compose.icons.feathericons.HardDrive
-import compose.icons.feathericons.Heart
 import compose.icons.feathericons.Info
 import compose.icons.feathericons.Key
 import compose.icons.feathericons.Lock
-import compose.icons.feathericons.MessageSquare
 import compose.icons.feathericons.Monitor
 import compose.icons.feathericons.Tool
 import compose.icons.feathericons.Moon
 import compose.icons.feathericons.PieChart
-import compose.icons.feathericons.Power
 import compose.icons.feathericons.RefreshCw
 import compose.icons.feathericons.Save
 import compose.icons.feathericons.Server
@@ -63,9 +60,6 @@ import compose.icons.feathericons.Users
 
 @Composable
 internal fun SettingsAharouGroupScreen(onOpen: (SettingsSection) -> Unit) {
-    // 入口行直接给字数摘要：不用点进去就能看出规则配没配（对齐简云的做法）
-    val rulesViewModel: RulesViewModel = hiltViewModel()
-    val rulesState by rulesViewModel.state.collectAsStateWithLifecycle()
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -86,44 +80,7 @@ internal fun SettingsAharouGroupScreen(onOpen: (SettingsSection) -> Unit) {
                 title = stringResource(SettingsSection.ConfigAudit.titleRes),
                 onClick = { onOpen(SettingsSection.ConfigAudit) }
             )
-            SettingsDivider()
-            SettingsRow(
-                icon = FeatherIcons.BookOpen,
-                title = stringResource(SettingsSection.Memory.titleRes),
-                onClick = { onOpen(SettingsSection.Memory) }
-            )
-            SettingsDivider()
-            // 工具与记忆、技能同级：都是 agent 的「能力面」，单列一页才看得到到底有哪些能用。
-            SettingsRow(
-                icon = FeatherIcons.Tool,
-                title = stringResource(SettingsSection.Tools.titleRes),
-                onClick = { onOpen(SettingsSection.Tools) }
-            )
-            SettingsDivider()
-            SettingsRow(
-                icon = FeatherIcons.MessageSquare,
-                title = stringResource(SettingsSection.Prompts.titleRes),
-                onClick = { onOpen(SettingsSection.Prompts) }
-            )
-            SettingsDivider()
-            SettingsRow(
-                icon = FeatherIcons.FileText,
-                title = stringResource(SettingsSection.Rules.titleRes),
-                subtitle = rulesSummary(rulesState),
-                onClick = { onOpen(SettingsSection.Rules) }
-            )
-            SettingsDivider()
-            SettingsRow(
-                icon = FeatherIcons.Power,
-                title = stringResource(R.string.assistant_digital_title),
-                onClick = { onOpen(SettingsSection.AssistantDigital) }
-            )
-            SettingsDivider()
-            SettingsRow(
-                icon = FeatherIcons.Heart,
-                title = stringResource(SettingsSection.Pet.titleRes),
-                onClick = { onOpen(SettingsSection.Pet) }
-            )
+
         }
     }}
 
@@ -153,8 +110,11 @@ private fun rulesSummary(state: RulesUiState): String {
 
 @Composable
 internal fun SettingsAiGroupScreen(onOpen: (SettingsSection) -> Unit) {
+    // 入口行直接给字数摘要：不用点进去就能看出规则配没配（对齐简云的做法）
+    val rulesViewModel: RulesViewModel = hiltViewModel()
+    val rulesState by rulesViewModel.state.collectAsStateWithLifecycle()
     // 配置页：只展用户直接可操作的子页面入口，不再有「AI 配置」分组标题。
-    // 顺序：记忆 / 技能 / 团队 / 知识库 / 工具 / 提示词，与用户的日常使用顺序对齐。
+    // 规则与记忆、工具和提示词统一归配置页。
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -197,6 +157,13 @@ internal fun SettingsAiGroupScreen(onOpen: (SettingsSection) -> Unit) {
                 icon = FeatherIcons.FileText,
                 title = stringResource(SettingsSection.Prompts.titleRes),
                 onClick = { onOpen(SettingsSection.Prompts) }
+            )
+            SettingsDivider()
+            SettingsRow(
+                icon = FeatherIcons.FileText,
+                title = stringResource(SettingsSection.Rules.titleRes),
+                subtitle = rulesSummary(rulesState),
+                onClick = { onOpen(SettingsSection.Rules) }
             )
         }
     }

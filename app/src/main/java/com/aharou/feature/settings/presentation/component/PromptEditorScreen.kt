@@ -35,6 +35,7 @@ import com.aharou.core.theme.Spacing
 import com.aharou.core.ui.AppSwitch
 import com.aharou.core.ui.AppTextField
 import com.aharou.feature.agent.domain.prompt.PromptFragment
+import com.aharou.feature.agent.domain.prompt.PromptFragmentInjection
 import com.aharou.feature.agent.domain.prompt.PromptFragmentSource
 import com.aharou.feature.agent.domain.subagent.InjectPart
 import com.aharou.feature.agent.domain.subagent.KeywordInjection
@@ -58,6 +59,8 @@ internal fun PromptEditorScreen(
     initialScope: PromptFragmentSource,
     initialKeywordInjections: List<KeywordInjection> = emptyList(),
     initialInjectParts: Set<InjectPart> = emptySet(),
+    initialInjection: PromptFragmentInjection = PromptFragmentInjection(),
+    members: List<String> = emptyList(),
     hasWorkspace: Boolean,
     onSave: (
         number: Int,
@@ -65,7 +68,8 @@ internal fun PromptEditorScreen(
         scope: PromptFragmentSource,
         content: String,
         keywordInjections: List<KeywordInjection>,
-        injectParts: Set<InjectPart>
+        injectParts: Set<InjectPart>,
+        injection: PromptFragmentInjection
     ) -> Unit,
     onNavigateBack: () -> Unit
 ) {
@@ -74,16 +78,12 @@ internal fun PromptEditorScreen(
     var description by rememberSaveable { mutableStateOf(initialDescription) }
     var content by rememberSaveable { mutableStateOf(initialContent) }
     var scopeIsProject by rememberSaveable { mutableStateOf(initialScope == PromptFragmentSource.PROJECT) }
-    // 关键词注入：前端存成「触发词1,触发词2|正文\n...」的明文，save 时拆开成 KeywordInjection。
-    var keywordInjectionsRaw by rememberSaveable {
-        mutableStateOf(initialKeywordInjections.joinToString("\n") { inj ->
-            inj.keywords.joinToString(",") + "|" + inj.injectContent
-        })
-    }
-    // 成员注入：Set<InjectPart> 进不了 Bundle，存 token 字符串集合；切页或旋转后仍能还原。
-    var injectTokens by rememberSaveable {
-        mutableStateOf(initialInjectParts.map { it.token })
-    }
+    var defaultInjection by rememberSaveable { mutableStateOf(initialInjection.defaultInjection) }
+    var keywordsEnabled by rememberSaveable { mutableStateOf(initialInjection.keywordsEnabled) }
+    var membersEnabled by rememberSaveable { mutableStateOf(initialInjection.membersEnabled) }
+    var keywordsRaw by rememberSaveable { mutableStateOf(initialInjection.keywords.joinToString(", ")) }
+    var selectedMembers by rememberSaveable { mutableStateOf(initialInjection.members.toList()) }
+    val memberNames = (members + initialInjection.members).distinct().sorted()
 
     val number = numberText.toIntOrNull()
     val numberValid = number != null && number in 0..99
@@ -115,22 +115,20 @@ internal fun PromptEditorScreen(
                     TextButton(
                         enabled = canSave,
                         onClick = {
-                            val kwInjs = keywordInjectionsRaw.trim().split("\n").mapNotNull { line ->
-                                val pipe = line.indexOf('|')
-                                if (pipe < 0) return@mapNotNull null
-                                val kws = line.substring(0, pipe).split(',').map { it.trim() }.filter { it.isNotEmpty() }
-                                val text = line.substring(pipe + 1).trim()
-                                if (kws.isEmpty() || text.isEmpty()) return@mapNotNull null
-                                KeywordInjection(kws, text)
-                            }
-                            val injParts = injectTokens.mapNotNull { InjectPart.fromToken(it) }.toSet()
                             onSave(
                                 number ?: 0,
                                 title.trim(),
                                 if (scopeIsProject) PromptFragmentSource.PROJECT else PromptFragmentSource.GLOBAL,
                                 PromptFragment.composeContent(description, content),
-                                kwInjs,
-                                injParts
+                                initialKeywordInjections,
+                                initialInjectParts,
+                                PromptFragmentInjection(
+                                    defaultInjection = defaultInjection,
+                                    keywords = keywordsRaw.split(',', '，', '\n').map { it.trim() }.filter { it.isNotEmpty() }.distinct(),
+                                    members = selectedMembers.toSet(),
+                                    keywordsEnabled = keywordsEnabled,
+                                    membersEnabled = membersEnabled
+                                )
                             )
                         }
                     ) {
@@ -222,57 +220,56 @@ internal fun PromptEditorScreen(
                 )
             }
 
-            // 关键词注入：触发词与正文一换行一条；格式「触发词1,触发词2|正文」
-            SettingsGroupHeader(text = stringResource(R.string.subagent_editor_keyword_inject))
+            SettingsGroupHeader(text = stringResource(R.string.prompts_injection))
             SettingsGroup {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.lg, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(stringResource(R.string.prompts_injection_default), style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            stringResource(R.string.prompts_injection_default_hint),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    AppSwitch(checked = defaultInjection, onCheckedChange = { defaultInjection = it })
+                }
+                SettingsDivider()
                 SettingsRow(
-                    title = stringResource(R.string.subagent_editor_keyword_inject),
-                    subtitle = stringResource(R.string.subagent_editor_keyword_inject_hint),
+                    title = stringResource(R.string.prompts_injection_keywords),
+                    subtitle = stringResource(R.string.prompts_injection_keywords_hint),
+                    trailing = { AppSwitch(checked = keywordsEnabled, onCheckedChange = { keywordsEnabled = it }) }
                 )
                 AppTextField(
-                    value = keywordInjectionsRaw,
-                    onValueChange = { keywordInjectionsRaw = it },
-                    label = stringResource(R.string.subagent_editor_keyword_inject_label),
+                    value = keywordsRaw,
+                    onValueChange = { keywordsRaw = it },
+                    label = stringResource(R.string.prompts_injection_keywords),
+                    enabled = keywordsEnabled,
                     singleLine = false,
-                    minLines = 5,
-                    maxLines = 20,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = Spacing.lg, vertical = Spacing.xs)
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.lg, vertical = Spacing.xs)
                 )
             }
-
-            // 成员注入：与 [SubAgentEditorScreen] 的注入分组风格保持一致（每行一个 part 带 hint + 开关）。
-            SettingsGroupHeader(text = stringResource(R.string.subagent_inject))
+            SettingsGroupHeader(text = stringResource(R.string.prompts_injection_members))
             SettingsGroup {
-                InjectPart.entries.forEachIndexed { index, part ->
-                    if (index > 0) SettingsDivider()
+                SettingsRow(
+                    title = stringResource(R.string.prompts_injection_members),
+                    subtitle = stringResource(R.string.prompts_injection_members_hint),
+                    trailing = { AppSwitch(checked = membersEnabled, onCheckedChange = { membersEnabled = it }) }
+                )
+                memberNames.forEach { name ->
+                    SettingsDivider()
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = Spacing.lg, vertical = 10.dp),
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.lg, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = stringResource(part.labelRes()),
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                text = stringResource(part.hintRes()),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
+                        Text(name, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
                         AppSwitch(
-                            checked = part.token in injectTokens,
+                            checked = name in selectedMembers,
+                            enabled = membersEnabled,
                             onCheckedChange = { checked ->
-                                injectTokens = if (checked) {
-                                    injectTokens + part.token
-                                } else {
-                                    injectTokens - part.token
-                                }
+                                selectedMembers = if (checked) selectedMembers + name else selectedMembers - name
                             }
                         )
                     }
@@ -280,21 +277,4 @@ internal fun PromptEditorScreen(
             }
         }
     }
-}
-
-// InjectPart 的 label/hint 字符串映射（与 SubAgentEditorScreen 保持一致）
-private fun InjectPart.labelRes(): Int = when (this) {
-    InjectPart.BASE -> R.string.subagent_inject_base
-    InjectPart.MAIN_RULES -> R.string.subagent_inject_main_rules
-    InjectPart.SKILLS -> R.string.subagent_inject_skills
-    InjectPart.MEMORY -> R.string.subagent_inject_memory
-    InjectPart.PROJECT_RULES -> R.string.subagent_inject_project_rules
-}
-
-private fun InjectPart.hintRes(): Int = when (this) {
-    InjectPart.BASE -> R.string.subagent_inject_base_hint
-    InjectPart.MAIN_RULES -> R.string.subagent_inject_main_rules_hint
-    InjectPart.SKILLS -> R.string.subagent_inject_skills_hint
-    InjectPart.MEMORY -> R.string.subagent_inject_memory_hint
-    InjectPart.PROJECT_RULES -> R.string.subagent_inject_project_rules_hint
 }

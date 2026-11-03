@@ -67,7 +67,9 @@ def main() -> int:
         if missing:
             problems.append(f"{abi} 缺少角色：{', '.join(sorted(missing))}")
 
-    expected_abis = {"arm64-v8a", "x86_64"}
+    expected_abis = {"arm64-v8a"}
+    for abi in sorted(set(seen) - expected_abis):
+        problems.append(f"不支持的 ABI：{abi}")
     for abi in sorted(expected_abis - set(seen)):
         problems.append(f"缺少 ABI：{abi}")
 

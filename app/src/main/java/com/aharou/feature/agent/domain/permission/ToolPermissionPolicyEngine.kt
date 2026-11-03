@@ -186,6 +186,57 @@ class ToolPermissionPolicyEngine @Inject constructor(
         workspacePath: String,
         sessionId: String? = null
     ): EvalResult {
+        val command = if (toolName != "Bash") tool?.permissionCommand(args) else null
+        if (command == null) return evaluateDirect(tool, toolName, args, mode, workspacePath, sessionId)
+
+        // 敏感与污点分支会提前 ASK，不能遮住脚本身份或真实命令的显式 DENY。
+        if (mode != com.aharou.feature.agent.domain.model.AgentMode.AUTO &&
+            mode != com.aharou.feature.agent.domain.model.AgentMode.ALLOW
+        ) {
+            val denied = rulesRepo.loadEffectiveFor(workspacePath).filter { it.decision == PermissionDecision.DENY }
+            val segments = ShellCommandParser.analyze(command).segments
+            if (denied.any { rule ->
+                    (rule.toolName == toolName && rule.pattern == PermissionRule.WHOLE_TOOL) ||
+                        (rule.toolName == "Bash" && (rule.pattern == PermissionRule.WHOLE_TOOL ||
+                            segments.any { ShellCommandParser.matches(rule.pattern, it) }))
+                }
+            ) {
+                return audit(
+                    EvalResult(Verdict.DENY, emptyList(), denyReason = "该工具或命令被项目权限规则策略禁止执行"),
+                    sessionId, toolName, riskLevelOf(toolName, tool?.effectiveCapabilities(args).orEmpty())
+                )
+            }
+        }
+
+        val identity = evaluateDirect(tool, toolName, args, mode, workspacePath, sessionId)
+        // 不传脚本的敏感调用钩子：它不能使 Bash 提前 ASK 而漏过灾难性命令检查。
+        val shell = evaluateDirect(null, "Bash", args + ("command" to JsonPrimitive(command)), mode, workspacePath, sessionId)
+        val combined = when {
+            identity.verdict == Verdict.DENY -> identity
+            shell.verdict == Verdict.DENY -> shell
+            identity.verdict == Verdict.ALLOW && shell.verdict == Verdict.ALLOW -> identity
+            else -> {
+                val ask = if (shell.verdict == Verdict.ASK) shell else identity
+                ask.copy(
+                    rememberablePatterns = emptyList(),
+                    rememberDisabledReason = "动态脚本同时核验工具身份与命令权限，仅支持单次放行",
+                    sensitiveReason = identity.sensitiveReason ?: shell.sensitiveReason,
+                    taintedReason = identity.taintedReason ?: shell.taintedReason,
+                    egressTarget = shell.egressTarget ?: identity.egressTarget
+                )
+            }
+        }
+        return audit(combined, sessionId, toolName, riskLevelOf(toolName, tool?.effectiveCapabilities(args).orEmpty()))
+    }
+
+    private suspend fun evaluateDirect(
+        tool: AgentTool?,
+        toolName: String,
+        args: Map<String, JsonElement>,
+        mode: com.aharou.feature.agent.domain.model.AgentMode,
+        workspacePath: String,
+        sessionId: String?
+    ): EvalResult {
         val capabilities = tool?.effectiveCapabilities(args).orEmpty()
         val risk = riskLevelOf(toolName, capabilities)
         if (mode == com.aharou.feature.agent.domain.model.AgentMode.PLAN && isDangerousTool(toolName, args, capabilities)) {

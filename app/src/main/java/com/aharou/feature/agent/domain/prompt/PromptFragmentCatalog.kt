@@ -50,12 +50,36 @@ internal object PromptFragmentMeta {
         }
     }
 
+    fun parseInjection(content: String): PromptFragmentInjection {
+        val json = TRAILING_META.find(content)?.groupValues?.get(1) ?: return PromptFragmentInjection()
+        return runCatching {
+            val policy = JSONObject(json).optJSONObject("injection") ?: return PromptFragmentInjection()
+            fun strings(key: String): List<String> {
+                val array = policy.optJSONArray(key) ?: return emptyList()
+                return (0 until array.length()).mapNotNull { index ->
+                    (array.opt(index) as? String)?.trim()?.takeIf { it.isNotEmpty() }
+                }
+            }
+            PromptFragmentInjection(
+                defaultInjection = policy.optBoolean("default", true),
+                keywords = strings("keywords"),
+                members = strings("members").toSet(),
+                keywordsEnabled = policy.optBoolean("keywords_enabled", strings("keywords").isNotEmpty()),
+                membersEnabled = policy.optBoolean("members_enabled", strings("members").isNotEmpty())
+            )
+        }.getOrDefault(PromptFragmentInjection())
+    }
+
     /**
      * 把两字段编码成末尾的 HTML 注释块。
      * 两个都为空时返回空串（不落噪音），方便旧片段无需重写过一遍。
      */
-    fun encode(keywordInjections: List<KeywordInjection>, injectParts: Set<InjectPart>): String {
-        if (keywordInjections.isEmpty() && injectParts.isEmpty()) return ""
+    fun encode(
+        keywordInjections: List<KeywordInjection>,
+        injectParts: Set<InjectPart>,
+        injection: PromptFragmentInjection = PromptFragmentInjection()
+    ): String {
+        if (keywordInjections.isEmpty() && injectParts.isEmpty() && injection == PromptFragmentInjection()) return ""
         val root = JSONObject()
         val arr = JSONArray()
         keywordInjections.forEach { inj ->
@@ -68,6 +92,13 @@ internal object PromptFragmentMeta {
         val partArr = JSONArray()
         injectParts.forEach { part -> partArr.put(part.token) }
         root.put("inject_parts", partArr)
+        root.put("injection", JSONObject().apply {
+            put("default", injection.defaultInjection)
+            put("keywords", JSONArray(injection.keywords))
+            put("members", JSONArray(injection.members.toList()))
+            put("keywords_enabled", injection.keywordsEnabled)
+            put("members_enabled", injection.membersEnabled)
+        })
         return "\n\n<!-- ah:meta ${root.toString()} -->"
     }
 }
@@ -90,7 +121,8 @@ data class PromptFragment(
     /** 关键词注入：用户输入命中任一 keyword 时把对应正文追加进提示词（旧片段无此字段，默认空）。 */
     val keywordInjections: List<KeywordInjection> = emptyList(),
     /** 成员注入：该片段对应的提示词片段开关（旧片段无此字段，默认空）。 */
-    val injectParts: Set<InjectPart> = emptySet()
+    val injectParts: Set<InjectPart> = emptySet(),
+    val injection: PromptFragmentInjection = PromptFragmentMeta.parseInjection(content)
 ) {
     val stableReorderKey: String
         get() = "$title:${content.hashCode()}"
@@ -181,16 +213,21 @@ class PromptFragmentCatalog @Inject constructor(
     )
 
     /** 静态基线正文：所有启用的片段去掉前导注释与尾部元数据块后按编号拼接。 */
-    fun renderStatic(projectRoot: String?): String =
+    fun renderStatic(
+        projectRoot: String?,
+        currentUserText: String = "",
+        memberName: String? = null,
+        inheritsMainRules: Boolean = false
+    ): String =
         list(projectRoot)
-            .filter { it.enabled }
+            .filter { it.enabled && it.injection.matches(currentUserText, memberName, inheritsMainRules) }
             .mapNotNull { it.body.takeIf { text -> text.isNotEmpty() } }
             .joinToString("\n\n")
 
     /** 「仅自定义片段」模式：只取项目层与全局层的自定义片段正文（已去掉元数据块）。 */
-    fun renderCustomOnly(projectRoot: String?): String =
+    fun renderCustomOnly(projectRoot: String?, currentUserText: String = ""): String =
         list(projectRoot)
-            .filter { it.custom && it.enabled }
+            .filter { it.custom && it.enabled && it.injection.matches(currentUserText) }
             .mapNotNull { it.body.takeIf { text -> text.isNotEmpty() } }
             .joinToString("\n\n")
 
@@ -282,6 +319,23 @@ class PromptFragmentCatalog @Inject constructor(
         false
     }
 
+    fun updateInjection(number: Int, projectRoot: String?, injection: PromptFragmentInjection): Boolean {
+        val current = fragment(number, projectRoot) ?: return false
+        val target = if (current.editable) current.file ?: return false
+            else File(globalDir, "%02d-%s.md".format(number, sanitizeTitle(current.title)))
+        return runCatching {
+            target.parentFile?.mkdirs()
+            val pending = File.createTempFile(".injection-", ".tmp", target.parentFile)
+            try {
+                pending.writeText(PromptFragmentMeta.stripTrailingMeta(current.content) +
+                    PromptFragmentMeta.encode(current.keywordInjections, current.injectParts, injection))
+                pending.renameTo(target)
+            } finally {
+                pending.delete()
+            }
+        }.getOrDefault(false)
+    }
+
     /**
      * 保存某编号的覆盖。
      *
@@ -297,7 +351,8 @@ class PromptFragmentCatalog @Inject constructor(
         target: PromptFragmentSource? = null,
         previousNumber: Int? = null,
         keywordInjections: List<KeywordInjection> = emptyList(),
-        injectParts: Set<InjectPart> = emptySet()
+        injectParts: Set<InjectPart> = emptySet(),
+        injection: PromptFragmentInjection = PromptFragmentInjection()
     ): Boolean {
         val project = projectDir(projectRoot)
         val dir = when (target) {
@@ -317,7 +372,7 @@ class PromptFragmentCatalog @Inject constructor(
             if (globalDir != dir) deleteOverridesFor(number, globalDir)
             // 关键词注入与成员注入编码进正文尾部的 ah:meta 块（JSON）；旧片段没有该块，读时默认空
             File(dir, "%02d-%s.md".format(number, sanitizeTitle(title)))
-                .writeText(content + PromptFragmentMeta.encode(keywordInjections, injectParts))
+                .writeText(PromptFragmentMeta.stripTrailingMeta(content) + PromptFragmentMeta.encode(keywordInjections, injectParts, injection))
             true
         } catch (e: Exception) {
             FileLogger.e(TAG, "写提示词覆盖失败: $number", e)

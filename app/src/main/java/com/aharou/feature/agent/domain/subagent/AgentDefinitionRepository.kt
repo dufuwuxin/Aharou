@@ -53,10 +53,12 @@ class AgentDefinitionRepository @Inject constructor(
      * 写入定义文件（新建或编辑）。[originalName] 为编辑前的名称，新建时传 null；
      * 改了名就写新文件再删旧文件，等价于重命名。返回 null 表示成功。
      */
+    @Synchronized
     fun save(
         form: AgentDefinitionForm,
         scope: AgentDefinitionScope,
-        originalName: String? = null
+        originalName: String? = null,
+        requireExisting: Boolean = false
     ): AgentSaveError? {
         val name = form.name.trim()
         if (!isValidName(name)) return AgentSaveError.INVALID_NAME
@@ -96,8 +98,13 @@ class AgentDefinitionRepository @Inject constructor(
         return try {
             // 名字未改时写回原文件，不能按 name 重拼文件名：内置 Explore 的文件叫 explore.md
             // 而 frontmatter 里写的是 Explore，重拼会在大小写敏感的文件系统上多出一份 Explore.md。
-            val target = existingFile?.takeIf { overwritingSelf && provider.isFile(it) }
-                ?: "${root.trimEnd('/')}/$name.md"
+            val target = if (requireExisting) {
+                existingFile?.takeIf { overwritingSelf && provider.isFile(it) }
+                    ?: return AgentSaveError.IO_FAILED
+            } else {
+                existingFile?.takeIf { overwritingSelf && provider.isFile(it) }
+                    ?: "${root.trimEnd('/')}/$name.md"
+            }
             provider.writeFile(target, text, overwrite = true)
             // 改名后清掉旧文件，否则会多出一个同内容的旧名子代理
             if (!overwritingSelf && existingFile != null && existingFile != target && provider.isFile(existingFile)) {
@@ -112,7 +119,42 @@ class AgentDefinitionRepository @Inject constructor(
         }
     }
 
+    @Synchronized
+    fun setSkillBinding(
+        name: String,
+        scope: AgentDefinitionScope,
+        skillName: String,
+        bound: Boolean
+    ): AgentSaveError? {
+        val definition = listAll().firstOrNull {
+            it.scope == scope && it.definition.name.equals(name, ignoreCase = true)
+        }?.definition ?: return AgentSaveError.IO_FAILED
+        val skills = definition.skills.filterNot { it.equals(skillName, ignoreCase = true) }
+            .let { if (bound) it + skillName else it }
+        if (skills == definition.skills) return null
+        return save(
+            AgentDefinitionForm(
+                name = definition.name,
+                description = definition.description,
+                providerId = definition.providerId,
+                model = definition.model,
+                reasoningEffort = definition.reasoningEffort,
+                mode = definition.mode,
+                allowedTools = definition.allowedTools,
+                disallowedTools = definition.disallowedTools,
+                skills = skills,
+                inject = definition.inject,
+                keywordInjections = definition.keywordInjections,
+                prompt = definition.prompt
+            ),
+            scope,
+            originalName = definition.name,
+            requireExisting = true
+        )
+    }
+
     /** 删除指定作用域的定义文件，不可恢复。返回是否成功。 */
+    @Synchronized
     fun delete(name: String, scope: AgentDefinitionScope): Boolean {
         val entry = listAll().firstOrNull {
             it.definition.name.equals(name, ignoreCase = true) && it.scope == scope

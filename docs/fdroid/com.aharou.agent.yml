@@ -26,15 +26,15 @@ Description: |-
 
 RepoType: git
 Repo: https://github.com/520huxiangli/Aharou.git
-Binaries: https://github.com/520huxiangli/Aharou/releases/download/v%v/Aharou-universal-v%v.apk
+Binaries: https://github.com/520huxiangli/Aharou/releases/download/v%v/Aharou-arm64-v%v.apk
 
 Builds:
   - versionName: 1.13.6
     versionCode: 910
     commit: v1.13.6
     gradle:
-      - universal
-    output: app/build/outputs/apk/universal/release/app-universal-release-unsigned.apk
+      - armsolo
+    output: app/build/outputs/apk/armsolo/release/app-armsolo-release-unsigned.apk
 
 AllowedAPKSigningKeys: 15eb1b0af0dabb68ca7c31deaa3c786ea3fb7de39684adbe94513c86959ab3c1
 

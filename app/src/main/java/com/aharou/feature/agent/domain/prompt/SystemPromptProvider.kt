@@ -64,7 +64,7 @@ class SystemPromptProvider @Inject constructor(
 
     private inner class StaticRuleSource : PromptSource {
         // 每次都重新读盘：未编辑时字符串一致，KV Cache 照常命中；编辑后立即生效，无需重启。
-        override fun build(ctx: AgentContext): String = promptFragmentCatalog.renderStatic(ctx.projectRoot)
+        override fun build(ctx: AgentContext): String = promptFragmentCatalog.renderStatic(ctx.projectRoot, ctx.currentUserText)
     }
 
     private inner class ActiveSkillsSource : PromptSource {
@@ -772,14 +772,7 @@ class SystemPromptProvider @Inject constructor(
      * 记忆、按需规则和工作区红线（`AGENTS.md`），只能靠猜。
      */
     private fun buildCustomOnly(ctx: AgentContext, consumeInbox: Boolean): String {
-        val content = promptFragmentCatalog.renderCustomOnly(ctx.projectRoot)
-        if (content.isEmpty()) {
-            FileLogger.w(
-                TAG,
-                "已启用 ${PromptFragmentResolver.DISABLE_BUILTIN_FILE}，但 $customDir 下没有 <两位数字>-<名称>.md 片段，系统提示词为空"
-            )
-            return ""
-        }
+        val content = promptFragmentCatalog.renderCustomOnly(ctx.projectRoot, ctx.currentUserText)
         val ghost = isGhostSession(ctx)
         // 与内置路径同一套开关：关掉的动态区块在「只用自定义片段」模式下也不追加。
         val offBlocks = promptFragmentCatalog.disabledBlocks()
@@ -847,8 +840,14 @@ class SystemPromptProvider @Inject constructor(
         agentContext: AgentContext
     ): String {
         val raw = buildString {
-            if (InjectPart.MAIN_RULES in definition.inject) {
-                append(staticRuleSource.build(agentContext))
+            val fragments = promptFragmentCatalog.renderStatic(
+                agentContext.projectRoot,
+                agentContext.currentUserText,
+                memberName = definition.name,
+                inheritsMainRules = InjectPart.MAIN_RULES in definition.inject
+            )
+            if (fragments.isNotBlank()) {
+                append(fragments)
                 append("\n\n")
             }
             if (InjectPart.BASE in definition.inject) {

@@ -128,7 +128,6 @@ enum class SettingsSection(@param:StringRes val titleRes: Int) {
     EnvVars(R.string.envvars_title),
     Vault(R.string.settings_vault),
     Accessibility(R.string.a11y_settings_title),
-    Pet(R.string.pet_title),
     Memory(R.string.memory_settings_title),
     General(R.string.settings_general),
     Theme(R.string.settings_theme_title),
@@ -136,7 +135,6 @@ enum class SettingsSection(@param:StringRes val titleRes: Int) {
     AccountCenter(R.string.account_entry_title),
     ProviderEditor(R.string.settings_provider_editor),
     DefaultModels(R.string.settings_default_models),
-    AssistantDigital(R.string.assistant_digital_title),
     Mcp(R.string.settings_mcp), Connectors(R.string.settings_connectors),
     Skills(R.string.settings_skills),
     SkillDetail(R.string.settings_skills), SkillEditor(R.string.settings_skills),
@@ -237,6 +235,7 @@ fun SettingsScreen(
     val skillDeleting by viewModel.skillDeleting.collectAsStateWithLifecycle()
     val subAgents by viewModel.subAgents.collectAsStateWithLifecycle()
     val subAgentSaveState by viewModel.subAgentSaveState.collectAsStateWithLifecycle()
+    val skillBindingSaveState by viewModel.skillBindingSaveState.collectAsStateWithLifecycle()
     val subAgentDeleting by viewModel.subAgentDeleting.collectAsStateWithLifecycle()
     val globalRules by viewModel.globalRules.collectAsStateWithLifecycle()
     val projectRules by viewModel.projectRules.collectAsStateWithLifecycle()
@@ -328,6 +327,7 @@ fun SettingsScreen(
     var showAddProviderSheet by remember { mutableStateOf(false) }
     var providerPresetPrefill by remember { mutableStateOf<ProviderPreset?>(null) }
     var mcpDialogRequest by remember { mutableStateOf<McpDialogRequest?>(null) }
+    var createToolRequested by remember { mutableStateOf(false) }
     var showMcpImportSheet by remember { mutableStateOf(false) }
     var showMcpExportSheet by remember { mutableStateOf(false) }
 
@@ -436,9 +436,8 @@ fun SettingsScreen(
         SettingsSection.MoreGroup,
         SettingsSection.HelpGroup -> if (section == configHome) null else (configHome ?: SettingsSection.Menu)
         SettingsSection.Soul,
-        SettingsSection.ConfigAudit,
-        SettingsSection.Memory,
-        SettingsSection.Pet -> (configHome ?: SettingsSection.AharouGroup)
+        SettingsSection.ConfigAudit -> (configHome ?: SettingsSection.AharouGroup)
+        SettingsSection.Memory -> (configHome ?: SettingsSection.AiGroup)
         SettingsSection.AccountCenter -> (configHome ?: SettingsSection.AiGroup)
         SettingsSection.Providers, SettingsSection.DefaultModels, SettingsSection.ScheduledTasks, SettingsSection.Extensions,
         SettingsSection.TelegramBot, SettingsSection.WeixinBot, SettingsSection.FeishuBot, SettingsSection.QqBot -> (configHome ?: SettingsSection.AiGroup)
@@ -461,9 +460,7 @@ fun SettingsScreen(
         SettingsSection.Backup,
         SettingsSection.Experiments -> (configHome ?: SettingsSection.MoreGroup)
         SettingsSection.About -> (configHome ?: SettingsSection.HelpGroup)
-        SettingsSection.Tools -> (configHome ?: SettingsSection.AharouGroup)
-        SettingsSection.Prompts -> (configHome ?: SettingsSection.AharouGroup)
-        SettingsSection.Rules -> (configHome ?: SettingsSection.AharouGroup)
+        SettingsSection.Tools, SettingsSection.Prompts, SettingsSection.Rules -> (configHome ?: SettingsSection.AiGroup)
         SettingsSection.ProviderEditor -> SettingsSection.Providers
         SettingsSection.Log -> logReturnSection.takeUnless { expanded && it == SettingsSection.Menu }
         SettingsSection.SkillDetail, SettingsSection.SkillMarket -> SettingsSection.Skills
@@ -668,7 +665,6 @@ fun SettingsScreen(
                 providers = providers,
                 modelMetadata = modelMetadata,
                 availableTools = remember { viewModel.availableToolNames() },
-                availableSkills = remember { viewModel.allSkillNames() },
                 saveState = subAgentSaveState,
                 onLoadMetadata = { viewModel.loadAllModelMetadata() },
                 onSave = { form, scope -> viewModel.saveSubAgent(form, scope, editingSubAgent?.name) },
@@ -701,8 +697,10 @@ fun SettingsScreen(
                     initialScope = fragment?.source ?: PromptFragmentSource.GLOBAL,
                     initialKeywordInjections = fragment?.keywordInjections ?: emptyList(),
                     initialInjectParts = fragment?.injectParts ?: emptySet(),
+                    initialInjection = fragment?.injection ?: com.aharou.feature.agent.domain.prompt.PromptFragmentInjection(),
+                    members = subAgents.map { it.name },
                     hasWorkspace = promptsState.hasWorkspace,
-                    onSave = { savedNumber, title, scope, content, keywordInjections, injectParts ->
+                    onSave = { savedNumber, title, scope, content, keywordInjections, injectParts, injection ->
                         promptsViewModel.saveFragment(
                             savedNumber,
                             title,
@@ -710,7 +708,8 @@ fun SettingsScreen(
                             content,
                             previousNumber = number,
                             keywordInjections = keywordInjections,
-                            injectParts = injectParts
+                            injectParts = injectParts,
+                            injection = injection
                         )
                         section = promptEditorReturn
                     },
@@ -865,10 +864,8 @@ fun SettingsScreen(
                                 modifier = Modifier.size(22.dp)
                             )
                         }
-                        // 工具页（McpToolsSection）与 Mcp 页共用同一套创建对话框：在列表页直接 + 就能新增 MCP 工具，
-                        // 不必跳去 Mcp 页找入口。保存后对话框关闭会回到 Mcp 管理页（完整视图）。
                         SettingsSection.Tools -> IconButton(onClick = {
-                            mcpDialogRequest = McpDialogRequest(editing = null, prefill = null)
+                            createToolRequested = true
                         }) {
                             Icon(
                                 FeatherIcons.Plus,
@@ -1008,7 +1005,6 @@ fun SettingsScreen(
                 SettingsSection.EnvVars -> EnvVarsSection()
                 SettingsSection.Vault -> VaultSection()
                 SettingsSection.Accessibility -> AccessibilitySection()
-                SettingsSection.Pet -> PetSection()
                 SettingsSection.Memory -> MemorySection()
                 SettingsSection.Knowledge -> KnowledgeBaseSection()
                 SettingsSection.Extensions -> ExtensionsSection(onOpenSection = openSection)
@@ -1050,7 +1046,6 @@ fun SettingsScreen(
                     onSetContextTrimRounds = { viewModel.setContextTrimRounds(it) }
                 )
                 SettingsSection.AccountCenter -> com.aharou.feature.account.presentation.AccountCenterScreen()
-                SettingsSection.AssistantDigital -> AssistantDigitalScreen()
                 SettingsSection.Providers -> ProvidersSection(
                     providers = providers,
                     onEdit = {
@@ -1186,8 +1181,6 @@ fun SettingsScreen(
                     }
                 }
                 SettingsSection.SkillDetail -> selectedSkill?.let { entry ->
-                    // 反向查：哪些专家成员已把本技能加进专属 skills（该成员 skills 列表含本技能名）。
-                    val boundMembers = subAgents.filter { it.skills.contains(entry.name) }
                     SkillDetailSection(
                         entry = entry,
                         cache = skillMarkdownCache,
@@ -1202,9 +1195,9 @@ fun SettingsScreen(
                         },
                         onExport = { viewModel.exportSkill(entry) },
                         exporting = skillExportState is SkillExportState.Running,
-                        boundMembers = boundMembers,
+                        members = subAgents, bindingSaveState = skillBindingSaveState,
+                        onSetMemberBinding = { member, bound -> viewModel.setSubAgentSkillBinding(member, entry.name, bound) },
                         onOpenMember = { member ->
-                            // 进该成员的编辑器：改专属技能绑定 / 配关键词注入都在这里
                             editingSubAgent = member
                             subAgentEditorReturn = SettingsSection.SubAgents
                             section = SettingsSection.SubAgentEditor
@@ -1222,9 +1215,10 @@ fun SettingsScreen(
                     onOpenTeams = { section = SettingsSection.Teams }
                 )
                 SettingsSection.Teams -> SubAgentTeamsSection(expertCount = subAgents.size, onOpenExperts = { section = SettingsSection.SubAgentEditor; editingSubAgent = null; subAgentEditorReturn = SettingsSection.Teams })
-                SettingsSection.Tools -> McpToolsSection(
-                    entries = mcpEntries,
-                    statuses = mcpStatuses,
+                SettingsSection.Tools -> ToolManagementSection(
+                    entries = mcpEntries, statuses = mcpStatuses,
+                    createRequested = createToolRequested, onCreateHandled = { createToolRequested = false },
+                    onCreateMcp = { mcpDialogRequest = McpDialogRequest(editing = null, prefill = null) },
                     onToggle = { entry, enabled ->
                         viewModel.setMcpServerEnabled(entry.server.name, enabled, entry.scope)
                     },
@@ -1423,12 +1417,12 @@ fun SettingsScreen(
             request = request,
             onDismiss = {
                 mcpDialogRequest = null
-                // 从连接器目录新增/取消后回到 MCP 列表，避免停在目录页。
-                section = SettingsSection.Mcp
+                // 只有连接器目录创建后返回 MCP；工具列表的创建、编辑、取消都留在原页。
+                if (section == SettingsSection.Connectors) section = SettingsSection.Mcp
             },
             onOpenLogs = { name ->
                 mcpDialogRequest = null
-                logReturnSection = SettingsSection.Mcp
+                logReturnSection = if (section == SettingsSection.Connectors) SettingsSection.Mcp else section
                 viewModel.refreshLogs(filterServerName = name)
                 section = SettingsSection.Log
             }

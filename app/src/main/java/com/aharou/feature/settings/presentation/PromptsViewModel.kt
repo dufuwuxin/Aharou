@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.aharou.feature.agent.domain.prompt.InjectionBlock
 import com.aharou.feature.agent.domain.prompt.PromptAuxFragment
 import com.aharou.feature.agent.domain.prompt.PromptFragment
+import com.aharou.feature.agent.domain.prompt.PromptFragmentInjection
 import com.aharou.feature.agent.domain.prompt.PromptFragmentCatalog
 import com.aharou.feature.agent.domain.prompt.PromptFragmentSource
 import com.aharou.feature.agent.domain.subagent.InjectPart
@@ -82,7 +83,8 @@ class PromptsViewModel @Inject constructor(
         content: String,
         previousNumber: Int? = null,
         keywordInjections: List<KeywordInjection> = emptyList(),
-        injectParts: Set<InjectPart> = emptySet()
+        injectParts: Set<InjectPart> = emptySet(),
+        injection: PromptFragmentInjection = PromptFragmentInjection()
     ) {
         viewModelScope.launch {
             val projectRoot = workspaceRepository.currentPath()
@@ -95,7 +97,8 @@ class PromptsViewModel @Inject constructor(
                     target = scope,
                     previousNumber = previousNumber,
                     keywordInjections = keywordInjections,
-                    injectParts = injectParts
+                    injectParts = injectParts,
+                    injection = injection
                 )
             }
             refresh()

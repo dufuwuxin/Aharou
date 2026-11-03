@@ -50,6 +50,8 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
@@ -504,16 +506,16 @@ fun AppNavigation(
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
 
-    // 用于判断当前路由：仅在聊天页允许 Drawer 手势。
     val currentBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = currentBackStackEntry?.destination?.route
+    val isPrimaryPage = currentRoute == "sessions" || currentRoute == "config" || currentRoute == "settings"
+    var bottomBarHeightPx by remember { mutableIntStateOf(0) }
+    val bottomBarHeight = with(LocalDensity.current) { bottomBarHeightPx.toDp() }
 
-    // 记录当前路由到全局，崩溃报告用它定位崩溃页面。
     LaunchedEffect(currentRoute) {
         AIEditorApp.currentRoute = currentRoute
     }
 
-    // Activity 级别的 ViewModel——Drawer 和 AIChatPanel 共享同一个实例。
     val agentViewModel: AIAgentViewModel = hiltViewModel()
     val settingsViewModel: SettingsViewModel = hiltViewModel()
     val workspaceViewModel: WorkspaceViewModel = hiltViewModel()
@@ -869,13 +871,13 @@ fun AppNavigation(
         )
     }
 
-    // 页面主体（NavHost）：大屏放进 Row 的右侧，窄窗放进 modal 抽屉容器里。
     val navBody: @Composable () -> Unit = {
         NavHost(
             navController = navController,
             startDestination = "sessions",
             // 过渡期间退场页会向左移出自身区域，大屏下不夹住会画到左侧常驻会话侧栏上。
-            modifier = Modifier.fillMaxSize().clipToBounds(),
+            modifier = Modifier.fillMaxSize().clipToBounds()
+                .padding(bottom = if (isPrimaryPage) bottomBarHeight else 0.dp),
             enterTransition = { pageEnter(forward = true) },
             exitTransition = { pageExit(forward = true) },
             popEnterTransition = { pageEnter(forward = false) },
@@ -1268,10 +1270,7 @@ fun AppNavigation(
         }
     }
 
-    // 底部主导航：悬浮玻璃圆角卡片。会话列表 / 配置 / 设置 三个一级页都常显（它们是并列的「首页」，
-    // 互相切换不回退、不收起底栏）；其他子路由（聊天详情、日志、容器等）隐藏，避免遮挡内容区。
-    val isPrimaryPage = currentRoute == "sessions" || currentRoute == "config" || currentRoute == "settings"
-    // 三个一级页各对应一个 tab：会话=0 / 配置=1 / 设置=2，高亮当前所在页。
+    // 三个一级页共享底栏实测高度（含底边距），聊天等子路由不留空白。
     val activeTab = when (currentRoute) {
         "config" -> 1
         "settings" -> 2
@@ -1307,6 +1306,7 @@ fun AppNavigation(
                 maskColor = settingsPageBackground(),
                 modifier = Modifier
                     .align(androidx.compose.ui.Alignment.BottomCenter)
+                    .onSizeChanged { bottomBarHeightPx = it.height }
                     .padding(bottom = 8.dp),
             )
         }

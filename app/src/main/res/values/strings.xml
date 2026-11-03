@@ -1759,9 +1759,9 @@
     <string name="subagent_editor_tools_allow_hint">不选则开放全部工具（不含 task）</string>
     <string name="subagent_editor_tools_deny">工具黑名单</string>
     <string name="subagent_editor_tools_deny_hint">优先于白名单生效</string>
-    <string name="subagent_editor_skills">专属技能</string>
-    <string name="subagent_editor_skills_hint">仅该角色可见；其它成员与主代理不注入本角色专属技能，避免 token 浪费。</string>
-    <string name="subagent_editor_skills_empty">未绑定专属技能（所有公共技能均可见）</string>
+    <string name="subagent_editor_skills">绑定技能</string>
+    <string name="subagent_editor_skills_hint">此处仅展示绑定结果；请在技能详情页选择使用该技能的成员，同一技能可绑定多个成员。</string>
+    <string name="subagent_editor_skills_empty">尚未绑定技能</string>
     <string name="subagent_editor_keyword_inject">关键词注入</string>
     <string name="subagent_editor_keyword_inject_hint">格式：「触发词1,触发词2|正文」，每条一行。命中才注入，主代理和其它成员不可见，节省 token。</string>
     <string name="subagent_editor_keyword_inject_label">关键词注入列表（触发词|正文）</string>
@@ -3682,10 +3682,39 @@
 
     <!-- 技能详情页新增：绑定成员入口 -->
     <string name="skills_bound_members">绑定成员</string>
-    <string name="skills_bound_members_hint">点击可前往该成员的「专属技能」设置页面，完成绑定或配置关键词注入。</string>
-    <string name="skills_bound_members_empty">暂未绑定任何成员；请在「专家成员」页为成员添加此技能，并设置关键词注入。</string>
-    <string name="skills_keyword_inject_guide">关键词注入由成员配置，不在技能本身。请在上方「绑定成员」进入专家成员编辑器配置。</string>
+    <string name="skills_bound_members_hint">打开开关即可绑定，可同时选择多个成员；每次更改自动保存。点击成员名称可配置关键词注入。</string>
+    <string name="skills_binding_failed">绑定更改未保存，请重试；原有绑定保持不变。</string>
+    <string name="skills_bound_members_empty">尚无可选成员，请先在「专家成员」页创建成员。</string>
+    <string name="skills_keyword_inject_guide">关键词注入仍由成员配置；绑定技能不会自动启用已停用的成员或技能。</string>
 
+    <string name="rules_runtime_title">运行时规则</string>
+    <string name="rules_runtime_trigger_plan">进入 PLAN 模式时注入</string>
+    <string name="rules_runtime_trigger_auto">进入 AUTO 模式时注入</string>
+    <string name="rules_runtime_trigger_subagent">创建子会话时注入子代理基线</string>
+    <string name="rules_runtime_trigger_memory">构建记忆上下文时注入，受注入开关控制</string>
+    <string name="rules_runtime_trigger_stuck">检测到重复操作或执行卡住时注入提醒</string>
+    <string name="rules_runtime_trigger_workspace">根据项目类型识别结果注入对应工程规则</string>
+    <string name="rules_runtime_trigger_unknown">触发条件暂无说明</string>
+    <string name="script_tools_title">脚本工具</string>
+    <string name="script_tools_add">添加脚本工具</string>
+    <string name="script_tools_name">名称（字母开头，仅字母、数字、下划线，最多24位）</string>
+    <string name="script_tools_description">描述</string>
+    <string name="script_tools_command">容器命令（从 stdin 读取 JSON 输入）</string>
+    <string name="script_tools_enabled">启用</string>
+    <string name="script_tools_save">保存</string>
+    <string name="script_tools_cancel">取消</string>
+    <string name="script_tools_edit">编辑</string>
+    <string name="script_tools_delete">删除</string>
+    <string name="script_tools_empty">尚无脚本工具</string>
+    <string name="script_tools_save_failed">更新脚本工具失败，请检查输入后重试</string>
+    <string name="prompts_injection_default">默认注入</string>
+    <string name="prompts_injection_default_hint">每轮注入；成员继承主规则时同样生效</string>
+    <string name="prompts_injection_keywords">关键词注入</string>
+    <string name="prompts_injection_keywords_hint">启用后，当前请求命中任一关键词时注入；用逗号或换行分隔</string>
+    <string name="prompts_injection_members">成员注入</string>
+    <string name="prompts_injection_members_hint">启用后，向选中的成员注入此片段；关闭不会清除选择</string>
+    <string name="tools_add_type">选择工具类型</string>
+    <string name="prompts_injection">注入方式</string>
 </resources>
 
     <!-- 技能详情页新增：绑定成员入口 -->

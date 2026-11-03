@@ -7,6 +7,8 @@ import com.aharou.core.config.ConfigRegistry
 import com.aharou.core.config.ConfigRisk
 import com.aharou.core.config.ConfigSchema
 import com.aharou.core.config.ConfigValue
+import com.aharou.core.util.FileLogger
+import com.aharou.feature.agent.domain.tool.script.ScriptToolManager
 import com.aharou.core.config.fields.ClosureField
 import com.aharou.core.config.fields.ReadOnlyField
 import com.aharou.feature.agent.domain.mcp.McpConfigRepository
@@ -32,10 +34,16 @@ import javax.inject.Singleton
 @Singleton
 class ConfigMcpFields @Inject constructor(
     private val mcpConfig: McpConfigRepository,
+    private val scriptFields: ConfigScriptToolFields,
+    private val scriptManager: ScriptToolManager,
 ) {
 
     fun registerInto(registry: ConfigRegistry) {
         registry.register(ServerCollection())
+        scriptFields.registerInto(registry)
+        runCatching { scriptManager.reload() }.onFailure {
+            FileLogger.w("ConfigMcpFields", "Script tools could not be loaded")
+        }
     }
 
     private fun servers(): List<McpServerConfig> = runBlocking { mcpConfig.getGlobalServers() }

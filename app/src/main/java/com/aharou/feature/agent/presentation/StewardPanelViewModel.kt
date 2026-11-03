@@ -2,7 +2,6 @@ package com.aharou.feature.agent.presentation
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.aharou.core.util.FileLogger
 import com.aharou.feature.agent.domain.session.MessagePersistenceUseCase
 import com.aharou.feature.agent.domain.steward.StewardController
 import com.aharou.feature.agent.domain.steward.StewardSettings
@@ -37,22 +36,22 @@ class StewardPanelViewModel @Inject constructor(
 
     /**
      * 开关托管。打开时以本会话最后一条用户消息为基准——那正是这一轮任务的起点；
-     * 会话里还没有用户消息就开不了（没有基准就无从判断完成没）。
+     * 空会话先开启等待，首条实际请求到来时再绑定基准。
      */
     fun setEnabled(on: Boolean, sessionId: String) {
         if (!on) {
             controller.disable()
             return
         }
+        val revision = controller.enable("", sessionId)
         viewModelScope.launch {
             val anchor = messagePersistenceUseCase.getMessagesOnce(sessionId)
-                .lastOrNull { it.role == MessageRole.USER.name && it.content.isNotBlank() }
+                .lastOrNull {
+                    it.role == MessageRole.USER.name && it.content.isNotBlank() &&
+                        !it.content.startsWith(BACKGROUND_NOTIFICATION_PREFIX)
+                }
                 ?.content?.trim().orEmpty()
-            if (anchor.isBlank()) {
-                FileLogger.w(TAG, "会话还没有用户指令，托管未开启: $sessionId")
-                return@launch
-            }
-            controller.enable(anchor, sessionId)
+            controller.bindAnchor(sessionId, anchor, revision)
         }
     }
 
@@ -66,7 +65,4 @@ class StewardPanelViewModel @Inject constructor(
         _unlimited.value = value
     }
 
-    private companion object {
-        const val TAG = "StewardPanelViewModel"
-    }
 }

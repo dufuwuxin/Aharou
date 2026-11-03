@@ -225,6 +225,13 @@ abstract class AgentTool {
     open fun isCallSensitive(args: Map<String, JsonElement>): Boolean = false
 
     /**
+     * 动态脚本的真实待执行命令，供策略引擎同时核验脚本身份与 Bash 权限。
+     * 必须暴露保存的脚本正文，不能只返回 sh -c、编码载荷或临时脚本路径；执行前仍须核对定义版本。
+     * null 表示普通工具，沿用原权限策略。
+     */
+    open fun permissionCommand(args: Map<String, JsonElement>): String? = null
+
+    /**
      * 不带上下文的执行。只实现了 [executeWithContext] 的工具无需实现它——工具调用链统一走
      * [executeWithContext]，这里只是兜底，正常运行不会走到。
      */

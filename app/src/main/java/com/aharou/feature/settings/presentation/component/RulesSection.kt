@@ -117,6 +117,7 @@ internal fun RulesSection(
                 modifier = Modifier.padding(horizontal = Spacing.lg).padding(top = Spacing.sm)
             )
         }
+        AuxiliaryRulesSection()
         BuiltinRuleGroup(
             rules = state.builtin,
             onToggle = viewModel::setBuiltinEnabled,

@@ -15,17 +15,16 @@ class UpdateDownloadSourceTest {
             "Aharou-universal-v1.13.5.apk",
             "Aharou-universal-v1.13.5-mapping.txt.gz",
         )
-        // 正式版发两个单架构包；arm64 设备拿 arm64 包，不拿体积翻倍的 universal
+        // 优先单架构包，旧通用包仅作兜底。
         assertEquals("Aharou-arm64-v1.13.5.apk", UpdateDownloadSource.pickApkAsset(names))
     }
 
     @Test
-    fun pickApkAsset_x86DeviceTakesX86Package() {
+    fun pickApkAsset_nonArm64DeviceRejectsAllPackages() {
         val names = listOf("Aharou-arm64-v1.13.5.apk", "Aharou-x86_64-v1.13.5.apk")
-        assertEquals(
-            "Aharou-x86_64-v1.13.5.apk",
-            UpdateDownloadSource.pickApkAsset(names, supportsArm64 = false)
-        )
+        assertNull(UpdateDownloadSource.pickApkAsset(names, supportsArm64 = false))
+        assertNull(UpdateDownloadSource.pickApkAsset(listOf("Aharou-universal.apk"), supportsArm64 = false))
+        assertNull(UpdateDownloadSource.pickApkAsset(listOf("Aharou-1.13.4.apk"), supportsArm64 = false))
     }
 
     @Test
@@ -33,6 +32,12 @@ class UpdateDownloadSourceTest {
         // 只有其他架构的包：下下来也装不上，宁可返回 null 不上报更新
         assertNull(UpdateDownloadSource.pickApkAsset(listOf("Aharou-arm64-v1.13.5.apk"), supportsArm64 = false))
         assertNull(UpdateDownloadSource.pickApkAsset(listOf("Aharou-x86_64-v1.13.5.apk"), supportsArm64 = true))
+    }
+
+    @Test
+    fun pickApkAsset_rejectsArmV7AndX86Packages() {
+        assertNull(UpdateDownloadSource.pickApkAsset(listOf("Aharou-armeabi-v7a.apk")))
+        assertNull(UpdateDownloadSource.pickApkAsset(listOf("Aharou-x86.apk")))
     }
 
     @Test
@@ -66,16 +71,14 @@ class UpdateDownloadSourceTest {
     }
 
     @Test
-    fun candidates_areOrderedCnbThenProxiesThenGitHub() {
+    fun candidates_areOrderedForkProxiesThenGitHub() {
         val list = UpdateDownloadSource.candidates("v1.13.5", "Aharou-universal-v1.13.5.apk")
-        val github = "https://github.com/520huxiangli/Aharou/releases/download/" +
+        val github = "https://github.com/dufuwuxin/Aharou/releases/download/" +
             "v1.13.5/Aharou-universal-v1.13.5.apk"
 
-        // cnb 的附件路由比 GitHub 多一截 `-`
-        assertTrue("cnb 应排第一", list.first().startsWith("https://cnb.cool/huxiangli/aharou-releases/-/releases/download/"))
+        assertTrue(list.none { it.contains("huxiangli") || it.contains("cnb.cool") })
         assertEquals("GitHub 原链应排最后", github, list.last())
-        // 除首个国内源与末尾原链外，剩下的都是「反代前缀 + GitHub 原链」
-        list.drop(1).dropLast(1).forEach { assertTrue(it.endsWith(github)) }
+        list.dropLast(1).forEach { assertTrue(it.endsWith(github)) }
         assertEquals(list.size, list.distinct().size)
     }
 
@@ -86,13 +89,18 @@ class UpdateDownloadSourceTest {
     }
 
     @Test
+    fun apiUsesSameForkAsDownloads() {
+        assertEquals("https://api.github.com/repos/dufuwuxin/Aharou/releases", UpdateDownloadSource.GITHUB_RELEASES_API)
+    }
+
+    @Test
     fun releasePage_pointsAtTheGivenTag() {
         assertEquals(
-            "https://github.com/520huxiangli/Aharou/releases/tag/v1.13.5",
+            "https://github.com/dufuwuxin/Aharou/releases/tag/v1.13.5",
             UpdateDownloadSource.releasePage("v1.13.5")
         )
         assertEquals(
-            "https://github.com/520huxiangli/Aharou/releases/latest",
+            "https://github.com/dufuwuxin/Aharou/releases/latest",
             UpdateDownloadSource.releasePage(null)
         )
     }

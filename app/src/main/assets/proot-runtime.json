@@ -7,8 +7,7 @@
     "packaging": "取自 Termux apt 仓库的 .deb（ar 封装 data.tar.xz）解包后提取文件",
     "embeddedVersionString": "5.1.0",
     "packageVersions": {
-      "arm64-v8a": "proot 5.1.107.96 / libtalloc 2.5.0 / libandroid-shmem 0.7",
-      "x86_64": "proot 5.1.107.96 / libtalloc 2.5.0 / libandroid-shmem 0.7"
+      "arm64-v8a": "proot 5.1.107.96 / libtalloc 2.5.0 / libandroid-shmem 0.7"
     },
     "license": "GPL-2.0-or-later"
   },
@@ -17,7 +16,7 @@
     "libproot.so：就地等长改写 DT_NEEDED（libtalloc.so.2 → libtalloc.so）"
   ],
   "buildNotes": {
-    "jniLibsSourceSets": "universal 同时收 _armJniLibs 与 _x86JniLibs；armsolo/x86solo 各收一套（app/build.gradle.kts 的 sourceSets）",
+    "jniLibsSourceSets": "armsolo 收 _armJniLibs（app/build.gradle.kts 的 sourceSets）",
     "useLegacyPackaging": true,
     "keepDebugSymbols": "对 5 个文件显式声明，作用是禁止构建再动这些字节；实际上游产物本身就是 stripped"
   },
@@ -56,41 +55,6 @@
       "repoPath": "app/src/_armJniLibs/arm64-v8a/libandroid-shmem.so",
       "sizeBytes": 14432,
       "sha256": "84475798e07c8174dbbfaec70a827fdb02f19ffa69a589380c13e7507fd0e731"
-    },
-    {
-      "abi": "x86_64",
-      "role": "proot-executable",
-      "repoPath": "app/src/_x86JniLibs/x86_64/libproot.so",
-      "sizeBytes": 263784,
-      "sha256": "cd893e5243aa0213a4f8dec38c84fb41b24a104605fda71e61d0b2f459f31177"
-    },
-    {
-      "abi": "x86_64",
-      "role": "loader-64",
-      "repoPath": "app/src/_x86JniLibs/x86_64/libproot-loader.so",
-      "sizeBytes": 18368,
-      "sha256": "a836b0569c84b1661333d16bacf6b396ff08fea816a5c936a82e08ddeeca8341"
-    },
-    {
-      "abi": "x86_64",
-      "role": "loader-32",
-      "repoPath": "app/src/_x86JniLibs/x86_64/libproot-loader32.so",
-      "sizeBytes": 6036,
-      "sha256": "fd5b394aa0801619e293b76fe6e830a3beb363aed4fa4b9a5a41f1388a0cb9b9"
-    },
-    {
-      "abi": "x86_64",
-      "role": "talloc",
-      "repoPath": "app/src/_x86JniLibs/x86_64/libtalloc.so",
-      "sizeBytes": 32536,
-      "sha256": "7354442094c5363639cc87e1126e9298442a2546dd2a0699972f74d263901da2"
-    },
-    {
-      "abi": "x86_64",
-      "role": "shmem",
-      "repoPath": "app/src/_x86JniLibs/x86_64/libandroid-shmem.so",
-      "sizeBytes": 14368,
-      "sha256": "092926060298acd3778e6239033d7aef1280dcb59aebe021a3719612e6a3465f"
     }
   ]
 }

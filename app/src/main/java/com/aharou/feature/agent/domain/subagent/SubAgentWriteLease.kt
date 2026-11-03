@@ -16,7 +16,6 @@ class SubAgentWriteLease @Inject constructor() {
     private val leases = ConcurrentHashMap<String, Set<String>>()
 
     fun register(sessionId: String, paths: Set<String>) {
-        if (leases.size > MAX_ENTRIES) leases.clear()
         leases[sessionId] = paths
     }
 
@@ -31,10 +30,7 @@ class SubAgentWriteLease @Inject constructor() {
      * 不必重派一个同样的任务（重派还要再烧一遍上下文）。
      */
     fun grant(sessionId: String, paths: Set<String>): Set<String> {
-        val merged = (leases[sessionId].orEmpty() + paths).toSet()
-        if (leases.size > MAX_ENTRIES && !leases.containsKey(sessionId)) leases.clear()
-        leases[sessionId] = merged
-        return merged
+        return leases.compute(sessionId) { _, existing -> existing.orEmpty() + paths }!!
     }
 
     /**
@@ -61,11 +57,6 @@ class SubAgentWriteLease @Inject constructor() {
     fun conflictingSession(writePaths: Set<String>, activeSessionIds: Set<String>): String? = leases.entries
         .firstOrNull { (id, existing) -> id in activeSessionIds && WriteLease.overlaps(writePaths, existing) }
         ?.key
-
-    private companion object {
-        /** 兜底上限：子会话 id 不会复用，正常路径走 release；超限时整体清空避免无限累积。 */
-        const val MAX_ENTRIES = 200
-    }
 }
 
 /** 写路径租约的判定逻辑，纯函数形式供文件工具调用（工具侧无需再注入租约本体）。 */

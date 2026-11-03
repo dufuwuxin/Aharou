@@ -43,7 +43,6 @@ import androidx.compose.ui.unit.dp
 import com.aharou.R
 import com.aharou.core.theme.Radius
 import com.aharou.core.theme.Spacing
-import com.aharou.feature.agent.domain.model.AgentMode
 import com.aharou.feature.onboarding.domain.OnboardingStep
 import com.aharou.feature.onboarding.presentation.onboardingTarget
 import compose.icons.FeatherIcons
@@ -57,7 +56,6 @@ import compose.icons.feathericons.GitBranch
 import compose.icons.feathericons.Globe
 import compose.icons.feathericons.HardDrive
 import compose.icons.feathericons.Menu
-import compose.icons.feathericons.Plus
 import compose.icons.feathericons.Terminal
 
 @Composable
@@ -71,7 +69,6 @@ internal fun ChatHeader(
     /** 从会话详情页顶部返回到会话列表页；仅在小屏入口场景下传非空。 */
     onBackToSessions: (() -> Unit)? = null,
     onOpenDrawer: () -> Unit,
-    onNewChat: () -> Unit,
     onNavigateToTerminal: () -> Unit,
     onNavigateToGit: () -> Unit,
     onNavigateToBrowser: () -> Unit = {},
@@ -80,8 +77,6 @@ internal fun ChatHeader(
     /** 打开只读观察面板：看本会话树里的上/下级在干什么。 */
     onNavigateToObserve: () -> Unit = {},
     onOpenActivity: () -> Unit = {},
-    currentMode: AgentMode,
-    onToggleMode: (AgentMode) -> Unit,
     connectionState: com.aharou.feature.agent.domain.container.ConnectionState? = null,
     showMenuButton: Boolean = true,
     terminalActive: Boolean = false,
@@ -107,7 +102,7 @@ internal fun ChatHeader(
             ) {
                 // 大屏常驻侧栏时隐掉汉堡键：侧栏已经摆在左边，再给个开关反而困惑。
                 // 当提供了回会话列表回调（小屏从列表进会话的场景）时显示左箭头；
-                // 否则保留汉堡键（打开侧边栏）；新建会话入口已移到右列末端。
+                // 否则保留汉堡键（打开侧边栏）。
                 if (onBackToSessions != null) {
                     IconButton(
                         onClick = onBackToSessions,
@@ -131,14 +126,6 @@ internal fun ChatHeader(
                 } else {
                     Spacer(modifier = Modifier.width(Spacing.sm))
                 }
-                // 会话模式标识：紧凑徽标（AUTO/PLAN/BUILD/ALLOW）在左列一眼可见
-                Text(
-                    text = currentMode.name,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = Spacing.xs)
-                )
-
                 // 中轴：当前会话标题（单行截断、weight 居中）；调用方未传时留空，三列布局保持不变
                 Box(
                     modifier = Modifier
@@ -217,16 +204,6 @@ internal fun ChatHeader(
                             contentDescription = stringResource(R.string.chat_tools_expand),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                }
-                // 新会话：全顶栏唯一入口，放右列末端；48dp 保证可点区，不与状态栏/手势条冲突。
-                IconButton(
-                    onClick = onNewChat,
-                    modifier = Modifier.size(48.dp)
-                ) {
-                    Icon(
-                        FeatherIcons.Plus,
-                        contentDescription = stringResource(R.string.chat_new_session),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
             // 远程模式：左边 SSH 连接状态，右边 token 累计统计

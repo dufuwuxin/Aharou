@@ -30,7 +30,6 @@ import com.aharou.feature.agent.domain.mcp.McpServerConfig
 import com.aharou.feature.agent.domain.mcp.McpServerEntry
 import com.aharou.feature.agent.domain.mcp.McpServerStatus
 import com.aharou.feature.agent.domain.mcp.McpToolDescriptor
-import com.aharou.feature.agent.domain.model.AgentMode
 import com.aharou.feature.agent.domain.ocr.TessdataManager
 import com.aharou.feature.agent.domain.ocr.TessdataState
 import com.aharou.feature.agent.domain.ocr.TessdataStatus
@@ -38,7 +37,6 @@ import com.aharou.feature.agent.domain.permission.PermissionRule
 import com.aharou.feature.agent.domain.permission.PermissionRulesRepository
 import com.aharou.feature.agent.domain.skill.SkillForm
 import com.aharou.feature.agent.domain.skill.SkillMoveResult
-import com.aharou.feature.agent.domain.skill.SkillRepository
 import com.aharou.feature.agent.domain.skill.SkillScope
 import com.aharou.feature.agent.domain.skill.market.MarketSkill
 import com.aharou.feature.agent.domain.skill.market.SkillTranslation
@@ -47,8 +45,6 @@ import com.aharou.feature.agent.domain.subagent.AgentDefinitionForm
 import com.aharou.feature.agent.domain.subagent.AgentDefinitionRepository
 import com.aharou.feature.agent.domain.subagent.AgentDefinitionScope
 import com.aharou.feature.agent.domain.subagent.AgentSaveError
-import com.aharou.feature.agent.domain.subagent.InjectPart
-import com.aharou.feature.agent.domain.subagent.KeywordInjection
 import com.aharou.feature.agent.domain.tool.ToolRegistry
 import com.aharou.feature.settings.data.remote.ModelApiService
 import com.aharou.feature.settings.data.remote.ModelMetadataService
@@ -56,6 +52,7 @@ import com.aharou.feature.settings.data.remote.ModelTestResult
 import com.aharou.feature.agent.domain.shell.HostShellManager
 import com.aharou.feature.settings.data.remote.UpdateApkDownloader
 import com.aharou.feature.settings.data.remote.UpdateCheckResult
+import com.aharou.feature.settings.data.remote.UpdateReleasePolicy
 import com.aharou.feature.settings.data.remote.UpdateCheckService
 import com.aharou.feature.settings.data.remote.UpdateDownloadSource
 import com.aharou.feature.settings.data.repository.UpdateCheckSettingsRepository
@@ -187,35 +184,6 @@ sealed interface UpdateDownloadUiState {
 }
 
 
-/** 子代理列表页的 UI 状态：定义内容 + 来源作用域 + 启停状态。 */
-data class SubAgentUiEntry(
-    val name: String,
-    val description: String,
-    val scope: AgentDefinitionScope,
-    val disabled: Boolean,
-    val providerId: String?,
-    val model: String?,
-    val reasoningEffort: String?,
-    val mode: AgentMode?,
-    val allowedTools: List<String>,
-    val disallowedTools: List<String>,
-    /** 该角色专属绑定的技能名（来自前端matter 的 skills）。主代理和团队里其它成员不可见。 */
-    val skills: List<String> = emptyList(),
-    val inject: Set<InjectPart>,
-    /** 关键词注入：每条 [keywords] 匹配用户输入时追加 [injectContent]，仅命中的会话/角色可见。 */
-    val keywordInjections: List<KeywordInjection> = emptyList(),
-    val prompt: String,
-    val filePath: String?
-)
-
-/** 子代理编辑页的保存结果：UI 据此决定是退回列表还是就地报错。 */
-sealed interface SubAgentSaveState {
-    data object Idle : SubAgentSaveState
-    data object Saving : SubAgentSaveState
-    data object Saved : SubAgentSaveState
-    data class Failed(val error: AgentSaveError) : SubAgentSaveState
-}
-
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
@@ -247,7 +215,6 @@ class SettingsViewModel @Inject constructor(
     private val tessdataManager: TessdataManager,
     private val imageGenModelSettingsRepository: ImageGenModelSettingsRepository,
     private val memoryModelSettingsRepository: MemoryModelSettingsRepository,
-    private val skillRepository: SkillRepository,
     private val compactionModelSettingsRepository: CompactionModelSettingsRepository,
     private val titleModelSettingsRepository: TitleModelSettingsRepository,
     private val defaultModelSettingsRepository: DefaultModelSettingsRepository,
@@ -614,6 +581,7 @@ class SettingsViewModel @Inject constructor(
     private val _logViewerState = MutableStateFlow(LogViewerUiState())
     val logViewerState: StateFlow<LogViewerUiState> = _logViewerState.asStateFlow()
 
+    private val updateCheckBusy = MutableStateFlow(false)
     private val _updateCheckState = MutableStateFlow<UpdateCheckUiState>(UpdateCheckUiState.Idle)
     val updateCheckState: StateFlow<UpdateCheckUiState> = _updateCheckState.asStateFlow()
 
@@ -728,6 +696,9 @@ class SettingsViewModel @Inject constructor(
 
     private val _subAgentSaveState = MutableStateFlow<SubAgentSaveState>(SubAgentSaveState.Idle)
     val subAgentSaveState: StateFlow<SubAgentSaveState> = _subAgentSaveState.asStateFlow()
+
+    private val _skillBindingSaveState = MutableStateFlow(SkillBindingSaveState())
+    val skillBindingSaveState: StateFlow<SkillBindingSaveState> = _skillBindingSaveState.asStateFlow()
 
     /** 正在删除的子代理名（非 null 表示删除进行中，用于弹窗转圈与禁用按钮）。 */
     private val _subAgentDeleting = MutableStateFlow<String?>(null)
@@ -1174,10 +1145,27 @@ class SettingsViewModel @Inject constructor(
     /** 当前已注册的全部工具名（含 MCP 动态工具），供编辑页勾选工具白名单与黑名单。 */
     fun availableToolNames(): List<String> = toolRegistry.getAvailableTools().map { it.name }
 
-    /** 全部公共技能名（可用于子代理「专属绑定」下拉）。内置技能不参与绑定（无法独占）。 */
-    fun allSkillNames(): List<String> = skillRepository.listAllSkills()
-        .filter { it.scope != SkillScope.BUILTIN }
-        .map { it.skill.name }
+    fun setSubAgentSkillBinding(member: SubAgentUiEntry, skillName: String, bound: Boolean) {
+        if (_skillBindingSaveState.value.state is SubAgentSaveState.Saving) return
+        _skillBindingSaveState.value = SkillBindingSaveState(skillName, SubAgentSaveState.Saving)
+        viewModelScope.launch {
+            val error = withContext(Dispatchers.IO) {
+                runCatching {
+                    agentDefinitionRepository.setSkillBinding(member.name, member.scope, skillName, bound)
+                }.getOrDefault(AgentSaveError.IO_FAILED)
+            }
+            if (error == null) {
+                _subAgents.value = _subAgents.value.map { entry ->
+                    if (entry.name != member.name || entry.scope != member.scope) entry else {
+                        val skills = entry.skills.filterNot { it.equals(skillName, ignoreCase = true) }
+                        entry.copy(skills = if (bound) skills + skillName else skills)
+                    }
+                }
+                refreshSubAgents()
+            }
+            _skillBindingSaveState.value = SkillBindingSaveState(skillName, if (error == null) SubAgentSaveState.Saved else SubAgentSaveState.Failed(error))
+        }
+    }
 
     fun deleteSubAgent(name: String, scope: AgentDefinitionScope) {
         if (_subAgentDeleting.value != null) return
@@ -1217,60 +1205,57 @@ class SettingsViewModel @Inject constructor(
 
     // ── 检查更新 ──
 
-    /**
-     * 检查更新。手动模式（关于页点击）不受开关与每日限制；自动模式（主页启动）
-     * 需开关开启且当天未检测过，失败时静默（不弹错误窗），无论结果都记录当天已检。
-     */
+    /** 自动检查保持静默；手动检查不受开关与每日限制。 */
     fun checkUpdate(manual: Boolean) {
         if (!manual) {
             if (!updateCheckSettingsRepository.autoCheckEnabled) return
             if (updateCheckSettingsRepository.hasCheckedToday()) return
         }
-        if (_updateCheckState.value == UpdateCheckUiState.Checking) return
+        if (!updateCheckBusy.compareAndSet(false, true)) return
         viewModelScope.launch {
-            // 手动检查显示「检测中」反馈；自动检查全程无感，仅检测到新版本才弹窗
-            if (manual) {
-                _updateCheckState.value = UpdateCheckUiState.Checking
-            }
-            val result = updateCheckService.checkForUpdate(
-                currentVersion = updateCheckSettingsRepository.currentVersionName(),
-                channel = updateCheckSettingsRepository.channel
-            )
-            _updateCheckState.value = when (result) {
-                is UpdateCheckResult.UpToDate -> {
-                    if (manual) UpdateCheckUiState.UpToDate else UpdateCheckUiState.Idle
-                }
-                is UpdateCheckResult.NewVersion -> {
-                    // 同一版本只自动提示一次：用户点过「稍后」后不该被反复打扰；手动检查不受此限。
-                    if (!manual && result.info.latestTag == updateCheckSettingsRepository.lastNotifiedTag) {
-                        UpdateCheckUiState.Idle
-                    } else {
-                        updateCheckSettingsRepository.lastNotifiedTag = result.info.latestTag
-                        UpdateCheckUiState.NewVersion(
-                            latestTag = result.info.latestTag,
-                            changelog = result.info.changelog,
-                            apkAssetName = result.info.apkAssetName,
-                            apkAssetSize = result.info.apkAssetSize,
-                            apkAssetDigest = result.info.apkAssetDigest
-                        )
+            try {
+                if (manual) _updateCheckState.value = UpdateCheckUiState.Checking
+                val result = updateCheckService.checkForUpdate(
+                    currentVersion = updateCheckSettingsRepository.currentVersionName(),
+                    channel = updateCheckSettingsRepository.channel
+                )
+                _updateCheckState.value = when (result) {
+                    is UpdateCheckResult.UpToDate -> {
+                        if (manual) UpdateCheckUiState.UpToDate else UpdateCheckUiState.Idle
+                    }
+                    is UpdateCheckResult.NewVersion -> {
+                        val identity = UpdateReleasePolicy.notificationIdentity(
+                            result.info.latestTag, result.info.apkAssetName, result.info.apkAssetDigest)
+                        if (!manual && identity == updateCheckSettingsRepository.lastNotifiedTag) {
+                            UpdateCheckUiState.Idle
+                        } else {
+                            updateCheckSettingsRepository.lastNotifiedTag = identity
+                            UpdateCheckUiState.NewVersion(
+                                latestTag = result.info.latestTag,
+                                changelog = result.info.changelog,
+                                apkAssetName = result.info.apkAssetName,
+                                apkAssetSize = result.info.apkAssetSize,
+                                apkAssetDigest = result.info.apkAssetDigest
+                            )
+                        }
+                    }
+                    is UpdateCheckResult.Error -> {
+                        if (manual) UpdateCheckUiState.Error(result.message) else UpdateCheckUiState.Idle
                     }
                 }
-                is UpdateCheckResult.Error -> {
-                    if (manual) UpdateCheckUiState.Error(result.message) else UpdateCheckUiState.Idle
+                if (result is UpdateCheckResult.NewVersion && _updateCheckState.value is UpdateCheckUiState.NewVersion &&
+                    updateCheckSettingsRepository.autoDownloadEnabled) {
+                    autoDownloadIfNeeded(result.info.latestTag, result.info.apkAssetDigest)
                 }
-            }
-            // 自动下载：检测到新版本就提前把包下好，用户之后只需点一下「立即安装」
-            if (result is UpdateCheckResult.NewVersion && updateCheckSettingsRepository.autoDownloadEnabled) {
-                autoDownloadIfNeeded(result.info.latestTag, result.info.apkAssetDigest)
-            }
-            // 无论结果如何，都刷新 ~/.aharou/update-info.json 供 AI 读取
-            updateCheckSettingsRepository.writeUpdateInfo(
-                currentVersion = updateCheckSettingsRepository.currentVersionName(),
-                channel = updateCheckSettingsRepository.channel,
-                result = result
-            )
-            if (!manual) {
-                updateCheckSettingsRepository.markCheckedToday()
+                updateCheckSettingsRepository.writeUpdateInfo(
+                    currentVersion = updateCheckSettingsRepository.currentVersionName(),
+                    channel = updateCheckSettingsRepository.channel,
+                    result = result
+                )
+            } finally {
+                if (_updateCheckState.value == UpdateCheckUiState.Checking) _updateCheckState.value = UpdateCheckUiState.Idle
+                try { if (!manual) updateCheckSettingsRepository.markCheckedToday() }
+                finally { updateCheckBusy.value = false }
             }
         }
     }
@@ -1282,7 +1267,7 @@ class SettingsViewModel @Inject constructor(
     }
 
     /**
-     * 应用内下载更新包：候选源依次尝试（cnb 发布仓 → 加速镜像 → GitHub 原链），
+     * 应用内下载更新包：候选源依次尝试（Fork 加速镜像 → Fork GitHub 原链），
      * 进度与当前来源写入 [updateDownloadState] 供弹窗展示。
      */
     fun downloadUpdate() {
@@ -1361,13 +1346,12 @@ class SettingsViewModel @Inject constructor(
         _updateDownloadState.value = UpdateDownloadUiState.Idle
     }
 
-    /**
-     * 检测到新版本就提前把包装好（开关默认开）。已下好同一版本则直接进入可安装状态，不重复下载。
-     */
+    /** 预下载新版本；固定 beta 标签只有摘要匹配才可复用缓存。 */
     private fun autoDownloadIfNeeded(tag: String, expectedSha256: String?) {
         val savedPath = updateCheckSettingsRepository.downloadedPath
         // 复用上次下好的包同样要校验：它接着就被送去安装，不能因为「上次下过」而免检。
-        if (updateCheckSettingsRepository.downloadedTag == tag && savedPath != null &&
+        if ((tag != "beta-latest" || !expectedSha256.isNullOrBlank()) &&
+            updateCheckSettingsRepository.downloadedTag == tag && savedPath != null &&
             File(savedPath).isFile &&
             runCatching { updateApkDownloader.matchesDigest(File(savedPath), expectedSha256) }
                 .getOrDefault(false)

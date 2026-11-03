@@ -69,12 +69,10 @@
         "aharou": "alpine-3.21-{abi}.tar.gz"
       },
       "abiNames": {
-        "arm64": "aarch64",
-        "x86_64": "x86_64"
+        "arm64": "aarch64"
       },
       "sha256ByAbi": {
-        "arm64": "a389940ee42579ead202fb91607fb25698a58a3a5b55c15b4603e5d39cfa4492",
-        "x86_64": "3d5912d47e004ac77746d63ab848abd9e37164465cf1c866eb574bc526135012"
+        "arm64": "a389940ee42579ead202fb91607fb25698a58a3a5b55c15b4603e5d39cfa4492"
       }
     },
     {
@@ -90,12 +88,10 @@
         "aharou": "alpine-3.22-{abi}.tar.gz"
       },
       "abiNames": {
-        "arm64": "aarch64",
-        "x86_64": "x86_64"
+        "arm64": "aarch64"
       },
       "sha256ByAbi": {
-        "arm64": "7e9b34ff3304381909e566e2c93de450664ccc724191261423974fc121c11623",
-        "x86_64": "57e364a241bab0699cd8a760c0fd7b270e9cbcbd3cee822cb2b07ca6d925c16c"
+        "arm64": "7e9b34ff3304381909e566e2c93de450664ccc724191261423974fc121c11623"
       }
     },
     {
@@ -111,12 +107,10 @@
         "aharou": "alpine-3.23-{abi}.tar.gz"
       },
       "abiNames": {
-        "arm64": "aarch64",
-        "x86_64": "x86_64"
+        "arm64": "aarch64"
       },
       "sha256ByAbi": {
-        "arm64": "7dcc7420bcc426a615c0512cc85b4a52e9f89df9c600b93ce78d22e0e9234891",
-        "x86_64": "7f483b63722c9da91206a648175fdbbbf1cf0f5dc1868364a66007204618c961"
+        "arm64": "7dcc7420bcc426a615c0512cc85b4a52e9f89df9c600b93ce78d22e0e9234891"
       }
     },
     {
@@ -132,12 +126,10 @@
         "aharou": "alpine-3.24-{abi}.tar.gz"
       },
       "abiNames": {
-        "arm64": "aarch64",
-        "x86_64": "x86_64"
+        "arm64": "aarch64"
       },
       "sha256ByAbi": {
-        "arm64": "4d3f80afaebd447c5591a63a73bde380a149fe8b2d85488cafabb2ff97551f50",
-        "x86_64": "f8e1cafba9b1b283b5d30d06f9885c8d2bc161ffe9083ade8e2e157813a53407"
+        "arm64": "4d3f80afaebd447c5591a63a73bde380a149fe8b2d85488cafabb2ff97551f50"
       }
     },
     {
@@ -154,12 +146,10 @@
         "aharou": "ubuntu-20.04-{abi}.tar.gz"
       },
       "abiNames": {
-        "arm64": "arm64",
-        "x86_64": "amd64"
+        "arm64": "arm64"
       },
       "sha256ByAbi": {
-        "arm64": "f9b999afb4c4b10193087ea8c11be36d688f19e609b05179b571f29357954b52",
-        "x86_64": "60e216b60947653dc8989be3821380268315b99b2959c29882781541bfe5a426"
+        "arm64": "f9b999afb4c4b10193087ea8c11be36d688f19e609b05179b571f29357954b52"
       }
     },
     {
@@ -176,12 +166,10 @@
         "aharou": "ubuntu-22.04-{abi}.tar.gz"
       },
       "abiNames": {
-        "arm64": "arm64",
-        "x86_64": "amd64"
+        "arm64": "arm64"
       },
       "sha256ByAbi": {
-        "arm64": "075d4abd2817a5023ab0a82f5cb314c5ec0aa64a9c0b40fd3154ca3bfdae979f",
-        "x86_64": "242cd8898b33ea806ef5f13b1076ed7c76f9f989d18384452f7166692438ff1a"
+        "arm64": "075d4abd2817a5023ab0a82f5cb314c5ec0aa64a9c0b40fd3154ca3bfdae979f"
       }
     },
     {
@@ -198,12 +186,10 @@
         "aharou": "ubuntu-24.04-{abi}.tar.gz"
       },
       "abiNames": {
-        "arm64": "arm64",
-        "x86_64": "amd64"
+        "arm64": "arm64"
       },
       "sha256ByAbi": {
-        "arm64": "a91d5a93010193712d346d761372b7c9db6dfcf093893161c64ca107f05914f2",
-        "x86_64": "e77b6f10c2590cef872b33ee9f635a0e3fd1f57fb074c0e52b5c7f56147a0c86"
+        "arm64": "a91d5a93010193712d346d761372b7c9db6dfcf093893161c64ca107f05914f2"
       }
     },
     {
@@ -219,12 +205,10 @@
         "aharou": "ubuntu-25.10-{abi}.tar.gz"
       },
       "abiNames": {
-        "arm64": "arm64",
-        "x86_64": "amd64"
+        "arm64": "arm64"
       },
       "sha256ByAbi": {
-        "arm64": "11534a7d4d94db63e7c65d6012b8696abdd6cf14b4efde01c6b1da196b77bc3b",
-        "x86_64": "febb74fc4e09b2d84ed8655a9e25b55777cdb970f8eb8e6dee302676b519bc95"
+        "arm64": "11534a7d4d94db63e7c65d6012b8696abdd6cf14b4efde01c6b1da196b77bc3b"
       }
     },
     {
@@ -241,12 +225,10 @@
         "aharou": "ubuntu-26.04-{abi}.tar.gz"
       },
       "abiNames": {
-        "arm64": "arm64",
-        "x86_64": "amd64"
+        "arm64": "arm64"
       },
       "sha256ByAbi": {
-        "arm64": "5a1906794ced63a71a8119c3f211ef5f0bbe0a243001b4bbd41fdf80c5b219fd",
-        "x86_64": "a496a960472ce474a59590b8987d3a1135d3cbef1991f3b1abe8cacfea8bf85a"
+        "arm64": "5a1906794ced63a71a8119c3f211ef5f0bbe0a243001b4bbd41fdf80c5b219fd"
       }
     },
     {
@@ -262,12 +244,10 @@
         "aharou": "ubuntu-26.10-{abi}.tar.gz"
       },
       "abiNames": {
-        "arm64": "arm64",
-        "x86_64": "amd64"
+        "arm64": "arm64"
       },
       "sha256ByAbi": {
-        "arm64": "8b7ea4ed71a92873f7f4e260a3defe0d9ed85cb69c0155b12414208f79fa0f2d",
-        "x86_64": "ff50c868fa972e956b6406d7efc6e3e47746247f5b301a7c29465e609788c3fc"
+        "arm64": "8b7ea4ed71a92873f7f4e260a3defe0d9ed85cb69c0155b12414208f79fa0f2d"
       }
     },
     {
@@ -284,8 +264,7 @@
         "aharou": "debian-12-{abi}.tar.xz"
       },
       "abiNames": {
-        "arm64": "arm64v8",
-        "x86_64": "amd64"
+        "arm64": "arm64v8"
       }
     },
     {
@@ -302,8 +281,7 @@
         "aharou": "debian-13-{abi}.tar.xz"
       },
       "abiNames": {
-        "arm64": "arm64v8",
-        "x86_64": "amd64"
+        "arm64": "arm64v8"
       }
     },
     {

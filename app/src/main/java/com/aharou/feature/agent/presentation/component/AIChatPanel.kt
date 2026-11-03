@@ -1233,7 +1233,6 @@ fun AIChatPanel(
                     keyboardController?.hide()
                     onOpenDrawer()
                 },
-                onNewChat = { viewModel.newSession() },
                 onNavigateToTerminal = onNavigateToTerminal,
                 onNavigateToGit = onNavigateToGit,
                 onNavigateToBrowser = onNavigateToBrowser,
@@ -1245,8 +1244,6 @@ fun AIChatPanel(
                     onNavigateToObserve()
                 },
                 onOpenActivity = { showActivity = true },
-                currentMode = currentMode,
-                onToggleMode = { viewModel.setSessionMode(it) },
                 connectionState = connectionState?.takeIf { isRemote },
                 showMenuButton = showMenuButton && sessionReady,
                 terminalActive = terminalActive,

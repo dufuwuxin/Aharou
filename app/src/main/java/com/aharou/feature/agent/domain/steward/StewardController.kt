@@ -5,7 +5,6 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -24,14 +23,11 @@ class StewardController @Inject constructor(
     private val _state = MutableStateFlow(StewardState())
     val state: StateFlow<StewardState> = _state.asStateFlow()
 
-    /** 用户最初那句任务：判断「完成没」的基准，开托管时由界面侧写入。 */
-    private var anchorInstruction: String = ""
-    /** 基准所属会话：判定用它的供应商/模型，跟会话本身走而不是全局默认。 */
-    private var anchorSessionId: String? = null
+    private val turnPolicy = StewardTurnPolicy()
     private var loopCount = 0
 
-    /** 同一轮不重入：判定还在跑时又来一次空闲回调，直接忽略。 */
-    private val judging = AtomicBoolean(false)
+    /** 旧判定的 finally 不得释放重新开启后的判定占用。 */
+    private var judging: StewardTurnPolicy.Ticket? = null
 
     val enabled: Boolean get() = settings.enabled
 
@@ -42,17 +38,32 @@ class StewardController @Inject constructor(
         publish(StewardStatus.Idle)
     }
 
-    fun enable(anchorInstruction: String, sessionId: String? = null) {
-        this.anchorInstruction = anchorInstruction
-        this.anchorSessionId = sessionId
+    fun enable(anchorInstruction: String, sessionId: String? = null): Long {
+        val revision = turnPolicy.enable(anchorInstruction, sessionId)
+        judging = null
         loopCount = 0
         settings.enabled = true
-        publish(StewardStatus.Monitoring)
+        publish(if (anchorInstruction.isBlank()) StewardStatus.Idle else StewardStatus.Monitoring)
+        return revision
     }
+
+    fun bindAnchor(sessionId: String, instruction: String, revision: Long? = null) {
+        if (revision == null) turnPolicy.bindAnchor(sessionId, instruction)
+        else turnPolicy.bindAnchor(sessionId, instruction, revision)
+        if (enabled && turnPolicy.instruction.isNotBlank() && _state.value.status == StewardStatus.Idle) {
+            publish(StewardStatus.Monitoring)
+        }
+    }
+
+    fun currentTurn(sessionId: String): StewardTurnPolicy.Ticket? =
+        if (enabled) turnPolicy.ticket(sessionId) else null
+
+    fun isCurrent(ticket: StewardTurnPolicy.Ticket): Boolean = enabled && turnPolicy.isCurrent(ticket)
 
     fun disable() {
         settings.enabled = false
-        judging.set(false)
+        turnPolicy.disable()
+        judging = null
         publish(StewardStatus.Stopped)
     }
 
@@ -73,13 +84,13 @@ class StewardController @Inject constructor(
      * @param send 把下一步指令送进同一会话的既有发送链路。
      * @return 是否已自动续发（true = 又开了一轮）。
      */
-    suspend fun onAiIdle(lastReport: String, send: suspend (String) -> Unit): Boolean {
-        if (!settings.enabled) return false
-        if (anchorInstruction.isBlank()) return false
-        if (!judging.compareAndSet(false, true)) return false
+    suspend fun onAiIdle(ticket: StewardTurnPolicy.Ticket, lastReport: String, send: suspend (String) -> Unit): Boolean {
+        if (!isCurrent(ticket) || judging != null) return false
+        judging = ticket
         try {
             publish(StewardStatus.Judging)
-            val judgement = judge.judge(anchorInstruction, lastReport, anchorSessionId)
+            val judgement = judge.judge(turnPolicy.instruction, lastReport, ticket.sessionId)
+            if (!isCurrent(ticket)) return false
             if (judgement == null) {
                 publish(StewardStatus.Monitoring)
                 return false
@@ -110,13 +121,14 @@ class StewardController @Inject constructor(
             publish(StewardStatus.Monitoring)
             return true
         } catch (e: CancellationException) {
+            if (isCurrent(ticket)) publish(StewardStatus.Monitoring)
             throw e
         } catch (e: Exception) {
             FileLogger.w(TAG, "托管续发失败，跳过: ${e.message}", e)
-            publish(StewardStatus.Monitoring)
+            if (isCurrent(ticket)) publish(StewardStatus.Monitoring)
             return false
         } finally {
-            judging.set(false)
+            if (judging === ticket) judging = null
         }
     }
 

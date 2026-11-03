@@ -72,6 +72,8 @@
 
 ## 5. 技能
 
+技能详情页支持为同一技能选择多个成员，成员编辑页仅展示绑定结果。界面通过 `AgentDefinitionRepository.setSkillBinding` 修改原作用域的成员定义；agent 可用文件工具编辑该成员定义中的 `skills` 列表，无新增专用工具。关键词注入仍属于成员配置。
+
 | 用户能做什么 | 界面入口（file:line） | Agent 有对应工具吗 | 工具名与入口（file:line） | 差距说明 |
 |---|---|---|---|---|
 | 从本机导入/安装技能 | `SettingsScreen.kt:830-838`（`showSkillAddSheet`），导入解析在 `feature/agent/domain/skill/SkillImport.kt` | 部分 | 无安装工具；按 `feature/agent/data/ConfigSkillFields.kt:22-24` 的注释，“新建/删除技能该走文件工具”——用 `writeFile` 在 `~/.aharou/skills/<名>/SKILL.md` 建目录（全局技能根见 `SkillRepository.kt:14`） | 没有“解析 zip/md 并校验 frontmatter”的能力，agent 只能手写文件，格式错了不会报 |
@@ -224,3 +226,9 @@
 3. **记忆 compact / distill**：确认没有工具与 config 字段，但后台 `MemoryMaintenanceWorker` 的触发条件未逐行读，因此“agent 完全无法触发”是按工具范围下的结论，不等于“这两件事永远不会发生”。
 4. **会话导出**（`MainActivity.kt:842-845`）的具体产物格式未核实，只确认入口存在且无对应工具。
 5. `docs/` 下此前没有本文件；本表未接入任何索引（`docs/FILE_INDEX.md` 未改，任务只允许写一份文档）。
+
+## 脚本工具与片段注入
+
+配置 → 工具的脚本工具列表与 `config script_tools` 集合共用 `ScriptToolManager`，支持增改、启停和删除，启用的版本动态注册为工具；执行复用 Bash 真实命令权限与当前会话执行器。提示词编辑器的默认、关键词、成员注入写入片段元数据，Agent 可通过文件工具编辑同一份定义。运行时规则的编辑入口移至规则页，不更改原有覆盖路径。
+
+片段注入策略也可通过 `config` 的 `prompt_fragments` 集合读写：每个两位编号下提供 `default_injection`、`keywords_enabled`、`members_enabled`、`keywords` 和 `members`。关键词与成员名每行一项，修改列表不会自动打开开关。
