@@ -54,7 +54,8 @@ class SystemPromptProvider @Inject constructor(
     private val ruleRepository: RuleRepository,
     private val chatSessionDao: ChatSessionDao,
     private val sharedInbox: SharedInbox,
-    private val containerProfileResolver: com.aharou.feature.agent.domain.container.ContainerProfileResolver, private val projectIndex: ProjectIndex
+    private val containerProfileResolver: com.aharou.feature.agent.domain.container.ContainerProfileResolver, private val projectIndex: ProjectIndex,
+    private val injectedContextStore: InjectedContextStore
 ) {
     // 抽象独立的 Source
     interface PromptSource {
@@ -684,7 +685,15 @@ class SystemPromptProvider @Inject constructor(
     fun findAgentDefinitionIncludingDisabled(name: String): AgentDefinition? =
         agentDefinitionRepository.findIncludingDisabled(name)
 
-    fun build(agentContext: AgentContext, consumeInbox: Boolean = true): String {
+    /**
+     * 构建本轮系统提示词，并把结果顺手存一份给界面的「显示全部」。
+     * 包一层而不是在 6 条 return 前逐个插代码：漏一条面板就少一段。
+     */
+    fun build(agentContext: AgentContext, consumeInbox: Boolean = true): String =
+        buildUnrecorded(agentContext, consumeInbox)
+            .also { injectedContextStore.record(agentContext.sessionId, it) }
+
+    private fun buildUnrecorded(agentContext: AgentContext, consumeInbox: Boolean): String {
         agentContext.agentDefinition?.let { return buildForSubAgent(it, agentContext) }
 
         if (PromptFragmentResolver.isBuiltinDisabled(customDir)) {
