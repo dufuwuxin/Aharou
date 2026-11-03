@@ -38,6 +38,13 @@ class WorkflowRunner @Inject constructor(
     private val maxRunningSource: MaxRunningSource
 ) {
 
+    companion object {
+        internal fun pipelineSucceeded(result: ToolResult): Boolean {
+            val data = (result as? ToolResult.Success)?.data as? JsonObject ?: return false
+            return (data["state"] as? JsonPrimitive)?.contentOrNull == "done"
+        }
+    }
+
     /** 列工作流清单；给了 [workflow] 就展开它的团队链。 */
     fun list(target: String): ToolResult {
         val entries = try {
@@ -175,6 +182,9 @@ class WorkflowRunner @Inject constructor(
                     executed.code
                 )
             }
+            if (!pipelineSucceeded(executed)) {
+                return ToolResult.Error("工作流第 $layer 层存在失败或未接受交付，已阻止后续层", "WORKFLOW_BLOCKED")
+            }
             val outputs = extractOutputs(executed)
             val verdict = WorkflowOrchestrator.parseVerdict(outputs[TeamRunner.judgeId(layer)].orEmpty())
             report += WorkflowOrchestrator.reportLine(layer, team.name, verdict)
@@ -280,6 +290,9 @@ class WorkflowRunner @Inject constructor(
                                 state = "escalated",
                                 note = "第 ${layer - 1} 层「$targetExpert」返工失败：${reworkResult.message}"
                             )
+                        }
+                        if (!pipelineSucceeded(reworkResult)) {
+                            return ToolResult.Error("返工任务未成功交付，已阻止工作流继续", "WORKFLOW_REWORK_BLOCKED")
                         }
                         val reworkOutput = extractOutputs(reworkResult)[TeamRunner.reworkId(layer - 1)].orEmpty()
                         report += "  └ 已退回第 ${layer - 1} 层「${upstreamRef.teamName}·$targetExpert」" +

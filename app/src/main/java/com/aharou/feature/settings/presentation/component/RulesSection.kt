@@ -89,7 +89,12 @@ internal fun RulesSection(
             .verticalScroll(rememberScrollState())
             .padding(bottom = Spacing.xl)
     ) {
-        // 与记忆页一致：顶部先选作用域，下面只铺一份列表，而不是两组卡片上下堆着
+        Text(
+            text = stringResource(R.string.injection_rules_purpose),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.sm)
+        )
         SegmentedTabs(
             selected = scopeTab,
             labels = listOf(

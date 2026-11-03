@@ -26,7 +26,8 @@ import kotlinx.serialization.json.put
 class TeamTasks @Inject constructor(
     private val teamRepository: AgentTeamRepository,
     private val agentDefinitionRepository: AgentDefinitionRepository,
-    private val maxRunningSource: MaxRunningSource
+    private val maxRunningSource: MaxRunningSource,
+    private val stageExecutor: TeamStageExecutor
 ) {
 
     fun list(args: Map<String, JsonElement>): ToolResult {
@@ -65,6 +66,7 @@ class TeamTasks @Inject constructor(
      */
     suspend fun run(
         args: Map<String, JsonElement>,
+        parentSessionId: String,
         exec: suspend (JsonArray) -> ToolResult
     ): ToolResult {
         val teamName = (args["team"] as? JsonPrimitive)?.contentOrNull?.trim().orEmpty()
@@ -94,7 +96,7 @@ class TeamTasks @Inject constructor(
                     TAG,
                     "团队「${team.name}」开始执行：${team.stages.size} 阶段 → ${plan.layers} 层 / ${plan.taskCount} 任务"
                 )
-                exec(plan.pipeline)
+                stageExecutor.run(team, goal, enabled, maxRunningSource.maxRunning(), parentSessionId, exec)
             }
         }
     }

@@ -104,6 +104,12 @@ internal fun PromptsSection(
     var showBatchDelete by remember { mutableStateOf(false) }
 
     Column(modifier = Modifier.fillMaxSize()) {
+        Text(
+            text = stringResource(R.string.injection_prompts_purpose),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.sm)
+        )
         if (selection.selectionMode) {
             SelectionActionBar(
                 selectedCount = selection.selectedCount,

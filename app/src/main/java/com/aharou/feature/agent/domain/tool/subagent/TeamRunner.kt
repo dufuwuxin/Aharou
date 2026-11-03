@@ -57,13 +57,15 @@ object TeamRunner {
         val pipeline = buildJsonArray {
             var upstream: List<String> = emptyList()
             team.stages.forEachIndexed { stageIndex, stage ->
+                val previousStage = upstream
+                val stageIds = mutableListOf<String>()
                 stage.tasks.chunked(batchSize).forEachIndexed { batchIndex, batch ->
                     val ids = batch.indices.map { "s${stageIndex + 1}-b${batchIndex + 1}-t${it + 1}" }
                     batch.forEachIndexed { taskIndex, task ->
                         addJsonObject {
                             put("id", ids[taskIndex])
                             put("description", "${stage.title}·${task.memberLabel()}".take(DESCRIPTION_MAX))
-                            put("prompt", taskPrompt(team, stage, task, goal))
+                            put("prompt", taskPrompt(team, stage, task, goal) + "\n" + logicalBrief(team, batchSize))
                             task.agent?.let { put("agent", it) }
                             task.department?.let { put("department", it) }
                             task.agentQuery?.let { put("agentQuery", it) }
@@ -75,7 +77,8 @@ object TeamRunner {
                             }
                         }
                     }
-                    upstream = ids
+                    stageIds += ids
+                    upstream = previousStage + stageIds
                     layers++
                 }
             }
@@ -126,13 +129,15 @@ object TeamRunner {
         val pipeline = buildJsonArray {
             var upstream: List<String> = emptyList()
             team.stages.forEachIndexed { stageIndex, stage ->
+                val previousStage = upstream
+                val stageIds = mutableListOf<String>()
                 stage.tasks.chunked(batchSize).forEachIndexed { batchIndex, batch ->
                     val ids = batch.indices.map { "w$layerIndex-s${stageIndex + 1}-b${batchIndex + 1}-t${it + 1}" }
                     batch.forEachIndexed { taskIndex, task ->
                         addJsonObject {
                             put("id", ids[taskIndex])
                             put("description", "第$layerIndex 层·${stage.title}·${task.memberLabel()}".take(DESCRIPTION_MAX))
-                            put("prompt", taskPrompt(team, stage, task, goal, upstreamBrief))
+                            put("prompt", taskPrompt(team, stage, task, goal, upstreamBrief) + "\n" + logicalBrief(team, batchSize, "w$layerIndex-"))
                             task.agent?.let { put("agent", it) }
                             task.department?.let { put("department", it) }
                             task.agentQuery?.let { put("agentQuery", it) }
@@ -144,7 +149,8 @@ object TeamRunner {
                             }
                         }
                     }
-                    upstream = ids
+                    stageIds += ids
+                    upstream = previousStage + stageIds
                     members += ids
                     layers++
                 }
@@ -298,7 +304,7 @@ object TeamRunner {
             append(index + 1).append(". ").append(stage.title)
                 .append("（").append(levelLabel(stage.level))
                 .append(if (stage.tasks.size > 1) "，并行 ${stage.tasks.size} 个" else "，1 个")
-                .append(if (stage.isReview) "，关卡" else "").append("）：")
+                .append(if (stage.isReview) "，审核" else "，执行").append("）：")
             append(stage.tasks.joinToString("、") { it.memberLabel() })
             stage.rejectTo?.let { append("；不通过则驳回→").append(it) }
             append("\n")
@@ -330,18 +336,41 @@ object TeamRunner {
             if (task.agent != null && task.agent in team.admins) {
                 append("你是本团队管理员之一：先独立给出判断，不要预设其他管理员会怎么想。\n")
             }
+            append("\n## 全员流程简报（任务未启动也具有身份）\n")
+            team.stages.forEachIndexed { index, item ->
+                append("阶段 ").append(index + 1).append("：").append(item.title)
+                    .append(if (item.isReview) " [审核]" else " [执行]").append('\n')
+                item.tasks.forEachIndexed { memberIndex, member ->
+                    append("- 阶段内任务 ").append(memberIndex + 1).append(" / ").append(member.memberLabel())
+                        .append("：").append(member.prompt).append('\n')
+                }
+                append("交接：接收此前阶段全部批次原文；交付给下一阶段全部成员，最终交回主代理。\n")
+            }
             append("\n你的任务：\n").append(task.prompt)
+            append("\n交付包须包含：产出、约束、验证（命令与结果）、未解决问题、下游事项；保留文件路径和原始证据，缺失标明 unknown。\n")
             if (stage.isReview) {
-                append("\n\n本阶段是关卡。逐条核对验收标准后，结论首行必须是：\n")
-                append("- 通过：写「通过」，然后列出验收依据；\n")
+                append("\n\n阶段类型：审核。逐条核对全部必需交付，输出且只输出一行机器判定（其余内容写证据）：\n")
+                append("通过：TEAM_REVIEW: PASS\n不通过：TEAM_REVIEW: REJECT <具体原因和必改点>\n")
+                append("所有必需审核成员均须给出合法判定；缺失不算通过。\n")
                 if (stage.rejectTo != null) {
-                    append("- 不通过：写「驳回→").append(stage.rejectTo)
-                        .append("」，再逐条列出必改点（谁改、改什么），交回主代理重排。\n")
+                    append("驳回目标：").append(stage.rejectTo).append("；系统附审核原文进行有限返工。\n")
                 } else {
-                    append("- 不通过：写「驳回」，列出必改点（本关是终审，没有可回退的阶段）。\n")
+                    append("本阶段没有回退目标；驳回将使本次运行受阻，结果交回主代理。\n")
                 }
             }
         }
+
+    private fun logicalBrief(team: AgentTeam, batchSize: Int, prefix: String = ""): String = buildString {
+        append("## 稳定逻辑任务身份（使用这些 id 定向沟通）\n")
+        team.stages.forEachIndexed { stageIndex, stage ->
+            stage.tasks.chunked(batchSize).forEachIndexed { batchIndex, batch ->
+                batch.forEachIndexed { index, task ->
+                    append(prefix).append("s${stageIndex + 1}-b${batchIndex + 1}-t${index + 1}")
+                        .append(" → ").append(stage.title).append(" / ").append(task.memberLabel()).append('\n')
+                }
+            }
+        }
+    }
 
     private fun TeamTask.memberLabel(): String =
         agent ?: listOfNotNull(department, agentQuery).joinToString("/")

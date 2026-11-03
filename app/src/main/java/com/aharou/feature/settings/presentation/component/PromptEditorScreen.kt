@@ -221,6 +221,12 @@ internal fun PromptEditorScreen(
             }
 
             SettingsGroupHeader(text = stringResource(R.string.prompts_injection))
+            Text(
+                text = stringResource(R.string.injection_conditions_hint),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.sm)
+            )
             SettingsGroup {
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.lg, vertical = 10.dp),

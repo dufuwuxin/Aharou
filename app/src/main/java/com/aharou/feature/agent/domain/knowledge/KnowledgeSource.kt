@@ -26,7 +26,8 @@ data class KnowledgeSourceDef(
     val description: Map<String, String> = emptyMap(),
     val category: String = "",
     val cover: String = "",
-    val exclude: List<String> = emptyList()
+    val exclude: List<String> = emptyList(),
+    val isLocal: Boolean = false
 ) {
     /** 按当前界面语言取展示名；没有本地化名时退回任何一个，再退回仓库名。 */
     fun displayName(lang: String): String =

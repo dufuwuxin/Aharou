@@ -1,5 +1,6 @@
 package com.aharou.feature.agent.domain.subagent
 
+import com.aharou.feature.agent.domain.tool.subagent.TeamRunRegistry
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -70,6 +71,7 @@ data class SubAgentEvent(
 class SubAgentEventBus @Inject constructor(
     private val maxRunningSource: MaxRunningSource,
     private val communicationSource: CommunicationEnabledSource,
+    private val runRegistry: TeamRunRegistry = TeamRunRegistry(),
 ) {
     /** 子代理之间的对等通信（team / tell）是否开启；工具层与手册层都据此决定说不说、做不做。 */
     fun communicationEnabled(): Boolean = communicationSource.communicationEnabled()
@@ -115,6 +117,11 @@ class SubAgentEventBus @Inject constructor(
      */
     fun release(subSessionId: String): Boolean = unmarkActive(subSessionId)
 
+    fun releaseStopped(subSessionId: String): Boolean {
+        runRegistry.terminal(subSessionId, "stopped")
+        return unmarkActive(subSessionId)
+    }
+
     /** 把 [subSessionId] 加入活跃集合；与 [unmarkActive] 共用 [activeLock]。 */
     private fun markActive(subSessionId: String) {
         synchronized(activeLock) {
@@ -131,9 +138,13 @@ class SubAgentEventBus @Inject constructor(
     }
 
     fun emit(event: SubAgentEvent) {
+        if (event.type.isTerminal() || event.type == SubAgentEventType.DELETED) {
+            runRegistry.terminal(event.subSessionId, event.type.name.lowercase())
+        }
         // 同步维护活跃集合
         when (event.type) {
             SubAgentEventType.SPAWNED -> {
+                terminalCache.remove(event.subSessionId)
                 markActive(event.subSessionId)
                 parentOfSub[event.subSessionId] = event.parentSessionId
             }
@@ -202,6 +213,11 @@ class SubAgentEventBus @Inject constructor(
 
     fun sendToSibling(fromSessionId: String, toSessionId: String, message: String): Boolean {
         if (message.isBlank() || !areSiblings(fromSessionId, toSessionId)) return false
+        if (!runRegistry.canMessage(fromSessionId) || !runRegistry.canMessage(toSessionId)) return false
+        val fromRun = runRegistry.runOf(fromSessionId)
+        val toRun = runRegistry.runOf(toSessionId)
+        if ((fromRun != null || toRun != null) && fromRun != toRun) return false
+        if (terminalEvent(toSessionId)?.type == SubAgentEventType.STOPPED) return false
         emit(
             SubAgentEvent(
                 subSessionId = fromSessionId,

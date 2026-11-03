@@ -41,7 +41,7 @@ class SlashCommandRegistry @Inject constructor(
 
     /** 重新扫描技能并重建菜单。涉及文件 IO，调用方应在 IO 上下文调用。 */
     suspend fun refresh() = withContext(Dispatchers.IO) {
-        skills = skillRepository.listSkills()
+        skills = skillRepository.listCommandSkills()
         _commands.value = buildCommands()
     }
 
@@ -87,6 +87,9 @@ class SlashCommandRegistry @Inject constructor(
             return ResolvedCommand.Action(handler, args)
         }
         val skill = skills.firstOrNull { it.name.equals(name, ignoreCase = true) } ?: return null
+        if (skill.keywordEnabled && skill.keywords.none {
+            it.isNotBlank() && trimmed.contains(it, ignoreCase = true)
+        }) return null
         return ResolvedCommand.SkillCommand(skill, args)
     }
 

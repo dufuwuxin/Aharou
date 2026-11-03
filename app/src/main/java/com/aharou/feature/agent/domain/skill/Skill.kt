@@ -14,7 +14,9 @@ data class Skill(
     val description: String,
     val requiredTools: List<String> = emptyList(),
     val dirPath: String? = null,
-    val instructions: String
+    val instructions: String,
+    val keywordEnabled: Boolean = false,
+    val keywords: List<String> = emptyList()
 )
 
 /** 设置页新建/编辑技能时提交的表单快照。 */
@@ -23,7 +25,9 @@ data class SkillForm(
     val description: String,
     val instructions: String,
     /** 手写技能里的 `required_tools`，编辑页不暴露但原样写回，避免保存后丢字段。 */
-    val requiredTools: List<String> = emptyList()
+    val requiredTools: List<String> = emptyList(),
+    val keywordEnabled: Boolean = false,
+    val keywords: List<String> = emptyList()
 )
 
 /** 保存技能失败的原因。 */
@@ -36,6 +40,8 @@ enum class SkillSaveError {
 
     /** 同作用域已有同名技能。 */
     NAME_CONFLICT,
+
+    BOUND_RENAME,
 
     /** 写盘失败。 */
     IO_FAILED,

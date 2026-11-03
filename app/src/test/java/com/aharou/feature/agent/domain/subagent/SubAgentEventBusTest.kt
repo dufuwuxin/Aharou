@@ -22,6 +22,18 @@ class SubAgentEventBusTest {
     )
 
     @Test
+    fun userStop_blocksMessagesButNormalReleaseDoesNot() {
+        val registry = com.aharou.feature.agent.domain.tool.subagent.TeamRunRegistry()
+        val bus = SubAgentEventBus(MaxRunningSource { 5 }, CommunicationEnabledSource { true }, registry)
+        spawn(bus, "stopped")
+        assertTrue(bus.releaseStopped("stopped"))
+        assertFalse(registry.canMessage("stopped"))
+        spawn(bus, "normal")
+        assertTrue(bus.release("normal"))
+        assertTrue(registry.canMessage("normal"))
+    }
+
+    @Test
     fun spawn_marksActive() {
         val bus = busWith()
         spawn(bus, "sub-1")

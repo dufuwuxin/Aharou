@@ -42,7 +42,7 @@ class SlashCommandRegistryTest {
         every { context.getString(R.string.slash_command_usage_desc) } returns "用量"
         every { context.getString(R.string.slash_command_compress_desc) } returns "压缩上下文"
         every { context.getString(R.string.slash_command_init_desc) } returns "初始化项目"
-        every { skillRepository.listSkills() } returns skills
+        every { skillRepository.listCommandSkills() } returns skills
         runBlocking { registry.refresh() }
     }
 
@@ -113,6 +113,15 @@ class SlashCommandRegistryTest {
         val resolved = registry.resolve("/echo  hello world ")
         assertTrue(resolved is SlashCommandRegistry.ResolvedCommand.Action)
         assertEquals("hello world", resolved!!.args)
+    }
+
+    @Test
+    fun resolve_keywordSkill_matchesCurrentInputWithoutHidingMenuEntry() {
+        val registry = registry()
+        prepare(registry, listOf(skill("review", "review").copy(keywordEnabled = true, keywords = listOf("Kotlin"))))
+        assertEquals(listOf("review"), registry.commands.value.map { it.name })
+        assertNull(registry.resolve("/review poetry"))
+        assertTrue(registry.resolve("/review Kotlin") is SlashCommandRegistry.ResolvedCommand.SkillCommand)
     }
 
     @Test

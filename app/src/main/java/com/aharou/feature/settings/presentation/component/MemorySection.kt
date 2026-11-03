@@ -242,6 +242,12 @@ internal fun MemorySection(viewModel: SettingsViewModel = hiltViewModel()) {
             .verticalScroll(rememberScrollState())
             .padding(bottom = Spacing.xl),
     ) {
+        Text(
+            text = stringResource(R.string.injection_memory_purpose),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.sm)
+        )
         SettingsGroupHeader(text = stringResource(R.string.memory_settings_title))
         SettingsGroup {
             SettingsRow(

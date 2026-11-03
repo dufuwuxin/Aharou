@@ -278,9 +278,9 @@ class AIEditorApp : Application(), Configuration.Provider {
     @Inject
     lateinit var configMcpFields: com.aharou.feature.agent.data.ConfigMcpFields
 
-    /** 技能启停集合注册。 */
     @Inject
     lateinit var configSkillFields: com.aharou.feature.agent.data.ConfigSkillFields
+    @Inject lateinit var configKnowledgeFields: com.aharou.feature.agent.data.ConfigKnowledgeFields
 
     /** 技能市场自定义源集合注册。 */
     @Inject
@@ -427,6 +427,7 @@ class AIEditorApp : Application(), Configuration.Provider {
         configRuleFields.registerInto(configRegistry); configReminderFields.registerInto(configRegistry)
         configMcpFields.registerInto(configRegistry)
         configSkillFields.registerInto(configRegistry)
+        configKnowledgeFields.registerInto(configRegistry)
         configSkillMarketFields.registerInto(configRegistry)
         configVoiceFields.registerInto(configRegistry)
         configChatFields.registerInto(configRegistry)

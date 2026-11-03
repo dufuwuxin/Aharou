@@ -431,11 +431,17 @@ private fun StageEditor(
             minLines = 2,
             maxLines = 5
         )
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Checkbox(checked = stage.isReview, onCheckedChange = { onChange(stage.copy(isReview = it)) })
-            Text(
-                text = stringResource(R.string.team_editor_stage_review),
-                style = MaterialTheme.typography.bodyMedium
+        Text(text = stringResource(R.string.team_editor_stage_type), style = MaterialTheme.typography.bodyMedium)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+            FilterChip(
+                selected = !stage.isReview,
+                onClick = { onChange(stage.copy(isReview = false, rejectTo = "")) },
+                label = { Text(stringResource(R.string.team_editor_stage_execution)) }
+            )
+            FilterChip(
+                selected = stage.isReview,
+                onClick = { onChange(stage.copy(isReview = true)) },
+                label = { Text(stringResource(R.string.team_editor_stage_review)) }
             )
         }
         if (stage.isReview) {
@@ -708,7 +714,7 @@ private fun ProcessNodeCard(
                     if (isReview) {
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = "\u25cf 关卡",
+                            text = stringResource(R.string.team_editor_stage_review),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.error,
                             fontWeight = FontWeight.Bold

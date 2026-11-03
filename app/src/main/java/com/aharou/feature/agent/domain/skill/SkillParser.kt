@@ -61,7 +61,10 @@ object SkillParser {
             description = description,
             requiredTools = requiredTools,
             dirPath = null,
-            instructions = body.trim()
+            instructions = body.trim(),
+            keywordEnabled = frontmatter["keyword_enabled"] == true,
+            keywords = (frontmatter["keywords"] as? List<*>)?.filterIsInstance<String>()
+                ?.map { it.trim() }?.filter { it.isNotEmpty() }?.distinct() ?: emptyList()
         )
     }
 
@@ -89,12 +92,18 @@ object SkillParser {
         name: String,
         description: String,
         requiredTools: List<String>,
-        instructions: String
+        instructions: String,
+        keywordEnabled: Boolean = false,
+        keywords: List<String> = emptyList()
     ): String = buildString {
         appendLine("---")
         appendLine("name: ${Frontmatter.quote(name)}")
         appendLine("description: ${Frontmatter.quote(description)}")
         if (requiredTools.isNotEmpty()) appendLine("required_tools: [${requiredTools.joinToString(", ")}]")
+        if (keywordEnabled || keywords.isNotEmpty()) {
+            appendLine("keyword_enabled: $keywordEnabled")
+            appendLine("keywords: [${keywords.joinToString(", ") { Frontmatter.quote(it) }}]")
+        }
         appendLine("---")
         appendLine(instructions.trim())
     }
