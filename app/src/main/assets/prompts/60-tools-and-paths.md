@@ -130,3 +130,9 @@
 ## 脚本扩展工具
 - 用户配置的脚本工具动态注册，参数以当前 schema 为准，`input` 是通过 stdin 传给命令的 JSON 对象，不作为 shell 源码拼接。
 - 定义由 `config` 的 `script_tools` 集合管理；启停、改动或删除后旧版本调用会失效，应重新读取当前工具定义。执行沿用当前会话的容器／SSH 与 Bash 命令审批，不能把脚本包装当成权限豁免。
+
+## 自定义命令工具与会话托管
+- 自定义工具配置在全局 `~/.aharou/tools/custom/<name>.json` 或项目 `.aharou/tools/custom/<name>.json`，项目层优先。内置/MCP 的描述与注入方式覆盖在 `tools/overrides.json`。不覆盖原有脚本工具或 MCP 服务器配置。
+- 自定义工具声明标量参数表（string/integer/number/boolean），命令模板用 `{{name}}` 占位符；执行前参数按 shell 单引号转义，只展开一次，不能把任意参数拼成未转义的命令。工具执行继续走现有权限、PLAN 与写入租约链路。
+- 工具注入方式为 every_round / keyword / off；关键词忽略大小写与空白，只对当前用户消息做子串匹配，在成员工具允许清单之后做减法。压缩没有用户消息时保留关键词工具，只剔除 off。注入关闭不等于撤销执行权限。
+- 托管按会话独立；配置通道使用 `steward.sessions.<sessionId>.enabled` / `max_loops` / `unlimited`，不再使用全局开关。先 `config get steward.sessions` 获取真实会话 id；进程重启关闭托管，空会话等待真实用户任务。关闭或重新开启后旧判定与旧基准加载结果不能续发。

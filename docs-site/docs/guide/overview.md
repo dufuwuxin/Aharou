@@ -76,6 +76,7 @@
 
 | 入口 | 说明 |
 | --- | --- |
+| 工具管理 | MCP / 脚本入口、自定义命令参数表与关键词注入 → [文档](/guide/tools) |
 | 工具授权 | AI 调用工具的授权规则 → [文档](/guide/permissions) |
 | 软件权限 | 安装未知应用、存储、电池优化、自启动、root、Shizuku 等系统权限 → [文档](/guide/app-permissions) |
 | 后台运行 | 后台保活、屏幕常亮、AI 完成通知 → [文档](/guide/background-run) |

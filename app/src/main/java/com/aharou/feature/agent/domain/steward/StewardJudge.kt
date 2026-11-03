@@ -2,6 +2,10 @@ package com.aharou.feature.agent.domain.steward
 
 import com.aharou.core.util.FileLogger
 import com.aharou.feature.agent.domain.workflow.AgentWorkflow
+import dagger.Binds
+import dagger.Module
+import dagger.hilt.InstallIn
+import dagger.hilt.components.SingletonComponent
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
@@ -12,6 +16,18 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
+ * 判定端口：[StewardController] 只依赖它，不依赖带整条模型链路的 [StewardJudge]——
+ * 控制器的纯 JVM 单测可以塞一个可控的假判定，不必拉起 AgentWorkflow。
+ */
+interface StewardJudgePort {
+
+    /**
+     * @return 判定结果；超时、模型不可用、回的不是 JSON 一律返回 null（由调用方静默不续发）。
+     */
+    suspend fun judge(originalInstruction: String, lastReport: String, sessionId: String? = null): StewardJudgement?
+}
+
+/**
  * 主管判定：拿「用户最初那句」和「AI 最后一次汇报」问一次模型——任务到底做完没有。
  *
  * 走会话链路既有的一次性调用入口 [AgentWorkflow.completeOnce]，不自己拼 HTTP：
@@ -20,12 +36,13 @@ import javax.inject.Singleton
 @Singleton
 class StewardJudge @Inject constructor(
     private val agentWorkflow: AgentWorkflow,
-) {
+) : StewardJudgePort {
 
-    /**
-     * @return 判定结果；超时、模型不可用、回的不是 JSON 一律返回 null（由调用方静默不续发）。
-     */
-    suspend fun judge(originalInstruction: String, lastReport: String, sessionId: String? = null): StewardJudgement? {
+    override suspend fun judge(
+        originalInstruction: String,
+        lastReport: String,
+        sessionId: String?,
+    ): StewardJudgement? {
         if (originalInstruction.isBlank()) return null
         return try {
             val prompt = JUDGE_PROMPT
@@ -99,4 +116,13 @@ Return only a JSON object, with no additional content:
   "next_instruction": "the next instruction when not completed; leave as an empty string when completed"
 }"""
     }
+}
+
+/** 把 [StewardJudge] 绑到控制器依赖的 [StewardJudgePort]。 */
+@Module
+@InstallIn(SingletonComponent::class)
+abstract class StewardJudgeModule {
+
+    @Binds
+    abstract fun bindStewardJudgePort(judge: StewardJudge): StewardJudgePort
 }

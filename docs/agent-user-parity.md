@@ -232,3 +232,10 @@
 配置 → 工具的脚本工具列表与 `config script_tools` 集合共用 `ScriptToolManager`，支持增改、启停和删除，启用的版本动态注册为工具；执行复用 Bash 真实命令权限与当前会话执行器。提示词编辑器的默认、关键词、成员注入写入片段元数据，Agent 可通过文件工具编辑同一份定义。运行时规则的编辑入口移至规则页，不更改原有覆盖路径。
 
 片段注入策略也可通过 `config` 的 `prompt_fragments` 集合读写：每个两位编号下提供 `default_injection`、`keywords_enabled`、`members_enabled`、`keywords` 和 `members`。关键词与成员名每行一项，修改列表不会自动打开开关。
+
+## Historical branch integration: custom tools and session supervision
+
+- 设置的工具入口保留 MCP 服务器与脚本工具，并增加自定义命令工具页签；参数表生成 schema，命令模板中的值单引号转义。命令仍经 ToolRegistry、ToolCallGuard 与运行期权限链执行。
+- 自定义工具与覆盖项作为文件资产可由 agent 的文件工具读写：全局 `~/.aharou/tools/`、项目 `.aharou/tools/`；在每轮工具构建前刷新，不需要新增标量 config 字段。
+- 每轮工具集先做成员允许清单，再做 every_round/keyword/off 注入过滤和描述覆盖；该过滤不是执行权限撤销。
+- 智能托管的设置和状态按会话隔离；界面设置与 `config get/set steward.sessions.<id>.enabled|max_loops|unlimited` 接入同一控制器。全局旧托管路径由显式会话路径取代，避免修改其他会话。

@@ -64,6 +64,11 @@ import com.aharou.feature.agent.domain.workflow.AgentWorkflow
 import com.aharou.feature.agent.domain.tool.ToolPermissionManager
 import com.aharou.feature.agent.domain.permission.ToolPermissionPolicyEngine
 import com.aharou.feature.agent.domain.tool.ToolCallGuard
+import com.aharou.feature.agent.domain.tool.custom.AharouToolStorageLocator
+import com.aharou.feature.agent.domain.tool.custom.CustomToolRuntime
+import com.aharou.feature.agent.domain.tool.custom.CustomToolSource
+import com.aharou.feature.agent.domain.tool.custom.ToolInjectionGate
+import com.aharou.feature.agent.domain.tool.custom.ToolStorageLocator
 import com.aharou.feature.agent.domain.tool.ToolRegistry
 import com.aharou.feature.agent.domain.tool.ToolSearchTool
 import com.aharou.feature.agent.domain.tool.ToolOutputStore
@@ -406,6 +411,14 @@ object AgentModule {
 
     @Provides
     @Singleton
+    fun provideToolStorageLocator(impl: AharouToolStorageLocator): ToolStorageLocator = impl
+
+    @Provides
+    @Singleton
+    fun provideCustomToolSource(impl: CustomToolRuntime): CustomToolSource = impl
+
+    @Provides
+    @Singleton
     fun provideSshLoginKeyStore(impl: SharedPrefsSshLoginKeyStore): SshLoginKeyStore = impl
 
     @Provides
@@ -449,9 +462,10 @@ object AgentModule {
         petAvatarTool: PetAvatarTool,
         diagnosticsTool: DiagnosticsTool,
         gitBlameTool: GitBlameTool,
+        customToolSource: CustomToolSource,
         guard: ToolCallGuard
     ): ToolRegistry {
-        return ToolRegistry(guard).apply {
+        return ToolRegistry(guard, customToolSource).apply {
             register("readFile", readFileTool)
             register("sendFile", sendFileTool)
             register("sendToChat", sendImFileTool)
@@ -542,6 +556,7 @@ object AgentModule {
         eventInjector: AgentEventInjector,
         memoryCurator: MemoryCurator,
         memoryCompactor: Lazy<MemoryCompactor>,
+        toolInjectionGate: ToolInjectionGate,
         fileAccess: FileAccessProvider,
         receiptRepository: ToolCallReceiptRepository,
         ocrEngine: TesseractOcrEngine,
@@ -582,7 +597,7 @@ object AgentModule {
             ocrEngine,
             vault,
             reminderEngine,
-            memoryCompactor
+            memoryCompactor, toolInjectionGate
         )
     }
 }

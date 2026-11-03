@@ -47,6 +47,7 @@ import com.aharou.feature.agent.domain.tool.ToolCall
 import com.aharou.feature.agent.domain.tool.mode.PlanApprovalChoice
 import com.aharou.feature.agent.domain.tool.mode.PlanApprovalManager
 import com.aharou.feature.agent.domain.tool.ToolPermissionManager
+import com.aharou.feature.agent.domain.tool.custom.ToolInjectionGate
 import com.aharou.feature.agent.domain.tool.ToolRegistry
 import com.aharou.feature.agent.domain.tool.ToolResult
 import com.aharou.feature.agent.domain.tool.ToolOutputStore
@@ -104,7 +105,6 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import java.util.UUID
 import javax.inject.Inject
-
 /**
  * 阶段三重构 (完全版)：基于不可变状态 (Immutable State) 与 MVI 架构的 Agent 工作流引擎。
  * 通过定义明确的 AgentSessionState, AgentAction 与 AgentSideEffect，
@@ -143,7 +143,7 @@ class StatefulAgentWorkflow @Inject constructor(
     private val receiptRepository: ToolCallReceiptRepository,
     private val ocrEngine: TesseractOcrEngine,
     private val vault: VaultRepository, private val reminderEngine: com.aharou.feature.agent.domain.reminder.ReminderEngine,
-    private val memoryCompactor: Lazy<MemoryCompactor> // Lazy 断环：MemoryCompactor 自己依赖 AgentWorkflow
+    private val memoryCompactor: Lazy<MemoryCompactor>, private val toolInjectionGate: ToolInjectionGate // Lazy breaks compactor cycle
 ) : AgentWorkflow {
 
     /** 卡死提示文案：从 prompts 文件读一次并缓存，用户可编辑该文件定制。 */
@@ -312,13 +312,13 @@ class StatefulAgentWorkflow @Inject constructor(
             history = history, sessionId = sessionId, mode = domain?.mode ?: AgentMode.BUILD,
             modeBeforePlan = domain?.modeBeforePlan, reasoningEffort = domain?.reasoningEffort?.apiValue,
             lastInputTokens = session?.lastInputTokens ?: 0, agentDefinition = definition)
-        val allTools = toolRegistry.getAvailableTools()
-        val tools = when {
+        toolInjectionGate.refresh(); val allTools = toolRegistry.getAvailableTools()
+        val tools = toolInjectionGate.visible(when {
             definition != null -> definition.filterToolNames(allTools.map { it.name }).toSet()
                 .let { allowed -> allTools.filter { it.name in allowed } }
             session?.parentId != null -> allTools // 子代理可再派子代理，递归由 MAX_SUBAGENT_DEPTH 兜底
             else -> allTools.filterNot { it.name == AgentDefinition.PARENT_MESSAGE_TOOL }
-        }
+        }, null)
         val compactionProvider = resolveCompactionFallbackProvider(sessionId) ?: provider
         val reuseMainPrefix = compactionProvider.providerId == provider.providerId && compactionProvider.model == provider.model  // 前缀缓存只同 provider 同 model 内生效，配了独立压缩模型就不复用主前缀
         return contextCompactor.compactIfNeeded(history, compactionProvider, sessionId, force = true, windowProvider = provider,

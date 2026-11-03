@@ -1,65 +1,276 @@
 package com.aharou.feature.settings.presentation
 
-import androidx.lifecycle.ViewModel
 import com.aharou.feature.agent.domain.tool.AgentTool
 import com.aharou.feature.agent.domain.tool.ToolCapability
-import com.aharou.feature.agent.domain.tool.ToolPermissionPolicy
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
 import com.aharou.feature.agent.domain.tool.ToolRegistry
+import com.aharou.feature.agent.domain.tool.custom.CustomToolDefinition
+import com.aharou.feature.agent.domain.tool.custom.CustomToolParameter
+import com.aharou.feature.agent.domain.tool.custom.ToolInjectionMode
+import com.aharou.feature.agent.domain.tool.custom.ToolOverride
+import com.aharou.feature.agent.domain.tool.custom.ToolSettingsStore
+import com.google.gson.GsonBuilder
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 
-/** 工具在「工具」页上的只读快照；设置页只展示，不改注册表。 */
+/** 工具来源：自建 / 内置 / MCP（界面据此分组与做删除权限判定）。 */
+enum class ToolSource { CUSTOM, BUILTIN, MCP }
+
+/** 编辑目标：[name] 为 null 表示新建，否则编辑该名字的工具。 */
+data class ToolEditorTarget(val name: String? = null)
+
+/** 一次性反馈（界面转成 Toast 后清掉），避免失败被静默吞掉。 */
+enum class ToolsMessage { SAVE_FAILED, DELETE_FAILED, LOAD_FAILED }
+
+/**
+ * 工具页的一行。
+ *
+ * [schemaJson] 是只读展示用的 schema（内置/MCP 由代码或服务端给，自定义由参数表生成）；
+ * [parametersJson] 只在自定义工具上有值，是编辑器里那份可改的参数 JSON。
+ */
 data class ToolUiEntry(
     val name: String,
     val description: String,
-    val permission: ToolPermissionPolicy,
-    /** 是否属于「延迟加载」目录：这类工具先由 `tool_search` 检索出来才进上下文，省每轮 schema 钱。 */
-    val deferred: Boolean,
-    val category: ToolCategory,
+    val source: ToolSource,
+    val schemaJson: String,
+    val injectionMode: ToolInjectionMode,
+    val keywords: List<String>,
+    val command: String = "",
+    val parametersJson: String = "",
+    val timeoutSeconds: Int = CustomToolDefinition.DEFAULT_TIMEOUT_SECONDS,
+    val permission: com.aharou.feature.agent.domain.tool.ToolPermissionPolicy = com.aharou.feature.agent.domain.tool.ToolPermissionPolicy.ASK,
+    val deferred: Boolean = false,
+    val category: ToolCategory = ToolCategory.OTHER,
 )
 
-/** 工具分类：按能力轴归组，用户找工具时先按「这类工具能干什么」扫，而不是背工具名。 */
-enum class ToolCategory {
-    FILE, COMMAND, NETWORK, DEVICE, AGENT, EXTERNAL, OTHER
-}
+data class ToolsUiState(
+    val entries: List<ToolUiEntry> = emptyList(),
+    val loading: Boolean = true,
+    val saving: Boolean = false,
+    val editor: ToolEditorTarget? = null,
+    val message: ToolsMessage? = null
+)
 
 /**
- * 「工具」页的数据源：直接读 [ToolRegistry] 的当前快照。
+ * 工具管理页的状态与动作。
  *
- * 刻意不塞进 SettingsViewModel：那个类已经顶在架构门禁的棘轮基线上（只许降不许涨），
- * 而且工具列表是纯只读派生数据，跟设置页的编辑状态没有交集。
+ * 读走 [ToolSettingsStore] 的内存快照（同步、无 IO），写一律切到 `Dispatchers.IO`；
+ * 写完只重建界面列表，不用「失败也 refresh」把错误盖掉——失败必须让用户看见。
  */
 @HiltViewModel
 class ToolsViewModel @Inject constructor(
-    toolRegistry: ToolRegistry
+    private val store: ToolSettingsStore,
+    private val registry: ToolRegistry
 ) : ViewModel() {
 
-    /** 延迟加载目录里的工具名：UI 上要标出来，否则用户会奇怪为什么对话里「看不见」它。 */
-    private val deferredNames: Set<String> = toolRegistry.getDeferredTools().map { it.name }.toSet()
+    private val _state = MutableStateFlow(ToolsUiState())
+    val state: StateFlow<ToolsUiState> = _state.asStateFlow()
 
-    /** 全部已注册工具，按分类 + 名称排序，保证每次进页面顺序稳定。 */
-    val entries: List<ToolUiEntry> = toolRegistry.getAvailableTools()
-        .map { tool ->
-            ToolUiEntry(
-                name = tool.name,
-                description = tool.description.lineSequence().firstOrNull().orEmpty().trim(),
+    val entries: List<ToolUiEntry> get() = state.value.entries
+    fun grouped(): List<Pair<ToolCategory, List<ToolUiEntry>>> = ToolCategory.entries.mapNotNull { category ->
+        entries.filter { it.category == category }.takeIf { it.isNotEmpty() }?.let { category to it }
+    }
+
+    private val prettyJson = Json {
+        prettyPrint = true
+        encodeDefaults = true
+    }
+    private val gson = GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create()
+
+    init {
+        refresh()
+    }
+
+    /** 重新从磁盘读取并重建列表（进入页面 / 外部改动后调用）。 */
+    fun refresh() {
+        viewModelScope.launch {
+            val entries = withContext(Dispatchers.IO) {
+                runCatching {
+                    store.refresh()
+                    buildEntries()
+                }.onFailure { if (it is CancellationException) throw it }.getOrNull()
+            }
+            _state.update {
+                if (entries == null) {
+                    it.copy(loading = false, message = ToolsMessage.LOAD_FAILED)
+                } else {
+                    it.copy(entries = entries, loading = false)
+                }
+            }
+        }
+    }
+
+    fun clearMessage() {
+        _state.update { it.copy(message = null) }
+    }
+
+    // ---- 编辑面板 ----
+
+    fun startCreate() {
+        _state.update { it.copy(editor = ToolEditorTarget(null)) }
+    }
+
+    fun openEditor(name: String) {
+        _state.update { it.copy(editor = ToolEditorTarget(name)) }
+    }
+
+    fun closeEditor() {
+        _state.update { it.copy(editor = null) }
+    }
+
+    // ---- 自定义工具 ----
+
+    fun saveCustomTool(
+        name: String,
+        description: String,
+        command: String,
+        parameters: List<CustomToolParameter>,
+        timeoutSeconds: Int,
+        injectionMode: ToolInjectionMode,
+        keywords: List<String>
+    ) {
+        mutate(
+            failure = ToolsMessage.SAVE_FAILED,
+            write = {
+                store.saveCustomTool(
+                    CustomToolDefinition(
+                        name = name,
+                        description = description,
+                        command = command,
+                        parameters = parameters,
+                        timeoutSeconds = timeoutSeconds,
+                        injectionMode = injectionMode,
+                        keywords = keywords
+                    )
+                )
+            }
+        )
+    }
+
+    fun deleteCustomTool(name: String) {
+        mutate(failure = ToolsMessage.DELETE_FAILED, write = { store.deleteCustomTool(name) })
+    }
+
+    // ---- 内置 / MCP 工具 ----
+
+    fun setInjection(name: String, mode: ToolInjectionMode) = updateSettings(name, mode = mode)
+
+    fun setKeywords(name: String, keywords: List<String>) = updateSettings(name, keywords = keywords)
+
+    fun setDescriptionOverride(name: String, description: String?) =
+        updateSettings(name, description = description)
+
+    /** 编辑器「保存」：一次把描述 / 注入方式 / 关键词写回去。 */
+    fun saveToolSettings(name: String, description: String?, mode: ToolInjectionMode, keywords: List<String>) =
+        updateSettings(name, mode = mode, keywords = keywords, description = description)
+
+    private fun updateSettings(
+        name: String,
+        mode: ToolInjectionMode? = null,
+        keywords: List<String>? = null,
+        description: String? = null
+    ) {
+        val custom = store.snapshotCustomTool(name)
+        if (custom != null) {
+            // 自建工具的注入方式落在它自己的定义文件里
+            val target = when {
+                mode != null -> custom.copy(injectionMode = mode)
+                keywords != null -> custom.copy(keywords = keywords)
+                else -> custom.copy(description = description.orEmpty())
+            }
+            mutate(failure = ToolsMessage.SAVE_FAILED, write = { store.saveCustomTool(target) })
+            return
+        }
+        val previous = store.snapshotOverrides()[name]
+        val merged = ToolOverride(
+            description = description ?: previous?.description,
+            injectionMode = mode ?: previous?.injectionMode,
+            keywords = keywords ?: previous?.keywords
+        ).normalized()
+        // 全部回到默认值（每轮注入 + 无描述覆盖 + 无关键词）等价于没有覆盖，落盘时直接删条目
+        val isDefault = merged.injectionMode == ToolInjectionMode.EVERY_ROUND &&
+            merged.description == null && merged.keywords.isNullOrEmpty()
+        mutate(
+            failure = ToolsMessage.SAVE_FAILED,
+            write = {
+                if (isDefault || merged.isEmpty) store.clearOverride(name) else store.saveOverride(name, merged)
+            }
+        )
+    }
+
+    // ---- 内部 ----
+
+    /** 写操作统一包装：IO 调度、成功才重建列表、失败给一条明确的界面反馈。 */
+    private fun mutate(failure: ToolsMessage, write: suspend () -> Boolean) {
+        if (_state.value.saving) return
+        _state.update { it.copy(saving = true) }
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching { write() }.onFailure { if (it is CancellationException) throw it }.getOrDefault(false)
+            }
+            if (!result) {
+                _state.update { it.copy(saving = false, message = failure) }
+                return@launch
+            }
+            val entries = withContext(Dispatchers.IO) { runCatching { buildEntries() }.onFailure { if (it is CancellationException) throw it }.getOrNull() }
+            _state.update {
+                it.copy(
+                    saving = false,
+                    editor = null,
+                    entries = entries ?: it.entries,
+                    message = if (entries == null) ToolsMessage.LOAD_FAILED else null
+                )
+            }
+        }
+    }
+
+    private fun buildEntries(): List<ToolUiEntry> {
+        val customs = store.snapshotCustomTools().associateBy { it.name }
+        val overrides = store.snapshotOverrides()
+        return registry.getAvailableTools().mapNotNull { tool ->
+            runCatching {
+                val custom = customs[tool.name]
+                val override = overrides[tool.name]
+                ToolUiEntry(
+                    name = tool.name,
                 permission = tool.permissionPolicy,
-                deferred = tool.name in deferredNames,
+                deferred = tool.deferredLoading,
                 category = categoryOf(tool),
-            )
+                    // 与注入闸门同一口径：有覆盖描述就显示覆盖后的，用户看到的就是模型看到的
+                    description = override?.description ?: tool.description,
+                    source = when {
+                        custom != null -> ToolSource.CUSTOM
+                        tool.name.startsWith(MCP_NAME_PREFIX) -> ToolSource.MCP
+                        else -> ToolSource.BUILTIN
+                    },
+                    schemaJson = gson.toJson(tool.toJsonSchema()),
+                    injectionMode = custom?.injectionMode
+                        ?: override?.injectionMode
+                        ?: ToolInjectionMode.EVERY_ROUND,
+                    keywords = custom?.keywords ?: override?.keywords.orEmpty(),
+                    command = custom?.command.orEmpty(),
+                    parametersJson = custom?.let { prettyJson.encodeToString(it.parameters) }.orEmpty(),
+                    timeoutSeconds = custom?.timeoutSeconds ?: CustomToolDefinition.DEFAULT_TIMEOUT_SECONDS
+                )
+            }.onFailure { if (it is CancellationException) throw it }.getOrNull()
         }
-        .sortedWith(compareBy({ it.category.ordinal }, { it.name.lowercase() }))
+    }
 
-    /** 按分类归组（保持枚举顺序，空组不返回）。 */
-    fun grouped(): List<Pair<ToolCategory, List<ToolUiEntry>>> =
-        ToolCategory.entries.mapNotNull { category ->
-            entries.filter { it.category == category }.takeIf { it.isNotEmpty() }?.let { category to it }
-        }
-
-    /**
-     * 一个工具只归一类，按「用户最想先知道的影响面」排序：
-     * 能跑命令 > 能改文件 > 能联网 > 能读设备 > 改 agent 自身配置 > 外部服务。
-     */
+    private companion object {
+        /** MCP 工具的命名空间前缀，见 McpTool.buildNamespacedName。 */
+        const val MCP_NAME_PREFIX = "mcp__"
+    }
     private fun categoryOf(tool: AgentTool): ToolCategory {
         val capabilities = tool.capabilities
         return when {
@@ -80,3 +291,5 @@ class ToolsViewModel @Inject constructor(
         }
     }
 }
+
+enum class ToolCategory { FILE, COMMAND, NETWORK, DEVICE, AGENT, EXTERNAL, OTHER }

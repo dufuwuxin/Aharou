@@ -8,6 +8,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.LaunchedEffect
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.aharou.feature.settings.presentation.ToolsViewModel
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -32,16 +35,21 @@ internal fun ToolManagementSection(
     onDelete: (McpServerEntry) -> Unit,
     onEdit: (McpServerEntry) -> Unit,
 ) {
-    var scripts by rememberSaveable { mutableStateOf(false) }
+    var selected by rememberSaveable { mutableStateOf(0) }
+    val customViewModel: ToolsViewModel = androidx.hilt.navigation.compose.hiltViewModel()
+    val customState by customViewModel.state.collectAsStateWithLifecycle()
+    LaunchedEffect(selected) { if (selected == 2) customViewModel.refresh() }
     var createScript by rememberSaveable { mutableStateOf(false) }
     Column(Modifier.fillMaxSize()) {
         SegmentedTabs(
-            selected = if (scripts) 1 else 0,
-            labels = listOf(stringResource(R.string.settings_mcp), stringResource(R.string.script_tools_title)),
-            onSelect = { scripts = it == 1 },
+            selected = selected,
+            labels = listOf(stringResource(R.string.settings_mcp), stringResource(R.string.script_tools_title), stringResource(R.string.tools_group_custom)),
+            onSelect = { selected = it },
             modifier = Modifier.padding(horizontal = Spacing.lg),
         )
-        if (scripts) {
+        if (selected == 2) {
+            ToolsSection(state = customState, viewModel = customViewModel)
+        } else if (selected == 1) {
             ScriptToolsSection(createRequested = createScript, onCreateHandled = { createScript = false })
         } else {
             Column(Modifier.verticalScroll(rememberScrollState()).padding(bottom = Spacing.xl)) {
@@ -58,10 +66,13 @@ internal fun ToolManagementSection(
             title = { Text(stringResource(R.string.tools_add_type)) },
             text = {
                 Column {
-                    TextButton(onClick = { scripts = false; onCreateHandled(); onCreateMcp() }) {
+                    TextButton(onClick = { selected = 0; onCreateHandled(); onCreateMcp() }) {
                         Text(stringResource(R.string.settings_add_mcp_server))
                     }
-                    TextButton(onClick = { scripts = true; createScript = true; onCreateHandled() }) {
+                    TextButton(onClick = { selected = 2; customViewModel.startCreate(); onCreateHandled() }) {
+                        Text(stringResource(R.string.tools_add))
+                    }
+                    TextButton(onClick = { selected = 1; createScript = true; onCreateHandled() }) {
                         Text(stringResource(R.string.script_tools_add))
                     }
                 }

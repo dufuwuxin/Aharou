@@ -1,57 +1,81 @@
 package com.aharou.feature.agent.data
 
+import com.aharou.core.config.ConfigCollection
+import com.aharou.core.config.ConfigError
+import com.aharou.core.config.ConfigField
 import com.aharou.core.config.ConfigRegistry
 import com.aharou.core.config.ConfigSchema
 import com.aharou.core.config.ConfigValue
 import com.aharou.core.config.fields.ClosureField
+import com.aharou.feature.agent.data.local.dao.ChatSessionDao
+import com.aharou.feature.agent.domain.steward.StewardController
 import com.aharou.feature.agent.domain.steward.StewardSettings
+import com.aharou.feature.agent.domain.steward.StewardSettingsStore
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.runBlocking
 
-/**
- * 智能托管（Steward Mode）→ 配置通道。
- *
- * 开关与轮数存在 SharedPreferences（`aharou_steward_prefs`）而不是 DataStore，
- * 所以用 [ClosureField] 桥接；那三个属性都是同步读写，正好对得上。
- */
+/** Keep the config channel, but require an explicit session instead of a global runtime switch. */
 @Singleton
 class ConfigStewardFields @Inject constructor(
-    private val steward: StewardSettings,
+    private val steward: StewardSettingsStore,
+    private val controller: StewardController,
+    private val sessions: ChatSessionDao,
+    private val messages: com.aharou.feature.agent.domain.session.MessagePersistenceUseCase,
 ) {
-
-    fun registerInto(registry: ConfigRegistry) = with(registry) {
-        register(
-            ClosureField(
-                path = "steward.enabled",
-                displayName = "智能托管",
-                description = "开启后每轮回答结束会旁路判断最初任务是否做完，没做完就把下一步指令续发进同一会话。默认关闭。",
-                valueSchema = ConfigSchema.Bool,
-                reader = { ConfigValue.Bool(steward.enabled) },
-                writer = { v -> steward.enabled = (v as? ConfigValue.Bool)?.value ?: false },
-            ),
-        )
-        register(
-            ClosureField(
-                path = "steward.max_loops",
-                displayName = "托管轮数上限",
-                description = "自动续发最多几轮，范围 ${StewardSettings.MIN_LOOPS}..${StewardSettings.MAX_LOOPS}，" +
-                    "默认 ${StewardSettings.DEFAULT_MAX_LOOPS}。超过范围会被自动收敛。",
-                valueSchema = ConfigSchema.Int(StewardSettings.MIN_LOOPS, StewardSettings.MAX_LOOPS),
-                reader = { ConfigValue.Int(steward.maxLoops) },
-                writer = { v ->
-                    steward.maxLoops = (v as? ConfigValue.Int)?.value ?: StewardSettings.DEFAULT_MAX_LOOPS
-                },
-            ),
-        )
-        register(
-            ClosureField(
-                path = "steward.unlimited",
-                displayName = "不限轮数",
-                description = "开启后不受上面的轮数上限限制，但仍受控制器里的硬上限与超时约束。",
-                valueSchema = ConfigSchema.Bool,
-                reader = { ConfigValue.Bool(steward.unlimited) },
-                writer = { v -> steward.unlimited = (v as? ConfigValue.Bool)?.value ?: false },
-            ),
-        )
+    fun registerInto(registry: ConfigRegistry) {
+        registry.register(object : ConfigCollection {
+            override val basePath = "steward.sessions"
+            override val displayName = "会话智能托管"
+            override val description = "按会话配置 enabled / max_loops / unlimited；不会影响其他会话。"
+            override val addable = false
+            override val removable = false
+            override fun childIds(): List<String> = runBlocking { sessions.getAllOnce() }.map { it.id }
+            override fun fields(forId: String): List<ConfigField> {
+                if (runBlocking { sessions.getById(forId) } == null) return emptyList()
+                fun verifySession() {
+                    if (runBlocking { sessions.getById(forId) } == null) {
+                        throw ConfigError.InvalidValue("Session no longer exists")
+                    }
+                }
+                return listOf(
+                    ClosureField(
+                        path = "$basePath.$forId.enabled",
+                        displayName = "智能托管",
+                        description = "仅开启此会话；空会话等待下一条用户指令。进程重启后关闭。",
+                        valueSchema = ConfigSchema.Bool,
+                        reader = { ConfigValue.Bool(controller.isEnabled(forId)) },
+                        writer = { value ->
+                            verifySession()
+                            if ((value as ConfigValue.Bool).value) {
+                                val anchor = runBlocking { messages.getMessagesOnce(forId) }.lastOrNull {
+                                    it.role == "USER" && it.content.isNotBlank() &&
+                                        !it.content.startsWith(com.aharou.feature.agent.presentation.BACKGROUND_NOTIFICATION_PREFIX)
+                                }?.content.orEmpty()
+                                controller.enable(forId, anchor)
+                            } else controller.disable(forId)
+                        },
+                    ),
+                    ClosureField(
+                        path = "$basePath.$forId.max_loops",
+                        displayName = "托管轮数上限",
+                        description = "仅此会话，默认 ${StewardSettings.DEFAULT_MAX_LOOPS} 轮。",
+                        valueSchema = ConfigSchema.Int(StewardSettings.MIN_LOOPS, StewardSettings.MAX_LOOPS),
+                        reader = { ConfigValue.Int(steward.maxLoops(forId)) },
+                        writer = { verifySession(); controller.setMaxLoops(forId, (it as ConfigValue.Int).value) },
+                    ),
+                    ClosureField(
+                        path = "$basePath.$forId.unlimited",
+                        displayName = "不限轮数",
+                        description = "仅此会话，仍受硬上限 ${StewardController.HARD_MAX_LOOPS} 轮约束。",
+                        valueSchema = ConfigSchema.Bool,
+                        reader = { ConfigValue.Bool(steward.unlimited(forId)) },
+                        writer = { verifySession(); controller.setUnlimited(forId, (it as ConfigValue.Bool).value) },
+                    ),
+                )
+            }
+            override fun add(payload: ConfigValue): String = throw ConfigError.PermissionDenied("Create a chat session first")
+            override fun remove(id: String) { throw ConfigError.PermissionDenied("Delete the chat session instead") }
+        })
     }
 }

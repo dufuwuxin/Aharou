@@ -1,5 +1,6 @@
 package com.aharou.feature.agent.domain.tool
 
+import com.aharou.feature.agent.domain.tool.custom.CustomToolSource
 import java.util.Collections
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -7,6 +8,7 @@ import javax.inject.Singleton
 @Singleton
 class ToolRegistry @Inject constructor(
     private val guard: ToolCallGuard? = null,
+    private val customToolSource: CustomToolSource? = null,
 ) {
     // LinkedHashMap 保留注册顺序（内置工具固定顺序 + MCP 动态追加），避免工具增删后
     // 前缀顺序漂移打断隐式前缀缓存；synchronizedMap 保证并发注册/读取安全。
@@ -21,7 +23,7 @@ class ToolRegistry @Inject constructor(
     }
 
     fun getTool(name: String): AgentTool? {
-        return tools[name]
+        return tools[name] ?: customTools().firstOrNull { it.name == name }
     }
 
     fun unregister(name: String) {
@@ -30,7 +32,7 @@ class ToolRegistry @Inject constructor(
     }
 
     fun getToolNames(): Set<String> {
-        return tools.keys.toSet()
+        return synchronized(tools) { tools.keys.toSet() } + customTools().map { it.name }
     }
 
     /**
@@ -43,9 +45,13 @@ class ToolRegistry @Inject constructor(
             // 但 **MCP 工具是各服务器连上后异步追加的**，哪个服务器先回就先注册。
             // 连接快慢一抖，tools 数组顺序就变——而 tools 排在 system prompt 之前，
             // 是整条前缀里最靠前的一段，顺序一变整段缓存全废。
-            return tools.values.sortedBy { it.name }
+            val registered = tools.values.toList()
+            val names = registered.mapTo(HashSet()) { it.name }
+            return (registered + customTools().filterNot { it.name in names }).sortedBy { it.name }
         }
     }
+
+    private fun customTools(): List<AgentTool> = customToolSource?.customTools().orEmpty().map { guard?.wrap(it) ?: it }
 
     /** 延迟加载工具的目录（名称 + 描述），供 `tool_search` 检索。 */
     fun getDeferredTools(): List<AgentTool> {
@@ -63,6 +69,6 @@ class ToolRegistry @Inject constructor(
     fun isActivated(name: String): Boolean = synchronized(activated) { name in activated }
 
     fun hasTool(name: String): Boolean {
-        return tools.containsKey(name)
+        return tools.containsKey(name) || customTools().any { it.name == name }
     }
 }

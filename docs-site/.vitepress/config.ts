@@ -201,6 +201,7 @@ export default defineConfig({
           items: [
             { text: '偏好设置', link: '/guide/general' },
             { text: '外观与语言', link: '/guide/appearance' },
+            { text: '工具管理', link: '/guide/tools' },
             { text: '工具授权', link: '/guide/permissions' },
             { text: '软件权限', link: '/guide/app-permissions' },
             { text: '无障碍与小染', link: '/guide/accessibility' },
