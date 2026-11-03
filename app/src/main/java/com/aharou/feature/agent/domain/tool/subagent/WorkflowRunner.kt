@@ -38,13 +38,6 @@ class WorkflowRunner @Inject constructor(
     private val maxRunningSource: MaxRunningSource
 ) {
 
-    companion object {
-        internal fun pipelineSucceeded(result: ToolResult): Boolean {
-            val data = (result as? ToolResult.Success)?.data as? JsonObject ?: return false
-            return (data["state"] as? JsonPrimitive)?.contentOrNull == "done"
-        }
-    }
-
     /** 列工作流清单；给了 [workflow] 就展开它的团队链。 */
     fun list(target: String): ToolResult {
         val entries = try {
@@ -400,10 +393,15 @@ class WorkflowRunner @Inject constructor(
     private fun arg(args: Map<String, JsonElement>, key: String): String =
         (args[key] as? JsonPrimitive)?.contentOrNull?.trim().orEmpty()
 
-    private companion object {
-        const val TAG = "WorkflowRunner"
+    companion object {
+        internal fun pipelineSucceeded(result: ToolResult): Boolean {
+            val data = (result as? ToolResult.Success)?.data as? JsonObject ?: return false
+            return (data["state"] as? JsonPrimitive)?.contentOrNull == "done"
+        }
+
+        private const val TAG = "WorkflowRunner"
 
         /** 上游事实累计上限：约两千字中文，够下游判断，又不至于把每层 prompt 撑成上万 token。 */
-        const val BRIEF_MAX_CHARS = 6000
+        private const val BRIEF_MAX_CHARS = 6000
     }
 }

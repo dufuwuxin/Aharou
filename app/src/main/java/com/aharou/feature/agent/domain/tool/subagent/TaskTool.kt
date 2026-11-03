@@ -151,7 +151,7 @@ class TaskTool @Inject constructor(
         if (target?.parentId != context.sessionId) {
             return ToolResult.Error("$id 不是你派出的子代理，无权追加写路径；用 action=\"list\" 看自己派出的会话。", "NOT_YOUR_SUBAGENT")
         }
-        val paths = stringSetOf(args["writePaths"]).orEmpty().filter { it.isNotBlank() }.toSet()
+        val paths = parseWritePaths(args).orEmpty()
         if (paths.isEmpty()) return ToolResult.Error("grant 需要非空 writePaths", "MISSING_WRITEPATHS")
         subAgentWriteLease.conflictFor(id, paths, eventBus.activeSubSessionIds.value)?.let { conflictId ->
             return conflictError(conflictId, paths, WriteLease.NEXT_GRANT, context.projectRoot)
