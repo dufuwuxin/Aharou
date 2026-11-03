@@ -1,36 +1,36 @@
 {
-    "//": "棘轮基线：登记既有违规，只许缩减不许新增或上涨。修好一处就从这里删掉对应条目，脚本会在 [WARN] 里提示可清理项。",
-    "fileLines": {
-        "app/src/main/java/com/aharou/feature/settings/presentation/SettingsViewModel.kt": 2287,
-        "app/src/main/java/com/aharou/feature/settings/presentation/component/ProviderEditorScreen.kt": 1246,
-        "app/src/main/java/com/aharou/feature/agent/presentation/AIAgentViewModel.kt": 3450,
-        "app/src/main/java/com/aharou/feature/agent/presentation/component/AIChatPanel.kt": 1870,
-        "app/src/main/java/com/aharou/feature/browser/BrowserUseManager.kt": 1908,
-        "app/src/main/java/com/aharou/feature/settings/presentation/component/SettingsScreen.kt": 1792,
-        "app/src/main/java/com/aharou/feature/pet/PetOverlay.kt": 1709,
-        "app/src/main/java/com/aharou/feature/agent/presentation/component/ChatDrawer.kt": 1570,
-        "app/src/main/java/com/aharou/feature/agent/domain/workflow/StatefulAgentWorkflow.kt": 1549,
-        "app/src/main/java/com/aharou/feature/sandbox/FilePreviewScreen.kt": 1399,
-        "app/src/main/java/com/aharou/MainActivity.kt": 1479,
-        "app/src/main/java/com/aharou/feature/git/presentation/component/GitStatusTab.kt": 1223,
-        "app/src/main/java/com/aharou/feature/browser/BrowserTabPool.kt": 1281,
-        "app/src/main/java/com/aharou/feature/settings/presentation/component/ContainerSettingsSection.kt": 1261,
-        "app/src/main/java/com/aharou/feature/agent/presentation/component/ChatInputBar.kt": 1345,
-        "app/src/main/java/com/aharou/feature/agent/presentation/component/AdaptiveCardRenderer.kt": 1194,
-        "app/src/main/java/com/aharou/AIEditorApp.kt": 1010,
-        "app/src/main/java/com/aharou/feature/settings/presentation/component/DefaultModelsSection.kt": 1006,
-        "app/src/main/java/com/aharou/feature/agent/domain/prompt/SystemPromptProvider.kt": 1031,
-        "app/src/main/java/com/aharou/feature/agent/domain/workflow/ContextCompactor.kt": 1012
-    },
-    "bannedImports": {
-        "androidx.compose.material3.ModalBottomSheet": [
-            "app/src/main/java/com/aharou/feature/browser/presentation/BrowserDownloadsSheet.kt",
-            "app/src/main/java/com/aharou/feature/browser/presentation/BrowserHistorySheet.kt",
-            "app/src/main/java/com/aharou/feature/browser/presentation/BrowserSettingsSheet.kt",
-            "app/src/main/java/com/aharou/feature/browser/presentation/StandardChatSheet.kt"
-        ],
-        "androidx.compose.material3.TextField": [
-            "app/src/main/java/com/aharou/feature/agent/presentation/component/ChatInputBar.kt"
-        ]
-    }
+  "//": "棘轮基线：登记既有违规，只许缩减不许新增或上涨。修好一处就从这里删掉对应条目，脚本会在 [WARN] 里提示可清理项。",
+  "fileLines": {
+    "app/src/main/java/com/aharou/feature/settings/presentation/SettingsViewModel.kt": 2287,
+    "app/src/main/java/com/aharou/feature/settings/presentation/component/ProviderEditorScreen.kt": 1225,
+    "app/src/main/java/com/aharou/feature/agent/presentation/AIAgentViewModel.kt": 3449,
+    "app/src/main/java/com/aharou/feature/agent/presentation/component/AIChatPanel.kt": 1870,
+    "app/src/main/java/com/aharou/feature/browser/BrowserUseManager.kt": 1908,
+    "app/src/main/java/com/aharou/feature/settings/presentation/component/SettingsScreen.kt": 1792,
+    "app/src/main/java/com/aharou/feature/pet/PetOverlay.kt": 1709,
+    "app/src/main/java/com/aharou/feature/agent/presentation/component/ChatDrawer.kt": 1568,
+    "app/src/main/java/com/aharou/feature/agent/domain/workflow/StatefulAgentWorkflow.kt": 1547,
+    "app/src/main/java/com/aharou/feature/sandbox/FilePreviewScreen.kt": 1399,
+    "app/src/main/java/com/aharou/MainActivity.kt": 1479,
+    "app/src/main/java/com/aharou/feature/git/presentation/component/GitStatusTab.kt": 1223,
+    "app/src/main/java/com/aharou/feature/browser/BrowserTabPool.kt": 1281,
+    "app/src/main/java/com/aharou/feature/settings/presentation/component/ContainerSettingsSection.kt": 1261,
+    "app/src/main/java/com/aharou/feature/agent/presentation/component/ChatInputBar.kt": 1344,
+    "app/src/main/java/com/aharou/feature/agent/presentation/component/AdaptiveCardRenderer.kt": 1194,
+    "app/src/main/java/com/aharou/AIEditorApp.kt": 1026,
+    "app/src/main/java/com/aharou/feature/settings/presentation/component/DefaultModelsSection.kt": 1004,
+    "app/src/main/java/com/aharou/feature/agent/domain/prompt/SystemPromptProvider.kt": 1016,
+    "app/src/main/java/com/aharou/feature/agent/domain/workflow/ContextCompactor.kt": 1012
+  },
+  "bannedImports": {
+    "androidx.compose.material3.ModalBottomSheet": [
+      "app/src/main/java/com/aharou/feature/browser/presentation/BrowserDownloadsSheet.kt",
+      "app/src/main/java/com/aharou/feature/browser/presentation/BrowserHistorySheet.kt",
+      "app/src/main/java/com/aharou/feature/browser/presentation/BrowserSettingsSheet.kt",
+      "app/src/main/java/com/aharou/feature/browser/presentation/StandardChatSheet.kt"
+    ],
+    "androidx.compose.material3.TextField": [
+      "app/src/main/java/com/aharou/feature/agent/presentation/component/ChatInputBar.kt"
+    ]
+  }
 }
