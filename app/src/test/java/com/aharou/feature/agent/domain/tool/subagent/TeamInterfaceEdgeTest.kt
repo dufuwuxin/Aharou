@@ -48,7 +48,7 @@ class TeamInterfaceEdgeTest {
     private fun build(team: AgentTeam): Map<String, String> {
         val plan = TeamRunner.build(team, "把登录改造完", enabled, 5) as TeamRunner.Plan.Ready
         return plan.pipeline.filterIsInstance<JsonObject>().associate {
-            it.getValue("id").let { id -> id.jsonPrimitive.content } to
+            (it.getValue("id") as JsonPrimitive).content to
                 (it["prompt"] as? JsonPrimitive)?.contentOrNull.orEmpty()
         }
     }
