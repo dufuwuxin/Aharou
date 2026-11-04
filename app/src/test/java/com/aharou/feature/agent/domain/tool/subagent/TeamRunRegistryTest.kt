@@ -56,8 +56,8 @@ class TeamRunRegistryTest {
         // five 是 a 的第 5 条，超出 HARD_TOTAL_MAX=4
         assertEquals("blocked", registry.route("a", "fourth", "five").state)
         assertEquals("TEAM_MESSAGE_LIMIT", registry.route("a", "fourth", "five").reason)
-        // third 只收到 three；four 虽先于 five 调用，但它是 a 的第 4 条、入队即达总配额上限后被拒绝
-        assertEquals("three", registry.bind(run, "third", "c"))
+        // four 是 a 的第 4 条（未超总上限）成功入队；third 依序收到 three 与 four
+        assertEquals("three\n\nfour", registry.bind(run, "third", "c"))
         assertEquals("", registry.bind(run, "fourth", "d"))
     }
     @Test fun failedDeliveryAndInvalidMessagesDoNotConsumeBudget() {
