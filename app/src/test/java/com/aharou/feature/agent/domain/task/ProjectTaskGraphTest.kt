@@ -5,7 +5,8 @@ import org.junit.Test
 
 class ProjectTaskGraphTest {
     private fun task(id: String, parent: String? = null, workspace: String = "w") =
-        ProjectTask(id = id, workspace = workspace, title = id, requirement = "deliver", parentId = parent)
+        ProjectTask(id = id, workspace = workspace, title = id, requirement = "deliver", parentId = parent,
+            order = 1_700_000_000_000L, createdAt = 1_700_000_000_000L)
     @Test fun crossProjectEdgesAreRejectedAndOldNullProjectsRemainValid() {
         val a = task("a").copy(projectId = "p1")
         val b = task("b", "a").copy(projectId = "p2")
@@ -40,8 +41,11 @@ class ProjectTaskGraphTest {
     @Test fun jsonRoundtripPreservesTaskSessionAndAcceptanceVersions() {
         val original = task("a").copy(sessionIds = listOf("s1", "s2"), evidenceRefs = listOf("src/file:8"),
             acceptance = "tested", acceptedRequirementsVersion = 1, status = ProjectTaskStatus.DONE, version = 7)
-        val encoded = kotlinx.serialization.json.Json.encodeToString(ProjectTask.serializer(), original)
-        assertEquals(original, kotlinx.serialization.json.Json.decodeFromString(ProjectTask.serializer(), encoded))
+        val repositoryJson = kotlinx.serialization.json.Json { encodeDefaults = true }
+        val encoded = repositoryJson.encodeToString(ProjectTask.serializer(), original)
+        assertTrue(encoded.contains("\"order\":${original.order}"))
+        assertTrue(encoded.contains("\"createdAt\":${original.createdAt}"))
+        assertEquals(original, repositoryJson.decodeFromString(ProjectTask.serializer(), encoded))
     }
     @Test fun coldRecoveryInterruptsOnlyPersistedRunningAndPreservesHistory() {
         val running = task("a").copy(status = ProjectTaskStatus.RUNNING, sessionIds = listOf("old-session"))
