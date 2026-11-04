@@ -148,4 +148,65 @@ class AgentTeamParserTest {
         assertEquals("no-name", team.name)
         assertTrue(team.charter.isEmpty())
     }
+
+    @Test
+    fun parse_readsTaskInterfaces() {
+        val file = write(
+            "interfaces.md",
+            """
+            ---
+            stages:
+              - title: 实现
+                tasks:
+                  - agent: 后端工程专家
+                    prompt: 实现接口
+                    interfaces:
+                      - with: 前端工程专家
+                        about: HTTP 响应字段
+                      - 验收员
+            ---
+            """.trimIndent()
+        )
+
+        val team = parseFile(file)!!
+        val interfaces = team.stages.single().tasks.single().interfaces
+
+        assertEquals(2, interfaces.size)
+        assertEquals("前端工程专家", interfaces[0].with)
+        assertEquals("HTTP 响应字段", interfaces[0].about)
+        assertEquals("验收员", interfaces[1].with)
+        assertTrue(interfaces[1].about.isEmpty())
+    }
+
+    @Test
+    fun serialize_roundTripsInterfacesThroughForm() {
+        val form = AgentTeamForm(
+            name = "交付",
+            description = "",
+            charter = "",
+            stages = listOf(
+                AgentTeamStageForm(
+                    title = "实现",
+                    tasks = listOf(
+                        AgentTeamTaskForm(
+                            agent = "后端工程专家",
+                            prompt = "实现接口",
+                            interfaces = listOf(
+                                TeamInterface("前端工程专家", "HTTP 响应字段")
+                            )
+                        )
+                    )
+                )
+            )
+        )
+
+        val text = AgentTeamParser.serialize(form)
+        val file = write("roundtrip.md", text)
+        val team = parseFile(file)!!
+        val interfaces = team.stages.single().tasks.single().interfaces
+
+        assertEquals(1, interfaces.size)
+        assertEquals("前端工程专家", interfaces.single().with)
+        assertEquals("HTTP 响应字段", interfaces.single().about)
+    }
 }

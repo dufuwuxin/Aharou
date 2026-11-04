@@ -55,7 +55,7 @@ class ToolInjectionGate @Inject constructor(
                 // 关键词为空时按「每轮注入」处理：否则工具永远不出现，用户只会以为工具坏了。
                 mode == ToolInjectionMode.KEYWORD && keywords.isNotEmpty() &&
                     userText != null && !matchesAny(keywords, userText) -> null
-                else -> withDescriptionOverride(tool, override?.description)
+                else -> withDescriptionOverride(tool, override?.description, override?.schemaJson)
             }
         }
     }
@@ -73,19 +73,22 @@ class ToolInjectionGate @Inject constructor(
     private fun normalizeForMatch(raw: String): String =
         raw.lowercase().filterNot { it.isWhitespace() }
 
-    private fun withDescriptionOverride(tool: AgentTool, description: String?): AgentTool {
-        val override = description?.trim().orEmpty()
-        if (override.isEmpty() || override == tool.description) return tool
+    private fun withDescriptionOverride(tool: AgentTool, description: String?, schemaJson: String?): AgentTool {
+        if (schemaJson == null && description.isNullOrBlank()) return tool
+        val override = description?.trim()?.takeIf { it.isNotEmpty() }
+            ?: (ToolSchemaOverride.apply(tool.toJsonSchema(), schemaJson)["description"] as? String)
+            ?: tool.description
+        if (override == tool.description && schemaJson == null) return tool
         return if (tool is StreamingAgentTool) {
-            DescriptionOverrideStreamingTool(tool, override)
+            DescriptionOverrideStreamingTool(tool, override, schemaJson)
         } else {
-            DescriptionOverrideTool(tool, override)
+            DescriptionOverrideTool(tool, override, schemaJson)
         }
     }
 }
 
 /**
- * 只替换描述的工具装饰器：schema 里若带顶层 `description` 一并替换，其余全部委托给原工具。
+ * 描述/schema 元数据装饰器：原执行参数与权限行为全部委托给原工具，schema 每次重新校验。
  *
  * 写法照抄 [com.aharou.feature.agent.domain.tool.ToolCallGuard] 的 wrapper——流式工具必须换一个
  * 同样实现 [StreamingAgentTool] 的包装，否则 `is StreamingAgentTool` 判定失败，流式输出会退化成
@@ -93,7 +96,8 @@ class ToolInjectionGate @Inject constructor(
  */
 private class DescriptionOverrideTool(
     private val delegate: AgentTool,
-    private val overrideDescription: String
+    private val overrideDescription: String,
+    private val schemaJson: String?
 ) : AgentTool() {
 
     override val name: String get() = delegate.name
@@ -104,7 +108,7 @@ private class DescriptionOverrideTool(
     override val acceptsSecrets: Boolean get() = delegate.acceptsSecrets
     override val deferredLoading: Boolean get() = delegate.deferredLoading
 
-    override fun toJsonSchema(): Map<String, Any> = withDescription(delegate.toJsonSchema(), overrideDescription)
+    override fun toJsonSchema(): Map<String, Any> = withDescription(ToolSchemaOverride.apply(delegate.toJsonSchema(), schemaJson), overrideDescription)
 
     override fun effectivePermissionPolicy(mode: AgentMode): ToolPermissionPolicy =
         delegate.effectivePermissionPolicy(mode)
@@ -137,7 +141,8 @@ private class DescriptionOverrideTool(
 /** [DescriptionOverrideTool] 的流式版本：执行侧完全委托，保留 [StreamingAgentTool] 能力。 */
 private class DescriptionOverrideStreamingTool(
     private val delegate: AgentTool,
-    private val overrideDescription: String
+    private val overrideDescription: String,
+    private val schemaJson: String?
 ) : AgentTool(), StreamingAgentTool {
 
     override val name: String get() = delegate.name
@@ -148,7 +153,7 @@ private class DescriptionOverrideStreamingTool(
     override val acceptsSecrets: Boolean get() = delegate.acceptsSecrets
     override val deferredLoading: Boolean get() = delegate.deferredLoading
 
-    override fun toJsonSchema(): Map<String, Any> = withDescription(delegate.toJsonSchema(), overrideDescription)
+    override fun toJsonSchema(): Map<String, Any> = withDescription(ToolSchemaOverride.apply(delegate.toJsonSchema(), schemaJson), overrideDescription)
 
     override fun effectivePermissionPolicy(mode: AgentMode): ToolPermissionPolicy =
         delegate.effectivePermissionPolicy(mode)

@@ -44,11 +44,15 @@ import com.aharou.core.ui.AppTextField
 import com.aharou.core.ui.SegmentedTabs
 import com.aharou.feature.agent.domain.tool.custom.CustomCommandTemplate
 import com.aharou.feature.agent.domain.tool.custom.CustomToolDefinition
+import com.aharou.feature.agent.domain.tool.custom.ToolSchemaOverride
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
 import com.aharou.feature.agent.domain.tool.custom.CustomToolParameter
 import com.aharou.feature.agent.domain.tool.custom.ToolInjectionMode
 import com.aharou.feature.settings.presentation.ToolSource
 import com.aharou.feature.settings.presentation.ToolUiEntry
 import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
 /** 编辑器里那份参数 JSON 的宽容解析器：忽略未知字段，手写多余键不会报错。 */
@@ -73,7 +77,7 @@ private const val PARAMETERS_EXAMPLE = """[
  *
  * - [entry] 为 null：新建自定义工具（名称可改）；
  * - [entry] 是自定义工具：名称锁定（模型按名字调用，改名等于换一个工具），其余可改；
- * - [entry] 是内置 / MCP 工具：schema 只读展示，只能改描述与注入方式。
+ * - [entry] 是内置 / MCP 工具：schema 只可改元数据，不能改变执行参数结构。
  *
  * 版式照 `SkinEditorSheet`：`AdaptiveModalBottomSheet` + `AppTextField`，长表单外层加 `imePadding()`。
  */
@@ -92,20 +96,29 @@ internal fun ToolEditorSheet(
         mode: ToolInjectionMode,
         keywords: List<String>
     ) -> Unit,
-    onSaveSettings: (name: String, description: String?, mode: ToolInjectionMode, keywords: List<String>) -> Unit
+    onSaveSettings: (name: String, description: String?, mode: ToolInjectionMode, keywords: List<String>, schemaJson: String?) -> Unit,
+    template: CustomToolDefinition? = null
 ) {
     val isNew = entry == null
     val isCustom = isNew || entry?.source == ToolSource.CUSTOM
 
-    var name by remember(entry) { mutableStateOf(entry?.name.orEmpty()) }
-    var description by remember(entry) { mutableStateOf(entry?.description.orEmpty()) }
-    var parametersText by remember(entry) { mutableStateOf(entry?.parametersJson.orEmpty()) }
-    var command by remember(entry) { mutableStateOf(entry?.command.orEmpty()) }
-    var timeoutText by remember(entry) {
+    var name by remember(entry, template) { mutableStateOf(entry?.name ?: template?.name.orEmpty()) }
+    var description by remember(entry, template) { mutableStateOf(entry?.description ?: template?.description.orEmpty()) }
+    var parametersText by remember(entry, template) { mutableStateOf(entry?.parametersJson ?: template?.let { Json.encodeToString(it.parameters) }.orEmpty()) }
+    var command by remember(entry, template) { mutableStateOf(entry?.command ?: template?.command.orEmpty()) }
+    var timeoutText by remember(entry, template) {
         mutableStateOf((entry?.timeoutSeconds ?: CustomToolDefinition.DEFAULT_TIMEOUT_SECONDS).toString())
     }
-    var mode by remember(entry) { mutableStateOf(entry?.injectionMode ?: ToolInjectionMode.EVERY_ROUND) }
-    var keywordsText by remember(entry) { mutableStateOf(entry?.keywords.orEmpty().joinToString(", ")) }
+    var mode by remember(entry, template) { mutableStateOf(entry?.injectionMode ?: template?.injectionMode ?: ToolInjectionMode.EVERY_ROUND) }
+    var keywordsText by remember(entry, template) { mutableStateOf((entry?.keywords ?: template?.keywords).orEmpty().joinToString(", ")) }
+
+    var schemaText by remember(entry, template) { mutableStateOf(entry?.schemaJson.orEmpty()) }
+    val originalSchema = remember(entry, template) {
+        runCatching {
+            Gson().fromJson<Map<String, Any>>(entry?.originalSchemaJson.orEmpty(), object : TypeToken<Map<String, Any>>() {}.type)
+        }.getOrNull()
+    }
+    val schemaValid = isCustom || (originalSchema != null && ToolSchemaOverride.isCompatible(originalSchema, schemaText))
 
     val parsedParameters = remember(parametersText) { parseParameters(parametersText) }
     val parametersError = isCustom && parametersText.isNotBlank() && parsedParameters == null
@@ -123,7 +136,7 @@ internal fun ToolEditorSheet(
     } else {
         null
     }
-    val canSave = !saving &&
+    val canSave = !saving && schemaValid &&
         (!isCustom || (name.isNotBlank() && !nameError && !parametersError && commandProblemOrNull(command, parsedParameters) == null))
 
     AdaptiveModalBottomSheet(onDismissRequest = onDismiss) {
@@ -211,7 +224,23 @@ internal fun ToolEditorSheet(
                     supportingText = { Text(stringResource(R.string.tools_timeout_hint)) }
                 )
             } else {
-                SchemaViewer(schemaJson = entry?.schemaJson.orEmpty())
+                Text(stringResource(R.string.tools_schema_original), style = MaterialTheme.typography.labelLarge)
+                SchemaViewer(schemaJson = entry?.originalSchemaJson.orEmpty())
+                AppTextField(
+                    value = schemaText,
+                    onValueChange = { schemaText = it },
+                    label = stringResource(R.string.tools_schema_edit),
+                    singleLine = false,
+                    minLines = 6,
+                    maxLines = 14,
+                    enabled = !saving,
+                    isError = !schemaValid,
+                    supportingText = { Text(stringResource(if (schemaValid) R.string.tools_schema_metadata_hint else R.string.tools_schema_invalid)) },
+                    textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace)
+                )
+                TextButton(onClick = { schemaText = entry?.originalSchemaJson.orEmpty() }, enabled = !saving) {
+                    Text(stringResource(R.string.tools_schema_reset))
+                }
                 AppTextField(
                     value = description,
                     onValueChange = { description = it },
@@ -260,7 +289,8 @@ internal fun ToolEditorSheet(
                                 keywords
                             )
                         } else {
-                            entry?.let { onSaveSettings(it.name, description.trim().takeIf { text -> text.isNotEmpty() }, mode, keywords) }
+                            entry?.let { onSaveSettings(it.name, description.trim().takeIf { text -> text.isNotEmpty() }, mode, keywords,
+                                schemaText.takeUnless { text -> text == it.originalSchemaJson }) }
                         }
                     }
                 ) {

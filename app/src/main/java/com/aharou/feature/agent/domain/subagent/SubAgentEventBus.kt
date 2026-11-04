@@ -211,9 +211,12 @@ class SubAgentEventBus @Inject constructor(
         parentOfSub[subSessionId] = parentSessionId
     }
 
+    fun siblingMayWake(fromSessionId: String, toSessionId: String): Boolean = runRegistry.siblingMayWake(fromSessionId, toSessionId)
+
     fun sendToSibling(fromSessionId: String, toSessionId: String, message: String): Boolean {
         if (message.isBlank() || !areSiblings(fromSessionId, toSessionId)) return false
-        if (!runRegistry.canMessage(fromSessionId) || !runRegistry.canMessage(toSessionId)) return false
+        if (!runRegistry.canMessage(fromSessionId) || !runRegistry.canMessage(toSessionId) ||
+            !runRegistry.acceptsSiblingNotification(fromSessionId, toSessionId)) return false
         val fromRun = runRegistry.runOf(fromSessionId)
         val toRun = runRegistry.runOf(toSessionId)
         if ((fromRun != null || toRun != null) && fromRun != toRun) return false

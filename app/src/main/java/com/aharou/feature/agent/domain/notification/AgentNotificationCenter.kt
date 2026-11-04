@@ -1,6 +1,7 @@
 package com.aharou.feature.agent.domain.notification
 
 import com.aharou.feature.agent.domain.model.AgentMode
+import com.aharou.feature.agent.domain.tool.subagent.TeamRunRegistry
 import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -58,7 +59,7 @@ data class PendingNotification(
  * 中途被取消时通知仍留在队列里，交给下一批工具或兜底路径。
  */
 @Singleton
-class AgentNotificationCenter @Inject constructor() {
+class AgentNotificationCenter @Inject constructor(private val teams: TeamRunRegistry = TeamRunRegistry()) {
 
     private val lock = Any()
     private val pending = mutableMapOf<String, MutableList<PendingNotification>>()
@@ -75,7 +76,9 @@ class AgentNotificationCenter @Inject constructor() {
 
     /** 读取该会话当前所有待送通知（不移除）。 */
     fun peek(sessionId: String): List<PendingNotification> = synchronized(lock) {
-        pending[sessionId]?.toList() ?: emptyList()
+        val items = pending[sessionId] ?: return@synchronized emptyList()
+        items.removeAll { it.fromSibling && !teams.acceptsSiblingNotification(it.sourceId, sessionId) }
+        items.toList()
     }
 
     /** 确认已送达：按序号移除，peek 之后新入队的条目不受影响。 */
@@ -90,7 +93,7 @@ class AgentNotificationCenter @Inject constructor() {
 
     /** 原子取走该会话全部待送通知。 */
     fun drain(sessionId: String): List<PendingNotification> = synchronized(lock) {
-        pending.remove(sessionId) ?: emptyList()
+        peek(sessionId).also { pending.remove(sessionId) }
     }
 
     fun pendingCount(sessionId: String): Int = synchronized(lock) {

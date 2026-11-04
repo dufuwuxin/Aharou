@@ -3772,7 +3772,10 @@
     <string name="tools_permission_title">确认执行自定义工具</string>
     <string name="tools_permission_details">自定义工具「%1$s」将在当前执行环境中执行。\n超时：%2$d 秒</string>
     <string name="skills_keyword_title">关键词公共模式</string>
-    <string name="skills_keyword_hint">用逗号或换行分隔。当前用户输入或派发任务命中任一词，只注入名称和简介，正文仍需按需加载。</string>
+    <string name="skills_keyword_hint">每个输入框填写一个关键词，可添加或移除。当前用户输入或派发任务命中任一词，只注入名称和简介，正文仍需按需加载。</string>
+    <string name="skills_keyword_item">关键词 %1$d</string>
+    <string name="skills_keyword_add">添加关键词</string>
+    <string name="skills_keyword_remove">移除关键词 %1$d</string>
     <string name="skills_keyword_unbind">此技能已绑定 %1$d 名成员。开启将解除全部成员绑定，关闭后不会自动恢复。</string>
     <string name="skills_keyword_confirm">确认解除现有成员绑定</string>
     <string name="skills_keyword_error">保存失败。请检查文件读写权限或成员绑定后重试。</string>
@@ -3792,6 +3795,38 @@
     <string name="injection_prompts_purpose">提示词：定义角色、工作方法与输出格式的执行模板。使用默认、关键词或成员条件控制注入；不要重复存放项目规则和记忆事实。</string>
     <string name="injection_conditions_hint">以下条件取“或”，同一片段只注入一次。仅希望关键词或成员命中时注入，请关闭“默认注入”；开启关键词不会限制默认注入范围。</string>
     <string name="skills_editor_error_bound_rename">该技能已绑定成员。请先解除绑定再改名，避免专属技能意外公开。</string>
+    <string name="skills_keyword_editor_title">关键词模式</string>
+    <string name="skills_keyword_editor_hint">仅当前任务命中任一关键词时，技能才进入可用列表；正文仍需按需加载。每个输入框填写一个关键词，点击「添加关键词」增加输入框，短语内的空格会保留。</string>
+    <string name="skills_normal_editor_hint">普通技能进入公共可用列表；成员专属技能仅对绑定成员可用。正文仍需按需加载。</string>
+    <string name="skills_editor_error_empty_keywords">关键词模式至少需要一个非空关键词。</string>
+    <string name="skills_editor_error_bound_keywords">技能已绑定成员。请先在详情页明确确认解除绑定，再启用关键词模式。</string>
+    <string name="tools_schema_original">原始参数 Schema（对照）</string>
+    <string name="tools_schema_edit">模型请求 Schema</string>
+    <string name="tools_schema_metadata_hint">仅可改 description、title、examples、$comment 等元数据；修改参数或执行能力请自建工具。</string>
+    <string name="tools_schema_invalid">JSON 无效或参数结构已改变。参数名、类型、required、enum 等必须保持原样。</string>
+    <string name="tools_schema_reset">重置为原始 Schema</string>
+    <string name="tools_templates_title">实用工具模板</string>
+    <string name="tools_templates_hint">选择后填入可编辑草稿，保存才注册；默认按关键词注入。RTK 需自行安装，缺命令时返回原生命令错误，不自动回退；可用原生命令回查完整输出。</string>
+    <string name="team_communication_title">阶段通信策略</string>
+    <string name="team_communication_stage">仅同阶段</string>
+    <string name="team_communication_parent">主代理转达</string>
+    <string name="team_communication_run">同运行批次</string>
+    <string name="team_communication_hint">范围、额度和重复消息由投递层校验。完成成员不会被消息重新启动；跨阶段以交接包为准。</string>
+    <string name="team_message_limit">每成员每次运行最多 %1$d 条消息</string>
+    <string name="team_communication_guide">沟通指引（接口、证据、分歧和阻塞如何处理）</string>
+    <string name="team_interface_title">协作对齐</string>
+    <string name="team_interface_hint">声明谁要和谁对齐什么；保存后只注入成员提示词，不改变执行顺序</string>
+    <string name="team_interface_need_two">至少选两名成员才能建立对齐关系</string>
+    <string name="team_interface_empty">还没有对齐关系</string>
+    <string name="team_interface_add">添加对齐</string>
+    <string name="team_interface_add_title">添加协作对齐</string>
+    <string name="team_interface_source">来自（单选）</string>
+    <string name="team_interface_targets">对齐对象（可多选）</string>
+    <string name="team_interface_about">对齐内容（如接口字段、错误码、验收口径）</string>
+    <string name="team_interface_confirm">添加（%1$d 条）</string>
+    <string name="team_interface_count">对齐 %1$d 条</string>
+    <string name="team_detail_topology">协作拓扑</string>
+    <string name="team_detail_topology_empty">尚未声明协作对齐——在编辑页的某个阶段里「添加对齐」</string>
 </resources>
 
     <!-- 技能详情页新增：绑定成员入口 -->

@@ -6,7 +6,7 @@
 
 - 内置工具的唯一注册点是 `app/src/main/java/com/aharou/di/AgentModule.kt:449-483`，共 **35 个**：`readFile` `sendFile` `sendToChat` `viewImage` `writeFile` `editFile` `generateImage` `Bash` `Shizuku` `terminal` `list` `search` `loadSkill` `loadRule` `knowledge_search` `askUserQuestion` `manageMcp` `tool_search` `websearch` `webfetch` `planMode` `todo` `memory` `task` `messageParent` `browser` `config` `vscreen` `a11y` `open_app` `check_dependencies` `sessions` `device` `personal_context` `petAvatar`。
 - MCP 工具在连接时动态注册（`feature/agent/domain/mcp/McpManager.kt:266`，卸载见 `:272` / `:354`）。
-- 每轮注入：`StatefulAgentWorkflow.kt:317` 取全部工具，`:568` 只过滤 `deferredLoading`（当前只有 MCP 工具延迟）；所以**内置的 35 个工具都在第一轮索引里**，MCP 工具要靠 `tool_search` 展开（`ToolSearchTool.kt:48`）。
+- 每轮注入：工具集经成员允许清单、`ToolInjectionGate` 的 every_round/keyword/off 策略过滤，并应用兼容的描述与 schema 说明覆盖；不能把注册工具总数当作每轮实际可见数量。MCP 的延迟加载仍由原有检索链路处理。
 - `config`（`di/AgentModule.kt:475`，实现 `feature/agent/domain/tool/config/ConfigTool.kt`）是一层**通用配置接口**：agent 能改什么，取决于 `ConfigRegistry` 里注册了哪些字段，注册入口集中在 `AIEditorApp.kt:409-434`（24 个 `Config*Fields`）。下文写“config `path`”即指这条路径。
 - 权限档只影响“执行时要不要弹确认”（`ToolPermissionPolicyEngine`），**不影响工具有没有**；本表只统计有没有。
 
@@ -72,7 +72,9 @@
 
 ## 5. 技能
 
-技能详情页支持为同一技能选择多个成员，成员编辑页仅展示绑定结果。界面通过 `AgentDefinitionRepository.setSkillBinding` 修改原作用域的成员定义；agent 可用文件工具编辑该成员定义中的 `skills` 列表，无新增专用工具。绑定成员默认折叠；专属技能只向绑定角色提供名称与简介。技能关键词公共模式与成员绑定互斥，config 的 skills 集合可读写 keyword_enabled 和 keywords。
+技能详情页支持为同一技能选择多个成员，成员编辑页仅展示绑定结果。界面通过 `AgentDefinitionRepository.setSkillBinding` 修改原作用域的成员定义；agent 可用文件工具编辑该成员定义中的 `skills` 列表，无新增专用工具。绑定成员默认折叠；专属技能只向绑定角色提供名称与简介。技能关键词公共模式与成员绑定互斥，编辑页和详情弹窗均支持逐行添加、移除独立关键词输入框；config 的 skills 集合继续读写 keyword_enabled 和 keywords 数组。
+
+新建与编辑技能可直接切换关键词公共模式、填写关键词，仓库保存采用本次表单设置；开启但无有效关键词时拒绝保存。已有成员绑定时拒绝直接切换，不隐式解绑；详情页保留明确确认解绑的入口。普通模式与关键词模式都不自动注入正文，正文通过 `loadSkill` 按需读取，未命中关键词的技能不进入本轮可用清单。
 
 | 用户能做什么 | 界面入口（file:line） | Agent 有对应工具吗 | 工具名与入口（file:line） | 差距说明 |
 |---|---|---|---|---|
@@ -236,9 +238,19 @@
 ## Historical branch integration: custom tools and session supervision
 
 - 设置的工具入口保留 MCP 服务器与脚本工具，并增加自定义命令工具页签；参数表生成 schema，命令模板中的值单引号转义。命令仍经 ToolRegistry、ToolCallGuard 与运行期权限链执行。
-- 自定义工具与覆盖项作为文件资产可由 agent 的文件工具读写：全局 `~/.aharou/tools/`、项目 `.aharou/tools/`；在每轮工具构建前刷新，不需要新增标量 config 字段。
-- 每轮工具集先做成员允许清单，再做 every_round/keyword/off 注入过滤和描述覆盖；该过滤不是执行权限撤销。
+- 自定义工具与覆盖项仍是文件资产：全局 `~/.aharou/tools/`、项目 `.aharou/tools/`；在每轮工具构建前刷新。应用启动通过 `ConfigAgentControlFields` 注册工具覆盖集合，`tool.overrides.<name>.schema_json` 读写使用 store 快照和 registry 原始 schema 校验；空字符串重置 schema 覆盖，保留注入策略。
+- 内置与 MCP 编辑器区分原始 schema 与当前 schema，支持重置；只允许兼容的 `description`、`title`、`examples`、`$comment` 元数据覆盖。保存和运行都校验，原始结构变化后不兼容的覆盖回退为原始 schema；实际模型请求使用校验后的工具定义。参数名、类型、required、enum 等结构不能靠覆盖改写，要变更执行能力应自建工具。
+- 每轮工具集先做成员允许清单，再做 every_round/keyword/off 注入过滤和描述、schema 说明覆盖；该过滤不是执行权限撤销，包装器必须保留流式接口及全部执行授权方法。
+- `git_status`、`git_diff`、`git_log`、`find_files`、`rtk_command` 是可编辑的自定义工具模板：用户选中后只填入新建表单，保存才注册。默认带有效关键词并使用关键词模式，不默认全注入或安装依赖；RTK 缺失保留原生命令错误，不静默替换执行。
 - 智能托管的设置和状态按会话隔离；界面设置与 `config get/set steward.sessions.<id>.enabled|max_loops|unlimited` 接入同一控制器。全局旧托管路径由显式会话路径取代，避免修改其他会话。
+
+## 团队运行通信与指令边界
+
+团队编辑页每阶段提供「协作对齐」可视化编辑：勾选来源与目标成员、填对齐内容，等价在任务上写 `interfaces` 边；详情页同步展示「协作拓扑」。边只是注入双方成员 prompt 的软约束，不改变调度顺序，也不要求 agent 有对应工具——与字段文档 `stages[].tasks[].interfaces` 口径一致。
+
+团队编辑器提供 `same_stage`、`parent_only`、`run` 三种通信策略，新建默认 `same_stage`，旧文件缺字段按 `run` 兼容。每成员每次运行消息额度默认 8，范围 1..100，重复消息拒绝；目标范围、预算与重复检查由执行层实施，不依靠模型自觉。主会话负责转达与协调，成员不能用消息扩大自己的任务或写路径授权。
+
+阶段指引单独作为指令注入，上游结果以交付证据传入。Agent 侧团队文件配置与界面共用预设定义；`team.stages.<id>` 暴露 `communication`、`message_limit` 和 `communication_guide`，id 由作用域、团队名称的 UTF-8 十六进制和阶段序号组成，避免合法团队名称中的点干扰配置路径解析。修改只影响下次运行，不扩大原任务写权限。注册与静态调用已接入，编译、端到端交互和实际配置加载仍须单独验证，本文不构成测试通过证据。
 
 ## 本地知识库补充
 

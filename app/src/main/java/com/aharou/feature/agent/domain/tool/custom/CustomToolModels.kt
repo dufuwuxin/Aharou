@@ -145,21 +145,23 @@ data class CustomToolDefinition(
 }
 
 /**
- * 内置 / MCP 工具的覆盖项：只允许改「描述」与「注入方式」，schema 仍由代码或服务端提供。
+ * 内置 / MCP 工具的覆盖项；schema 仅允许兼容的描述元数据改动，执行结构仍由原工具定义。
  *
- * 三个字段都为 null 表示「没有覆盖」，对应删除 `overrides.json` 里的这条记录。
+ * 所有字段都为 null 表示没有覆盖；旧配置缺少 schemaJson 时按 null 读取。
  */
 @Serializable
 data class ToolOverride(
     val description: String? = null,
     val injectionMode: ToolInjectionMode? = null,
-    val keywords: List<String>? = null
+    val keywords: List<String>? = null,
+    val schemaJson: String? = null
 ) {
     val isEmpty: Boolean
-        get() = description.isNullOrBlank() && injectionMode == null && keywords.isNullOrEmpty()
+        get() = description.isNullOrBlank() && injectionMode == null && keywords.isNullOrEmpty() && schemaJson.isNullOrBlank()
 
     fun normalized(): ToolOverride = copy(
         description = description?.trim()?.takeIf { it.isNotEmpty() },
-        keywords = keywords?.let { CustomToolDefinition.normalizeKeywords(it) }
+        keywords = keywords?.let { CustomToolDefinition.normalizeKeywords(it) },
+        schemaJson = schemaJson?.trim()?.takeIf { it.isNotEmpty() }
     )
 }

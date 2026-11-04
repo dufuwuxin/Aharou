@@ -47,6 +47,7 @@ import com.aharou.feature.settings.presentation.TeamSettingsViewModel
 import compose.icons.FeatherIcons
 import compose.icons.feathericons.ChevronRight
 import compose.icons.feathericons.Plus
+import compose.icons.feathericons.ArrowRight
 import compose.icons.feathericons.Users
 
 /**
@@ -334,6 +335,36 @@ private fun TeamDetailSheet(
                 )
             }
 
+            // 协作拓扑：把阶段里的接口边画成「成员 → 对齐对象」的行，一眼看出谁和谁对接
+            SettingsGroupHeader(text = stringResource(R.string.team_detail_topology))
+            val topology = team.stages.map { stage ->
+                stage to stage.tasks.mapNotNull { task ->
+                    val from = task.agent?.trim().orEmpty()
+                    if (from.isEmpty() || task.interfaces.isEmpty()) null
+                    else from to task.interfaces
+                }
+            }.filter { (_, rows) -> rows.isNotEmpty() }
+            if (topology.isEmpty()) {
+                Text(
+                    text = stringResource(R.string.team_detail_topology_empty),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                topology.forEach { (stage, rows) ->
+                    Text(
+                        text = stage.title,
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    rows.forEach { (from, edges) ->
+                        edges.forEach { edge ->
+                            TopologyRow(from = from, target = edge.with, about = edge.about)
+                        }
+                    }
+                }
+            }
+
             if (team.charter.isNotBlank()) {
                 SettingsGroupHeader(text = stringResource(R.string.team_detail_charter))
                 Text(
@@ -362,6 +393,46 @@ private fun TeamDetailSheet(
     }
 
 
+}
+
+/** 一条接口边：成员 → 对齐对象，内容非空时附在后行。 */
+@Composable
+private fun TopologyRow(from: String, target: String, about: String) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = from,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Icon(
+                imageVector = FeatherIcons.ArrowRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier
+                    .padding(horizontal = 4.dp)
+                    .size(14.dp)
+            )
+            Text(
+                text = target,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        if (about.isNotBlank()) {
+            Text(
+                text = about,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
 }
 
 @Composable

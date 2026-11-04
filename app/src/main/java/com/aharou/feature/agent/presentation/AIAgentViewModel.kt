@@ -1876,7 +1876,7 @@ class AIAgentViewModel @Inject constructor(
         if (items.isEmpty()) return
         // 强制插入那条用户消息已经自己落过库、正文也在历史里了：这里只消费其余通知，
         // 否则同一条会被再落一次（多一个用户气泡）、再喂一次模型。
-        val fresh = items.filterNot { it.alreadyPersisted }
+        val fresh = items.filterNot { it.alreadyPersisted || (it.fromSibling && !subAgentEventBus.siblingMayWake(it.sourceId, sessionId)) }
         if (fresh.isEmpty()) return agentNotificationCenter.ack(sessionId, items.map { it.seq })
         FileLogger.d(TAG, "flushPendingNotifications: sid=$sessionId items=${fresh.size} state=${_agentStates.value[sessionId]}")
         viewModelScope.launch {

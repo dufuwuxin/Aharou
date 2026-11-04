@@ -594,7 +594,9 @@ class TaskTool @Inject constructor(
             return ToolResult.Error("tell 需要 id 与 1~4000 字 message", "INVALID_ARGS")
         }
         val delivery = runRegistry.route(self, target, message)
-        if (delivery.state == "blocked") return ToolResult.Error("目标不在本运行批次或任务已停止", "NOT_SIBLING")
+        if (delivery.state == "blocked") return ToolResult.Error(
+            "消息未投递：${delivery.reason}。遵守阶段通信范围与额度；不要重复重试，将阻塞写入交付交主代理。",
+            delivery.reason ?: "NOT_SIBLING")
         delivery.sessionId?.let { to ->
             if (eventBus.terminalEvent(to)?.type == SubAgentEventType.STOPPED || !eventBus.sendToSibling(self, to, message)) {
                 return ToolResult.Error("目标已停止或无法投递", "SIBLING_DELIVERY_FAILED")
