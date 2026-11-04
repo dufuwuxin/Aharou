@@ -37,6 +37,9 @@ class ConfigSkillFields @Inject constructor(
             .filter { it.scope != SkillScope.BUILTIN }
             .map { it.skill.name }
 
+    private fun skill(name: String) = skillRepository.listAllSkills().firstOrNull { it.skill.name == name }
+        ?: throw ConfigError.InvalidValue("Unknown skill")
+
     private inner class SkillCollection : ConfigCollection {
         override val basePath = "skill.skills"
         override val displayName = "技能"
@@ -50,6 +53,34 @@ class ConfigSkillFields @Inject constructor(
         override fun fields(forId: String): List<ConfigField> {
             if (forId !in skillNames()) return emptyList()
             return listOf(
+                ClosureField(
+                    path = "$basePath.$forId.keyword_enabled",
+                    displayName = "关键词公共模式",
+                    description = "按当前用户/派发任务匹配任一关键词；已有成员绑定时拒绝，须先明确解除绑定。",
+                    valueSchema = ConfigSchema.Bool,
+                    revertable = true,
+                    reader = { ConfigValue.Bool(skill(forId).skill.keywordEnabled) },
+                    writer = { value ->
+                        val entry = skill(forId)
+                        skillRepository.setKeywordPolicy(forId, entry.scope,
+                            (value as? ConfigValue.Bool)?.value ?: throw ConfigError.TypeMismatch("boolean"), entry.skill.keywords)
+                    },
+                ),
+                ClosureField(
+                    path = "$basePath.$forId.keywords",
+                    displayName = "关键词",
+                    description = "非空关键词数组，任一词匹配当前任务即注入名称与简介，不注入正文。",
+                    valueSchema = ConfigSchema.Array(ConfigSchema.Str()),
+                    revertable = true,
+                    reader = { ConfigValue.Arr(skill(forId).skill.keywords.map { ConfigValue.Str(it) }) },
+                    writer = { value ->
+                        val words = (value as? ConfigValue.Arr)?.value?.map {
+                            (it as? ConfigValue.Str)?.value ?: throw ConfigError.TypeMismatch("string")
+                        } ?: throw ConfigError.TypeMismatch("array")
+                        val entry = skill(forId)
+                        skillRepository.setKeywordPolicy(forId, entry.scope, entry.skill.keywordEnabled, words)
+                    },
+                ),
                 ClosureField(
                     path = "$basePath.$forId.disabled",
                     displayName = "停用（$forId）",

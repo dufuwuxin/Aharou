@@ -1,5 +1,6 @@
 package com.aharou.feature.agent.domain.subagent
 
+import com.aharou.feature.agent.domain.tool.subagent.TeamRunRegistry
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -70,6 +71,7 @@ data class SubAgentEvent(
 class SubAgentEventBus @Inject constructor(
     private val maxRunningSource: MaxRunningSource,
     private val communicationSource: CommunicationEnabledSource,
+    private val runRegistry: TeamRunRegistry = TeamRunRegistry(),
 ) {
     /** 子代理之间的对等通信（team / tell）是否开启；工具层与手册层都据此决定说不说、做不做。 */
     fun communicationEnabled(): Boolean = communicationSource.communicationEnabled()
@@ -133,6 +135,11 @@ class SubAgentEventBus @Inject constructor(
      */
     fun release(subSessionId: String): Boolean = unmarkActive(subSessionId)
 
+    fun releaseStopped(subSessionId: String): Boolean {
+        runRegistry.terminal(subSessionId, "stopped")
+        return unmarkActive(subSessionId)
+    }
+
     /** 把 [subSessionId] 加入活跃集合；与 [unmarkActive] 共用 [activeLock]。 */
     private fun markActive(subSessionId: String) {
         synchronized(activeLock) {
@@ -149,9 +156,14 @@ class SubAgentEventBus @Inject constructor(
     }
 
     fun emit(event: SubAgentEvent) {
+        if (event.type == SubAgentEventType.SPAWNED) runRegistry.started(event.subSessionId)
+        if (event.type.isTerminal() || event.type == SubAgentEventType.DELETED) {
+            runRegistry.terminal(event.subSessionId, event.type.name.lowercase())
+        }
         // 同步维护活跃集合
         when (event.type) {
             SubAgentEventType.SPAWNED -> synchronized(activeLock) {
+                terminalCache.remove(event.subSessionId)
                 parentOfSub[event.subSessionId] = event.parentSessionId
                 siblingMessages.remove(event.subSessionId)
                 markActive(event.subSessionId)
@@ -216,9 +228,12 @@ class SubAgentEventBus @Inject constructor(
     }
 
     /** 消费端在异步查询之后复查，登记关系不代表成员仍在运行。 */
-    fun canReceiveSiblingMessage(fromSessionId: String, toSessionId: String): Boolean = synchronized(activeLock) {
-        communicationEnabled() && areSiblings(fromSessionId, toSessionId) &&
-            fromSessionId in _activeSubSessionIds.value && toSessionId in _activeSubSessionIds.value
+    fun canReceiveSiblingMessage(fromSessionId: String, toSessionId: String): Boolean {
+        val sameRun = runRegistry.canCommunicate(fromSessionId, toSessionId)
+        return synchronized(activeLock) {
+            sameRun && communicationEnabled() && areSiblings(fromSessionId, toSessionId) &&
+                fromSessionId in _activeSubSessionIds.value && toSessionId in _activeSubSessionIds.value
+        }
     }
 
     /** 保留 Boolean 调用口径：只有本次确实投递才返回 true。 */
@@ -226,13 +241,14 @@ class SubAgentEventBus @Inject constructor(
         sendToSiblingResult(fromSessionId, toSessionId, message) == SiblingSendResult.SENT
 
     /** 校验、去重、投递及计数与生命周期串行，失败和重复均不占用预算。 */
-    fun sendToSiblingResult(fromSessionId: String, toSessionId: String, message: String): SiblingSendResult =
-        synchronized(activeLock) {
+    fun sendToSiblingResult(fromSessionId: String, toSessionId: String, message: String): SiblingSendResult {
+        val sameRun = runRegistry.canCommunicate(fromSessionId, toSessionId)
+        return synchronized(activeLock) {
             val text = message.trim()
             val rejection = when {
                 !communicationEnabled() -> SiblingSendResult.DISABLED
                 fromSessionId == toSessionId -> SiblingSendResult.SELF
-                !areSiblings(fromSessionId, toSessionId) -> SiblingSendResult.NOT_SIBLING
+                !sameRun || !areSiblings(fromSessionId, toSessionId) -> SiblingSendResult.NOT_SIBLING
                 fromSessionId !in _activeSubSessionIds.value -> SiblingSendResult.INACTIVE_SENDER
                 toSessionId !in _activeSubSessionIds.value -> SiblingSendResult.INACTIVE_RECIPIENT
                 text.isBlank() -> SiblingSendResult.EMPTY
@@ -255,4 +271,5 @@ class SubAgentEventBus @Inject constructor(
             sent.add(text)
             SiblingSendResult.SENT
         }
+    }
 }

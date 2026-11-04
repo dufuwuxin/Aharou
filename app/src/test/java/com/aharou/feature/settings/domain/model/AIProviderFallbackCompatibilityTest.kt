@@ -19,7 +19,7 @@ class AIProviderFallbackCompatibilityTest {
         try {
             every { KeystoreCipher.encryptString(any()) } answers { firstArg() }
             every { KeystoreCipher.decryptString(any()) } answers { firstArg() }
-            val repo = mockk<AIProviderRepositoryImpl>(relaxed = true)
+            val repo = AIProviderRepositoryImpl(mockk(), mockk())
             val toEntity = AIProviderRepositoryImpl::class.java.getDeclaredMethod("toEntity", AIProviderConfig::class.java)
                 .apply { isAccessible = true }
             val toDomain = AIProviderRepositoryImpl::class.java.getDeclaredMethod("toDomainModel", AIProviderEntity::class.java)

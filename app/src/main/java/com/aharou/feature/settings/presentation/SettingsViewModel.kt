@@ -1039,6 +1039,11 @@ class SettingsViewModel @Inject constructor(
 
     fun refreshSkills() = skillController.refreshSkills()
 
+    suspend fun setSkillKeywords(entry: SkillUiEntry, enabled: Boolean, words: List<String>, confirmed: Boolean) {
+        skillController.setSkillKeywords(entry, enabled, words, confirmed)
+        refreshSubAgents()
+    }
+
     fun setSkillEnabled(name: String, enabled: Boolean, scope: SkillScope) =
         skillController.setSkillEnabled(name, enabled, scope)
 

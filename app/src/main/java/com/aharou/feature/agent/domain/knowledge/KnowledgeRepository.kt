@@ -7,6 +7,8 @@ import com.aharou.core.util.writeTextSafely
 import com.aharou.feature.agent.domain.skill.market.SkillRepoAccess
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
+import java.io.IOException
+import java.util.UUID
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -25,7 +27,8 @@ import okhttp3.Request
 @Singleton
 class KnowledgeRepository @Inject constructor(
     @param:ApplicationContext private val context: Context,
-    private val catalog: KnowledgeCatalog
+    private val catalog: KnowledgeCatalog,
+    private val sourceRepository: KnowledgeSourceRepository
 ) {
     // 与 RepoDataFetcher / SkillMarketRepository 保持一致的代理与超时配置：
     // 用户配了上游代理时，裸 client 会连不通（缺 proxyAuthenticator）。
@@ -38,7 +41,68 @@ class KnowledgeRepository @Inject constructor(
 
     fun rootDir(): File = File(context.filesDir, KNOWLEDGE_DIR)
 
-    fun sourceDir(sourceId: String): File = File(rootDir(), sourceId)
+    fun sourceDir(sourceId: String): File {
+        require(sourceId.matches(Regex("[A-Za-z0-9][A-Za-z0-9._-]*"))) { "Invalid knowledge source id" }
+        val root = rootDir().canonicalFile
+        val dir = File(root, sourceId).canonicalFile
+        require(dir.parentFile == root) { "Knowledge source escapes its root" }
+        return dir
+    }
+
+    @Synchronized
+    fun createLocal(name: String, description: String, markdown: String): String {
+        val title = name.trim()
+        require(title.isNotBlank() && markdown.isNotBlank()) { "Name and Markdown content are required" }
+        require(catalog.load().sources.values.none { source ->
+            source.name.values.any { it.equals(title, ignoreCase = true) } ||
+                source.displayName(appLanguage).equals(title, ignoreCase = true)
+        }) { "Knowledge name already exists" }
+        val id = "local-${UUID.randomUUID()}"
+        val dir = sourceDir(id)
+        if (!dir.mkdirs()) throw IOException("Cannot create local knowledge directory")
+        try {
+            writeNewDocument(dir, "index.md", markdown)
+            sourceRepository.addLocal(
+                id,
+                KnowledgeSourceDef(
+                    name = mapOf("zh" to title, "en" to title),
+                    description = mapOf("zh" to description.trim(), "en" to description.trim()),
+                    isLocal = true
+                )
+            )
+        } catch (error: Exception) {
+            if (!dir.deleteRecursively()) error.addSuppressed(IOException("Cannot remove incomplete local knowledge"))
+            throw error
+        }
+        return id
+    }
+
+    @Synchronized
+    fun addLocalDocument(sourceId: String, path: String, markdown: String) {
+        val source = catalog.load().sources[sourceId]
+        require(source?.isLocal == true) { "Not a local knowledge source" }
+        require(markdown.isNotBlank()) { "Markdown content is required" }
+        writeNewDocument(sourceDir(sourceId), path, markdown)
+    }
+
+    private fun writeNewDocument(dir: File, path: String, markdown: String) {
+        require(path.isNotBlank() && !File(path).isAbsolute && '\\' !in path &&
+            path.split('/').none { it.isBlank() || it == "." || it == ".." } &&
+            path.endsWith(".md", ignoreCase = true)) { "Invalid Markdown document path" }
+        val target = File(dir, path).canonicalFile
+        require(target.toPath().startsWith(dir.canonicalFile.toPath()) && target != dir.canonicalFile) {
+            "Document escapes knowledge directory"
+        }
+        val parent = target.parentFile ?: throw IOException("Missing document directory")
+        if (!parent.isDirectory && !parent.mkdirs()) throw IOException("Cannot create document directory")
+        require(target.createNewFile()) { "Document already exists" }
+        try {
+            target.writeText(markdown, Charsets.UTF_8)
+        } catch (error: Exception) {
+            if (!target.delete()) error.addSuppressed(IOException("Cannot remove incomplete document"))
+            throw error
+        }
+    }
 
     /** 这个源是否已经装到本地（有目录且有文件）。 */
     fun isInstalled(sourceId: String): Boolean {
@@ -68,7 +132,7 @@ class KnowledgeRepository @Inject constructor(
      */
     suspend fun sync(sourceId: String): SyncResult? = withContext(Dispatchers.IO) {
         val source = catalog.load().sources[sourceId] ?: return@withContext null
-        if (source.repo.isBlank()) return@withContext null
+        if (source.isLocal || source.repo.isBlank()) return@withContext null
 
         val coord = SkillRepoAccess.Coord(source.host, source.repo, source.branch)
         val treeBody = httpGetFirst(SkillRepoAccess.treeUrls(coord)) ?: return@withContext null
@@ -89,7 +153,10 @@ class KnowledgeRepository @Inject constructor(
         for (relative in remoteFiles) {
             val local = if (prefix.isEmpty()) relative else relative.removePrefix("$prefix/")
             val body = httpGetFirst(SkillRepoAccess.fileUrls(coord, relative)) ?: continue
-            val target = File(dir, local)
+            val target = File(dir, local).canonicalFile
+            require(target.toPath().startsWith(dir.canonicalFile.toPath()) && target != dir.canonicalFile) {
+                "Remote document escapes knowledge directory"
+            }
             kept.add(target.absolutePath)
             val existing = if (target.isFile) {
                 runCatching { target.readText(Charsets.UTF_8) }.getOrNull()
@@ -120,7 +187,7 @@ class KnowledgeRepository @Inject constructor(
      */
     suspend fun remoteDigest(sourceId: String): String? = withContext(Dispatchers.IO) {
         val source = catalog.load().sources[sourceId] ?: return@withContext null
-        if (source.repo.isBlank()) return@withContext null
+        if (source.isLocal || source.repo.isBlank()) return@withContext null
         val coord = SkillRepoAccess.Coord(source.host, source.repo, source.branch)
         httpGetFirst(SkillRepoAccess.treeUrls(coord))
             ?.let { SkillRepoAccess.treeDigest(source.host, it) }
@@ -137,7 +204,10 @@ class KnowledgeRepository @Inject constructor(
         for (id in sources) {
             val dir = sourceDir(id)
             if (!dir.isDirectory) continue
-            dir.walkTopDown().filter { it.isFile && it.name.endsWith(".md", ignoreCase = true) }
+            dir.walkTopDown().filter {
+                    it.isFile && it.name.endsWith(".md", ignoreCase = true) &&
+                        it.canonicalFile.toPath().startsWith(dir.canonicalFile.toPath())
+                }
                 .forEach { file ->
                     val text = runCatching { file.readText(Charsets.UTF_8) }.getOrNull() ?: return@forEach
                     out.add(
@@ -164,9 +234,14 @@ class KnowledgeRepository @Inject constructor(
         val names = catalog.load().sources.mapValues { it.value.displayName(appLanguage) }
         val hits = mutableListOf<KnowledgeHit>()
 
-        rootDir().listFiles().orEmpty().filter { it.isDirectory }.forEach { dir ->
+        rootDir().listFiles().orEmpty().filter {
+            it.isDirectory && it.canonicalFile.parentFile == rootDir().canonicalFile
+        }.forEach { dir ->
             val sourceId = dir.name
-            dir.walkTopDown().filter { it.isFile && it.name.endsWith(".md", ignoreCase = true) }
+            dir.walkTopDown().filter {
+                    it.isFile && it.name.endsWith(".md", ignoreCase = true) &&
+                        it.canonicalFile.toPath().startsWith(dir.canonicalFile.toPath())
+                }
                 .forEach { file ->
                     val text = runCatching { file.readText(Charsets.UTF_8) }.getOrNull() ?: return@forEach
                     val lower = text.lowercase()

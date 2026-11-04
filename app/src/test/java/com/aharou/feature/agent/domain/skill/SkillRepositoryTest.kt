@@ -28,13 +28,178 @@ class SkillRepositoryTest {
         every { listSkills() } returns emptyList()
         every { loadInstructions(any()) } returns null
     }
-    private val repository = SkillRepository(builtinSource, globalSource, projectSource, config, provider)
+    private val agents = mockk<com.aharou.feature.agent.domain.subagent.AgentDefinitionRepository>().apply {
+        every { listAll() } returns emptyList()
+    }
+    private val repository = SkillRepository(builtinSource, globalSource, projectSource, config, provider, agents)
 
     private fun skill(name: String) = Skill(
         name = name,
         description = "desc of $name",
         instructions = "body of $name"
     )
+
+    @Test
+    fun boundSkillRename_isRejectedWithoutMakingItPublic() {
+        val owner = com.aharou.feature.agent.domain.subagent.AgentDefinition("owner", "", skills = listOf("private"), prompt = "role")
+        every { agents.listAll() } returns listOf(com.aharou.feature.agent.domain.subagent.AgentDefinitionEntry(
+            owner, com.aharou.feature.agent.domain.subagent.AgentDefinitionScope.GLOBAL))
+        every { globalSource.listSkills() } returns listOf(skill("private"))
+        assertEquals(SkillSaveError.BOUND_RENAME, repository.save(SkillForm("renamed", "desc", "body"), SkillScope.GLOBAL, "private"))
+        assertTrue(repository.listSkillsForAgent(null).isEmpty())
+    }
+
+    @Test
+    fun commandDirectory_keepsConditionalPublicButHidesExclusiveSkills() {
+        val owner = com.aharou.feature.agent.domain.subagent.AgentDefinition("owner", "", skills = listOf("private"), prompt = "role")
+        every { agents.listAll() } returns listOf(com.aharou.feature.agent.domain.subagent.AgentDefinitionEntry(
+            owner, com.aharou.feature.agent.domain.subagent.AgentDefinitionScope.GLOBAL))
+        every { globalSource.listSkills() } returns listOf(skill("private"), skill("conditional").copy(keywordEnabled = true, keywords = listOf("Kotlin")))
+        assertEquals(listOf("conditional"), repository.listCommandSkills().map { it.name })
+        assertTrue(repository.listSkills().isEmpty())
+    }
+
+    @Test
+    fun loadSkillTool_enforcesOwnershipAndIgnoresHistoryAndToolBodies() = kotlinx.coroutines.runBlocking {
+        val owner = com.aharou.feature.agent.domain.subagent.AgentDefinition(
+            "owner", "", skills = listOf("private"), inject = emptySet(), prompt = "role")
+        val entry = com.aharou.feature.agent.domain.subagent.AgentDefinitionEntry(
+            owner, com.aharou.feature.agent.domain.subagent.AgentDefinitionScope.GLOBAL)
+        every { agents.listAll() } returns listOf(entry)
+        every { globalSource.listSkills() } returns listOf(skill("private"),
+            skill("conditional").copy(keywordEnabled = true, keywords = listOf("Kotlin")))
+        val tool = com.aharou.feature.agent.domain.tool.skill.LoadSkillTool(repository)
+        val args = mapOf("skill_name" to kotlinx.serialization.json.JsonPrimitive("private"))
+        val main = com.aharou.feature.agent.domain.model.AgentContext(null, null, "/project", null)
+        assertEquals("SKILL_NOT_ALLOWED", (tool.executeWithContext(args, main) as com.aharou.feature.agent.domain.tool.ToolResult.Error).code)
+        assertTrue(tool.executeWithContext(args, main.copy(agentDefinition = owner)) is com.aharou.feature.agent.domain.tool.ToolResult.Success)
+        assertEquals("SKILL_NOT_ALLOWED", (tool.executeWithContext(args, main.copy(agentDefinition = owner.copy(name = "other", skills = emptyList())))
+            as com.aharou.feature.agent.domain.tool.ToolResult.Error).code)
+        val history = listOf(
+            com.aharou.feature.agent.domain.model.AgentMessage.UserMessage(content = "Kotlin"),
+            com.aharou.feature.agent.domain.model.AgentMessage.ToolResultMessage(toolName = "readFile", result = "Kotlin"))
+        val conditionalArgs = mapOf("skill_name" to kotlinx.serialization.json.JsonPrimitive("conditional"))
+        assertEquals("SKILL_NOT_ALLOWED", (tool.executeWithContext(conditionalArgs, main.copy(history = history,
+            currentUserText = "Write a poem")) as com.aharou.feature.agent.domain.tool.ToolResult.Error).code)
+        assertTrue(tool.executeWithContext(conditionalArgs, main.copy(currentUserText = "Kotlin task")) is com.aharou.feature.agent.domain.tool.ToolResult.Success)
+    }
+
+    @Test
+    fun bindingEntry_rejectsKeywordSkillEvenOutsideSkillDetailUi() {
+        val temp = java.nio.file.Files.createTempDirectory("keyword-binding").toFile()
+        try {
+            val agentRoot = File(temp, "agents").apply { mkdirs() }
+            val skillDir = File(temp, "skills/conditional").apply { mkdirs() }
+            File(skillDir, "SKILL.md").writeText(SkillParser.serialize("conditional", "", emptyList(), "body", true, listOf("test")))
+            val global = mockk<com.aharou.feature.agent.domain.subagent.GlobalDirectoryAgentSource>()
+            val project = mockk<com.aharou.feature.agent.domain.subagent.ProjectDirectoryAgentSource>()
+            every { global.agentsRoot } returns agentRoot.path
+            every { project.agentsRoot } returns File(temp, "other/agents").path
+            val member = com.aharou.feature.agent.domain.subagent.AgentDefinition("owner", "", prompt = "body", filePath = File(agentRoot, "owner.md").path)
+            every { global.listDefinitions() } returns listOf(member)
+            every { project.listDefinitions() } returns emptyList()
+            val config = mockk<com.aharou.feature.agent.domain.subagent.AgentDefinitionConfigRepository>()
+            val agentRepo = com.aharou.feature.agent.domain.subagent.AgentDefinitionRepository(global, project, config, provider)
+            assertEquals(com.aharou.feature.agent.domain.subagent.AgentSaveError.IO_FAILED,
+                agentRepo.setSkillBinding("owner", com.aharou.feature.agent.domain.subagent.AgentDefinitionScope.GLOBAL, "conditional", true))
+            assertTrue(!File(member.filePath!!).exists())
+        } finally { temp.deleteRecursively() }
+    }
+
+    @Test
+    fun keywordPolicy_rejectsUnconfirmedBindingAndRollsBackFailedUnbind() {
+        val temp = java.nio.file.Files.createTempDirectory("keyword-policy").toFile()
+        try {
+            val dir = File(temp, "conditional").apply { mkdirs() }
+            val file = File(dir, "SKILL.md").apply { writeText("---\nname: conditional\n---\nbody") }
+            val memberFile = File(temp, "member.md").apply { writeText("original member") }
+            val definition = com.aharou.feature.agent.domain.subagent.AgentDefinition(
+                name = "owner", description = "", skills = listOf("conditional"), prompt = "role", filePath = memberFile.path)
+            val entry = com.aharou.feature.agent.domain.subagent.AgentDefinitionEntry(
+                definition, com.aharou.feature.agent.domain.subagent.AgentDefinitionScope.GLOBAL)
+            every { agents.listAll() } returns listOf(entry)
+            every { globalSource.listSkills() } returns listOf(skill("conditional").copy(dirPath = dir.path))
+            assertTrue(runCatching { repository.setKeywordPolicy("conditional", SkillScope.GLOBAL, true, listOf("test")) }.isFailure)
+            assertEquals("original member", memberFile.readText())
+            every { agents.setSkillBinding("owner", entry.scope, "conditional", false) } answers {
+                memberFile.writeText("partial write")
+                com.aharou.feature.agent.domain.subagent.AgentSaveError.IO_FAILED
+            }
+            val original = file.readText()
+            assertTrue(runCatching { repository.setKeywordPolicy("conditional", SkillScope.GLOBAL, true, listOf("test"), true) }.isFailure)
+            assertEquals(original, file.readText())
+            assertEquals("original member", memberFile.readText())
+        } finally { temp.deleteRecursively() }
+    }
+
+    @Test
+    fun keywordPolicy_enablesAndDisablesWithoutRestoringBindings() {
+        val temp = java.nio.file.Files.createTempDirectory("keyword-policy").toFile()
+        try {
+            val dir = File(temp, "conditional").apply { mkdirs() }
+            val file = File(dir, "SKILL.md").apply { writeText("---\nname: conditional\ndescription_zh: 保留翻译\n---\nbody") }
+            val memberFile = File(temp, "owner.md").apply { writeText("bound member") }
+            var bound = true
+            val owner = com.aharou.feature.agent.domain.subagent.AgentDefinition("owner", "", prompt = "role", filePath = memberFile.path)
+            val scope = com.aharou.feature.agent.domain.subagent.AgentDefinitionScope.GLOBAL
+            every { agents.listAll() } answers { listOf(com.aharou.feature.agent.domain.subagent.AgentDefinitionEntry(
+                owner.copy(skills = if (bound) listOf("conditional") else emptyList()), scope)) }
+            every { agents.setSkillBinding("owner", scope, "conditional", false) } answers {
+                bound = false
+                memberFile.writeText("unbound member")
+                null
+            }
+            every { globalSource.listSkills() } answers { listOf(SkillParser.parseText(file.readText(), "conditional").copy(dirPath = dir.path)) }
+            repository.setKeywordPolicy("conditional", SkillScope.GLOBAL, true, listOf(" test "), true)
+            assertTrue(!bound)
+            assertTrue(SkillParser.parseText(file.readText(), "conditional").keywordEnabled)
+            assertEquals(listOf("test"), SkillParser.parseText(file.readText(), "conditional").keywords)
+            assertTrue(file.readText().contains("description_zh"))
+            repository.setKeywordPolicy("conditional", SkillScope.GLOBAL, false, listOf("test"))
+            assertTrue(!SkillParser.parseText(file.readText(), "conditional").keywordEnabled)
+            assertTrue(!bound)
+            assertEquals("unbound member", memberFile.readText())
+            verify(exactly = 1) { agents.setSkillBinding("owner", scope, "conditional", false) }
+            verify(exactly = 0) { agents.setSkillBinding(any(), any(), any(), true) }
+        } finally { temp.deleteRecursively() }
+    }
+
+    @Test
+    fun exclusiveSkills_areHiddenFromMainAndOtherRoles() {
+        val owner = mockk<com.aharou.feature.agent.domain.subagent.AgentDefinition>()
+        val other = mockk<com.aharou.feature.agent.domain.subagent.AgentDefinition>()
+        every { owner.name } returns "owner"
+        every { owner.skills } returns listOf("PRIVATE")
+        every { other.name } returns "other"
+        every { other.skills } returns emptyList()
+        val entry = mockk<com.aharou.feature.agent.domain.subagent.AgentDefinitionEntry>()
+        every { entry.definition } returns owner
+        every { agents.listAll() } returns listOf(entry)
+        every { globalSource.listSkills() } returns listOf(skill("private"), skill("legacy"))
+        assertEquals(listOf("legacy"), repository.listSkills().map { it.name })
+        assertEquals(listOf("legacy"), repository.listSkillsForAgent(other).map { it.name })
+        assertEquals(listOf("legacy", "private"), repository.listSkillsForAgent(owner).map { it.name })
+        assertEquals(listOf("private"), repository.listSkillsForAgent(owner, includePublic = false).map { it.name })
+    }
+
+    @Test
+    fun keywords_matchAnyCurrentTaskAndRecomputeOnTaskChange() {
+        every { globalSource.listSkills() } returns listOf(
+            skill("conditional").copy(keywordEnabled = true, keywords = listOf("Kotlin", "Android")),
+            skill("legacy")
+        )
+        assertEquals(listOf("conditional", "legacy"), repository.listSkillsForAgent(null, "Fix ANDROID bug").map { it.name })
+        assertEquals(listOf("legacy"), repository.listSkillsForAgent(null, "Write a poem").map { it.name })
+        assertEquals(listOf("legacy"), repository.listSkillsForAgent(null, "").map { it.name })
+    }
+
+    @Test
+    fun keywordMode_rejectsEmptyWordsAndUnconfirmedUnbinding() {
+        assertTrue(!SkillRepository.validKeywordPolicy(true, listOf(" ")))
+        assertTrue(SkillRepository.validKeywordPolicy(true, listOf(" Kotlin ")))
+        assertTrue(!SkillRepository.canEnableKeywords(true, false))
+        assertTrue(SkillRepository.canEnableKeywords(true, true))
+    }
 
     @Test
     fun loadInstructions_projectOverridesSameNameWithDifferentBody() {

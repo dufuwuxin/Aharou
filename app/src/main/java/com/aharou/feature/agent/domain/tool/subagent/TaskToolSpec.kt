@@ -15,13 +15,13 @@ internal object TaskToolSpec {
         "action" to ToolParameter(
             name = "action",
             type = ParameterType.STRING,
-            description = "操作类型：create（默认，创建子代理并执行任务）/ send（向子代理发一条消息，可反复发送）/ read（读取子代理的最后输出）/ stop（停止子代理的执行）/ del（删除子代理会话及其消息）/ list（列出当前会话的全部子代理）/ roles（列出可用子代理角色，可按 department、agentQuery 过滤排序，用于查名字后再用 agent 点名）/ team（列出同批队友：同一父会话下的其它子代理及其任务与状态）/ tell（向同批队友发一条消息，配 id 与 message 使用）/ grant（运行期给已派发的子代理追加可写路径：id + writePaths）/ teams（列出团队预设 teams/*.md；给 team 参数看单个预设的阶段与成员；给 workflow 列工作流）/ team_run（按团队预设跑完整流程：team + goal，阶段内并行、阶段间串行；给 workflow 则走多团队逐层流转与驳回）",
+            description = "操作类型：create（默认，创建子代理并执行任务）/ send（向子代理发一条消息，可反复发送）/ read（读取子代理的最后输出）/ stop（停止子代理的执行）/ del（删除子代理会话及其消息）/ list（列出当前会话的全部子代理）/ roles（列出可用子代理角色，可按 department、agentQuery 过滤排序，用于查名字后再用 agent 点名）/ team（列出同批队友：同一运行批次的逻辑任务（含未来阶段）及其任务与状态）/ tell（向同批队友发一条消息，配 id 与 message 使用）/ grant（运行期给已派发的子代理追加可写路径：id + writePaths）/ teams（列出团队预设 teams/*.md；给 team 参数看单个预设的阶段与成员；给 workflow 列工作流）/ team_run（按团队预设跑完整流程：team + goal，执行/审核阶段闭环；每位必需审核成员输出唯一 TEAM_REVIEW: PASS 或 TEAM_REVIEW: REJECT <具体原因>，按 rejectTo 退回早先阶段，最多两轮，失败/缺失结论则 blocked；给 workflow 则保留多团队逐层流转与驳回）",
             required = false
         ),
         "id" to ToolParameter(
             name = "id",
             type = ParameterType.STRING,
-            description = "子会话 id（read/send/stop/del/tell 必填，取自 task 返回的 id 或 team 名单）",
+            description = "子会话 id（read/send/stop/del/tell 必填，取自 task 返回的子会话 id 或 team 名单的逻辑任务 id；tell 支持向未启动任务排队留言）",
             required = false
         ),
         "description" to ToolParameter(
@@ -77,7 +77,7 @@ internal object TaskToolSpec {
             name = "pipeline",
             type = ParameterType.ARRAY,
             description = "流水线任务列表（action=pipeline 必填）。每项：{id, description, prompt, dependsOn?, writePaths?, agent? / department?+agentQuery?, model?, provider?}。" +
-                "无依赖的任务同层并发跑；有依赖的等上游全部完成后才跑，且上游产出会自动接在它的 prompt 前面。" +
+                "无依赖的任务同层并发跑；有依赖的等上游全部完成后才跑，且必需依赖仅 succeeded 才启动下游；failed/stopped/timeout/unaccepted 会 blocked。上游完整交接原文自动接到 prompt，不截断证据。" +
                 "同一层任务的 writePaths 不得相交（含目录与其中文件的关系）。",
             required = false,
             itemsSchema = mapOf(

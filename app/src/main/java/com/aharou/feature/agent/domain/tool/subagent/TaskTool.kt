@@ -27,7 +27,6 @@ import com.aharou.feature.settings.domain.repository.AIProviderRepository
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -70,7 +69,9 @@ class TaskTool @Inject constructor(
     private val teamTasks: TeamTasks,
     private val workflowRunner: WorkflowRunner,
     private val aiProviderRepository: AIProviderRepository,
-    private val subAgentWriteLease: SubAgentWriteLease
+    private val subAgentWriteLease: SubAgentWriteLease,
+    private val stageExecutor: TeamStageExecutor,
+    private val runRegistry: TeamRunRegistry
 ) : AbstractContextualTool() {
 
     /**
@@ -87,8 +88,6 @@ class TaskTool @Inject constructor(
         /** `roles` 里每条描述的截断长度。 */
         const val ROLE_DESCRIPTION_MAX = 160
 
-        /** 流水线等待子代理的时长上限：超了就带着「仍在运行」的结论返回，不让工具调用无限挂住。 */
-        const val PIPELINE_WAIT_TIMEOUT_MS = 30L * 60L * 1000L
         /** 能改文件/落盘的工具：出现在角色白名单里就说明它不是只读角色。 */
         val WRITE_TOOLS = setOf("writeFile", "editFile", "generateImage")
         /** 能跑命令或操作设备的工具：用在「能不能执行命令」的提示上。 */
@@ -98,8 +97,6 @@ class TaskTool @Inject constructor(
         /** `team` 名单一次最多列多少个队友，以及单个队友标题的截断长度。 */
         const val TEAM_ROSTER_LIMIT = 20
 
-        /** 回传给调用方的各任务产出上限（保留尾部：判定与结论都在结尾）。 */
-        const val PIPELINE_OUTPUT_TAIL_MAX = 6000
     }
 
     override val name = "task"
@@ -152,7 +149,7 @@ class TaskTool @Inject constructor(
         if (target?.parentId != context.sessionId) {
             return ToolResult.Error("$id 不是你派出的子代理，无权追加写路径；用 action=\"list\" 看自己派出的会话。", "NOT_YOUR_SUBAGENT")
         }
-        val paths = stringSetOf(args["writePaths"]).orEmpty().filter { it.isNotBlank() }.toSet()
+        val paths = parseWritePaths(args).orEmpty()
         if (paths.isEmpty()) return ToolResult.Error("grant 需要非空 writePaths", "MISSING_WRITEPATHS")
         subAgentWriteLease.conflictFor(id, paths, eventBus.activeSubSessionIds.value)?.let { conflictId ->
             return conflictError(conflictId, paths, WriteLease.NEXT_GRANT, context.projectRoot)
@@ -181,167 +178,8 @@ class TaskTool @Inject constructor(
      *
      * 同层任务的写范围必须互不相交（借用 [WriteLease.overlaps]，与单任务 create 同一套判定）。
      */
-    private suspend fun runPipeline(args: Map<String, JsonElement>, context: AgentContext): ToolResult {
-        context.sessionId ?: return ToolResult.Error("缺少会话上下文", "NO_SESSION")
-
-        val raw = args["pipeline"] as? JsonArray
-            ?: return ToolResult.Error("pipeline 必须是数组（每项至少要有 id 与 prompt）", "INVALID_ARGS")
-
-        val tasks = raw.mapNotNull { it as? JsonObject }.mapNotNull { obj ->
-            val id = (obj["id"] as? JsonPrimitive)?.contentOrNull?.trim().orEmpty()
-            val prompt = (obj["prompt"] as? JsonPrimitive)?.contentOrNull?.trim().orEmpty()
-            if (id.isEmpty() || prompt.isEmpty()) {
-                null
-            } else {
-                PipelineTask(
-                    id = id,
-                    prompt = prompt,
-                    description = (obj["description"] as? JsonPrimitive)?.contentOrNull?.trim()
-                        ?.replace(Regex("\\s+"), " ")?.take(TASK_DESCRIPTION_MAX)?.takeIf { it.isNotBlank() } ?: id,
-                    dependsOn = stringSetOf(obj["dependsOn"]).orEmpty(),
-                    writePaths = stringSetOf(obj["writePaths"]),
-                    agent = (obj["agent"] as? JsonPrimitive)?.contentOrNull?.trim()?.takeIf { it.isNotBlank() },
-                    department = (obj["department"] as? JsonPrimitive)?.contentOrNull?.trim()?.takeIf { it.isNotBlank() },
-                    agentQuery = (obj["agentQuery"] as? JsonPrimitive)?.contentOrNull?.trim()?.takeIf { it.isNotBlank() },
-                    model = (obj["model"] as? JsonPrimitive)?.contentOrNull?.trim()?.takeIf { it.isNotBlank() },
-                    provider = (obj["provider"] as? JsonPrimitive)?.contentOrNull?.trim()?.takeIf { it.isNotBlank() }
-                )
-            }
-        }
-        if (tasks.isEmpty()) {
-            return ToolResult.Error("pipeline 里没有有效任务：每项至少要给 id 与 prompt", "INVALID_ARGS")
-        }
-        val knownIds = tasks.map { it.id }.toSet()
-        if (knownIds.size != tasks.size) {
-            return ToolResult.Error("pipeline 里存在重复的 id", "INVALID_ARGS")
-        }
-        tasks.forEach { task ->
-            val missing = task.dependsOn - knownIds
-            if (missing.isNotEmpty()) {
-                return ToolResult.Error("任务「${task.id}」依赖了不存在的 id：${missing.joinToString("、")}", "INVALID_ARGS")
-            }
-        }
-
-        val layers = try {
-            pipelineLayers(tasks)
-        } catch (e: IllegalStateException) {
-            return ToolResult.Error("pipeline 的依赖关系无法排序：${e.message}", "INVALID_ARGS")
-        }
-
-        val outputs = mutableMapOf<String, String>()
-        val report = mutableListOf<String>()
-
-        for ((layerIndex, layer) in layers.withIndex()) {
-            overlappingPair(layer)?.let { (a, b) ->
-                return ToolResult.Error(
-                    WriteLease.layerConflictMessage(a.id, a.writePaths, b.id, b.writePaths, context.projectRoot),
-                    "WRITE_CONFLICT"
-                )
-            }
-            if (layer.size > eventBus.maxRunning) {
-                return ToolResult.Error(
-                    "第 ${layerIndex + 1} 层有 ${layer.size} 个任务，超过并发上限 ${eventBus.maxRunning}：" +
-                        "拆成多层（用 dependsOn 串起来）或减少同层任务数",
-                    "TOO_MANY_IN_LAYER"
-                )
-            }
-
-            val spawned = mutableMapOf<String, String>()
-            for (task in layer) {
-                val upstream = task.dependsOn.mapNotNull { dep ->
-                    outputs[dep]?.takeIf { it.isNotBlank() }?.let { "## 上游任务「$dep」的产出\n$it" }
-                }.joinToString("\n\n")
-                val fullPrompt = if (upstream.isEmpty()) task.prompt else "$upstream\n\n---\n\n${task.prompt}"
-
-                val createArgs = buildJsonObject {
-                    put("action", "create")
-                    put("prompt", fullPrompt)
-                    put("description", task.description)
-                    task.agent?.let { put("agent", it) }
-                    task.department?.let { put("department", it) }
-                    task.agentQuery?.let { put("agentQuery", it) }
-                    task.model?.let { put("model", it) }
-                    task.provider?.let { put("provider", it) }
-                    task.writePaths?.let { paths ->
-                        put("writePaths", buildJsonArray { paths.forEach { add(JsonPrimitive(it)) } })
-                    }
-                }
-                val created = createSubagent(createArgs, context)
-                if (created is ToolResult.Error) {
-                    outputs[task.id] = ""
-                    report += "- ${task.id}：派发失败（${created.code}）${created.message}"
-                    continue
-                }
-                val subId = ((created as? ToolResult.Success)?.data as? JsonObject)
-                    ?.get("id")?.let { (it as? JsonPrimitive)?.contentOrNull }
-                if (subId.isNullOrBlank()) {
-                    outputs[task.id] = ""
-                    report += "- ${task.id}：派发后没拿到子会话 id"
-                } else {
-                    spawned[task.id] = subId
-                }
-            }
-            if (spawned.isEmpty()) continue
-
-            val finished = awaitSubAgents(spawned.values.toSet())
-            for ((taskId, subId) in spawned) {
-                val event = finished[subId]
-                outputs[taskId] = readSubagentOutput(subId, context)
-                val verdict = when {
-                    event == null -> if (subId in eventBus.activeSubSessionIds.value) "仍在运行（等待超时）"
-                        else "完成（未捕获结束事件，结论见 read 输出）"
-                    event.type == SubAgentEventType.FAILED -> "失败"
-                    event.accepted == false -> "完成但未通过交付判定"
-                    else -> "完成"
-                }
-                report += "- $taskId：$verdict（子会话 $subId）"
-            }
-        }
-
-        val summary = report.joinToString("\n")
-        return ToolResult.Success(
-            buildJsonObject {
-                put("state", "done")
-                put("layers", layers.size)
-                put("report", summary)
-                // 工作流要拿某层协调者的判定，必须能按任务 id 取回产出；只回 report 文本的话，
-                // 上层只能去解析正则或重新 read 一遍，两条路都脆。
-                put(
-                    "outputs",
-                    buildJsonObject {
-                        outputs.forEach { (taskId, text) ->
-                            put(taskId, text.takeLast(PIPELINE_OUTPUT_TAIL_MAX))
-                        }
-                    }
-                )
-                put(
-                    "message",
-                    "流水线已跑完（共 ${tasks.size} 个任务、${layers.size} 层）：\n$summary\n" +
-                        "各任务产出已按依赖自动传给下游；要看某个任务的完整输出用 task(action=\"read\", id=<子会话 id>)。"
-                )
-            }
-        )
-    }
-
-    /** 等这些子代理全部跑到终态；超时则返回已收到的部分（缺失即「仍在运行」）。 */
-    private suspend fun awaitSubAgents(ids: Set<String>): Map<String, SubAgentEvent> =
-        withTimeoutOrNull(PIPELINE_WAIT_TIMEOUT_MS) {
-            val done = mutableMapOf<String, SubAgentEvent>()
-            // 先回捞已发过的终态：本层刚派发完就结束的子代理，事件早已过去（SharedFlow 无 replay）
-            for (id in ids) eventBus.terminalEvent(id)?.let { done[id] = it }
-            val remaining = ids.filterNot { it in done }.toMutableSet()
-            while (remaining.isNotEmpty()) {
-                // 既不在活跃集合、又没回捞到事件：它在本函数订阅前就结束了，再等也等不到，交给 read 取结论
-                if (remaining.none { it in eventBus.activeSubSessionIds.value }) break
-                val event = eventBus.events.first { it.subSessionId in remaining && it.type.isTerminal() }
-                remaining.remove(event.subSessionId)
-                done[event.subSessionId] = event
-            }
-            done
-        } ?: emptyMap()
-
-    private fun SubAgentEventType.isTerminal(): Boolean =
-        this == SubAgentEventType.COMPLETED || this == SubAgentEventType.FAILED || this == SubAgentEventType.STOPPED
+    private suspend fun runPipeline(args: Map<String, JsonElement>, context: AgentContext): ToolResult =
+        stageExecutor.pipeline(args, context, eventBus, { createSubagent(it, context) }, { readSubagentOutput(it, context) })
 
     /** 读子代理最后输出；复用 read 路径，保证与手动 read 拿到的是同一份结论。 */
     private suspend fun readSubagentOutput(subSessionId: String, context: AgentContext): String {
@@ -355,56 +193,6 @@ class TaskTool @Inject constructor(
         val data = (result as? ToolResult.Success)?.data as? JsonObject
         return (data?.get("lastOutput") as? JsonPrimitive)?.contentOrNull.orEmpty()
     }
-
-    /** 拓扑分层：同层任务互不依赖（可并发）；依赖成环时抛 IllegalStateException。 */
-    private fun pipelineLayers(tasks: List<PipelineTask>): List<List<PipelineTask>> {
-        val byId = tasks.associateBy { it.id }
-        val depth = mutableMapOf<String, Int>()
-        val visiting = mutableSetOf<String>()
-        fun depthOf(id: String): Int {
-            depth[id]?.let { return it }
-            if (!visiting.add(id)) throw IllegalStateException("任务「$id」形成依赖环")
-            val task = byId.getValue(id)
-            val value = if (task.dependsOn.isEmpty()) 0 else task.dependsOn.maxOf { depthOf(it) } + 1
-            visiting.remove(id)
-            depth[id] = value
-            return value
-        }
-        return tasks.groupBy { depthOf(it.id) }.toSortedMap().values.toList()
-    }
-
-    /** 同层里第一对写范围相交的任务；没有则返回 null。 */
-    private fun overlappingPair(layer: List<PipelineTask>): Pair<PipelineTask, PipelineTask>? {
-        for (i in layer.indices) {
-            val a = layer[i].writePaths ?: continue
-            for (j in i + 1 until layer.size) {
-                val b = layer[j].writePaths ?: continue
-                if (WriteLease.overlaps(a, b)) return layer[i] to layer[j]
-            }
-        }
-        return null
-    }
-
-    /** 把 JSON 数组参数读成字符串集合；非数组返回 null（表示「未声明」，与 create 的语义一致）。 */
-    private fun stringSetOf(element: JsonElement?): Set<String>? {
-        val array = element as? JsonArray ?: return null
-        return array.mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.trim() }
-            .filter { it.isNotEmpty() }
-            .toSet()
-    }
-
-    private data class PipelineTask(
-        val id: String,
-        val prompt: String,
-        val description: String,
-        val dependsOn: Set<String>,
-        val writePaths: Set<String>?,
-        val agent: String?,
-        val department: String?,
-        val agentQuery: String?,
-        val model: String?,
-        val provider: String?
-    )
 
     /** 解析 writePaths 参数；未提供返回 null（不登记租约 = 不限制）。 */
     private fun parseWritePaths(args: Map<String, JsonElement>): Set<String>? {
@@ -440,6 +228,11 @@ class TaskTool @Inject constructor(
             )
         }
 
+        val runId = (args["_teamRunId"] as? JsonPrimitive)?.contentOrNull
+        val logicalId = (args["_teamLogicalId"] as? JsonPrimitive)?.contentOrNull
+        if (runId != null && (logicalId == null || !runRegistry.belongs(runId, parentSessionId, logicalId))) {
+            return ToolResult.Error("无效团队任务身份", "INVALID_TEAM_RUN")
+        }
         val prompt = (args["prompt"] as? JsonPrimitive)?.contentOrNull?.trim()
         if (prompt.isNullOrBlank()) {
             return ToolResult.Error("参数无效：prompt 不能为空", "INVALID_ARGS")
@@ -517,10 +310,12 @@ class TaskTool @Inject constructor(
         }
         val subSessionId = subSession.id
 
-        // 团队简报：把同批队友与协作方式接在任务指令前，让分支上的模型知道彼此是一个团队。
-        // 取不到简报时退回原始指令，不影响派发（新增通道失败不拖垮主流程）。
-        val briefing = runCatching { teamBriefing(parentSessionId, subSessionId) }.getOrNull()
-        val detail = if (briefing.isNullOrBlank()) prompt else "$briefing\n\n---\n\n$prompt"
+        val queued = if (runId != null && logicalId != null) runRegistry.bind(runId, logicalId, subSessionId) else {
+            runRegistry.bindStandalone(parentSessionId, subSessionId, description, eventBus.activeSubSessionIds.value)
+            ""
+        }
+        val briefing = if (eventBus.communicationEnabled()) runRegistry.briefing(subSessionId) else ""
+        val detail = "$briefing\n\n$queued\n\n---\n\n$prompt"
 
         // 通知 ViewModel 在子会话上启动 AI 工作流
         eventBus.emit(
@@ -564,12 +359,15 @@ class TaskTool @Inject constructor(
         if (sub.parentId != parentSessionId) {
             return ToolResult.Error("只能向当前会话派生的子代理发消息", "NOT_YOUR_SUBAGENT")
         }
+        if (!runRegistry.canMessage(subSessionId) || eventBus.terminalEvent(subSessionId)?.type == SubAgentEventType.STOPPED) {
+            return ToolResult.Error("用户已停止此任务，普通消息不能重新启动", "TASK_STOPPED")
+        }
 
         eventBus.emit(
             SubAgentEvent(
                 subSessionId = subSessionId,
                 parentSessionId = parentSessionId,
-                type = SubAgentEventType.MESSAGE_FROM_PARENT,
+                type = if (subSessionId in eventBus.activeSubSessionIds.value) SubAgentEventType.MESSAGE_FROM_PARENT else SubAgentEventType.SPAWNED,
                 detail = message
             )
         )
@@ -687,6 +485,7 @@ class TaskTool @Inject constructor(
                 type = SubAgentEventType.STOPPED
             )
         )
+        runRegistry.terminal(subSessionId, "stopped")
         subAgentWriteLease.release(subSessionId)
         return ToolResult.Success(
             buildJsonObject {
@@ -718,6 +517,7 @@ class TaskTool @Inject constructor(
             )
         }
         subAgentWriteLease.release(subSessionId)
+        runRegistry.terminal(subSessionId, "deleted")
         sessionUseCase.deleteSession(subSessionId)
         FileLogger.i(TAG, "子代理已删除: session=$subSessionId parent=${context.sessionId}")
         return ToolResult.Success(
@@ -774,80 +574,35 @@ class TaskTool @Inject constructor(
      * 新子代理的团队简报：列出同批队友（同父会话的其它子代理）与协作方式，
      * 让分支上的模型知道彼此是一个团队、可以互相交流。
      */
-    private suspend fun teamBriefing(parentSessionId: String, selfId: String): String {
-        val siblings = chatSessionDao.getSubSessionsByParentOnce(parentSessionId).filter { it.id != selfId }
-        val activeIds = eventBus.activeSubSessionIds.value
-        val lines = mutableListOf(
-            "## 团队协作",
-            "你与同一父会话派出的其它子代理是一个团队，可以互相交流、分工协作。"
-        )
-        if (siblings.isEmpty()) {
-            lines += "当前还没有其它队友（后继可能加入）。"
-        } else {
-            lines += "当前队友："
-            siblings.take(TEAM_ROSTER_LIMIT).forEach { s ->
-                val role = s.subagentType?.takeIf { it.isNotBlank() }?.let { "$it，" }.orEmpty()
-                lines += "- $role${s.title}（${if (s.id in activeIds) "运行中" else "已完成"}，id=${s.id}）"
-            }
-        }
-        lines += SubAgentCommGate.briefingLine(eventBus.communicationEnabled())
-        return lines.joinToString("\n")
-    }
-
-    /** 列出同批队友（同父会话的其它子代理）：谁在跑、各自负责任务与角色。主会话无父，返回提示。 */
     private suspend fun listTeam(context: AgentContext): ToolResult {
-        val selfId = context.sessionId ?: return ToolResult.Error("缺少会话上下文", "NO_SESSION")
-        val parentId = sessionUseCase.getSessionById(selfId)?.parentId
-            ?: return ToolResult.Error("当前是主会话，没有同批队友；查看派出的子代理请用 action=\"list\"。", "NO_PARENT")
-        val activeIds = eventBus.activeSubSessionIds.value
-        val teammates = chatSessionDao.getSubSessionsByParentOnce(parentId).filter { it.id != selfId }
-            .take(TEAM_ROSTER_LIMIT).map { entity ->
-                buildJsonObject {
-                    put("id", entity.id)
-                    put("title", entity.title)
-                    put("role", entity.subagentType ?: "")
-                    put("state", if (entity.id in activeIds) "running" else "completed")
-                }
-            }
-        return ToolResult.Success(
-            buildJsonObject {
-                put("parent", parentId)
-                put("teammates", buildJsonArray { teammates.forEach { add(it) } })
-                put("count", teammates.size)
-                put(
-                    "message",
-                    if (teammates.isEmpty()) "当前没有其它队友。"
-                    else "给队友发消息用 task(action=\"tell\", id=\"<队友 id>\", message=\"…\")。"
-                )
-            }
-        )
+        val self = context.sessionId ?: return ToolResult.Error("缺少会话上下文", "NO_SESSION")
+        val roster = runRegistry.roster(self)
+        return ToolResult.Success(buildJsonObject {
+            put("content", runRegistry.briefing(self))
+            put("teammates", JsonArray(roster))
+            put("count", roster.size)
+        })
     }
 
-    /** 向同父且活跃的队友发消息；预算与长度统一由总线判定，不唤醒已结束成员。 */
     private suspend fun tellSibling(args: Map<String, JsonElement>, context: AgentContext): ToolResult {
-        val selfId = context.sessionId ?: return ToolResult.Error("缺少会话上下文", "NO_SESSION")
-        val targetId = (args["id"] as? JsonPrimitive)?.contentOrNull?.trim()
-            ?: return ToolResult.Error("参数无效：id 不能为空", "INVALID_ARGS")
-        val message = (args["message"] as? JsonPrimitive)?.contentOrNull?.trim()
-        if (message.isNullOrBlank()) return ToolResult.Error("参数无效：message 不能为空", "INVALID_ARGS")
-        if (targetId == selfId) return ToolResult.Error("不能给自己发消息", "INVALID_ARGS")
-        val parentId = sessionUseCase.getSessionById(selfId)?.parentId
-            ?: return ToolResult.Error("当前是主会话，没有同批队友；向子代理发消息请用 action=\"send\"。", "NO_PARENT")
-        val target = sessionUseCase.getSessionById(targetId)
-            ?: return ToolResult.Error("队友会话不存在: $targetId", "SESSION_NOT_FOUND")
-        if (target.parentId != parentId) {
-            return ToolResult.Error("$targetId 不是你的队友（不在同一父会话下）；用 action=\"team\" 查看队友。", "NOT_SIBLING")
+        val self = context.sessionId ?: return ToolResult.Error("缺少会话上下文", "NO_SESSION")
+        val target = (args["id"] as? JsonPrimitive)?.contentOrNull?.trim().orEmpty()
+        val message = (args["message"] as? JsonPrimitive)?.contentOrNull?.trim().orEmpty()
+        if (target.isBlank() || message.isBlank() || message.codePointCount(0, message.length) > SubAgentEventBus.SIBLING_MESSAGE_MAX) {
+            return ToolResult.Error("tell 需要 id 与 1~300 Unicode码点 message", "INVALID_ARGS")
         }
-        eventBus.registerSibling(selfId, parentId); eventBus.registerSibling(targetId, parentId)
-        val result = eventBus.sendToSiblingResult(selfId, targetId, message)
-        FileLogger.i(TAG, "子代理向队友发消息: from=$selfId to=$targetId result=$result")
-        return SubAgentCommGate.messageResult(targetId, result)
+        var result: SubAgentEventBus.SiblingSendResult? = null
+        val delivery = runRegistry.route(self, target, message) { to ->
+            result = eventBus.sendToSiblingResult(self, to, message)
+            result == SubAgentEventBus.SiblingSendResult.SENT || result == SubAgentEventBus.SiblingSendResult.DUPLICATE
+        }
+        result?.let { return SubAgentCommGate.messageResult(target, it) }
+        if (delivery.state !in setOf("queued", "duplicate")) {
+            return ToolResult.Error("成员通信被拒绝：${delivery.state}；预算耗尽或目标已结束时不要重试，交回主代理。", "SIBLING_${delivery.state.uppercase()}")
+        }
+        return ToolResult.Success(buildJsonObject { put("state", delivery.state); put("to", target) })
     }
 
-    /**
-     * 角色能力摘要：直接列出该角色的可用工具，并点明「只读」「不能执行命令」这两个最常踩的边界——
-     * 常驻索引里只有角色名与一句用途，主代理无从知道 Explore 这类角色不能改文件、不能跑命令。
-     */
     private fun roleToolSummary(definition: AgentDefinition): String {
         val allowed = definition.allowedTools
         val disallowed = definition.disallowedTools
@@ -925,7 +680,7 @@ class TaskTool @Inject constructor(
                 runPipeline(buildJsonObject { put("pipeline", pipeline) }, context)
             }
         } else {
-            teamTasks.run(args) { pipeline ->
+            teamTasks.run(args, context.sessionId.orEmpty()) { pipeline ->
                 runPipeline(buildJsonObject { put("pipeline", pipeline) }, context)
             }
         }

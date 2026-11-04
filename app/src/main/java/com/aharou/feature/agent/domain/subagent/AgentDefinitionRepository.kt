@@ -53,23 +53,39 @@ class AgentDefinitionRepository @Inject constructor(
      * 写入定义文件（新建或编辑）。[originalName] 为编辑前的名称，新建时传 null；
      * 改了名就写新文件再删旧文件，等价于重命名。返回 null 表示成功。
      */
-    @Synchronized
     fun save(
         form: AgentDefinitionForm,
         scope: AgentDefinitionScope,
         originalName: String? = null,
         requireExisting: Boolean = false
-    ): AgentSaveError? {
+    ): AgentSaveError? = synchronized(com.aharou.feature.agent.domain.skill.SkillParser) {
         val name = form.name.trim()
-        if (!isValidName(name)) return AgentSaveError.INVALID_NAME
-        if (form.prompt.isBlank()) return AgentSaveError.EMPTY_PROMPT
+        if (!isValidName(name)) return@synchronized AgentSaveError.INVALID_NAME
+        if (form.prompt.isBlank()) return@synchronized AgentSaveError.EMPTY_PROMPT
+        if (form.skills.isNotEmpty()) {
+            try {
+                val effective = linkedMapOf<String, com.aharou.feature.agent.domain.skill.Skill>()
+                AgentDefinitionScope.entries.forEach { sourceScope ->
+                    val root = agentsRoot(sourceScope).trimEnd('/').removeSuffix("/agents") + "/skills"
+                    if (fileAccess.isDirectory(root)) fileAccess.listFiles(root).filter { it.isDirectory }.forEach { dir ->
+                        com.aharou.feature.agent.domain.skill.SkillParser.parse(fileAccess, "$root/${dir.name}", "en")?.let {
+                            effective[it.name.lowercase()] = it
+                        }
+                    }
+                }
+                if (form.skills.any { effective[it.lowercase()]?.keywordEnabled == true }) return@synchronized AgentSaveError.IO_FAILED
+            } catch (e: Exception) {
+                FileLogger.e(TAG, "校验技能绑定失败", e)
+                return@synchronized AgentSaveError.IO_FAILED
+            }
+        }
 
         val overwritingSelf = originalName != null && originalName.equals(name, ignoreCase = true)
         if (!overwritingSelf) {
             val taken = listAll().any {
                 it.scope == scope && it.definition.name.equals(name, ignoreCase = true)
             }
-            if (taken) return AgentSaveError.NAME_CONFLICT
+            if (taken) return@synchronized AgentSaveError.NAME_CONFLICT
         }
 
         val existingFile = originalName?.let { old ->
@@ -95,12 +111,12 @@ class AgentDefinitionRepository @Inject constructor(
             prompt = form.prompt
         )
 
-        return try {
+        return@synchronized try {
             // 名字未改时写回原文件，不能按 name 重拼文件名：内置 Explore 的文件叫 explore.md
             // 而 frontmatter 里写的是 Explore，重拼会在大小写敏感的文件系统上多出一份 Explore.md。
             val target = if (requireExisting) {
                 existingFile?.takeIf { overwritingSelf && provider.isFile(it) }
-                    ?: return AgentSaveError.IO_FAILED
+                    ?: return@synchronized AgentSaveError.IO_FAILED
             } else {
                 existingFile?.takeIf { overwritingSelf && provider.isFile(it) }
                     ?: "${root.trimEnd('/')}/$name.md"
@@ -119,20 +135,19 @@ class AgentDefinitionRepository @Inject constructor(
         }
     }
 
-    @Synchronized
     fun setSkillBinding(
         name: String,
         scope: AgentDefinitionScope,
         skillName: String,
         bound: Boolean
-    ): AgentSaveError? {
+    ): AgentSaveError? = synchronized(com.aharou.feature.agent.domain.skill.SkillParser) {
         val definition = listAll().firstOrNull {
             it.scope == scope && it.definition.name.equals(name, ignoreCase = true)
-        }?.definition ?: return AgentSaveError.IO_FAILED
+        }?.definition ?: return@synchronized AgentSaveError.IO_FAILED
         val skills = definition.skills.filterNot { it.equals(skillName, ignoreCase = true) }
             .let { if (bound) it + skillName else it }
-        if (skills == definition.skills) return null
-        return save(
+        if (skills == definition.skills) return@synchronized null
+        return@synchronized save(
             AgentDefinitionForm(
                 name = definition.name,
                 description = definition.description,
@@ -154,15 +169,14 @@ class AgentDefinitionRepository @Inject constructor(
     }
 
     /** 删除指定作用域的定义文件，不可恢复。返回是否成功。 */
-    @Synchronized
-    fun delete(name: String, scope: AgentDefinitionScope): Boolean {
+    fun delete(name: String, scope: AgentDefinitionScope): Boolean = synchronized(com.aharou.feature.agent.domain.skill.SkillParser) {
         val entry = listAll().firstOrNull {
             it.definition.name.equals(name, ignoreCase = true) && it.scope == scope
-        } ?: return false
-        val filePath = entry.definition.filePath ?: return false
+        } ?: return@synchronized false
+        val filePath = entry.definition.filePath ?: return@synchronized false
         val provider = fileAccess
-        if (!provider.isFile(filePath)) return false
-        return runCatching { provider.delete(filePath); true }.getOrDefault(false)
+        if (!provider.isFile(filePath)) return@synchronized false
+        return@synchronized runCatching { provider.delete(filePath); true }.getOrDefault(false)
     }
 
     /** 指定作用域的定义目录（容器路径）。 */

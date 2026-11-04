@@ -42,6 +42,8 @@ class ToolPermissionPolicyEngineTest {
         val t = mockk<AgentTool>(relaxed = true)
         every { t.capabilities } returns caps.toSet()
         every { t.effectiveCapabilities(any()) } returns caps.toSet()
+        // 普通工具沿用真实的 null 默认值，避免 relaxed mock 的空字符串误入动态脚本双重鉴权。
+        every { t.permissionCommand(any()) } answers { callOriginal() }
         return t
     }
 

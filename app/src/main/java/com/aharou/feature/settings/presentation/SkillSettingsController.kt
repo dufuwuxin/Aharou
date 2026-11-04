@@ -152,6 +152,8 @@ class SkillSettingsController @Inject constructor(
                         disabled = entry.skill.name.lowercase() in disabled,
                         instructions = entry.skill.instructions,
                         requiredTools = entry.skill.requiredTools,
+                    keywordEnabled = entry.skill.keywordEnabled,
+                    keywords = entry.skill.keywords,
                         builtin = entry.scope == SkillScope.BUILTIN
                     )
                 }
@@ -160,6 +162,11 @@ class SkillSettingsController @Inject constructor(
     }
 
     /** 切换技能的启用/禁用状态（写入对应作用域的 skills.json）。 */
+    suspend fun setSkillKeywords(entry: SkillUiEntry, enabled: Boolean, words: List<String>, confirmed: Boolean) {
+        withContext(Dispatchers.IO) { skillRepository.setKeywordPolicy(entry.name, entry.scope, enabled, words, confirmed) }
+        refreshSkills()
+    }
+
     fun setSkillEnabled(name: String, enabled: Boolean, scope: SkillScope) {
         this.scope.launch {
             withContext(Dispatchers.IO) { skillRepository.setSkillDisabled(name, !enabled, scope) }

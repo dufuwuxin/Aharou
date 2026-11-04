@@ -2,6 +2,7 @@ package com.aharou.feature.settings.presentation.component
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -9,6 +10,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -17,6 +19,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -24,6 +27,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -39,6 +44,7 @@ import com.aharou.R
 import com.aharou.core.theme.Spacing
 import com.aharou.core.theme.semanticColors
 import com.aharou.core.ui.AppTextField
+import com.aharou.core.ui.dialogTextFieldColors
 import com.aharou.feature.settings.presentation.KnowledgeBaseStatus
 import com.aharou.feature.settings.presentation.KnowledgeBaseViewModel
 
@@ -53,6 +59,8 @@ import com.aharou.feature.settings.presentation.KnowledgeBaseViewModel
 internal fun KnowledgeBaseSection(
     viewModel: KnowledgeBaseViewModel = hiltViewModel()
 ) {
+    var showLocalDialog by remember { mutableStateOf(false) }
+    var documentSource by remember { mutableStateOf<String?>(null) }
     var repoInput by remember { mutableStateOf("") }
     var category by remember { mutableStateOf<String?>(null) }
     // per-app 语言下进程 Locale 未必跟着 App 走，取配置里的语言才准
@@ -66,6 +74,24 @@ internal fun KnowledgeBaseSection(
         if (category == null) sources else sources.filter { it.definition.category == category }
     }
 
+    val coroutineScope = rememberCoroutineScope()
+    if (showLocalDialog) {
+        LocalKnowledgeDialog(
+            saving = viewModel.localSaving,
+            addingDocument = documentSource != null,
+            error = viewModel.localError,
+            onDismiss = { showLocalDialog = false; viewModel.clearLocalError() },
+            onSave = { name, description, path, markdown ->
+                coroutineScope.launch {
+                    val id = documentSource
+                    val saved = if (id == null) viewModel.createLocal(name, description, markdown)
+                        else viewModel.addLocalDocument(id, path, markdown)
+                    if (saved) { showLocalDialog = false; category = null }
+                }
+            }
+        )
+    }
+
     Column(modifier = Modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
@@ -74,6 +100,17 @@ internal fun KnowledgeBaseSection(
                 .padding(top = Spacing.sm),
             verticalArrangement = Arrangement.spacedBy(Spacing.sm)
         ) {
+            TextButton(onClick = {
+                documentSource = null
+                viewModel.clearLocalError()
+                showLocalDialog = true
+            }) { Text(stringResource(R.string.knowledge_local_create)) }
+            if (!showLocalDialog && viewModel.localError != null) {
+                Text(
+                    stringResource(R.string.knowledge_local_error, viewModel.localError.orEmpty()),
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
             if (categories.isNotEmpty()) {
                 Row(
                     modifier = Modifier
@@ -109,12 +146,12 @@ internal fun KnowledgeBaseSection(
                     singleLine = true,
                     isError = status == KnowledgeBaseStatus.InvalidRepo,
                     keyboardActions = KeyboardActions(onDone = {
-                        if (viewModel.addSource(repoInput)) repoInput = ""
+                        coroutineScope.launch { if (viewModel.addSource(repoInput)) repoInput = "" }
                     })
                 )
                 TextButton(
-                    onClick = { if (viewModel.addSource(repoInput)) repoInput = "" },
-                    enabled = repoInput.isNotBlank()
+                    onClick = { coroutineScope.launch { if (viewModel.addSource(repoInput)) repoInput = "" } },
+                    enabled = !viewModel.localSaving && repoInput.isNotBlank()
                 ) {
                     Text(stringResource(R.string.knowledge_base_add))
                 }
@@ -160,6 +197,12 @@ internal fun KnowledgeBaseSection(
                         working = busyId == source.id,
                         blocked = busyId != null && busyId != source.id,
                         custom = source.custom,
+                        local = source.definition.isLocal,
+                        onAddDocument = {
+                            documentSource = source.id
+                            viewModel.clearLocalError()
+                            showLocalDialog = true
+                        },
                         onInstall = { viewModel.install(source.id) },
                         onUpdate = { viewModel.install(source.id) },
                         onUninstall = { viewModel.uninstall(source.id) },
@@ -170,6 +213,62 @@ internal fun KnowledgeBaseSection(
             }
         }
     }
+}
+
+@Composable
+private fun LocalKnowledgeDialog(
+    saving: Boolean,
+    addingDocument: Boolean,
+    error: String?,
+    onDismiss: () -> Unit,
+    onSave: (String, String, String, String) -> Unit
+) {
+    var name by remember { mutableStateOf("") }
+    var description by remember { mutableStateOf("") }
+    var path by remember { mutableStateOf("") }
+    var markdown by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = { if (!saving) onDismiss() },
+        modifier = Modifier.imePadding(),
+        title = { Text(stringResource(if (addingDocument) R.string.knowledge_local_add_document else R.string.knowledge_local_create)) },
+        text = {
+            Column(
+                Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(Spacing.sm)
+            ) {
+                if (addingDocument) {
+                    AppTextField(
+                        value = path, onValueChange = { path = it },
+                        label = stringResource(R.string.knowledge_local_path), colors = dialogTextFieldColors()
+                    )
+                } else {
+                    AppTextField(
+                        value = name, onValueChange = { name = it },
+                        label = stringResource(R.string.knowledge_local_name), colors = dialogTextFieldColors()
+                    )
+                    AppTextField(
+                        value = description, onValueChange = { description = it },
+                        label = stringResource(R.string.knowledge_local_description), colors = dialogTextFieldColors()
+                    )
+                }
+                AppTextField(
+                    value = markdown, onValueChange = { markdown = it },
+                    label = stringResource(R.string.knowledge_local_markdown),
+                    singleLine = false, minLines = 5, maxLines = 10, colors = dialogTextFieldColors()
+                )
+                if (error != null) Text(
+                    stringResource(R.string.knowledge_local_error, error), color = MaterialTheme.colorScheme.error
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = !saving && markdown.isNotBlank() && (if (addingDocument) path.isNotBlank() else name.isNotBlank()),
+                onClick = { onSave(name, description, path, markdown) }
+            ) { Text(stringResource(R.string.knowledge_local_save)) }
+        },
+        dismissButton = { TextButton(enabled = !saving, onClick = onDismiss) { Text(stringResource(R.string.knowledge_local_cancel)) } }
+    )
 }
 
 /**
@@ -186,6 +285,8 @@ private fun KnowledgeRow(
     working: Boolean,
     blocked: Boolean,
     custom: Boolean,
+    local: Boolean,
+    onAddDocument: () -> Unit,
     onInstall: () -> Unit,
     onUpdate: () -> Unit,
     onUninstall: () -> Unit,
@@ -216,6 +317,9 @@ private fun KnowledgeRow(
                     overflow = TextOverflow.Ellipsis
                 )
             }
+            if (local) {
+                Text(stringResource(R.string.knowledge_local_source), style = MaterialTheme.typography.labelSmall)
+            }
             if (installed) {
                 Text(
                     text = stringResource(R.string.knowledge_base_installed_meta, docCount),
@@ -230,6 +334,9 @@ private fun KnowledgeRow(
         Spacer(modifier = Modifier.width(Spacing.sm))
 
         when {
+            local -> TextButton(onClick = onAddDocument, enabled = !blocked) {
+                Text(stringResource(R.string.knowledge_local_add_document))
+            }
             working -> Text(
                 text = stringResource(R.string.knowledge_base_installing),
                 style = MaterialTheme.typography.labelMedium,

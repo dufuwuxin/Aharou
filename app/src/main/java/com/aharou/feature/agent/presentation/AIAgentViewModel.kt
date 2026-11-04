@@ -2601,7 +2601,7 @@ class AIAgentViewModel @Inject constructor(
      */
     private fun clearDeletedSessionState(sessionId: String) {
         clearSessionRuntimeState(sessionId)
-        subAgentEventBus.release(sessionId)
+        subAgentEventBus.releaseStopped(sessionId)
         // 先清队列再 cancel：cancel 可能在调用栈内同步跑 finally → flushPendingNotifications，
         // 队列已空才会直接返回，不为已删会话再起一轮。
         agentNotificationCenter.clear(sessionId)
@@ -2623,7 +2623,7 @@ class AIAgentViewModel @Inject constructor(
     private fun releaseStoppedSubAgent(sessionId: String) {
         // TaskTool 的 stop 已在 emit(STOPPED) 时释放过、del 走 DELETED 分支（不经过这里），
         // 那些路径下 release 返回 false，不会重复通知。
-        if (!subAgentEventBus.release(sessionId)) return
+        if (!subAgentEventBus.releaseStopped(sessionId)) return
         viewModelScope.launch {
             val sub = sessionUseCase.getSessionById(sessionId)
             val parentId = sub?.parentId
@@ -2942,7 +2942,7 @@ class AIAgentViewModel @Inject constructor(
         // 删掉运行中的子代理时先取它的父会话与标题（删库后就取不到了），稍后告知父代理。
         // 删的是父会话时无需通知（父会话本身也没了），但级联删掉的子会话仍要交回并发槽位。
         val deletedSession = sessionUseCase.getSessionById(id)
-        val stoppedSubAgent = deletedSession?.takeIf { it.parentId != null && subAgentEventBus.release(id) }
+        val stoppedSubAgent = deletedSession?.takeIf { it.parentId != null && subAgentEventBus.releaseStopped(id) }
 
         checkpointManager.clearSessionCheckpoints(id)
         val deletedIds = sessionUseCase.deleteSession(id)

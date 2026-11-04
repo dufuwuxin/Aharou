@@ -72,7 +72,7 @@
 
 ## 5. 技能
 
-技能详情页支持为同一技能选择多个成员，成员编辑页仅展示绑定结果。界面通过 `AgentDefinitionRepository.setSkillBinding` 修改原作用域的成员定义；agent 可用文件工具编辑该成员定义中的 `skills` 列表，无新增专用工具。关键词注入仍属于成员配置。
+技能详情页支持为同一技能选择多个成员，成员编辑页仅展示绑定结果。界面通过 `AgentDefinitionRepository.setSkillBinding` 修改原作用域的成员定义；agent 可用文件工具编辑该成员定义中的 `skills` 列表，无新增专用工具。绑定成员默认折叠；专属技能只向绑定角色提供名称与简介。技能关键词公共模式与成员绑定互斥，config 的 skills 集合可读写 keyword_enabled 和 keywords。
 
 | 用户能做什么 | 界面入口（file:line） | Agent 有对应工具吗 | 工具名与入口（file:line） | 差距说明 |
 |---|---|---|---|---|
@@ -239,3 +239,9 @@
 - 自定义工具与覆盖项作为文件资产可由 agent 的文件工具读写：全局 `~/.aharou/tools/`、项目 `.aharou/tools/`；在每轮工具构建前刷新，不需要新增标量 config 字段。
 - 每轮工具集先做成员允许清单，再做 every_round/keyword/off 注入过滤和描述覆盖；该过滤不是执行权限撤销。
 - 智能托管的设置和状态按会话隔离；界面设置与 `config get/set steward.sessions.<id>.enabled|max_loops|unlimited` 接入同一控制器。全局旧托管路径由显式会话路径取代，避免修改其他会话。
+
+## 本地知识库补充
+
+用户可在知识库页创建本地库并追加 Markdown，保存后立即进入现有检索范围。Agent 对应 `config` 的 `knowledge.local`（创建/移除）和 `knowledge.documents`（追加），检索仍用 `knowledge_search`。移除会删除本地文档，必须遵循删除授权。
+
+规则、记忆、提示词页面已补职责说明；提示词编辑页明确多条件 OR，不改变既有配置。

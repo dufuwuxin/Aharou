@@ -64,11 +64,9 @@ class LoadSkillTool @Inject constructor(
         }
         val agentDef = context?.agentDefinition
         // 子代理：允许加载的 = 该角色专属绑定的技能 + 全部公共技能；主代理：全量公共技能。
-        val allowed = if (agentDef != null) {
-            skillRepository.listSkillsForAgent(agentDef).map { it.name }.toSet()
-        } else {
-            skillRepository.listSkills().map { it.name }.toSet()
-        }
+        val allowed = skillRepository.listSkillsForAgent(agentDef, context?.currentUserText.orEmpty(),
+            agentDef?.let { com.aharou.feature.agent.domain.subagent.InjectPart.SKILLS in it.inject } ?: true
+        ).map { it.name }.toSet()
         if (skillName !in allowed) {
             FileLogger.w(TAG, "loadSkill 被拒（不在可见范围）: $skillName，允许: $allowed")
             return ToolResult.Error(
@@ -76,7 +74,8 @@ class LoadSkillTool @Inject constructor(
                 "SKILL_NOT_ALLOWED"
             )
         }
-        val instructions = skillRepository.loadInstructions(skillName)
+        val instructions = skillRepository.loadInstructionsForAgent(skillName, agentDef, context?.currentUserText.orEmpty(),
+            agentDef?.let { com.aharou.feature.agent.domain.subagent.InjectPart.SKILLS in it.inject } ?: true)
         if (instructions == null) {
             val available = allowed.joinToString(", ")
             FileLogger.w(TAG, "load_skill 未找到: $skillName，可用: $available")

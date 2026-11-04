@@ -17,7 +17,7 @@ import kotlinx.serialization.json.put
  */
 internal object SubAgentCommGate {
 
-    private const val LIMIT_HINT = "仅限同父活跃成员；每次运行总发送最多4条、每个有向成员对最多2条，单条最多300 Unicode code points；重复内容不投递、不计预算，已结束队友不唤醒。"
+    private const val LIMIT_HINT = "仅限同批任务；活跃成员直投，未启动任务可限额留言；每次运行总发送最多4条、每个有向成员对最多2条，单条最多300 Unicode code points；直投与留言共用预算，重复不发、不计预算，已结束队友不唤醒。"
 
     fun messageResult(targetId: String, result: SiblingSendResult): ToolResult =
         if (result == SiblingSendResult.SENT || result == SiblingSendResult.DUPLICATE) {

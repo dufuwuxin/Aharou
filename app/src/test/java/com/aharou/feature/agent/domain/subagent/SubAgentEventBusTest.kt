@@ -171,6 +171,46 @@ class SubAgentEventBusTest {
     }
 
     @Test
+    fun userStop_blocksMessagesButNormalReleaseDoesNot() {
+        val registry = com.aharou.feature.agent.domain.tool.subagent.TeamRunRegistry()
+        val bus = SubAgentEventBus(MaxRunningSource { 5 }, CommunicationEnabledSource { true }, registry)
+        spawn(bus, "stopped")
+        assertTrue(bus.releaseStopped("stopped"))
+        assertFalse(registry.canMessage("stopped"))
+        spawn(bus, "normal")
+        assertTrue(bus.release("normal"))
+        assertTrue(registry.canMessage("normal"))
+    }
+
+    @Test
+    fun siblingMessage_keepsRunIsolationAndRegistryDeliveryCallback() {
+        val registry = com.aharou.feature.agent.domain.tool.subagent.TeamRunRegistry()
+        val bus = SubAgentEventBus(MaxRunningSource { 5 }, CommunicationEnabledSource { true }, registry)
+        val tasks = kotlinx.serialization.json.buildJsonArray {
+            add(kotlinx.serialization.json.buildJsonObject { put("id", kotlinx.serialization.json.JsonPrimitive("first")) })
+            add(kotlinx.serialization.json.buildJsonObject { put("id", kotlinx.serialization.json.JsonPrimitive("second")) })
+        }
+        val run = registry.begin("parent", tasks)
+        val other = registry.begin("parent", tasks)
+        registry.bind(run, "first", "a"); registry.bind(run, "second", "b")
+        registry.bind(other, "first", "c")
+        listOf("a", "b", "c").forEach { spawn(bus, it) }
+        assertFalse(bus.sendToSibling("a", "c", "cross run"))
+        assertFalse(bus.canReceiveSiblingMessage("a", "c"))
+        assertEquals("delivered", registry.route("a", "second", "same run") { to ->
+            bus.sendToSibling("a", to, "same run")
+        }.state)
+        bus.release("b")
+        assertEquals("unavailable", registry.route("a", "second", "retry") { to ->
+            bus.sendToSibling("a", to, "retry")
+        }.state)
+        spawn(bus, "b")
+        assertEquals("delivered", registry.route("a", "second", "retry") { to ->
+            bus.sendToSibling("a", to, "retry")
+        }.state)
+    }
+
+    @Test
     fun spawn_marksActive() {
         val bus = busWith()
         spawn(bus, "sub-1")

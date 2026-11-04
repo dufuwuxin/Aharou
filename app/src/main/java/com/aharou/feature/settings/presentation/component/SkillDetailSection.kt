@@ -14,6 +14,17 @@ import androidx.compose.material3.MaterialTheme
 import com.aharou.core.ui.AppSwitch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.AlertDialog
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.hilt.navigation.compose.hiltViewModel
+import com.aharou.core.ui.AppTextField
+import com.aharou.feature.settings.presentation.SettingsViewModel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -49,8 +60,61 @@ internal fun SkillDetailSection(
     members: List<SubAgentUiEntry> = emptyList(),
     bindingSaveState: SkillBindingSaveState = SkillBindingSaveState(),
     onSetMemberBinding: (SubAgentUiEntry, Boolean) -> Unit,
-    onOpenMember: (SubAgentUiEntry) -> Unit
+    onOpenMember: (SubAgentUiEntry) -> Unit,
+    viewModel: SettingsViewModel = hiltViewModel()
 ) {
+    var membersExpanded by remember(entry.name) { mutableStateOf(false) }
+    var keywordEnabled by remember(entry.name, entry.keywordEnabled) { mutableStateOf(entry.keywordEnabled) }
+    var keywords by remember(entry.name, entry.keywords) { mutableStateOf(entry.keywords) }
+    var showKeywords by remember(entry.name) { mutableStateOf(false) }
+    var draft by remember(entry.name) { mutableStateOf("") }
+    var confirmUnbind by remember(entry.name) { mutableStateOf(false) }
+    var keywordSaving by remember(entry.name) { mutableStateOf(false) }
+    var keywordError by remember(entry.name) { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
+    val boundCount = members.count { member -> member.skills.any { it.equals(entry.name, true) } }
+    fun persistKeywords(enabled: Boolean, words: List<String>, confirmed: Boolean) {
+        keywordSaving = true
+        coroutineScope.launch {
+            try {
+                viewModel.setSkillKeywords(entry, enabled, words, confirmed)
+                keywordEnabled = enabled
+                keywords = words
+                showKeywords = false
+                keywordError = false
+            } catch (e: CancellationException) { throw e }
+            catch (_: Exception) { keywordError = true }
+            finally { keywordSaving = false }
+        }
+    }
+    if (showKeywords) {
+        val words = draft.split(Regex("[,，\\n]")).map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+        AlertDialog(
+            onDismissRequest = { if (!keywordSaving) showKeywords = false },
+            title = { Text(stringResource(R.string.skills_keyword_title)) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                    Text(stringResource(R.string.skills_keyword_hint))
+                    AppTextField(value = draft, onValueChange = { draft = it }, singleLine = false)
+                    if (boundCount > 0) {
+                        Text(stringResource(R.string.skills_keyword_unbind, boundCount))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(stringResource(R.string.skills_keyword_confirm), Modifier.weight(1f))
+                            AppSwitch(checked = confirmUnbind, onCheckedChange = { confirmUnbind = it })
+                        }
+                    }
+                    if (keywordError) Text(stringResource(R.string.skills_keyword_error), color = MaterialTheme.colorScheme.error)
+                }
+            },
+            confirmButton = {
+                TextButton(enabled = !keywordSaving && words.isNotEmpty() && (boundCount == 0 || confirmUnbind),
+                    onClick = { persistKeywords(true, words, confirmUnbind) }) { Text(stringResource(R.string.common_save)) }
+            },
+            dismissButton = {
+                TextButton(enabled = !keywordSaving, onClick = { showKeywords = false }) { Text(stringResource(R.string.common_cancel)) }
+            }
+        )
+    }
     val bindingState = bindingSaveState.state.takeIf {
         it is SubAgentSaveState.Saving || bindingSaveState.skillName == entry.name
     } ?: SubAgentSaveState.Idle
@@ -124,72 +188,95 @@ internal fun SkillDetailSection(
         }
 
         if (!entry.builtin) {
-            SettingsGroupHeader(text = stringResource(R.string.skills_bound_members))
             SettingsGroup {
-                Text(
-                    text = stringResource(R.string.skills_bound_members_hint),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.semanticColors.subtleText,
-                    modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.sm)
-                )
-                if (bindingState is SubAgentSaveState.Failed) {
-                    Text(
-                        text = stringResource(R.string.skills_binding_failed),
-                        color = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.sm)
-                    )
+                Row(Modifier.fillMaxWidth().padding(horizontal = Spacing.lg, vertical = Spacing.md), verticalAlignment = Alignment.CenterVertically) {
+                    Text(stringResource(R.string.skills_keyword_title), Modifier.weight(1f))
+                    AppSwitch(checked = keywordEnabled, enabled = !keywordSaving, onCheckedChange = { enabled ->
+                        keywordError = false
+                        if (enabled) {
+                            draft = keywords.joinToString(", ")
+                            confirmUnbind = false
+                            showKeywords = true
+                        } else persistKeywords(false, keywords, false)
+                    })
                 }
-                if (members.isEmpty()) {
+                if (keywordEnabled) TextButton(enabled = !keywordSaving, onClick = {
+                    draft = keywords.joinToString(", "); confirmUnbind = false; showKeywords = true
+                }) { Text(keywords.joinToString(", ")) }
+                if (keywordError && !showKeywords) Text(stringResource(R.string.skills_keyword_error), color = MaterialTheme.colorScheme.error)
+            }
+            SettingsGroup {
+                SettingsRow(title = stringResource(R.string.skills_keyword_members, boundCount),
+                    onClick = { membersExpanded = !membersExpanded })
+            }
+            if (membersExpanded) {
+                SettingsGroup {
                     Text(
-                        text = stringResource(R.string.skills_bound_members_empty),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.semanticColors.subtleText,
-                        modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.sm)
-                    )
-                } else {
-                    members.forEachIndexed { index, member ->
-                        if (index > 0) SettingsDivider()
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = Spacing.lg, vertical = Spacing.sm),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(Spacing.md)
-                        ) {
-                            Column(
-                                modifier = Modifier.weight(1f).clickable(
-                                    enabled = bindingState !is SubAgentSaveState.Saving
-                                ) { onOpenMember(member) }
-                            ) {
-                                Text(
-                                    text = member.name,
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Text(
-                                    text = member.description.ifBlank { stringResource(R.string.mcp_no_description) },
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.semanticColors.subtleText,
-                                    maxLines = 1,
-                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                                )
-                            }
-                            AppSwitch(
-                                checked = member.skills.any { it.equals(entry.name, ignoreCase = true) },
-                                onCheckedChange = { onSetMemberBinding(member, it) },
-                                enabled = bindingState !is SubAgentSaveState.Saving
-                            )
-                        }
-                    }
-                    SettingsDivider()
-                    Text(
-                        text = stringResource(R.string.skills_keyword_inject_guide),
+                        text = stringResource(R.string.skills_bound_members_hint),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.semanticColors.subtleText,
                         modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.sm)
                     )
+                    if (bindingState is SubAgentSaveState.Failed) {
+                        Text(
+                            text = stringResource(R.string.skills_binding_failed),
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.sm)
+                        )
+                    }
+                    if (members.isEmpty()) {
+                        Text(
+                            text = stringResource(R.string.skills_bound_members_empty),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.semanticColors.subtleText,
+                            modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.sm)
+                        )
+                    } else {
+                        members.forEachIndexed { index, member ->
+                            if (index > 0) SettingsDivider()
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = Spacing.lg, vertical = Spacing.sm),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(Spacing.md)
+                            ) {
+                                Column(
+                                    modifier = Modifier.weight(1f).clickable(
+                                        enabled = bindingState !is SubAgentSaveState.Saving
+                                    ) { onOpenMember(member) }
+                                ) {
+                                    Text(
+                                        text = member.name,
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = member.description.ifBlank { stringResource(R.string.mcp_no_description) },
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.semanticColors.subtleText,
+                                        maxLines = 1,
+                                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                    )
+                                }
+                                AppSwitch(
+                                    checked = member.skills.any { it.equals(entry.name, ignoreCase = true) },
+                                    onCheckedChange = { onSetMemberBinding(member, it) },
+                                    enabled = !keywordEnabled && !keywordSaving && bindingState !is SubAgentSaveState.Saving
+                                )
+                            }
+                        }
+                        SettingsDivider()
+                        Text(
+                            text = stringResource(R.string.skills_keyword_inject_guide),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.semanticColors.subtleText,
+                            modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.sm)
+                        )
+                    }
                 }
             }
+
         }
 
         // 卡片 2：导出（内置技能也能导：正文从 assets 现攒一份 SKILL.md 打进包里）

@@ -1701,7 +1701,9 @@
     <string name="team_editor_stage_level">Level</string>
     <string name="team_editor_stage_members">Members on this stage</string>
     <string name="team_editor_stage_prompt">Stage instruction</string>
-    <string name="team_editor_stage_review">Mark as a review gate</string>
+    <string name="team_editor_stage_type">Stage type</string>
+    <string name="team_editor_stage_execution">Execution</string>
+    <string name="team_editor_stage_review">Review</string>
     <string name="team_editor_stage_reject">Reject back to</string>
     <string name="team_editor_stage_reject_none">Final gate, no rollback</string>
     <string name="team_editor_task_agent">Member role</string>
@@ -3771,5 +3773,26 @@
     <string name="steward_per_session_note">Steward is per conversation: the switch, loop count and status apply to this conversation only and do not affect others.</string>
     <string name="tools_permission_title">Run custom tool</string>
     <string name="tools_permission_details">Custom tool %1$s will run in the current environment.\nTimeout: %2$d seconds</string>
+    <string name="skills_keyword_title">Public keyword mode</string>
+    <string name="skills_keyword_hint">Separate keywords with commas or new lines. A match in the current user input or delegated task injects only the name and description; load the instructions on demand.</string>
+    <string name="skills_keyword_unbind">This skill is bound to %1$d members. Enabling removes all bindings; disabling does not restore them.</string>
+    <string name="skills_keyword_confirm">Confirm removing existing member bindings</string>
+    <string name="skills_keyword_error">Could not save. Check file access and member bindings, then try again.</string>
+    <string name="skills_keyword_members">Bound members (%1$d) · expand/collapse</string>
+    <string name="knowledge_local_create">Create local knowledge base</string>
+    <string name="knowledge_local_source">Created locally · No Git or network required</string>
+    <string name="knowledge_local_add_document">Add document</string>
+    <string name="knowledge_local_name">Name (must be unique)</string>
+    <string name="knowledge_local_description">Description (optional)</string>
+    <string name="knowledge_local_path">Document path (e.g. notes.md)</string>
+    <string name="knowledge_local_markdown">Markdown content</string>
+    <string name="knowledge_local_save">Save</string>
+    <string name="knowledge_local_cancel">Cancel</string>
+    <string name="knowledge_local_error">Could not save: %1$s</string>
+    <string name="injection_rules_purpose">Rules define stable constraints and project boundaries. Main rules and rules.d are always included; specialized rules load on demand. Keep facts and experience in memory instead of duplicating them.</string>
+    <string name="injection_memory_purpose">Memory holds evolving facts, preferences and experience. Relevant entries are recalled and details load on demand; core profiles may remain included. Memory does not replace permissions or acceptance rules.</string>
+    <string name="injection_prompts_purpose">Prompts are execution templates for roles, workflows and output formats. Default, keyword and member conditions control inclusion. Avoid duplicating project rules or remembered facts.</string>
+    <string name="injection_conditions_hint">Conditions are combined with OR and each fragment is included once. Turn off default inclusion to use only keyword or member matching; enabling keywords does not narrow default inclusion.</string>
+    <string name="skills_editor_error_bound_rename">This skill is assigned to members. Remove the bindings before renaming to avoid making it public.</string>
 </resources>
     <!-- 技能详情页新增：绑定成员入口 -->

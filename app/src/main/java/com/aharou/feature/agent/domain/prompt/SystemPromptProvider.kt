@@ -68,33 +68,23 @@ class SystemPromptProvider @Inject constructor(
     }
 
     private inner class ActiveSkillsSource : PromptSource {
-        // 会话级缓存：同一 (sessionId, projectRoot) 内只扫一次磁盘，保持 system prompt 稳定以命中 KV 缓存；
-        // 新开会话 / 切换工作区 / 重启 App 时缓存自然失效重建。空内容用 "" 占位以区分"未缓存"。
-        private val cachedByKey = ConcurrentHashMap<SourceCacheKey, String>()
-
         override fun build(ctx: AgentContext): String? {
-            val key = SourceCacheKey(ctx.sessionId, ctx.projectRoot)
-            val cached = cachedByKey[key]
-            if (cached != null) return cached.ifEmpty { null }
             // 子代理会话：只看该角色绑定的专属技能 + 公共技能；主代理看全量公共技能。
             val skills = try {
-                ctx.agentDefinition?.let { skillRepository.listSkillsForAgent(it) } ?: skillRepository.listSkills()
+                skillRepository.listSkillsForAgent(
+                    ctx.agentDefinition, ctx.currentUserText,
+                    ctx.agentDefinition?.let { InjectPart.SKILLS in it.inject } ?: true
+                )
             } catch (e: Exception) { return null }
             if (skills.isEmpty()) {
-                cachedByKey[key] = ""
                 return null
             }
 
             val list = skills.joinToString("\n") { "- ${it.name}: ${it.description.ifBlank { "（无描述）" } }" }
             val content = "可用技能 (skills)（格式为 名称: 何时使用；相关时用 loadSkill 传入名称取完整正文，详见上文「技能」说明）：\n当清单里有与当前任务对口的技能时，在合适的时机主动 `loadSkill` 加载并按其正文行事，让技能辅助你更规范、更高效地完成工作，而不是仅凭默认流程硬做。\n$list"
-            cachedByKey[key] = content
-            trimIfNeeded()
             return content
         }
 
-        private fun trimIfNeeded() {
-            if (cachedByKey.size > SOURCE_CACHE_LIMIT) cachedByKey.clear()
-        }
     }
 
     /** 子代理专用精简基线：只保留工具用法、路径约定与安全边界，不含模式切换、结尾总结等主代理专属规则。 */
@@ -873,7 +863,7 @@ class SystemPromptProvider @Inject constructor(
                 )
             )
 
-            if (InjectPart.SKILLS in definition.inject && SKILLS_VAR !in raw) {
+            if (SKILLS_VAR !in raw) {
                 activeSkillsSource.build(agentContext)?.let {
                     append("\n\n")
                     append(it)

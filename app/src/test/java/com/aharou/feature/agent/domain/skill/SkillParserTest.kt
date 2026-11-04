@@ -34,6 +34,15 @@ class SkillParserTest {
     }
 
     @Test
+    fun keywords_roundTripAndLegacyDefaultsRemainPublic() {
+        val text = SkillParser.serialize("conditional", "summary", emptyList(), "private body", true, listOf("Kotlin", "x: y"))
+        val parsed = SkillParser.parseText(text, "fallback")
+        assertTrue(parsed.keywordEnabled)
+        assertEquals(listOf("Kotlin", "x: y"), parsed.keywords)
+        assertTrue(!SkillParser.parseText("---\nname: legacy\n---\nbody", "fallback").keywordEnabled)
+    }
+
+    @Test
     fun serialize_roundTripsThroughParse() {
         val skill = parseSerialized(
             name = "pdf-report",

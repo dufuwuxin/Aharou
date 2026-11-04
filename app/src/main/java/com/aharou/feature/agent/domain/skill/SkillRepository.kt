@@ -20,7 +20,8 @@ class SkillRepository @Inject constructor(
     private val globalDirectorySkillSource: GlobalDirectorySkillSource,
     private val projectDirectorySkillSource: ProjectDirectorySkillSource,
     private val skillConfigRepository: SkillConfigRepository,
-    private val fileAccess: FileAccessProvider
+    private val fileAccess: FileAccessProvider,
+    private val agents: com.aharou.feature.agent.domain.subagent.AgentDefinitionRepository
 ) {
     /** 全部技能（含来源作用域），未过滤禁用；同名按 内置 < 全局 < 项目 逐级覆盖。 */
     fun listAllSkills(): List<SkillEntry> = mergeAll(
@@ -30,20 +31,80 @@ class SkillRepository @Inject constructor(
     )
 
     /** 启用的技能列表（注入系统提示词用），禁用技能被过滤。 */
-    fun listSkills(): List<Skill> =
-        filterDisabled(listAllSkills(), skillConfigRepository.disabledNames()).map { it.skill }
+    fun listSkills(): List<Skill> = listSkillsForAgent(null)
 
-    /**
-     * 子代理会话的可见技能：公共技能（已过滤禁用）+ 该角色专属绑定的技能。
-     * 专属技能绑定在 [AgentDefinition.skills]：运行时只有对应角色能看到，其它成员不可读，避免共享 token。
-     */
-    fun listSkillsForAgent(definition: com.aharou.feature.agent.domain.subagent.AgentDefinition?): List<Skill> {
-        val bound = definition?.skills?.toHashSet()
-        if (bound.isNullOrEmpty()) return listSkills()
-        val all = filterDisabled(listAllSkills(), skillConfigRepository.disabledNames())
-        val publicSkills = all.filter { it.skill.name !in bound }
-        val exclusiveSkills = all.filter { it.skill.name in bound }
-        return publicSkills.map { it.skill } + exclusiveSkills.map { it.skill }
+    fun listCommandSkills(): List<Skill> = synchronized(SkillParser) {
+        val exclusive = agents.listAll().flatMap { it.definition.skills }.map { it.lowercase() }.toSet()
+        filterDisabled(listAllSkills(), skillConfigRepository.disabledNames()).map { it.skill }
+            .filterNot { it.name.lowercase() in exclusive }
+    }
+
+    /** Ownership is derived from every registered role, including disabled roles. */
+    fun listSkillsForAgent(
+        definition: com.aharou.feature.agent.domain.subagent.AgentDefinition?,
+        currentTask: String = "",
+        includePublic: Boolean = true
+    ): List<Skill> = synchronized(SkillParser) {
+        val definitions = agents.listAll().map { it.definition }
+        val exclusive = definitions.flatMap { it.skills }.map { it.lowercase() }.toSet()
+        val own = definition?.let { role ->
+            definitions.firstOrNull { it.name.equals(role.name, ignoreCase = true) }?.skills
+        }.orEmpty().map { it.lowercase() }.toSet()
+        return@synchronized filterDisabled(listAllSkills(), skillConfigRepository.disabledNames()).map { it.skill }.filter { skill ->
+            if (skill.name.lowercase() in exclusive) skill.name.lowercase() in own && !skill.keywordEnabled
+            else (!skill.keywordEnabled && includePublic) || (skill.keywordEnabled && skill.keywords.any {
+                it.isNotBlank() && currentTask.contains(it, ignoreCase = true)
+            })
+        }
+    }
+
+    /** Atomically switches keyword mode; any failed write restores all touched files. */
+    fun setKeywordPolicy(name: String, scope: SkillScope, enabled: Boolean, keywords: List<String>, confirmUnbind: Boolean = false) {
+        synchronized(SkillParser) {
+            require(scope != SkillScope.BUILTIN) { "Builtin skills are read-only" }
+            val words = keywords.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+            require(validKeywordPolicy(enabled, words)) { "At least one keyword is required" }
+            val skill = entriesIn(scope).firstOrNull { it.name.equals(name, true) } ?: error("Skill not found")
+            val bound = agents.listAll().filter { entry -> entry.definition.skills.any { it.equals(name, true) } }
+            require(canEnableKeywords(enabled && bound.isNotEmpty(), confirmUnbind)) { "Confirm removing member bindings first" }
+            val skillFile = instructionFile(fileAccess, skill.dirPath ?: error("Missing skill directory")) ?: error("Missing skill file")
+            val originals = linkedMapOf(skillFile to fileAccess.readFile(skillFile))
+            if (enabled) bound.forEach { entry ->
+                val path = entry.definition.filePath ?: error("Missing member file")
+                originals[path] = fileAccess.readFile(path)
+            }
+            try {
+                if (enabled) bound.forEach { entry ->
+                    check(agents.setSkillBinding(entry.definition.name, entry.scope, name, false) == null) { "Failed to remove member binding" }
+                }
+                // Patch only these frontmatter keys, preserving translated descriptions and other metadata.
+                val original = originals.getValue(skillFile).replace("\r\n", "\n")
+                val end = if (original.startsWith("---\n")) original.indexOf("\n---", 3) else -1
+                val metadata = if (end >= 0) original.substring(4, end) else ""
+                val body = if (end >= 0) original.substring(end + 4).removePrefix("\n") else original
+                val yaml = org.yaml.snakeyaml.Yaml()
+                val fields = (yaml.load<Map<String, Any>>(metadata) ?: emptyMap()).toMutableMap()
+                fields["keyword_enabled"] = enabled
+                fields["keywords"] = words
+                fileAccess.writeFile(skillFile, "---\n${yaml.dump(fields)}---\n$body", overwrite = true)
+            } catch (failure: Exception) {
+                originals.entries.toList().asReversed().forEach { (path, text) ->
+                    try { fileAccess.writeFile(path, text, overwrite = true) }
+                    catch (rollback: Exception) { failure.addSuppressed(rollback) }
+                }
+                throw failure
+            }
+        }
+    }
+
+    fun loadInstructionsForAgent(
+        name: String,
+        definition: com.aharou.feature.agent.domain.subagent.AgentDefinition?,
+        currentTask: String,
+        includePublic: Boolean
+    ): String? = synchronized(SkillParser) {
+        if (listSkillsForAgent(definition, currentTask, includePublic).none { it.name == name }) null
+        else loadInstructions(name)
     }
 
     /** 读取指定 skill 的完整指令正文；不存在 / 解析失败 / 已被禁用时返回 null。 */
@@ -70,16 +131,25 @@ class SkillRepository @Inject constructor(
      * 编辑时写回原目录里的原指令文件（可能叫 CLAUDE.md），改名只改 frontmatter 的 name、不动目录名——
      * 技能正文常按 `~/.aharou/skills/<目录>/run.py` 引用同目录脚本，跟着改名会把这些引用打断。
      */
-    fun save(form: SkillForm, scope: SkillScope, originalName: String? = null): SkillSaveError? {
-        if (scope == SkillScope.BUILTIN) return SkillSaveError.READ_ONLY
+    fun save(form: SkillForm, scope: SkillScope, originalName: String? = null): SkillSaveError? = synchronized(SkillParser) {
+        if (scope == SkillScope.BUILTIN) return@synchronized SkillSaveError.READ_ONLY
         val name = form.name.trim()
-        if (!isValidName(name)) return SkillSaveError.INVALID_NAME
-        if (form.instructions.isBlank()) return SkillSaveError.EMPTY_INSTRUCTIONS
-
+        if (!isValidName(name)) return@synchronized SkillSaveError.INVALID_NAME
+        if (form.instructions.isBlank()) return@synchronized SkillSaveError.EMPTY_INSTRUCTIONS
         val scopeSkills = entriesIn(scope)
+        val persisted = originalName?.let { old -> scopeSkills.firstOrNull { it.name.equals(old, true) } }
+        val keywordEnabled = persisted?.keywordEnabled ?: form.keywordEnabled
+        val keywords = persisted?.keywords ?: form.keywords
+        if (!validKeywordPolicy(keywordEnabled, keywords)) return@synchronized SkillSaveError.IO_FAILED
+        if (keywordEnabled && agents.listAll().any { entry ->
+            entry.definition.skills.any { it.equals(originalName ?: name, true) || it.equals(name, true) }
+        }) return@synchronized SkillSaveError.IO_FAILED
         val keepingName = originalName != null && originalName.equals(name, ignoreCase = true)
+        if (originalName != null && !keepingName && agents.listAll().any { entry ->
+            entry.definition.skills.any { it.equals(originalName, ignoreCase = true) }
+        }) return@synchronized SkillSaveError.BOUND_RENAME
         if (!keepingName && scopeSkills.any { it.name.equals(name, ignoreCase = true) }) {
-            return SkillSaveError.NAME_CONFLICT
+            return@synchronized SkillSaveError.NAME_CONFLICT
         }
 
         val existingDir = originalName?.let { old ->
@@ -90,11 +160,13 @@ class SkillRepository @Inject constructor(
             name = name,
             description = form.description,
             requiredTools = form.requiredTools,
-            instructions = form.instructions
+            instructions = form.instructions,
+            keywordEnabled = keywordEnabled,
+            keywords = keywords
         )
 
         val provider = fileAccess
-        return try {
+        return@synchronized try {
             val dir = existingDir?.takeIf { provider.isDirectory(it) } ?: "${skillsRoot(scope)}/$name"
             provider.mkdirs(dir)
             val target = instructionFile(provider, dir) ?: "${dir.trimEnd('/')}/$INSTRUCTION_FILE"
@@ -221,6 +293,11 @@ class SkillRepository @Inject constructor(
     }
 
     companion object {
+        internal fun validKeywordPolicy(enabled: Boolean, keywords: List<String>): Boolean =
+            !enabled || keywords.any { it.isNotBlank() }
+
+        internal fun canEnableKeywords(hasBindings: Boolean, confirmed: Boolean): Boolean = !hasBindings || confirmed
+
         private const val TAG = "SkillRepository"
 
         /** 新建技能时写入的指令文件名。 */

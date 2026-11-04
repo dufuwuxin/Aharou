@@ -15,6 +15,8 @@ data class SkillUiEntry(
     val disabled: Boolean,
     val instructions: String,
     /** 手写技能里的 `required_tools`，编辑页不展示，保存时原样写回。 */
+    val keywordEnabled: Boolean = false,
+    val keywords: List<String> = emptyList(),
     val requiredTools: List<String> = emptyList(),
     /** 内置技能：随 App 打包，不可编辑、删除或停用。 */
     val builtin: Boolean = false

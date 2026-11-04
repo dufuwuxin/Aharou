@@ -69,7 +69,7 @@ class KnowledgeSearchTool @Inject constructor(
             return ToolResult.Success(
                 JsonPrimitive(
                     if (total == 0) {
-                        "本地还没有同步任何知识库内容（启动时会自动同步一次，稍后重试即可）。"
+                        "本地还没有知识库内容。请在设置的知识库页面创建本地知识库，或安装一个 Git 知识源。"
                     } else {
                         "知识库里没有找到与「$query」相关的内容（本地共 $total 篇）。"
                     }
@@ -83,6 +83,7 @@ class KnowledgeSearchTool @Inject constructor(
                     buildJsonObject {
                         put("title", hit.title)
                         put("source", hit.sourceName)
+                        put("sourceId", hit.sourceId)
                         put("path", hit.path)
                         put("snippet", hit.snippet)
                     }

@@ -108,7 +108,9 @@ internal fun SkillEditorScreen(
                                     name = name.trim(),
                                     description = description.trim(),
                                     instructions = instructions.trim(),
-                                    requiredTools = initial?.requiredTools ?: emptyList()
+                                    requiredTools = initial?.requiredTools ?: emptyList(),
+                                    keywordEnabled = initial?.keywordEnabled ?: false,
+                                    keywords = initial?.keywords ?: emptyList()
                                 ),
                                 scope
                             )
@@ -213,6 +215,7 @@ private fun SkillSaveError.messageRes(): Int = when (this) {
     SkillSaveError.INVALID_NAME -> R.string.skills_editor_error_invalid_name
     SkillSaveError.EMPTY_INSTRUCTIONS -> R.string.skills_editor_error_empty_instructions
     SkillSaveError.NAME_CONFLICT -> R.string.skills_editor_error_name_conflict
+    SkillSaveError.BOUND_RENAME -> R.string.skills_editor_error_bound_rename
     SkillSaveError.IO_FAILED -> R.string.skills_editor_error_io
     SkillSaveError.READ_ONLY -> R.string.skills_editor_error_read_only
 }

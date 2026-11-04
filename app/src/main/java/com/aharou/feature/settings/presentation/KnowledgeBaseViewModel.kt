@@ -5,6 +5,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.aharou.core.util.FileLogger
 import com.aharou.feature.agent.domain.knowledge.KnowledgeCatalog
 import com.aharou.feature.agent.domain.knowledge.KnowledgeRepository
 import com.aharou.feature.agent.domain.knowledge.KnowledgeSourceDef
@@ -12,7 +13,10 @@ import com.aharou.feature.agent.domain.knowledge.KnowledgeSourceRepository
 import com.aharou.feature.agent.domain.skill.market.SkillRepoAccess
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** 知识库页的状态：只在有动作时才有意义，[Idle] 表示界面不提示任何结果。 */
 enum class KnowledgeBaseStatus { Idle, Installing, Installed, Failed, InvalidRepo }
@@ -65,16 +69,59 @@ class KnowledgeBaseViewModel @Inject constructor(
     var status by mutableStateOf(KnowledgeBaseStatus.Idle)
         private set
 
+    var localError by mutableStateOf<String?>(null)
+        private set
+
+    fun clearLocalError() { localError = null }
+
+    var localSaving by mutableStateOf(false)
+        private set
+
+    suspend fun createLocal(name: String, description: String, markdown: String): Boolean = localOperation {
+        repository.createLocal(name, description, markdown)
+    }
+
+    suspend fun addLocalDocument(id: String, path: String, markdown: String): Boolean = localOperation {
+        repository.addLocalDocument(id, path, markdown)
+    }
+
+    private suspend fun localOperation(action: () -> Unit): Boolean {
+        if (localSaving) return false
+        localSaving = true
+        return try {
+            val snapshot = withContext(Dispatchers.IO) { action(); loadSnapshot() }
+            applySnapshot(snapshot)
+            localError = null
+            true
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            FileLogger.e("KnowledgeBase", "Local knowledge operation failed", error)
+            localError = error.message ?: error.javaClass.simpleName
+            false
+        } finally {
+            localSaving = false
+        }
+    }
+
     init {
-        reload()
-        checkUpdates()
+        viewModelScope.launch {
+            applySnapshot(withContext(Dispatchers.IO) { loadSnapshot() })
+            checkUpdates()
+        }
     }
 
     /** 重新读源清单与本地安装情况。 */
     fun reload() {
+        viewModelScope.launch {
+            applySnapshot(withContext(Dispatchers.IO) { loadSnapshot() })
+        }
+    }
+
+    private fun loadSnapshot(): Pair<List<SourceUi>, List<CategoryUi>> {
         val data = catalog.load()
         val customIds = sourceRepository.all().keys
-        sources = data.sources.map { (id, definition) ->
+        val loadedSources = data.sources.map { (id, definition) ->
             SourceUi(
                 id = id,
                 definition = definition,
@@ -85,18 +132,24 @@ class KnowledgeBaseViewModel @Inject constructor(
             )
         }
         // 只列真正有源的分类；清单没声明分类时按源里出现的顺序兜底
-        val used = sources.map { it.definition.category }.filter { it.isNotBlank() }.toSet()
+        val used = loadedSources.map { it.definition.category }.filter { it.isNotBlank() }.toSet()
         val declared = data.categories.filterKeys { it in used }
-        categories = if (declared.isNotEmpty()) {
+        val loadedCategories = if (declared.isNotEmpty()) {
             declared.map { (id, name) -> CategoryUi(id, name) }
         } else {
             used.map { CategoryUi(it, emptyMap()) }
         }
+        return loadedSources to loadedCategories
+    }
+
+    private fun applySnapshot(snapshot: Pair<List<SourceUi>, List<CategoryUi>>) {
+        sources = snapshot.first
+        categories = snapshot.second
     }
 
     /** 装一个源：把它的 Markdown 拉到本地。装完界面立刻反映篇数。 */
     fun install(id: String) {
-        if (busyId != null) return
+        if (busyId != null || sources.any { it.id == id && it.definition.isLocal }) return
         busyId = id
         status = KnowledgeBaseStatus.Installing
         viewModelScope.launch {
@@ -117,7 +170,7 @@ class KnowledgeBaseViewModel @Inject constructor(
      */
     private fun checkUpdates() {
         viewModelScope.launch {
-            val stale = sources.filter { it.installed }.mapNotNull { source ->
+            val stale = sources.filter { it.installed && !it.definition.isLocal }.mapNotNull { source ->
                 val remote = repository.remoteDigest(source.id) ?: return@mapNotNull null
                 val saved = repository.savedDigest(source.id) ?: return@mapNotNull null
                 source.id.takeIf { saved != remote }
@@ -131,16 +184,19 @@ class KnowledgeBaseViewModel @Inject constructor(
 
     /** 卸一个源：只删本地副本，源仍在列表里，随时能再装。 */
     fun uninstall(id: String) {
-        repository.uninstall(id)
-        updateIds = updateIds - id
-        reload()
+        if (sources.any { it.id == id && it.definition.isLocal }) return
+        viewModelScope.launch {
+            if (localOperation { check(repository.uninstall(id)) { "Cannot uninstall knowledge source" } }) {
+                updateIds = updateIds - id
+            }
+        }
     }
 
     /**
      * 加一个自定义源。地址认不出来返回 false，界面据此提示——校验放这儿是因为
      * 「什么算合法仓库地址」的判据在 [SkillRepoAccess] 里，UI 不该复制一份。
      */
-    fun addSource(input: String): Boolean {
+    suspend fun addSource(input: String): Boolean {
         val parsed = SkillRepoAccess.parse(input.trim())
         if (parsed == null || parsed.coord.repo.isBlank()) {
             status = KnowledgeBaseStatus.InvalidRepo
@@ -151,24 +207,27 @@ class KnowledgeBaseViewModel @Inject constructor(
         val id = "user-" + coord.repo.substringAfterLast('/')
             .lowercase()
             .replace(Regex("[^a-z0-9._-]"), "-")
-        sourceRepository.add(
-            id,
-            KnowledgeSourceDef(
-                repo = coord.repo,
-                branch = coord.ref,
-                path = parsed.subPath,
-                host = coord.host
+        return localOperation {
+            sourceRepository.add(
+                id,
+                KnowledgeSourceDef(
+                    repo = coord.repo,
+                    branch = coord.ref,
+                    path = parsed.subPath,
+                    host = coord.host
+                )
             )
-        )
-        status = KnowledgeBaseStatus.Idle
-        reload()
-        return true
+        }.also { if (it) status = KnowledgeBaseStatus.Idle }
     }
 
     /** 把用户自己加的源从列表里删掉（顺带清掉它的本地副本）。 */
-    fun removeSource(id: String) {
-        repository.uninstall(id)
-        sourceRepository.remove(id)
-        reload()
+    fun removeSource(id: String) = viewModelScope.launch {
+        localOperation {
+            // Remove metadata only after the contents have actually been removed.
+            if (repository.sourceDir(id).exists()) {
+                check(repository.uninstall(id)) { "Cannot remove knowledge contents" }
+            }
+            sourceRepository.remove(id)
+        }
     }
 }
