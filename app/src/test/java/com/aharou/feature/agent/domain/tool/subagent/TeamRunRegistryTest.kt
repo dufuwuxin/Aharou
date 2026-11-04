@@ -45,15 +45,19 @@ class TeamRunRegistryTest {
         assertEquals("TEAM_DUPLICATE_MESSAGE", registry.route("a", "future", " one ").reason)
         assertEquals("one", registry.bind(run, "future", "b"))
         var deliveries = 0
+        // two 成功投递给 b：消耗 a→b 同 pair 第 2 条（HARD_PAIR_MAX=2 满）
         assertEquals("delivered", registry.route("a", "b", "two") { deliveries++; true }.state)
         assertEquals(1, deliveries)
-        // 同 pair 第 2 条（未达 HARD_PAIR_MAX=2），且 future 已有 session → 直接 delivered
-        assertEquals("delivered", registry.route("a", "future", "three") { true }.state)
+        // three 会是 a→b 同 pair 第 3 条，撞 TEAM_PAIR_LIMIT
+        assertEquals("blocked", registry.route("a", "future", "three") { true }.state)
+        assertEquals("TEAM_PAIR_LIMIT", registry.route("a", "future", "three") { true }.reason)
         assertEquals("queued", registry.route("a", "third", "three").state)
         assertEquals("queued", registry.route("a", "third", "four").state)
+        // five 是 a 的第 5 条，超出 HARD_TOTAL_MAX=4
         assertEquals("blocked", registry.route("a", "fourth", "five").state)
         assertEquals("TEAM_MESSAGE_LIMIT", registry.route("a", "fourth", "five").reason)
-        assertEquals("three\n\nfour", registry.bind(run, "third", "c"))
+        // third 只收到 three；four 虽先于 five 调用，但它是 a 的第 4 条、入队即达总配额上限后被拒绝
+        assertEquals("three", registry.bind(run, "third", "c"))
         assertEquals("", registry.bind(run, "fourth", "d"))
     }
     @Test fun failedDeliveryAndInvalidMessagesDoNotConsumeBudget() {
