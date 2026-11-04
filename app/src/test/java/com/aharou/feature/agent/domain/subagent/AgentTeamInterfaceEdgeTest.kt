@@ -34,7 +34,18 @@ class AgentTeamInterfaceEdgeTest {
     }
 
     private fun savedTeam(name: String): AgentTeam =
-        AgentTeamParser.parse(fileAccess, "~/.aharou/teams/$name.md")!!
+        AgentTeamParser.parse(fileAccess, "~/.aharou/teams/$name.md")!!.also {
+            assertEquals(listOf("designer"), it.admins)
+        }
+
+    @Test
+    fun save_rejectsMissingOrMultipleAdministratorsWithoutWriting() {
+        val form = AgentTeamForm(name = "invalid-admin", members = listOf(TeamMemberRef("designer"), TeamMemberRef("engineer")),
+            stages = listOf(AgentTeamStageForm(title = "build", members = listOf("designer"), prompt = "deliver")))
+        assertEquals(AgentTeamSaveError.INVALID_FLOW, repository.save(form))
+        assertEquals(AgentTeamSaveError.INVALID_FLOW, repository.save(form.copy(admins = listOf("designer", "engineer"))))
+        assertNull(writtenContent)
+    }
 
     @Test
     fun save_distributesStageEdgesToMatchingMemberTasks() {
@@ -42,6 +53,7 @@ class AgentTeamInterfaceEdgeTest {
             name = "edge-team",
             description = "",
             scope = AgentDefinitionScope.GLOBAL,
+            admins = listOf("designer"),
             members = listOf(TeamMemberRef("designer"), TeamMemberRef("engineer")),
             stages = listOf(
                 AgentTeamStageForm(
@@ -76,6 +88,7 @@ class AgentTeamInterfaceEdgeTest {
             name = "edge-drop",
             description = "",
             scope = AgentDefinitionScope.GLOBAL,
+            admins = listOf("designer"),
             members = listOf(TeamMemberRef("designer"), TeamMemberRef("engineer")),
             stages = listOf(
                 AgentTeamStageForm(
@@ -141,6 +154,7 @@ class AgentTeamInterfaceEdgeTest {
                     )
                 )
             ),
+            admins = listOf("designer"),
             members = listOf(TeamMemberRef("designer"), TeamMemberRef("engineer"))
         )
         assertNull(repository.save(team.toForm(AgentDefinitionScope.GLOBAL), null))
@@ -162,6 +176,7 @@ class AgentTeamInterfaceEdgeTest {
             name = "stable",
             description = "",
             scope = AgentDefinitionScope.GLOBAL,
+            admins = listOf("designer"),
             members = listOf(TeamMemberRef("designer"), TeamMemberRef("engineer")),
             stages = listOf(
                 AgentTeamStageForm(

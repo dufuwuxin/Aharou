@@ -57,7 +57,8 @@ class TeamControlIntegrationTest {
     @Test fun actualRepositoryAndConfigSavePreserveTaskLeasesForDottedNames() {
         val provider = TestFileAccessProvider()
         val file = File(folder.root, "team.md")
-        val initial = AgentTeamForm(name = "发布 release.v2 next", members = listOf(TeamMemberRef("worker.a"), TeamMemberRef("worker.b")),
+        val initial = AgentTeamForm(name = "发布 release.v2 next", admins = listOf("worker.a"),
+            members = listOf(TeamMemberRef("worker.a"), TeamMemberRef("worker.b")),
             stages = listOf(AgentTeamStageForm(title = "implement", members = listOf("worker.a", "worker.b"), prompt = "deliver",
                 tasks = listOf(AgentTeamTaskForm(agent = "worker.a", prompt = "deliver", writePaths = "src/a.kt"),
                     AgentTeamTaskForm(agent = "worker.b", prompt = "deliver", writePaths = "src/b.kt")))))
@@ -90,6 +91,7 @@ class TeamControlIntegrationTest {
         assertEquals(listOf(listOf("src/a.kt"), listOf("src/b.kt")), team.stages.single().tasks.map { it.writePaths })
         assertTrue(team.stages.single().tasks.all { it.prompt == "deliver" })
         assertEquals(TeamCommunication.PARENT_ONLY, team.stages.single().communication)
+        assertEquals(listOf("worker.a"), team.admins)
     }
 
     @Test fun keywordInputKeepsMultiwordPhrasesAcrossEditing() {
