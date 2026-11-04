@@ -1,5 +1,12 @@
 package com.aharou.feature.agent.domain.subagent
 
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -20,6 +27,148 @@ class SubAgentEventBusTest {
     private fun spawn(bus: SubAgentEventBus, id: String) = bus.emit(
         SubAgentEvent(subSessionId = id, parentSessionId = "parent", type = SubAgentEventType.SPAWNED)
     )
+
+    @Test
+    fun siblingMessage_requiresActiveSameParentAndEnabledCommunication() {
+        val bus = busWith()
+        listOf("a", "b").forEach { spawn(bus, it) }
+        assertTrue(bus.sendToSibling("a", "b", "hello"))
+        assertFalse(bus.sendToSibling("a", "a", "self"))
+        assertFalse(bus.sendToSibling("a", "unknown", "unknown"))
+        bus.emit(SubAgentEvent("other", "other-parent", SubAgentEventType.SPAWNED))
+        assertFalse(bus.sendToSibling("a", "other", "foreign"))
+        val disabled = busWith(commEnabled = false)
+        listOf("a", "b").forEach { spawn(disabled, it) }
+        assertFalse(disabled.sendToSibling("a", "b", "disabled"))
+    }
+
+    @Test
+    fun siblingMessage_rejectsInactiveSenderAndRecipientForEveryTerminalPath() {
+        listOf(SubAgentEventType.COMPLETED, SubAgentEventType.FAILED,
+            SubAgentEventType.STOPPED, SubAgentEventType.DELETED).forEach { terminal ->
+            val bus = busWith()
+            listOf("a", "b").forEach { spawn(bus, it) }
+            bus.emit(SubAgentEvent("b", "parent", terminal))
+            bus.registerSibling("b", "parent")
+            assertFalse("recipient $terminal", bus.sendToSibling("a", "b", "late"))
+            assertFalse("sender $terminal", bus.sendToSibling("b", "a", "late"))
+        }
+        val bus = busWith()
+        listOf("a", "b").forEach { spawn(bus, it) }
+        bus.release("b")
+        assertFalse(bus.sendToSibling("a", "b", "released"))
+        bus.registerSibling("registered-only", "parent")
+        assertFalse(bus.sendToSibling("a", "registered-only", "inactive"))
+    }
+
+    @Test
+    fun siblingMessage_enforcesUnicodeCodePointLimit() {
+        val bus = busWith()
+        listOf("a", "b").forEach { spawn(bus, it) }
+        assertFalse(bus.sendToSibling("a", "b", " "))
+        assertFalse(bus.sendToSibling("a", "b", "x".repeat(301)))
+        assertFalse(bus.sendToSibling("a", "b", "\uD83D\uDE00".repeat(301)))
+        assertTrue(bus.sendToSibling("a", "b", "\uD83D\uDE00".repeat(300)))
+        assertTrue(bus.sendToSibling("a", "b", "x".repeat(300)))
+    }
+
+    @Test
+    fun siblingMessage_duplicateDoesNotDeliverOrSpendBudget() = runBlocking {
+        val bus = busWith()
+        listOf("a", "b", "c", "d").forEach { spawn(bus, it) }
+        val received = mutableListOf<SubAgentEvent>()
+        val collector = launch(start = CoroutineStart.UNDISPATCHED) {
+            bus.events.collect { if (it.fromSibling) received += it }
+        }
+        try {
+            assertTrue(bus.sendToSibling("a", "b", "one"))
+            assertFalse(bus.sendToSibling("a", "b", "one"))
+            assertTrue(bus.sendToSibling("a", "b", "two"))
+            assertFalse(bus.sendToSibling("a", "b", "three"))
+            assertTrue(bus.sendToSibling("a", "c", "three"))
+            assertTrue(bus.sendToSibling("a", "c", "four"))
+            assertFalse(bus.sendToSibling("a", "d", "five"))
+            kotlinx.coroutines.yield()
+            assertEquals(4, received.size)
+        } finally {
+            collector.cancel()
+        }
+    }
+
+    @Test
+    fun siblingMessage_spawnResetsOnlySenderBudgetAndRegisterDoesNotReset() {
+        val bus = busWith()
+        listOf("a", "b").forEach { spawn(bus, it) }
+        repeat(2) {
+            assertTrue(bus.sendToSibling("a", "b", "a$it"))
+            assertTrue(bus.sendToSibling("b", "a", "b$it"))
+        }
+        bus.registerSibling("a", "parent")
+        bus.registerSibling("b", "parent")
+        assertFalse(bus.sendToSibling("a", "b", "new"))
+        bus.emit(SubAgentEvent("a", "parent", SubAgentEventType.COMPLETED))
+        spawn(bus, "a")
+        assertTrue(bus.sendToSibling("a", "b", "a0"))
+        assertFalse(bus.sendToSibling("b", "a", "new"))
+    }
+
+    @Test
+    fun siblingMessage_concurrentSendsCannotExceedPairOrTotalBudget() {
+        val bus = busWith()
+        listOf("a", "b", "c", "d").forEach { spawn(bus, it) }
+        val pool = Executors.newFixedThreadPool(8)
+        val start = CountDownLatch(1)
+        try {
+            val futures = (0 until 48).map { n ->
+                pool.submit<Pair<String, Boolean>> {
+                    start.await()
+                    val target = listOf("b", "c", "d")[n % 3]
+                    target to bus.sendToSibling("a", target, "message-$n")
+                }
+            }
+            start.countDown()
+            val sent = futures.map { it.get(5, TimeUnit.SECONDS) }.filter { it.second }
+            assertEquals(4, sent.size)
+            assertTrue(sent.groupingBy { it.first }.eachCount().values.all { it <= 2 })
+        } finally {
+            pool.shutdownNow()
+        }
+    }
+
+    @Test
+    fun siblingMessage_consumerRechecksStateAfterSendBeforeDelivery() {
+        val bus = busWith()
+        listOf("a", "b").forEach { spawn(bus, it) }
+        assertTrue(bus.sendToSibling("a", "b", "sent-before-completion"))
+        assertTrue(bus.canReceiveSiblingMessage("a", "b"))
+        bus.emit(SubAgentEvent("b", "parent", SubAgentEventType.COMPLETED))
+        assertFalse(bus.canReceiveSiblingMessage("a", "b"))
+        spawn(bus, "b")
+        bus.release("a")
+        assertFalse(bus.canReceiveSiblingMessage("a", "b"))
+    }
+
+    @Test
+    fun parentChildMessages_remainUnaffectedByDisabledSiblingCommunication() = runBlocking {
+        val bus = busWith(commEnabled = false)
+        val received = mutableListOf<SubAgentEvent>()
+        val collector = launch(start = CoroutineStart.UNDISPATCHED) {
+            bus.events.collect { received += it }
+        }
+        try {
+            val sent = listOf(
+                SubAgentEvent("a", "parent", SubAgentEventType.MESSAGE_FROM_PARENT, "send"),
+                SubAgentEvent("a", "parent", SubAgentEventType.MESSAGE_FROM_SUB, "read")
+            )
+            sent.forEach { bus.emit(it) }
+            kotlinx.coroutines.yield()
+            assertEquals(sent, received)
+            assertTrue(received.none { it.fromSibling })
+            assertEquals(emptySet<String>(), bus.activeSubSessionIds.value)
+        } finally {
+            collector.cancel()
+        }
+    }
 
     @Test
     fun spawn_marksActive() {

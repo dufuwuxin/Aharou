@@ -1,6 +1,9 @@
 package com.aharou.feature.agent.domain.tool.subagent
 
+import com.aharou.feature.agent.domain.subagent.SubAgentEventBus.SiblingSendResult
 import com.aharou.feature.agent.domain.tool.ToolResult
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -13,6 +16,35 @@ import org.junit.Test
  * 工具说明是模型唯一的动作索引，说明没跟着开关变，关掉也等于没关。
  */
 class SubAgentCommGateTest {
+
+    @Test
+    fun messageResult_exposesEveryRuntimeRejectionWithoutClaimingDelivery() {
+        SiblingSendResult.values().filter { it != SiblingSendResult.SENT && it != SiblingSendResult.DUPLICATE }
+            .forEach { rejection ->
+                val result = SubAgentCommGate.messageResult("target", rejection)
+                assertTrue(result is ToolResult.Error)
+                result as ToolResult.Error
+                assertEquals("SIBLING_${rejection.name}", result.code)
+                assertEquals(rejection.reason, result.message)
+            }
+    }
+
+    @Test
+    fun messageResult_duplicateIsExplicitAndDoesNotClaimDelivery() {
+        val result = SubAgentCommGate.messageResult("target", SiblingSendResult.DUPLICATE) as ToolResult.Success
+        assertEquals("duplicate", result.data.jsonObject["state"]?.jsonPrimitive?.content)
+        assertTrue(result.data.jsonObject["message"]?.jsonPrimitive?.content.orEmpty().contains("no budget spent"))
+    }
+
+    @Test
+    fun enabledHints_includeRuntimeBudgetAndActiveOnlyRestriction() {
+        listOf(SubAgentCommGate.descriptionHint(true), SubAgentCommGate.briefingLine(true)).forEach { hint ->
+            assertTrue(hint.contains("4"))
+            assertTrue(hint.contains("2"))
+            assertTrue(hint.contains("300"))
+            assertTrue(hint.contains("活跃"))
+        }
+    }
 
     @Test
     fun `关闭时拒绝码与提示都应明确指向设置入口`() {

@@ -97,8 +97,6 @@ class TaskTool @Inject constructor(
         const val DEFAULT_SUBAGENT_TYPE = "subagent"
         /** `team` 名单一次最多列多少个队友，以及单个队友标题的截断长度。 */
         const val TEAM_ROSTER_LIMIT = 20
-        /** 发给队友的单条消息长度上限（与 messageParent 一致）。 */
-        const val SIBLING_MESSAGE_MAX = 4000
 
         /** 回传给调用方的各任务产出上限（保留尾部：判定与结论都在结尾）。 */
         const val PIPELINE_OUTPUT_TAIL_MAX = 6000
@@ -825,7 +823,7 @@ class TaskTool @Inject constructor(
         )
     }
 
-    /** 向同批队友发一条消息（复用子代理消息投递通道：收件人忙碌时搭车、空闲时被唤醒）。 */
+    /** 向同父且活跃的队友发消息；预算与长度统一由总线判定，不唤醒已结束成员。 */
     private suspend fun tellSibling(args: Map<String, JsonElement>, context: AgentContext): ToolResult {
         val selfId = context.sessionId ?: return ToolResult.Error("缺少会话上下文", "NO_SESSION")
         val targetId = (args["id"] as? JsonPrimitive)?.contentOrNull?.trim()
@@ -833,9 +831,6 @@ class TaskTool @Inject constructor(
         val message = (args["message"] as? JsonPrimitive)?.contentOrNull?.trim()
         if (message.isNullOrBlank()) return ToolResult.Error("参数无效：message 不能为空", "INVALID_ARGS")
         if (targetId == selfId) return ToolResult.Error("不能给自己发消息", "INVALID_ARGS")
-        if (message.length > SIBLING_MESSAGE_MAX) {
-            return ToolResult.Error("消息过长（上限 $SIBLING_MESSAGE_MAX 字）", "INVALID_ARGS")
-        }
         val parentId = sessionUseCase.getSessionById(selfId)?.parentId
             ?: return ToolResult.Error("当前是主会话，没有同批队友；向子代理发消息请用 action=\"send\"。", "NO_PARENT")
         val target = sessionUseCase.getSessionById(targetId)
@@ -844,18 +839,9 @@ class TaskTool @Inject constructor(
             return ToolResult.Error("$targetId 不是你的队友（不在同一父会话下）；用 action=\"team\" 查看队友。", "NOT_SIBLING")
         }
         eventBus.registerSibling(selfId, parentId); eventBus.registerSibling(targetId, parentId)
-        val delivered = runCatching { eventBus.sendToSibling(selfId, targetId, message) }.getOrDefault(false)
-        if (!delivered) {
-            return ToolResult.Error("消息未送达：该队友不在当前协作批次内或已被停止；用 action=\"team\" 查看实时队友。", "SIBLING_UNREACHABLE")
-        }
-        FileLogger.i(TAG, "子代理向队友发消息: from=$selfId to=$targetId")
-        return ToolResult.Success(
-            buildJsonObject {
-                put("id", targetId)
-                put("state", "delivered")
-                put("message", "消息已投递给队友，可继续手头工作；它的回复会像父会话消息一样送达你。")
-            }
-        )
+        val result = eventBus.sendToSiblingResult(selfId, targetId, message)
+        FileLogger.i(TAG, "子代理向队友发消息: from=$selfId to=$targetId result=$result")
+        return SubAgentCommGate.messageResult(targetId, result)
     }
 
     /**

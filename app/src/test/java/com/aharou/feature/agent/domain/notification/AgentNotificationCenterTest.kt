@@ -69,6 +69,38 @@ class AgentNotificationCenterTest {
     }
 
     @Test
+    fun freshForNewRound_siblingMessagesDoNotWakeCompletedRecipient() {
+        val center = AgentNotificationCenter()
+        center.enqueue("recipient", task("peer").copy(
+            kind = AgentNotificationKind.AGENT_MESSAGE,
+            fromSibling = true,
+            message = "sent before recipient completed"
+        ))
+        val snapshot = center.peek("recipient")
+        assertEquals(1, snapshot.size)
+        assertTrue(center.freshForNewRound(snapshot).isEmpty())
+        assertEquals(snapshot, center.peek("recipient"))
+        center.ack("recipient", snapshot.map { it.seq })
+        assertTrue(center.peek("recipient").isEmpty())
+    }
+
+    @Test
+    fun freshForNewRound_mixedQueueKeepsParentChildAndBackgroundMessages() {
+        val center = AgentNotificationCenter()
+        val peer = task("peer").copy(kind = AgentNotificationKind.AGENT_MESSAGE, fromSibling = true)
+        val parent = task("parent").copy(kind = AgentNotificationKind.AGENT_MESSAGE, fromParent = true)
+        val child = task("child").copy(kind = AgentNotificationKind.AGENT_MESSAGE)
+        val persisted = task("user").copy(kind = AgentNotificationKind.USER_MESSAGE, alreadyPersisted = true)
+        val background = task("terminal")
+        listOf(peer, parent, child, persisted, background).forEach { center.enqueue("s1", it) }
+        val snapshot = center.peek("s1")
+        assertEquals(listOf(parent, child, background), center.freshForNewRound(snapshot).map { it.copy(seq = 0) })
+        val late = center.enqueue("s1", task("late"))
+        center.ack("s1", snapshot.map { it.seq })
+        assertEquals(listOf(late), center.peek("s1").map { it.seq })
+    }
+
+    @Test
     fun clearAll_removesEverySession() {
         val center = AgentNotificationCenter()
         center.enqueue("s1", task("term-1"))

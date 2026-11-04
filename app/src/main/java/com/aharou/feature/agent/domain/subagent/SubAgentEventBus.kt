@@ -96,6 +96,24 @@ class SubAgentEventBus @Inject constructor(
      */
     private val activeLock = Any()
 
+    /** 发送方本次 SPAWNED 运行内：收件人 → 已投递正文；与生命周期共用锁。 */
+    private val siblingMessages = mutableMapOf<String, MutableMap<String, MutableSet<String>>>()
+
+    enum class SiblingSendResult(val reason: String) {
+        SENT("Message delivered"),
+        DUPLICATE("Duplicate message ignored; no budget spent"),
+        DISABLED("Sibling communication is disabled; parent send/read remain available"),
+        SELF("Cannot send a sibling message to yourself"),
+        NOT_SIBLING("Sender and recipient must share a parent"),
+        INACTIVE_SENDER("Sender is not active"),
+        INACTIVE_RECIPIENT("Recipient is not active; completed/stopped/deleted members cannot be woken"),
+        EMPTY("Message must not be blank"),
+        TOO_LONG("Message exceeds 300 Unicode code points"),
+        PAIR_LIMIT("Directed pair budget exhausted: at most 2 messages per sender run"),
+        TOTAL_LIMIT("Sender budget exhausted: at most 4 messages per run"),
+        UNAVAILABLE("Message queue is full; no budget spent")
+    }
+
     /** 运行中的子代理数量。 */
     val activeCount: Int get() = _activeSubSessionIds.value.size
 
@@ -133,9 +151,10 @@ class SubAgentEventBus @Inject constructor(
     fun emit(event: SubAgentEvent) {
         // 同步维护活跃集合
         when (event.type) {
-            SubAgentEventType.SPAWNED -> {
-                markActive(event.subSessionId)
+            SubAgentEventType.SPAWNED -> synchronized(activeLock) {
                 parentOfSub[event.subSessionId] = event.parentSessionId
+                siblingMessages.remove(event.subSessionId)
+                markActive(event.subSessionId)
             }
             SubAgentEventType.COMPLETED, SubAgentEventType.FAILED,
             SubAgentEventType.STOPPED, SubAgentEventType.DELETED -> {
@@ -165,6 +184,9 @@ class SubAgentEventBus @Inject constructor(
     companion object {
         /** 同时运行的子代理上限的默认值。实际值由 [SubAgentSettings] 给，工具层只读实例值。 */
         const val DEFAULT_MAX_RUNNING = 5
+        const val SIBLING_MESSAGE_MAX = 300
+        private const val SIBLING_TOTAL_MAX = 4
+        private const val SIBLING_PAIR_MAX = 2
     }
 
     // ── 兄弟（同父）消息路由 ──────────────────────────────────
@@ -184,33 +206,53 @@ class SubAgentEventBus @Inject constructor(
     }
 
     /**
-     * 兄弟消息路由：把 [fromSessionId] 的消息投递给同父的 [toSessionId]。
-     *
-     * 复用既有的子代理消息投递通道（MESSAGE_FROM_SUB，收件人取 parentSessionId）：收件人忙碌时搭车送达、
-     * 空闲或已完成时被唤醒起新一轮，与「子 → 父」通道共用同一套分发逻辑。非兄弟、消息为空或收件人未登记
-     * 时返回 false，由调用方决定提示；本方法不抛异常，任何失败都不影响主流程。
-     */
-    /**
      * 用数据库已证实的兄弟关系补登记内存表。
      *
      * 内存表只在 SPAWNED 事件时写入，进程重启后为空。调用方既然已从会话记录的 parentId 确认了
      * 二者同父，这里补一笔即可，否则重启后第一次 `tell` 会被当成「不是队友」直接拒掉。
      */
     fun registerSibling(subSessionId: String, parentSessionId: String) {
-        parentOfSub[subSessionId] = parentSessionId
+        synchronized(activeLock) { parentOfSub[subSessionId] = parentSessionId }
     }
 
-    fun sendToSibling(fromSessionId: String, toSessionId: String, message: String): Boolean {
-        if (message.isBlank() || !areSiblings(fromSessionId, toSessionId)) return false
-        emit(
-            SubAgentEvent(
-                subSessionId = fromSessionId,
-                parentSessionId = toSessionId,
-                type = SubAgentEventType.MESSAGE_FROM_SUB,
-                detail = message,
-                fromSibling = true
-            )
-        )
-        return true
+    /** 消费端在异步查询之后复查，登记关系不代表成员仍在运行。 */
+    fun canReceiveSiblingMessage(fromSessionId: String, toSessionId: String): Boolean = synchronized(activeLock) {
+        communicationEnabled() && areSiblings(fromSessionId, toSessionId) &&
+            fromSessionId in _activeSubSessionIds.value && toSessionId in _activeSubSessionIds.value
     }
+
+    /** 保留 Boolean 调用口径：只有本次确实投递才返回 true。 */
+    fun sendToSibling(fromSessionId: String, toSessionId: String, message: String): Boolean =
+        sendToSiblingResult(fromSessionId, toSessionId, message) == SiblingSendResult.SENT
+
+    /** 校验、去重、投递及计数与生命周期串行，失败和重复均不占用预算。 */
+    fun sendToSiblingResult(fromSessionId: String, toSessionId: String, message: String): SiblingSendResult =
+        synchronized(activeLock) {
+            val text = message.trim()
+            val rejection = when {
+                !communicationEnabled() -> SiblingSendResult.DISABLED
+                fromSessionId == toSessionId -> SiblingSendResult.SELF
+                !areSiblings(fromSessionId, toSessionId) -> SiblingSendResult.NOT_SIBLING
+                fromSessionId !in _activeSubSessionIds.value -> SiblingSendResult.INACTIVE_SENDER
+                toSessionId !in _activeSubSessionIds.value -> SiblingSendResult.INACTIVE_RECIPIENT
+                text.isBlank() -> SiblingSendResult.EMPTY
+                text.codePointCount(0, text.length) > SIBLING_MESSAGE_MAX -> SiblingSendResult.TOO_LONG
+                else -> null
+            }
+            if (rejection != null) return@synchronized rejection
+            val outgoing = siblingMessages.getOrPut(fromSessionId) { mutableMapOf() }
+            val sent = outgoing.getOrPut(toSessionId) { mutableSetOf() }
+            if (text in sent) return@synchronized SiblingSendResult.DUPLICATE
+            if (sent.size >= SIBLING_PAIR_MAX) return@synchronized SiblingSendResult.PAIR_LIMIT
+            if (outgoing.values.sumOf { it.size } >= SIBLING_TOTAL_MAX) return@synchronized SiblingSendResult.TOTAL_LIMIT
+            if (!_events.tryEmit(SubAgentEvent(
+                    subSessionId = fromSessionId,
+                    parentSessionId = toSessionId,
+                    type = SubAgentEventType.MESSAGE_FROM_SUB,
+                    detail = text,
+                    fromSibling = true
+                ))) return@synchronized SiblingSendResult.UNAVAILABLE
+            sent.add(text)
+            SiblingSendResult.SENT
+        }
 }

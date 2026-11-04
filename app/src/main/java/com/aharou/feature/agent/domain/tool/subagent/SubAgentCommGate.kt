@@ -1,6 +1,9 @@
 package com.aharou.feature.agent.domain.tool.subagent
 
+import com.aharou.feature.agent.domain.subagent.SubAgentEventBus.SiblingSendResult
 import com.aharou.feature.agent.domain.tool.ToolResult
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 /**
  * 子代理通信总开关在**工具文案与拒绝**上的唯一出口。
@@ -13,6 +16,19 @@ import com.aharou.feature.agent.domain.tool.ToolResult
  * 是上下级通道，不受影响。
  */
 internal object SubAgentCommGate {
+
+    private const val LIMIT_HINT = "仅限同父活跃成员；每次运行总发送最多4条、每个有向成员对最多2条，单条最多300 Unicode code points；重复内容不投递、不计预算，已结束队友不唤醒。"
+
+    fun messageResult(targetId: String, result: SiblingSendResult): ToolResult =
+        if (result == SiblingSendResult.SENT || result == SiblingSendResult.DUPLICATE) {
+            ToolResult.Success(buildJsonObject {
+                put("id", targetId)
+                put("state", if (result == SiblingSendResult.SENT) "delivered" else "duplicate")
+                put("message", result.reason)
+            })
+        } else {
+            ToolResult.Error(result.reason, "SIBLING_${result.name}")
+        }
 
     /** 关闭时 `team` / `tell` 的统一拒绝：说清「现在关着」「去哪开」「还有哪条路可用」，免得模型反复重试。 */
     fun disabledError(): ToolResult = ToolResult.Error(
@@ -28,7 +44,7 @@ internal object SubAgentCommGate {
      */
     fun descriptionHint(enabled: Boolean): String =
         if (enabled) {
-            "分支上的子代理可用 team 查队友、tell 互相发消息；"
+            "分支上的子代理可用 team 查队友、tell 互相发消息；$LIMIT_HINT"
         } else {
             "子代理之间的互通已被主人关闭，不要调 team / tell；"
         }
@@ -41,7 +57,7 @@ internal object SubAgentCommGate {
      */
     fun briefingLine(enabled: Boolean): String =
         if (enabled) {
-            "查看实时队友：task(action=\"team\")；给队友发消息：task(action=\"tell\", id=\"<队友 id>\", message=\"…\")。"
+            "查看实时队友：task(action=\"team\")；给队友发消息：task(action=\"tell\", id=\"<队友 id>\", message=\"…\")。$LIMIT_HINT"
         } else {
             "子代理之间的对话已被主人关闭：不要调 team / tell，需要转达的信息请写进最终结论。"
         }

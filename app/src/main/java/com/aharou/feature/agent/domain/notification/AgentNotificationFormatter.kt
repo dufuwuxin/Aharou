@@ -202,7 +202,7 @@ object AgentNotificationFormatter {
                     "需要协调时用 messageParent(message=\"...\") 回复主会话，无需逐条回执。"
                 // 队友之间是平级的，回复必须用 tell；用 send 会被当成「不是你的子代理」直接拒掉（NOT_YOUR_SUBAGENT）。
                 fromSibling ->
-                    "可用 task(action=\"tell\", id=\"$sourceId\", message=\"...\") 回复该队友；若无需回复可忽略。"
+                    "仅需协调且双方仍活跃、预算未耗尽时用 task(action=\"tell\", id=\"$sourceId\", message=\"...\") 回复；本次运行总发送最多4条、每个有向成员对最多2条、单条最多300 Unicode code points，重复不投递不计预算，不逐条回执、不唤醒已结束队友。"
                 else ->
                     "可用 task(action=\"send\", id=\"$sourceId\", message=\"...\") 回复该子代理；若无需回复可忽略。"
             }

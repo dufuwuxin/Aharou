@@ -78,6 +78,10 @@ class AgentNotificationCenter @Inject constructor() {
         pending[sessionId]?.toList() ?: emptyList()
     }
 
+    /** 队友通知只能搭车当前轮，不能在收尾时反复唤醒成员。 */
+    fun freshForNewRound(items: List<PendingNotification>): List<PendingNotification> =
+        items.filterNot { it.alreadyPersisted || it.fromSibling }
+
     /** 确认已送达：按序号移除，peek 之后新入队的条目不受影响。 */
     fun ack(sessionId: String, seqs: Collection<Long>) {
         if (seqs.isEmpty()) return
