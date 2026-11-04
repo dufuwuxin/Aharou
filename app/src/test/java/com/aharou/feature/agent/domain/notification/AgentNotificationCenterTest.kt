@@ -1,5 +1,6 @@
 package com.aharou.feature.agent.domain.notification
 
+import com.aharou.feature.agent.domain.tool.subagent.TeamRunRegistry
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -20,7 +21,7 @@ class AgentNotificationCenterTest {
 
     @Test
     fun peek_doesNotRemove() {
-        val center = AgentNotificationCenter()
+        val center = AgentNotificationCenter(TeamRunRegistry())
         center.enqueue("s1", task("term-1"))
 
         assertEquals(1, center.peek("s1").size)
@@ -30,7 +31,7 @@ class AgentNotificationCenterTest {
 
     @Test
     fun ack_removesOnlyAckedItems() {
-        val center = AgentNotificationCenter()
+        val center = AgentNotificationCenter(TeamRunRegistry())
         center.enqueue("s1", task("term-1"))
         val peeked = center.peek("s1")
         // peek 之后新到达的事件不应被这次 ack 误删
@@ -45,7 +46,7 @@ class AgentNotificationCenterTest {
 
     @Test
     fun drain_takesAllAndClears() {
-        val center = AgentNotificationCenter()
+        val center = AgentNotificationCenter(TeamRunRegistry())
         center.enqueue("s1", task("term-1"))
         center.enqueue("s1", task("term-2"))
 
@@ -58,7 +59,7 @@ class AgentNotificationCenterTest {
 
     @Test
     fun sessionsAreIsolated() {
-        val center = AgentNotificationCenter()
+        val center = AgentNotificationCenter(TeamRunRegistry())
         center.enqueue("s1", task("term-1"))
         center.enqueue("s2", task("term-2"))
 
@@ -70,7 +71,7 @@ class AgentNotificationCenterTest {
 
     @Test
     fun freshForNewRound_siblingMessagesDoNotWakeCompletedRecipient() {
-        val center = AgentNotificationCenter()
+        val center = AgentNotificationCenter(TeamRunRegistry())
         center.enqueue("recipient", task("peer").copy(
             kind = AgentNotificationKind.AGENT_MESSAGE,
             fromSibling = true,
@@ -86,7 +87,7 @@ class AgentNotificationCenterTest {
 
     @Test
     fun freshForNewRound_mixedQueueKeepsParentChildAndBackgroundMessages() {
-        val center = AgentNotificationCenter()
+        val center = AgentNotificationCenter(TeamRunRegistry())
         val peer = task("peer").copy(kind = AgentNotificationKind.AGENT_MESSAGE, fromSibling = true)
         val parent = task("parent").copy(kind = AgentNotificationKind.AGENT_MESSAGE, fromParent = true)
         val child = task("child").copy(kind = AgentNotificationKind.AGENT_MESSAGE)
@@ -102,7 +103,7 @@ class AgentNotificationCenterTest {
 
     @Test
     fun clearAll_removesEverySession() {
-        val center = AgentNotificationCenter()
+        val center = AgentNotificationCenter(TeamRunRegistry())
         center.enqueue("s1", task("term-1"))
         center.enqueue("s2", task("term-2"))
 
