@@ -3829,7 +3829,6 @@
     <string name="team_interface_count">%1$d edge(s)</string>
     <string name="team_detail_topology">Collaboration topology</string>
     <string name="team_detail_topology_empty">No collaboration edges yet — use "Add edge" inside a stage on the edit page</string>
-</resources>
     <!-- 技能详情页新增：绑定成员入口 -->
     <!-- 2026-11-03 界面修复批次新增 -->
     <string name="browser_history_group_today">Today</string>

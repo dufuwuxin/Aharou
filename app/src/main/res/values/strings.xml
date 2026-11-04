@@ -3857,6 +3857,5 @@
     <string name="vault_reset_confirm">清空</string>
     <string name="im_secret_write_failed">保存失败：系统密钥库暂不可用，请稍后再试</string>
     <string name="backup_secrets_unavailable">其中 %1$d 项凭据无法在本机解出，需要重新填写</string>
-</resources>
-
     <!-- 技能详情页新增：绑定成员入口 -->
+</resources>

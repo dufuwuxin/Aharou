@@ -28,13 +28,13 @@ Aharou 特有的部分是：子代理交付后只做只读核实（读文件、�
 | 推送前技能自检 | `python3 scripts/check_skills.py`（frontmatter/命名、description、验收用例齐全、市场配置与文档同步） |
 | 推送前架构门禁 | `python3 scripts/check_architecture.py`（或 `./gradlew checkArchitecture`；已挂 `preBuild`，禁用组件 import、单文件行数棘轮、双语 strings 不一致会直接编不过） |
 | proot 资产校验 | `python3 scripts/check_proot_assets.py`（或 `./gradlew checkProotAssets`；已挂 `preBuild`，换了 .so 却没同步 `assets/proot-runtime.json` 时拦下） |
-| 发版构建 APK / AAB | `./gradlew assembleRelease` / `./gradlew bundleRelease` |
+| 发版构建 APK | `./gradlew :app:assembleArmsoloRelease`（CI 的 release workflow 只出 APK，不发 AAB） |
 
 - 只跑单个测试类：`./gradlew :app:testArmsoloDebugUnitTest --tests "com.aharou.<包>.<类>Test"`；结果读 `app/build/test-results/testArmsoloDebugUnitTest/TEST-*.xml`——**看用例数，别只看 BUILD SUCCESSFUL**（`--tests` 过滤成 0 个也是成功）。
 
 - **别用聚合任务做日常验证**：`assembleDebug` / `assembleRelease` / `test` / `build` 可能包含多个 buildType；日常验证应明确选用 ArmsoloDebug。
 - **别用 `--rerun-tasks` 强制全量重编**：它与 dex 增量缓存冲突，会在 `dexBuilderArmsoloDebug` 上报 `NoSuchFileException` 并让后续编译停在 `UP-TO-DATE`（日志照样写 SUCCESSFUL，但 APK 不更新）。真要强制重编就删中间产物。
-- 产物：冒烟编译出 `app/build/outputs/apk/armsolo/debug/app-armsolo-debug.apk`；发版出 `app/build/outputs/apk/<flavor>/release/app-<flavor>-release.apk`、`.../bundle/<flavor>/release/app-<flavor>-release.aab`。
+- 产物：冒烟编译出 `app/build/outputs/apk/armsolo/debug/app-armsolo-debug.apk`；发版出 `app/build/outputs/apk/armsolo/release/app-armsolo-release.apk`（不发 AAB）。
 - 唯一 flavor 为 `armsolo`（ARMv8 / `arm64-v8a`）；不再构建或发布 x86、x86-64 或 32 位 ARM 变体。
 - buildType 三个：`debug`（applicationId 后缀 `.debug`）、`beta`（后缀 `.beta`，与 release 同配置同签名，CI 用它出测试包）、`release`。三者可与正式版同机共存，日常验证用 `.debug` 即可。
 - release 签名凭据读 `app/keystore.properties`（`storeFile` / `storePassword` / `keyAlias` / `keyPassword`）；本地通常不存放签名文件，CI 从 GitHub secret 还原到 `app/aicode.jks`。
