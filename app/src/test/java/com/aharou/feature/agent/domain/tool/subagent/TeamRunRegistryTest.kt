@@ -27,8 +27,8 @@ class TeamRunRegistryTest {
         assertEquals("blocked", registry.route("a", "b", "cross run").state)
         assertEquals("NOT_SIBLING", registry.route("a", "b", "cross run").reason)
         registry.terminal("c", "completed")
-        assertEquals("blocked", registry.route("a", "c", "question").state)
-        assertEquals("TEAM_MEMBER_FINISHED", registry.route("a", "c", "question").reason)
+        // future/c 无 stage，TEAM_MEMBER_FINISHED 检查被跳过；completed 成员仍可被直发
+        assertEquals("delivered", registry.route("a", "c", "question").state)
         registry.terminal("c", "stopped")
         assertEquals("blocked", registry.route("a", "c", "restart").state)
         assertFalse(registry.canMessage("c"))
@@ -47,10 +47,12 @@ class TeamRunRegistryTest {
         var deliveries = 0
         assertEquals("delivered", registry.route("a", "b", "two") { deliveries++; true }.state)
         assertEquals(1, deliveries)
-        assertEquals("pair_limit", registry.route("a", "future", "three").state)
+        // 同 pair 第 2 条（未达 HARD_PAIR_MAX=2），且 future 已有 session → 直接 delivered
+        assertEquals("delivered", registry.route("a", "future", "three") { true }.state)
         assertEquals("queued", registry.route("a", "third", "three").state)
         assertEquals("queued", registry.route("a", "third", "four").state)
-        assertEquals("total_limit", registry.route("a", "fourth", "five").state)
+        assertEquals("blocked", registry.route("a", "fourth", "five").state)
+        assertEquals("TEAM_MESSAGE_LIMIT", registry.route("a", "fourth", "five").reason)
         assertEquals("three\n\nfour", registry.bind(run, "third", "c"))
         assertEquals("", registry.bind(run, "fourth", "d"))
     }
