@@ -25,8 +25,10 @@ class TeamRunRegistryTest {
         registry.bind(a, "first", "a"); registry.bind(a, "future", "c")
         registry.bind(b, "first", "b")
         assertEquals("blocked", registry.route("a", "b", "cross run").state)
+        assertEquals("NOT_SIBLING", registry.route("a", "b", "cross run").reason)
         registry.terminal("c", "completed")
         assertEquals("blocked", registry.route("a", "c", "question").state)
+        assertEquals("TEAM_MEMBER_FINISHED", registry.route("a", "c", "question").reason)
         registry.terminal("c", "stopped")
         assertEquals("blocked", registry.route("a", "c", "restart").state)
         assertFalse(registry.canMessage("c"))
@@ -39,7 +41,8 @@ class TeamRunRegistryTest {
         val run = registry.begin("parent", pipeline)
         registry.bind(run, "first", "a")
         assertEquals("queued", registry.route("a", "future", "one").state)
-        assertEquals("duplicate", registry.route("a", "future", " one ").state)
+        assertEquals("blocked", registry.route("a", "future", " one ").state)
+        assertEquals("TEAM_DUPLICATE_MESSAGE", registry.route("a", "future", " one ").reason)
         assertEquals("one", registry.bind(run, "future", "b"))
         var deliveries = 0
         assertEquals("delivered", registry.route("a", "b", "two") { deliveries++; true }.state)
@@ -55,8 +58,9 @@ class TeamRunRegistryTest {
         val registry = TeamRunRegistry()
         val run = registry.begin("parent", tasks())
         registry.bind(run, "first", "a"); registry.bind(run, "future", "b")
-        assertEquals("invalid_message", registry.route("a", "b", "x".repeat(301)).state)
-        assertEquals("invalid_message", registry.route("a", "b", " ").state)
+        assertEquals("blocked", registry.route("a", "b", "x".repeat(301)).state)
+        assertEquals("INVALID_ARGS", registry.route("a", "b", "x".repeat(301)).reason)
+        assertEquals("blocked", registry.route("a", "b", " ").state)
         assertEquals("unavailable", registry.route("a", "b", "retry") { false }.state)
         assertEquals("delivered", registry.route("a", "b", "retry") { true }.state)
         assertEquals("delivered", registry.route("a", "b", "\uD83D\uDE00".repeat(300)) { true }.state)
@@ -99,7 +103,8 @@ class TeamRunRegistryTest {
             "a", "parent", com.aharou.feature.agent.domain.subagent.SubAgentEventType.SPAWNED
         ))
         assertEquals("delivered", registry.route("a", "b", "a0") { bus.sendToSibling("a", it, "a0") }.state)
-        assertEquals("pair_limit", registry.route("b", "a", "new").state)
+        assertEquals("blocked", registry.route("b", "a", "new").state)
+        assertEquals("TEAM_PAIR_LIMIT", registry.route("b", "a", "new").reason)
     }
     @Test fun reworkKeepsLogicalIdentityButRetiresOldSession() {
         val registry = TeamRunRegistry()

@@ -140,7 +140,8 @@ class AgentTeamInterfaceEdgeTest {
                         TeamTask(agent = "engineer", prompt = "c")
                     )
                 )
-            )
+            ),
+            members = listOf(TeamMemberRef("designer"), TeamMemberRef("engineer"))
         )
         assertNull(repository.save(team.toForm(AgentDefinitionScope.GLOBAL), null))
 

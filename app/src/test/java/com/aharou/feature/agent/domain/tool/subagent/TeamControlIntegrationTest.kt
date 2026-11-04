@@ -57,10 +57,10 @@ class TeamControlIntegrationTest {
     @Test fun actualRepositoryAndConfigSavePreserveTaskLeasesForDottedNames() {
         val provider = TestFileAccessProvider()
         val file = File(folder.root, "team.md")
-        val initial = AgentTeamForm(name = "发布 release.v2 next", members = listOf(TeamMemberRef("worker")),
-            stages = listOf(AgentTeamStageForm(title = "implement", members = listOf("worker"), prompt = "deliver",
-                tasks = listOf(AgentTeamTaskForm(agent = "worker", prompt = "deliver", writePaths = "src/a.kt"),
-                    AgentTeamTaskForm(agent = "worker", prompt = "deliver", writePaths = "src/b.kt")))))
+        val initial = AgentTeamForm(name = "发布 release.v2 next", members = listOf(TeamMemberRef("worker.a"), TeamMemberRef("worker.b")),
+            stages = listOf(AgentTeamStageForm(title = "implement", members = listOf("worker.a", "worker.b"), prompt = "deliver",
+                tasks = listOf(AgentTeamTaskForm(agent = "worker.a", prompt = "deliver", writePaths = "src/a.kt"),
+                    AgentTeamTaskForm(agent = "worker.b", prompt = "deliver", writePaths = "src/b.kt")))))
         file.writeText(AgentTeamParser.serialize(initial))
         val repository = spyk(AgentTeamRepository(provider))
         every { repository.listAll() } answers {
