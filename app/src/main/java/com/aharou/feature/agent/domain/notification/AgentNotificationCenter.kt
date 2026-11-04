@@ -59,7 +59,7 @@ data class PendingNotification(
  * 中途被取消时通知仍留在队列里，交给下一批工具或兜底路径。
  */
 @Singleton
-class AgentNotificationCenter @Inject constructor(private val teams: TeamRunRegistry = TeamRunRegistry()) {
+class AgentNotificationCenter @Inject constructor(private val teams: TeamRunRegistry) {
 
     private val lock = Any()
     private val pending = mutableMapOf<String, MutableList<PendingNotification>>()

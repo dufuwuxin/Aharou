@@ -71,7 +71,7 @@ data class SubAgentEvent(
 class SubAgentEventBus @Inject constructor(
     private val maxRunningSource: MaxRunningSource,
     private val communicationSource: CommunicationEnabledSource,
-    private val runRegistry: TeamRunRegistry = TeamRunRegistry(),
+    private val runRegistry: TeamRunRegistry,
 ) {
     /** 子代理之间的对等通信（team / tell）是否开启；工具层与手册层都据此决定说不说、做不做。 */
     fun communicationEnabled(): Boolean = communicationSource.communicationEnabled()

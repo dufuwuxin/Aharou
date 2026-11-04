@@ -22,7 +22,7 @@ class SubAgentEventBusTest {
     private fun busWith(
         limit: Int = SubAgentEventBus.DEFAULT_MAX_RUNNING,
         commEnabled: Boolean = true,
-    ) = SubAgentEventBus(MaxRunningSource { limit }, CommunicationEnabledSource { commEnabled })
+    ) = SubAgentEventBus(MaxRunningSource { limit }, CommunicationEnabledSource { commEnabled }, TeamRunRegistry())
 
     private fun spawn(bus: SubAgentEventBus, id: String) = bus.emit(
         SubAgentEvent(subSessionId = id, parentSessionId = "parent", type = SubAgentEventType.SPAWNED)
