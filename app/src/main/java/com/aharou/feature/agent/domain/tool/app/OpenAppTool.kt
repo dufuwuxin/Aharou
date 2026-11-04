@@ -54,7 +54,7 @@ class OpenAppTool @Inject constructor(
             "action=open 打开应用：target 给包名（最准，如抖音 com.ss.android.ugc.aweme）或应用名关键词；" +
             "action=navigate 起导航：target 直接给目的地文字（如「天安门」，不用经纬度），mode 可选 driving/walking/transit。" +
             "装了高德就走高德、装了百度就走百度，都没有则退回系统地图让用户选。" +
-            "需要已授予 root 或已安装并授权 Shizuku；没有时返回开启指引。"
+            "需要已安装并授权 Shizuku；没有时返回开启指引。"
 
     override val permissionPolicy = ToolPermissionPolicy.AUTO_APPROVE
     override val capabilities = setOf(ToolCapability.EXECUTE_COMMANDS)
@@ -83,7 +83,7 @@ class OpenAppTool @Inject constructor(
         if (hostShell.ensureMode() == HostShellMode.UNAVAILABLE) {
             return ToolResult.Error(
                 "宿主命令通道不可用：${hostShell.shizukuState.value.hint()}。" +
-                    "请先安装并启动 Shizuku、在 Shizuku 里授权本应用，或给本应用 root 权限，然后重试。",
+                    "请先安装并启动 Shizuku、在 Shizuku 里授权本应用，然后重试。",
                 "HOST_SHELL_UNAVAILABLE",
             )
         }

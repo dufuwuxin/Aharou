@@ -49,10 +49,8 @@ internal object WidgetRenderer {
         // 顶部快捷入口
         styleButton(views, R.id.widget_entry_new, palette.primary, palette.onPrimary)
         styleButton(views, R.id.widget_entry_chat, palette.chip, palette.onSurface)
-        styleButton(views, R.id.widget_entry_voice, palette.chip, palette.onSurface)
         views.setOnClickPendingIntent(R.id.widget_entry_new, WidgetActions.newChat(context, appWidgetId))
         views.setOnClickPendingIntent(R.id.widget_entry_chat, WidgetActions.openApp(context, appWidgetId))
-        views.setOnClickPendingIntent(R.id.widget_entry_voice, WidgetActions.startVoice(context, appWidgetId))
 
         // 最近会话（固定槽位）
         val now = System.currentTimeMillis()

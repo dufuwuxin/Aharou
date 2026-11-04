@@ -11,9 +11,6 @@ import com.aharou.feature.agent.domain.memory.MemoryCompactReport
 import com.aharou.feature.agent.domain.memory.MemoryOrganizeReport
 import com.aharou.feature.agent.domain.memory.MemoryScope
 import com.aharou.feature.agent.domain.memory.MemoryType
-import com.aharou.feature.voice.domain.VoiceModelManager
-import com.aharou.feature.voice.domain.VoiceModelState
-import com.aharou.feature.voice.domain.VoiceModelStatus
 import com.aharou.core.util.FileLogger
 import com.aharou.core.util.LogLevel
 import com.aharou.feature.agent.domain.container.ConnectionState
@@ -50,24 +47,12 @@ import com.aharou.feature.settings.data.remote.ModelApiService
 import com.aharou.feature.settings.data.remote.ModelMetadataService
 import com.aharou.feature.settings.data.remote.ModelTestResult
 import com.aharou.feature.agent.domain.shell.HostShellManager
-import com.aharou.feature.settings.data.remote.UpdateApkDownloader
-import com.aharou.feature.settings.data.remote.UpdateCheckResult
-import com.aharou.feature.settings.data.remote.UpdateReleasePolicy
-import com.aharou.feature.settings.data.remote.UpdateCheckService
-import com.aharou.feature.settings.data.remote.UpdateDownloadSource
-import com.aharou.feature.settings.data.repository.UpdateCheckSettingsRepository
-import com.aharou.feature.settings.data.repository.VoiceSttSettingsRepository
-import com.aharou.feature.settings.data.repository.VoiceTtsSettingsRepository
-import com.aharou.feature.settings.data.repository.VoiceWakeSettingsRepository
-import com.aharou.feature.voice.call.VoiceCallService
 import android.app.role.RoleManager
 import android.content.Intent
 import android.os.Build
 import android.provider.Settings
-import com.aharou.feature.settings.data.repository.UpdateChannel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import com.aharou.feature.settings.data.repository.AppThemeMode
-import com.aharou.feature.voice.assistant.AharouVoiceInteractionService
 import com.aharou.feature.agent.domain.shizuku.ShizukuManager
 import com.aharou.feature.settings.data.repository.ContainerSettingsRepository
 import com.aharou.feature.settings.data.repository.DownloadedImageRecord
@@ -93,7 +78,7 @@ import com.aharou.feature.settings.data.repository.ImageGenModelSettingsReposito
 import com.aharou.feature.settings.data.repository.MemoryModelSettingsRepository
 import com.aharou.feature.settings.data.repository.VisionModelSettingsRepository
 import com.aharou.feature.workspace.domain.model.RemoteConnection
-import com.aharou.feature.workspace.domain.repository.RemoteRepository
+import com.aharou.feature.workspace.data.local.dao.RemoteConnectionDao
 import com.aharou.feature.settings.domain.model.AIProviderConfig
 import com.aharou.feature.settings.domain.model.DashboardContext
 import com.aharou.feature.settings.domain.model.ModelMetadata
@@ -147,43 +132,6 @@ data class LogViewerUiState(
     val error: String? = null
 )
 
-/** 检查更新弹窗状态（全局弹窗宿主在主页 AppNavigation 层渲染，自动/手动共用）。 */
-sealed interface UpdateCheckUiState {
-    data object Idle : UpdateCheckUiState
-    data object Checking : UpdateCheckUiState
-    data object UpToDate : UpdateCheckUiState
-    data class NewVersion(
-        val latestTag: String,
-        val changelog: String,
-        /** release 里挑出的 APK 资产名；为 null 时只能走浏览器兜底。 */
-        val apkAssetName: String? = null,
-        val apkAssetSize: Long = 0L,
-        /** 该资产的 sha256（剥掉 `sha256:` 前缀）；为 null 时下载后不校验。 */
-        val apkAssetDigest: String? = null
-    ) : UpdateCheckUiState
-    data class Error(val message: String) : UpdateCheckUiState
-}
-
-/** 应用内下载更新包的状态（在检查更新弹窗里展示进度）。 */
-sealed interface UpdateDownloadUiState {
-    data object Idle : UpdateDownloadUiState
-
-    /** 正在挑选可用的下载源（cnb 发布仓 → 加速镜像 → GitHub 原链）。 */
-    data object Resolving : UpdateDownloadUiState
-
-    data class Downloading(
-        val bytesRead: Long,
-        val totalBytes: Long,
-        val sourceUrl: String
-    ) : UpdateDownloadUiState
-
-    /** 下载完成，等交给系统安装器。 */
-    data class Ready(val apkPath: String, val versionTag: String) : UpdateDownloadUiState
-
-    data class Failed(val message: String? = null) : UpdateDownloadUiState
-}
-
-
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
@@ -208,10 +156,6 @@ class SettingsViewModel @Inject constructor(
     private val agentDefinitionConfigRepository: AgentDefinitionConfigRepository,
     private val toolRegistry: ToolRegistry,
     private val visionModelSettingsRepository: VisionModelSettingsRepository,
-    private val voiceSttSettingsRepository: VoiceSttSettingsRepository,
-    private val voiceTtsSettingsRepository: VoiceTtsSettingsRepository,
-    private val voiceWakeSettingsRepository: VoiceWakeSettingsRepository,
-    private val voiceModelManager: VoiceModelManager,
     private val tessdataManager: TessdataManager,
     private val imageGenModelSettingsRepository: ImageGenModelSettingsRepository,
     private val memoryModelSettingsRepository: MemoryModelSettingsRepository,
@@ -224,10 +168,7 @@ class SettingsViewModel @Inject constructor(
     private val executionModeRepository: ExecutionModeRepository,
     private val executionModeHolder: ExecutionModeHolder,
     private val remoteSshConnection: RemoteSshConnection,
-    private val remoteRepository: RemoteRepository,
-    private val updateCheckSettingsRepository: UpdateCheckSettingsRepository,
-    private val updateCheckService: UpdateCheckService,
-    private val updateApkDownloader: UpdateApkDownloader,
+    private val remoteConnectionDao: RemoteConnectionDao,
     private val hostShell: HostShellManager,
     private val providerDashboardRunner: ProviderDashboardRunner,
     private val terminalSettingsRepository: TerminalSettingsRepository,
@@ -304,7 +245,6 @@ class SettingsViewModel @Inject constructor(
 
     private companion object {
         /** Shizuku 静默安装的超时（大包 pm install 要几十秒）。 */
-        const val SHIZUKU_INSTALL_TIMEOUT_MS = 120_000L
         const val MAX_LOG_LINES = 1200
         /** 背景透明度停止拖动后的落盘延迟。 */
         const val BACKGROUND_ALPHA_WRITE_DEBOUNCE_MS = 80L
@@ -414,127 +354,10 @@ class SettingsViewModel @Inject constructor(
     private val _memoryModel = MutableStateFlow("")
     val memoryModel: StateFlow<String> = _memoryModel.asStateFlow()
 
-    /** 语音识别（STT）专用模型：providerId 为空即未配置（回退内置离线模型）。 */
-    private val _voiceSttProviderId = MutableStateFlow("")
-    val voiceSttProviderId: StateFlow<String> = _voiceSttProviderId.asStateFlow()
-
-    private val _voiceSttModel = MutableStateFlow("")
-    val voiceSttModel: StateFlow<String> = _voiceSttModel.asStateFlow()
-
-    /** 语音合成（TTS）专用模型：providerId 为空即未配置（不朗读）。 */
-    private val _voiceTtsProviderId = MutableStateFlow("")
-    val voiceTtsProviderId: StateFlow<String> = _voiceTtsProviderId.asStateFlow()
-
-    private val _voiceTtsModel = MutableStateFlow("")
-    val voiceTtsModel: StateFlow<String> = _voiceTtsModel.asStateFlow()
-
-    /** 合成音色名；不同服务商格式不同，原样透传，为空时用服务端默认。 */
-    private val _voiceTtsVoice = MutableStateFlow("")
-    val voiceTtsVoice: StateFlow<String> = _voiceTtsVoice.asStateFlow()
-
-    private val _autoReadAloud = MutableStateFlow(false)
-
-    /** 自动朗读开关：开了之后 AI 每条回复落地就自动念。 */
-    val autoReadAloud: StateFlow<Boolean> = _autoReadAloud.asStateFlow()
-
-    private val _voiceWakeEnabled = MutableStateFlow(false)
-
-    /** 语音唤醒开关：开了麦克风常驻听唤醒词。 */
-    val voiceWakeEnabled: StateFlow<Boolean> = _voiceWakeEnabled.asStateFlow()
-
-    private val _isDefaultAssistant = MutableStateFlow(false)
-
-    /** 本应用当前是不是系统的默认数字助手。 */
-    val isDefaultAssistant: StateFlow<Boolean> = _isDefaultAssistant.asStateFlow()
-
-    fun toggleVoiceWake() {
-        viewModelScope.launch {
-            val next = !voiceWakeSettingsRepository.isEnabled()
-            voiceWakeSettingsRepository.setEnabled(next)
-            _voiceWakeEnabled.value = next
-            if (next) VoiceCallService.start(context, wakeMode = true) else VoiceCallService.stop(context)
-        }
-    }
-
-    /**
-     * 刷新「是否默认助手」。
-     *
-     * 只认 RoleManager 是不够的：国产 ROM 多数不把 ASSISTANT 角色开放给第三方，
-     * 但通过特权通道写 `secure.assistant` 同样能让系统把我们当默认助手用，
-     * 此时 `isRoleHeld` 仍是 false——只按它判断就会一直显示「未设置」。
-     * 所以两者取或，任一成立就算已设置。
-     */
-    fun refreshDefaultAssistant() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val roleManager = context.getSystemService(RoleManager::class.java)
-            if (roleManager != null && roleManager.isRoleHeld(RoleManager.ROLE_ASSISTANT)) {
-                _isDefaultAssistant.value = true
-                return
-            }
-        }
-        _isDefaultAssistant.value = assistantComponentName() ==
-            Settings.Secure.getString(context.contentResolver, "assistant")
-    }
-
-    /** 我们的语音交互服务组件名，格式包名/类全名。 */
-    private fun assistantComponentName(): String =
-        "${context.packageName}/${AharouVoiceInteractionService::class.java.name}"
-
-    /**
-     * 用特权通道直接把默认助手指向我们自己。
-     *
-     * ColorOS 这类 ROM 的助手设置页不认第三方应用，走 `RoleManager` 或系统设置页
-     * 都落不了地；有 Shizuku/root 时直接写 secure 设置最可靠，写完即刻生效。
-     *
-     * @return true 表示写入成功（调用方随后应调 [refreshDefaultAssistant]）。
-     */
-    suspend fun applyDefaultAssistant(): Boolean {
-        val component = assistantComponentName()
-        val command = "settings put secure assistant $component" +
-            "; settings put secure voice_interaction_service $component"
-        val result = runCatching { shizukuManager.runCommand(command, 5000) }.getOrNull()
-            ?: return false
-        if (result.exitCode != 0) return false
-        return Settings.Secure.getString(context.contentResolver, "assistant") == component
-    }
-
-    /**
-     * 构造「设为默认助手」要打开的页面。
-     *
-     * 只返回 Intent、**由界面层用 Activity 的 context 启动**：早先在这里用 application
-     * context + NEW_TASK 直接 startActivity，系统（尤其 ColorOS）会默默拦掉后台启动，
-     * 表现就是「点了没反应」。
-     *
-     * 返回 null 表示确实无处可去。
-     */
-    fun defaultAssistantIntent(): Intent? {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val roleManager = context.getSystemService(RoleManager::class.java)
-            if (roleManager != null && roleManager.isRoleAvailable(RoleManager.ROLE_ASSISTANT)) {
-                return roleManager.createRequestRoleIntent(RoleManager.ROLE_ASSISTANT)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-        }
-        // 不少 ROM（如 ColorOS）不给应用开放 ASSISTANT 角色，退到系统的语音输入设置页
-        return Intent(Settings.ACTION_VOICE_INPUT_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-    }
-
     private val _ocrForTextOnlyModels = MutableStateFlow(true)
 
     /** 为不支持图片输入的模型自动做本机 OCR 的开关。 */
     val ocrForTextOnlyModels: StateFlow<Boolean> = _ocrForTextOnlyModels.asStateFlow()
-
-    /** 离线语音模型的当前状态（打开设置页时构造 VM 即算好）。 */
-    private val _voiceModelStatus = MutableStateFlow(voiceModelManager.statusAll())
-    val voiceModelStatus: StateFlow<VoiceModelStatus> = _voiceModelStatus.asStateFlow()
-
-    /** 进行中的下载/解压状态；[VoiceModelState.Idle] 表示没在跑。 */
-    private val _voiceModelState = MutableStateFlow<VoiceModelState>(VoiceModelState.Idle)
-    val voiceModelState: StateFlow<VoiceModelState> = _voiceModelState.asStateFlow()
-
-    fun refreshVoiceModelStatus() {
-        _voiceModelStatus.value = voiceModelManager.statusAll()
-    }
 
     /** OCR 语言包的当前状态（打开设置页时构造 VM 即算好）。 */
     private val _tessdataStatus = MutableStateFlow(tessdataManager.status())
@@ -562,47 +385,11 @@ class SettingsViewModel @Inject constructor(
             refreshTessdataStatus()
         }
     }
-    fun downloadVoiceModel() {
-        val running = _voiceModelState.value
-        if (running is VoiceModelState.Downloading || running is VoiceModelState.Extracting) return
-        _voiceModelState.value = VoiceModelState.Downloading(0f)
-        viewModelScope.launch {
-            try { voiceModelManager.ensureAll { _voiceModelState.value = it } }
-            catch (e: CancellationException) {
-                _voiceModelState.value = VoiceModelState.Idle
-                throw e
-            } catch (e: Exception) { _voiceModelState.value = VoiceModelState.Failed(e.message.orEmpty()) }
-            finally { refreshVoiceModelStatus() }
-        }
-    }
     private val _logLevel = MutableStateFlow(LogLevel.VERBOSE)
     val logLevel: StateFlow<LogLevel> = _logLevel.asStateFlow()
 
     private val _logViewerState = MutableStateFlow(LogViewerUiState())
     val logViewerState: StateFlow<LogViewerUiState> = _logViewerState.asStateFlow()
-
-    private val updateCheckBusy = MutableStateFlow(false)
-    private val _updateCheckState = MutableStateFlow<UpdateCheckUiState>(UpdateCheckUiState.Idle)
-    val updateCheckState: StateFlow<UpdateCheckUiState> = _updateCheckState.asStateFlow()
-
-    private val _updateDownloadState = MutableStateFlow<UpdateDownloadUiState>(UpdateDownloadUiState.Idle)
-    val updateDownloadState: StateFlow<UpdateDownloadUiState> = _updateDownloadState.asStateFlow()
-    private var updateDownloadJob: Job? = null
-    private var shizukuInstallJob: Job? = null
-
-    private val _updateCheckEnabled = MutableStateFlow(updateCheckSettingsRepository.autoCheckEnabled)
-    val updateCheckEnabled: StateFlow<Boolean> = _updateCheckEnabled.asStateFlow()
-
-    private val _updateCheckChannel = MutableStateFlow(updateCheckSettingsRepository.channel)
-    val updateCheckChannel: StateFlow<UpdateChannel> = _updateCheckChannel.asStateFlow()
-
-    private val _autoDownloadEnabled = MutableStateFlow(updateCheckSettingsRepository.autoDownloadEnabled)
-    val autoDownloadEnabled: StateFlow<Boolean> = _autoDownloadEnabled.asStateFlow()
-
-    private val _autoInstallEnabled = MutableStateFlow(updateCheckSettingsRepository.autoInstallEnabled)
-    val autoInstallEnabled: StateFlow<Boolean> = _autoInstallEnabled.asStateFlow()
-    /** 关于页只读展示：最近一次检查结果（含手动检查），初值来自持久化记录。 */
-    val lastVersionCheck = updateCheckSettingsRepository.lastCheckSnapshot
 
     private val _keepaliveEnabled = MutableStateFlow(false)
     val keepaliveEnabled: StateFlow<Boolean> = _keepaliveEnabled.asStateFlow()
@@ -649,11 +436,7 @@ class SettingsViewModel @Inject constructor(
     private val _themeMode = MutableStateFlow(AppThemeMode.AUTO)
     val themeMode: StateFlow<AppThemeMode> = _themeMode.asStateFlow()
 
-    private val _themePresetId = MutableStateFlow<String?>(null)
-    val themePresetId: StateFlow<String?> = _themePresetId.asStateFlow()
 
-    private val _dynamicColorEnabled = MutableStateFlow(false)
-    val dynamicColorEnabled: StateFlow<Boolean> = _dynamicColorEnabled.asStateFlow()
 
     /** 全局自定义背景图文件路径（null=未设置），供设置弹窗展示与预览。 */
     private val _backgroundImagePath = MutableStateFlow<String?>(null)
@@ -667,7 +450,7 @@ class SettingsViewModel @Inject constructor(
     private var backgroundAlphaWriteJob: Job? = null
 
     /** 用户选择的应用语言 tag（null 表示跟随系统）。 */
-    private val _languageTag = MutableStateFlow<String?>(null)
+    private val _languageTag = MutableStateFlow<String?>("zh")
     val languageTag: StateFlow<String?> = _languageTag.asStateFlow()
 
     private val _mcpEntries = MutableStateFlow<List<McpServerEntry>>(emptyList())
@@ -796,7 +579,11 @@ class SettingsViewModel @Inject constructor(
     val filterModel: StateFlow<String?> = tokenStatsController.filterModel
 
     /** 工作区已配置的远程连接通道，供容器镜像 SSH 模式下拉复用。 */
-    val remoteConnections: StateFlow<List<RemoteConnection>> = remoteRepository.getConnections()
+    val remoteConnections: StateFlow<List<RemoteConnection>> = remoteConnectionDao.getAllConnections().map { connections ->
+        connections.map { RemoteConnection(id = it.id, name = it.name, protocol = it.protocol,
+            host = it.host, port = it.port, username = it.username, authType = it.authType,
+            authData = it.authData, passphrase = it.passphrase, sortOrder = it.sortOrder) }
+    }
         .stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.Eagerly, emptyList())
 
     /**
@@ -832,14 +619,6 @@ class SettingsViewModel @Inject constructor(
         syncFlow(imageGenModelSettingsRepository.modelFlow, _imageGenModel)
         syncFlow(memoryModelSettingsRepository.providerIdFlow, _memoryProviderId)
         syncFlow(memoryModelSettingsRepository.modelFlow, _memoryModel)
-        syncFlow(voiceSttSettingsRepository.providerIdFlow, _voiceSttProviderId)
-        syncFlow(voiceSttSettingsRepository.modelFlow, _voiceSttModel)
-        syncFlow(voiceTtsSettingsRepository.providerIdFlow, _voiceTtsProviderId)
-        syncFlow(voiceTtsSettingsRepository.modelFlow, _voiceTtsModel)
-        syncFlow(voiceTtsSettingsRepository.voiceFlow, _voiceTtsVoice)
-        syncFlow(voiceTtsSettingsRepository.autoReadAloudFlow, _autoReadAloud)
-        syncFlow(voiceWakeSettingsRepository.enabledFlow, _voiceWakeEnabled)
-        refreshDefaultAssistant()
         syncFlow(generalSettingsRepository.ocrForTextOnlyModelsFlow, _ocrForTextOnlyModels)
         syncFlow(logSettingsRepository.levelFlow, _logLevel)
         syncFlow(keepaliveSettingsRepository.enabledFlow, _keepaliveEnabled)
@@ -857,8 +636,6 @@ class SettingsViewModel @Inject constructor(
         syncFlow(generalSettingsRepository.sendFileMaxSizeMbFlow, _sendFileMaxSizeMb)
         syncFlow(generalSettingsRepository.deleteExternalWorkspaceSessionsFlow, _deleteExternalWorkspaceSessions)
         syncFlow(themeSettingsRepository.themeModeFlow, _themeMode)
-        syncFlow(themeSettingsRepository.themePresetIdFlow, _themePresetId)
-        syncFlow(themeSettingsRepository.dynamicColorFlow, _dynamicColorEnabled)
         syncFlow(backgroundSettingsRepository.imagePathFlow, _backgroundImagePath)
         syncFlow(backgroundSettingsRepository.alphaFlow, _backgroundAlpha)
         syncFlow(languageSettingsRepository.languageFlow, _languageTag)
@@ -1211,215 +988,6 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    // ── 检查更新 ──
-
-    /** 自动检查保持静默；手动检查不受开关与每日限制。 */
-    fun checkUpdate(manual: Boolean) {
-        if (!manual) {
-            if (!updateCheckSettingsRepository.autoCheckEnabled) return
-            if (updateCheckSettingsRepository.hasCheckedToday()) return
-        }
-        if (!updateCheckBusy.compareAndSet(false, true)) return
-        viewModelScope.launch {
-            try {
-                if (manual) _updateCheckState.value = UpdateCheckUiState.Checking
-                val result = updateCheckService.checkForUpdate(
-                    currentVersion = updateCheckSettingsRepository.currentVersionName(),
-                    channel = updateCheckSettingsRepository.channel
-                )
-                _updateCheckState.value = when (result) {
-                    is UpdateCheckResult.UpToDate -> {
-                        if (manual) UpdateCheckUiState.UpToDate else UpdateCheckUiState.Idle
-                    }
-                    is UpdateCheckResult.NewVersion -> {
-                        val identity = UpdateReleasePolicy.notificationIdentity(
-                            result.info.latestTag, result.info.apkAssetName, result.info.apkAssetDigest)
-                        if (!manual && identity == updateCheckSettingsRepository.lastNotifiedTag) {
-                            UpdateCheckUiState.Idle
-                        } else {
-                            updateCheckSettingsRepository.lastNotifiedTag = identity
-                            UpdateCheckUiState.NewVersion(
-                                latestTag = result.info.latestTag,
-                                changelog = result.info.changelog,
-                                apkAssetName = result.info.apkAssetName,
-                                apkAssetSize = result.info.apkAssetSize,
-                                apkAssetDigest = result.info.apkAssetDigest
-                            )
-                        }
-                    }
-                    is UpdateCheckResult.Error -> {
-                        if (manual) UpdateCheckUiState.Error(result.message) else UpdateCheckUiState.Idle
-                    }
-                }
-                if (result is UpdateCheckResult.NewVersion && _updateCheckState.value is UpdateCheckUiState.NewVersion &&
-                    updateCheckSettingsRepository.autoDownloadEnabled) {
-                    autoDownloadIfNeeded(result.info.latestTag, result.info.apkAssetDigest)
-                }
-                updateCheckSettingsRepository.writeUpdateInfo(
-                    currentVersion = updateCheckSettingsRepository.currentVersionName(),
-                    channel = updateCheckSettingsRepository.channel,
-                    result = result
-                )
-            } finally {
-                if (_updateCheckState.value == UpdateCheckUiState.Checking) _updateCheckState.value = UpdateCheckUiState.Idle
-                try { if (!manual) updateCheckSettingsRepository.markCheckedToday() }
-                finally { updateCheckBusy.value = false }
-            }
-        }
-    }
-
-    /** 关闭更新弹窗（连同已下未装的进度一起收起）。 */
-    fun dismissUpdateCheck() {
-        _updateCheckState.value = UpdateCheckUiState.Idle
-        cancelDownload()
-    }
-
-    /**
-     * 应用内下载更新包：候选源依次尝试（Fork 加速镜像 → Fork GitHub 原链），
-     * 进度与当前来源写入 [updateDownloadState] 供弹窗展示。
-     */
-    fun downloadUpdate() {
-        val state = _updateCheckState.value as? UpdateCheckUiState.NewVersion ?: return
-        if (updateDownloadJob?.isActive == true) return
-        updateDownloadJob = viewModelScope.launch {
-            _updateDownloadState.value = UpdateDownloadUiState.Resolving
-            // 资产可能在「发现新版本」那一刻还没同步到位（发布主源的资产滞后于 release）。
-            // 不能拿状态里那个 null 直接报错：那样用户退出重进、再点下载都是一样的失败。
-            // 这里现场重查一次，拿到资产就用（并回写状态，让后续点击也正常）。
-            var effective = state
-            if (effective.apkAssetName.isNullOrBlank()) {
-                val fresh = runCatching {
-                    updateCheckService.checkForUpdate(
-                        currentVersion = updateCheckSettingsRepository.currentVersionName(),
-                        channel = updateCheckSettingsRepository.channel
-                    )
-                }.getOrNull()
-                val freshInfo = (fresh as? UpdateCheckResult.NewVersion)?.info
-                if (freshInfo?.apkAssetName.isNullOrBlank()) {
-                    _updateDownloadState.value = UpdateDownloadUiState.Failed("no apk asset in release")
-                    return@launch
-                }
-                effective = UpdateCheckUiState.NewVersion(
-                    latestTag = freshInfo!!.latestTag,
-                    changelog = freshInfo.changelog,
-                    apkAssetName = freshInfo.apkAssetName,
-                    apkAssetSize = freshInfo.apkAssetSize,
-                    apkAssetDigest = freshInfo.apkAssetDigest
-                )
-                _updateCheckState.value = effective
-            }
-            val assetName = effective.apkAssetName.orEmpty()
-            val candidates = UpdateDownloadSource.candidates(effective.latestTag, assetName)
-            // 记下实际命中的候选（候选列表失败会静默换下一个源，不记就无从得知走的哪条）
-            var usedSource = ""
-            try {
-                val file = updateApkDownloader.download(
-                    candidates = candidates,
-                    fileName = assetName,
-                    expectedSize = effective.apkAssetSize,
-                    expectedSha256 = effective.apkAssetDigest,
-                    onSource = { url ->
-                        usedSource = url
-                        _updateDownloadState.value = UpdateDownloadUiState.Downloading(
-                            bytesRead = 0L,
-                            totalBytes = effective.apkAssetSize,
-                            sourceUrl = url
-                        )
-                    },
-                    onProgress = { read, total ->
-                        val source = (_updateDownloadState.value as? UpdateDownloadUiState.Downloading)?.sourceUrl.orEmpty()
-                        _updateDownloadState.value = UpdateDownloadUiState.Downloading(read, total, source)
-                    }
-                )
-                updateCheckSettingsRepository.downloadedTag = effective.latestTag
-                updateCheckSettingsRepository.downloadedPath = file.absolutePath
-                updateCheckSettingsRepository.writeDownloadRecord(effective.latestTag, usedSource, file.absolutePath)
-                FileLogger.i("UpdateDownload", "已下载 $effective.latestTag，来源=$usedSource")
-                _updateDownloadState.value = UpdateDownloadUiState.Ready(file.absolutePath, effective.latestTag)
-                maybeAutoInstall(file.absolutePath, effective.latestTag)
-            } catch (e: CancellationException) {
-                _updateDownloadState.value = UpdateDownloadUiState.Idle
-                throw e
-            } catch (e: Exception) {
-                FileLogger.w("UpdateDownload", "download failed: ${e.message}")
-                _updateDownloadState.value = UpdateDownloadUiState.Failed(e.message)
-            }
-        }
-    }
-
-    /** 取消进行中的下载（半成品由下载器删除）。 */
-    fun cancelDownload() {
-        updateDownloadJob?.cancel()
-        updateDownloadJob = null
-        _updateDownloadState.value = UpdateDownloadUiState.Idle
-    }
-
-    /** 预下载新版本；固定 beta 标签只有摘要匹配才可复用缓存。 */
-    private fun autoDownloadIfNeeded(tag: String, expectedSha256: String?) {
-        val savedPath = updateCheckSettingsRepository.downloadedPath
-        // 复用上次下好的包同样要校验：它接着就被送去安装，不能因为「上次下过」而免检。
-        if ((tag != "beta-latest" || !expectedSha256.isNullOrBlank()) &&
-            updateCheckSettingsRepository.downloadedTag == tag && savedPath != null &&
-            File(savedPath).isFile &&
-            runCatching { updateApkDownloader.matchesDigest(File(savedPath), expectedSha256) }
-                .getOrDefault(false)
-        ) {
-            _updateDownloadState.value = UpdateDownloadUiState.Ready(savedPath, tag)
-            maybeAutoInstall(savedPath, tag)
-            return
-        }
-        downloadUpdate()
-    }
-
-    /** 开关开启时交给 Shizuku 静默安装；未开启/未授权则什么都不做，等用户点「立即安装」。 */
-    private fun maybeAutoInstall(path: String, tag: String) {
-        if (!updateCheckSettingsRepository.autoInstallEnabled) return
-        installUpdateWithShizuku(path, tag)
-    }
-
-    /**
-     * 用宿主通道（有 root 走 root，否则 adb shell）静默安装已下载的更新包。
-     * 失败不弹错误窗：UI 上的「立即安装」按钮仍在，可回落到系统安装器。
-     */
-    fun installUpdateWithShizuku(path: String, tag: String) {
-        if (shizukuInstallJob?.isActive == true) return
-        shizukuInstallJob = viewModelScope.launch {
-            val result = runCatching {
-                hostShell.run("pm install -r \"$path\"", SHIZUKU_INSTALL_TIMEOUT_MS)
-            }.getOrNull()
-            val ok = result != null && result.exitCode == 0 && !result.output.contains("Failure")
-            FileLogger.i(
-                "UpdateInstall",
-                "静默安装 tag=$tag exit=${result?.exitCode} ok=$ok"
-            )
-            // 成功时 App 马上被替换重启，不必再改状态；失败就保持 Ready，让用户点按钮走系统安装器
-        }
-    }
-
-    /** 自动检查更新开关（默认开启）。 */
-    fun setUpdateCheckEnabled(enabled: Boolean) {
-        updateCheckSettingsRepository.autoCheckEnabled = enabled
-        _updateCheckEnabled.value = enabled
-    }
-
-    /** 自动下载更新包开关：检测到新版本就用国内源提前下好。 */
-    fun setAutoDownloadEnabled(enabled: Boolean) {
-        updateCheckSettingsRepository.autoDownloadEnabled = enabled
-        _autoDownloadEnabled.value = enabled
-    }
-
-    /** 下载后自动静默安装开关（需 Shizuku 授权；覆盖安装会重启 App）。 */
-    fun setAutoInstallEnabled(enabled: Boolean) {
-        updateCheckSettingsRepository.autoInstallEnabled = enabled
-        _autoInstallEnabled.value = enabled
-    }
-
-    /** 更新通道：正式版 / 测试版。 */
-    fun setUpdateCheckChannel(channel: UpdateChannel) {
-        updateCheckSettingsRepository.channel = channel
-        _updateCheckChannel.value = channel
-    }
-
     /**
      * 判断日志行是否属于某个 MCP server：只认 MCP 组件写下的日志（tag 以 `Mcp` 开头，
      * 如 McpManager/McpClient/McpStdioTransport/McpTool），且消息里引用了该 server——
@@ -1629,17 +1197,6 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    fun setThemePreset(id: String) {
-        viewModelScope.launch {
-            themeSettingsRepository.setThemePresetId(id)
-        }
-    }
-
-    fun setDynamicColorEnabled(enabled: Boolean) {
-        viewModelScope.launch {
-            themeSettingsRepository.setDynamicColorEnabled(enabled)
-        }
-    }
 
     /** 选择新背景图（拷贝到私有目录后替换）。 */
     fun setBackgroundImage(uri: Uri) {
@@ -1670,11 +1227,6 @@ class SettingsViewModel @Inject constructor(
     }
 
     /** 设置应用语言；tag 为空字符串或 null 表示跟随系统。 */
-    fun setLanguage(tag: String?) {
-        viewModelScope.launch {
-            languageSettingsRepository.setLanguage(tag?.takeIf { it.isNotBlank() })
-        }
-    }
 
     /**
      * 切换当前选中的容器 profile，并按其 [ContainerProfile.mode] 同步切全局执行模式。
@@ -1852,27 +1404,6 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    /** 设置语音识别模型；providerId 留空等同 [clearVoiceSttModel]（回退内置离线模型）。 */
-    fun setVoiceSttModel(providerId: String, model: String) {
-        viewModelScope.launch {
-            voiceSttSettingsRepository.setSttModel(providerId, model)
-        }
-    }
-
-    /** 清空语音识别模型——回退到内置离线模型。 */
-    fun clearVoiceSttModel() {
-        viewModelScope.launch {
-            voiceSttSettingsRepository.clear()
-        }
-    }
-
-    /** 设置语音合成模型与音色；providerId 留空等同 [clearVoiceTtsModel]。 */
-    fun setVoiceTtsModel(providerId: String, model: String, voice: String) {
-        viewModelScope.launch {
-            voiceTtsSettingsRepository.setTtsModel(providerId, model, voice)
-        }
-    }
-
     /**
      * 切换「为无视觉模型自动识别图片」：同样以存储里的真实值为准取反，
      * 不按界面上的 checked 算（界面状态可能过期，会写成同一个值）。
@@ -1882,41 +1413,6 @@ class SettingsViewModel @Inject constructor(
             val current = runCatching { generalSettingsRepository.ocrForTextOnlyModels() }.getOrDefault(true)
             generalSettingsRepository.setOcrForTextOnlyModels(!current)
             _ocrForTextOnlyModels.value = !current
-        }
-    }
-
-    /** 切换自动朗读。 */
-    fun setAutoReadAloud(enabled: Boolean) {
-        viewModelScope.launch {
-            voiceTtsSettingsRepository.setAutoReadAloud(enabled)
-        }
-    }
-
-    /**
-     * 切换自动朗读：以存储里的真实值为准取反。
-     *
-     * 不能按界面上的值取反——界面状态一旦过期（收流断过），它显示的是错的值，
-     * 用户每点一次都会写回同一个值，表现就是「开关点不动、一直关不掉」。
-     */
-    fun toggleAutoReadAloud() {
-        viewModelScope.launch {
-            val current = runCatching { voiceTtsSettingsRepository.isAutoReadAloud() }.getOrDefault(false)
-            voiceTtsSettingsRepository.setAutoReadAloud(!current)
-            _autoReadAloud.value = !current
-        }
-    }
-
-    /** 只改音色，保留当前合成模型选择。 */
-    fun setVoiceTtsVoice(voice: String) {
-        viewModelScope.launch {
-            voiceTtsSettingsRepository.setVoice(voice)
-        }
-    }
-
-    /** 清空语音合成模型——AI 回复不再朗读。 */
-    fun clearVoiceTtsModel() {
-        viewModelScope.launch {
-            voiceTtsSettingsRepository.clear()
         }
     }
 
@@ -2036,16 +1532,8 @@ class SettingsViewModel @Inject constructor(
         ) {
             visionModelSettingsRepository.clear()
         }
-        if (voiceSttSettingsRepository.getSttProviderId() == provider.id &&
-            voiceSttSettingsRepository.getSttModel() in removed
-        ) {
-            voiceSttSettingsRepository.clear()
-        }
-        if (voiceTtsSettingsRepository.getTtsProviderId() == provider.id &&
-            voiceTtsSettingsRepository.getTtsModel() in removed
-        ) {
-            voiceTtsSettingsRepository.clear()
-        }
+
+
         if (imageGenModelSettingsRepository.getImageGenProviderId() == provider.id &&
             imageGenModelSettingsRepository.getImageGenModel() in removed
         ) {

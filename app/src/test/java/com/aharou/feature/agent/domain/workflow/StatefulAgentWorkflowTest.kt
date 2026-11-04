@@ -82,6 +82,8 @@ class StatefulAgentWorkflowTest {
     // 回退协调器：用例不覆盖跨供应商回退，relaxed 下 isActive=false、activate 返回 null
     private val failoverCoordinator = mockk<ProviderFailoverCoordinator>(relaxed = true)
     private val notifications = mockk<AgentNotificationCenter>()
+    private val chainSettings = mockk<com.aharou.feature.settings.data.repository.WorkspaceModelChainRepository>()
+    private val workspaceModels = WorkspaceModelChain(chainSettings, providers)
     private val config = AIProviderConfig("provider", "Provider", ProviderType.OPENAI, "test-key",
         baseUrl = "https://example.invalid", defaultModel = "model", models = listOf("model"))
     private val context = AgentContext(null, null, "/workspace", null, sessionId = "session")
@@ -115,6 +117,7 @@ class StatefulAgentWorkflowTest {
         keyRotator = mockk(),
         generatedImagePersister = imagePersister,
         failoverCoordinator = failoverCoordinator,
+        workspaceModelChain = workspaceModels,
         agentNotificationCenter = notifications,
         eventInjector = mockk(),
         memoryCurator = mockk(),
@@ -142,6 +145,7 @@ class StatefulAgentWorkflowTest {
     ), recordPrivateCalls = true)
 
     init {
+        coEvery { chainSettings.get(any()) } returns emptyList()
         coEvery { reminderEngine.decorate(any(), any(), any(), any()) } answers {
             arg<com.aharou.feature.agent.domain.tool.ToolResult>(2).toTransportString()
         }
@@ -180,6 +184,59 @@ class StatefulAgentWorkflowTest {
             signature = response.signature, thinkingBlocksJson = response.thinkingBlocksJson,
             attachments = listOf(attachment), inputTokens = response.inputTokens, outputTokens = response.outputTokens,
             cachedInputTokens = response.cachedInputTokens) }
+    }
+
+    @Test
+    fun candidateSwitchRetainsInsertedMessageAndRecomputesWindow() = runTest {
+        prepare(flow { throw java.io.IOException("retries exhausted") })
+        val backupConfig = config.copy(selectedModel = "backup")
+        val backup = mockk<AIProvider>(relaxed = true)
+        every { backup.providerId } returns config.id
+        every { backup.model } returns "backup"
+        coEvery { workflow["createStandaloneProvider"](backupConfig, "session") } returns backup
+        coEvery { chainSettings.get("/workspace") } returns listOf(
+            com.aharou.feature.settings.domain.model.FallbackTarget(config.id, "model"),
+            com.aharou.feature.settings.domain.model.FallbackTarget(config.id, "backup"))
+        val smaller = ModelMetadata("backup", contextTokens = 16_000, supportsVision = false)
+        coEvery { metadata.resolve(config.id, ProviderType.OPENAI, "backup") } returns smaller
+        val requests = mutableListOf<List<AgentMessage>>()
+        every { backup.completeStream(any(), capture(requests), any(), any()) } returns flow {
+            emit(AIStreamChunk.Final(AIResponse("done", emptyList())))
+        }
+        var pending = true
+        val notice = com.aharou.feature.agent.domain.notification.PendingNotification(
+            kind = com.aharou.feature.agent.domain.notification.AgentNotificationKind.USER_MESSAGE,
+            sourceId = "session", title = "", outcome = com.aharou.feature.agent.domain.notification.NotificationOutcome.COMPLETED,
+            message = "use the corrected requirements", alreadyPersisted = true, seq = 1)
+        every { notifications.peek("session") } answers { if (pending) listOf(notice) else emptyList() }
+        every { notifications.ack("session", any()) } answers { pending = false }
+        val events = mutableListOf<AgentEvent>()
+        workflow.executeEvents("request", context.copy(inputImages = listOf(image)), emptyList()).collect {
+            events += it
+            if (it is AgentEvent.AssistantText) it.persisted?.complete(Unit)
+        }
+        assertTrue(events.none { it is AgentEvent.Failed })
+        assertEquals(1, requests.size)
+        assertEquals(1, requests.single().filterIsInstance<AgentMessage.UserMessage>().count { it.content == notice.message })
+        assertTrue(requests.single().filterIsInstance<AgentMessage.UserMessage>().all { it.images.isEmpty() })
+        assertTrue(events.filterIsInstance<AgentEvent.ContextUsage>().any {
+            it.inputBudget == com.aharou.feature.settings.domain.model.ModelContextPolicy.effectiveInputBudget(smaller)
+        })
+        coVerify(exactly = 0) { failoverCoordinator.next(any(), any()) }
+        coVerify { metadata.resolve(config.id, ProviderType.OPENAI, "backup") }
+    }
+
+    @Test
+    fun partialOutputNeverSwitchesToNextCandidate() = runTest {
+        prepare(flow { emit(AIStreamChunk.TextDelta("partial")); throw java.io.IOException("disconnected") })
+        coEvery { chainSettings.get("/workspace") } returns listOf(
+            com.aharou.feature.settings.domain.model.FallbackTarget(config.id, "model"),
+            com.aharou.feature.settings.domain.model.FallbackTarget(config.id, "backup"))
+        workflow.executeEvents("request", context, emptyList()).collect {
+            if (it is AgentEvent.AssistantText) it.persisted?.complete(Unit)
+        }
+        assertEquals("model", workspaceModels.current("session")?.effectiveModel)
+        coVerify(exactly = 0) { metadata.resolve(any(), any(), "backup") }
     }
 
     @Test

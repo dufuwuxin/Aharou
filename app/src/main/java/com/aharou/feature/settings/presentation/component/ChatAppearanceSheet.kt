@@ -4,6 +4,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -256,6 +259,31 @@ internal fun ChatAppearanceSheet(
                 }
             }
         }
+    }
+}
+
+@Composable
+internal fun HslSliders(
+    label: String,
+    hue: Float,
+    saturation: Float,
+    lightness: Float,
+    onHueChange: (Float) -> Unit,
+    onSaturationChange: (Float) -> Unit,
+    onLightnessChange: (Float) -> Unit
+) {
+    Column {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(text = label, style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
+            Box(
+                modifier = Modifier.size(18.dp).clip(CircleShape)
+                    .background(colorFromHsl(hue, saturation, lightness))
+                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape)
+            )
+        }
+        Slider(value = hue, onValueChange = onHueChange, valueRange = 0f..360f)
+        Slider(value = saturation, onValueChange = onSaturationChange, valueRange = 0f..1f)
+        Slider(value = lightness, onValueChange = onLightnessChange, valueRange = 0f..1f)
     }
 }
 

@@ -8,7 +8,6 @@ import com.aharou.core.config.fields.DataStoreEnumField
 import com.aharou.core.config.fields.DataStoreIntField
 import com.aharou.core.config.fields.DataStoreStrField
 import com.aharou.feature.settings.data.repository.ProxySettingsRepository
-import com.aharou.feature.settings.data.repository.SyncSettingsRepository
 import com.aharou.feature.settings.domain.model.ProxyType
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.map
@@ -27,7 +26,6 @@ import javax.inject.Singleton
 class ConfigNetworkFields @Inject constructor(
     @param:ApplicationContext private val context: Context,
     private val proxySettings: ProxySettingsRepository,
-    private val syncSettings: SyncSettingsRepository,
 ) {
 
     fun registerInto(registry: ConfigRegistry) {
@@ -105,35 +103,5 @@ class ConfigNetworkFields @Inject constructor(
             ),
         )
 
-        registry.register(
-            DataStoreStrField(
-                path = "network.sync_ignored_patterns",
-                displayName = "同步忽略规则",
-                description = "远程同步时忽略的目录 / 文件模式，逗号分隔。",
-                flow = syncSettings.ignoredPatterns,
-                setter = { syncSettings.setIgnoredPatterns(it) },
-            ),
-        )
-
-        registry.register(
-            DataStoreBoolField(
-                path = "network.sync_use_gitignore",
-                displayName = "同步遵循 .gitignore",
-                description = "远程同步时按工作区的 .gitignore 跳过文件。默认开启。",
-                flow = syncSettings.useGitIgnore,
-                setter = { syncSettings.setUseGitIgnore(it) },
-            ),
-        )
-
-        registry.register(
-            DataStoreIntField(
-                path = "network.sync_max_batch_size",
-                displayName = "同步批次大小",
-                description = "单次远程同步最多处理的文件数。默认 5。",
-                flow = syncSettings.maxSyncBatchSize,
-                setter = { syncSettings.setMaxSyncBatchSize(it) },
-                minValue = 1,
-            ),
-        )
     }
 }

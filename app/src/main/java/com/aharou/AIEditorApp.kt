@@ -136,15 +136,9 @@ class AIEditorApp : Application(), Configuration.Provider {
         // 使 App 侧全部 HTTP 链路（对话、MCP、更新检查等）按需走全局/提供商代理。
         // 用 base 而非下文才定义的局部 context：attachBaseContext 阶段 base 即合法 Context。
         AppProxy.applyGlobal(base)
-        val tag = base.getSharedPreferences(LANG_PREFS, android.content.Context.MODE_PRIVATE)
-            .getString(LANG_KEY, null)
-        val context = if (tag.isNullOrBlank()) {
-            base
-        } else {
-            val config = android.content.res.Configuration(base.resources.configuration)
-            config.setLocale(java.util.Locale.forLanguageTag(tag))
-            base.createConfigurationContext(config)
-        }
+        val config = android.content.res.Configuration(base.resources.configuration)
+        config.setLocale(java.util.Locale.SIMPLIFIED_CHINESE)
+        val context = base.createConfigurationContext(config)
         super.attachBaseContext(context)
     }
 
@@ -200,10 +194,6 @@ class AIEditorApp : Application(), Configuration.Provider {
     @Inject
     lateinit var configProviderFields: com.aharou.feature.settings.data.ConfigProviderFields
 
-    /** 远程连接与挂载集合注册。 */
-    @Inject
-    lateinit var configRemoteFields: com.aharou.feature.workspace.data.ConfigRemoteFields
-
     /** 各角色模型选择字段注册。 */
     @Inject
     lateinit var configModelRoleFields: com.aharou.feature.settings.data.ConfigModelRoleFields
@@ -214,10 +204,6 @@ class AIEditorApp : Application(), Configuration.Provider {
 
     @Inject lateinit var configScheduledTaskFields: com.aharou.feature.agent.data.ConfigScheduledTaskFields
     @Inject lateinit var configRuleFields: com.aharou.feature.agent.data.ConfigRuleFields; @Inject lateinit var configReminderFields: com.aharou.feature.agent.data.ConfigReminderFields
-    /** 语音合成（TTS）字段注册。 */
-    @Inject
-    lateinit var configVoiceFields: com.aharou.feature.settings.data.ConfigVoiceFields
-
     /** 聊天气泡外观字段注册。 */
     @Inject
     lateinit var configChatFields: com.aharou.feature.agent.data.ConfigChatFields
@@ -261,10 +247,6 @@ class AIEditorApp : Application(), Configuration.Provider {
     /** 备份导出范围字段注册。 */
     @Inject
     lateinit var configBackupFields: com.aharou.feature.settings.data.ConfigBackupFields
-
-    /** FTP 服务器字段注册。 */
-    @Inject
-    lateinit var configFtpFields: com.aharou.feature.settings.data.ConfigFtpFields
 
     /** 记忆的 AI 蒸馏：启动时后台判一次「是否到点」，到点才调模型。 */
     @Inject
@@ -339,7 +321,7 @@ class AIEditorApp : Application(), Configuration.Provider {
     @Inject
     lateinit var executionModeRepository: com.aharou.feature.settings.data.repository.ExecutionModeRepository
 
-    /** 应用语言偏好仓库：持久化用户选择的语言，供 attachBaseContext 同步读取。 */
+    /** 中文语言配置的备份兼容仓库。 */
     @Inject
     lateinit var languageSettings: LanguageSettingsRepository
 
@@ -363,10 +345,6 @@ class AIEditorApp : Application(), Configuration.Provider {
     @Inject
     lateinit var workspaceRepository: com.aharou.feature.workspace.data.repository.WorkspaceRepository
 
-    /** 连接与同步仓库：注入以在启动早期创建 @Singleton 实例，其内部跟随当前工作区自动连接/断开挂载。 */
-    @Inject
-    lateinit var remoteRepository: com.aharou.feature.workspace.domain.repository.RemoteRepository
-
     /** 模型元数据服务：启动即异步从本仓库拉取模型目录（12h 缓存，失败静默，兜底内置数据）。 */
     @Inject
     lateinit var modelMetadataService: ModelMetadataService
@@ -387,8 +365,8 @@ class AIEditorApp : Application(), Configuration.Provider {
     @Inject
     lateinit var pluginMarketCatalog: com.aharou.feature.plugin.domain.market.PluginMarketCatalog
 
-    /** 灵动岛 / 流体云：把通话、Agent、后台终端三路运行态汇成一条 promoted ongoing 通知。
-      * internal：它依赖同为 internal 的 VoiceCallSession，公开属性无法暴露该类型。 */
+    /** 灵动岛 / 流体云：把 Agent、后台终端运行态汇成一条 promoted ongoing 通知。
+      */
     @Inject
     internal lateinit var liveUpdateCoordinator: com.aharou.feature.agent.presentation.notification.LiveUpdateCoordinator
 
@@ -419,7 +397,6 @@ class AIEditorApp : Application(), Configuration.Provider {
         configNetworkFields.registerInto(configRegistry)
         configContainerFields.registerInto(configRegistry)
         configProviderFields.registerInto(configRegistry)
-        configRemoteFields.registerInto(configRegistry)
         configMemorySyncFields.registerInto(configRegistry)
         configModelRoleFields.registerInto(configRegistry)
         configEnvFields.registerInto(configRegistry)
@@ -429,7 +406,6 @@ class AIEditorApp : Application(), Configuration.Provider {
         configAgentControlFields.registerInto(configRegistry)
         configKnowledgeFields.registerInto(configRegistry)
         configSkillMarketFields.registerInto(configRegistry)
-        configVoiceFields.registerInto(configRegistry)
         configChatFields.registerInto(configRegistry)
         configBrowserFields.registerInto(configRegistry)
         configImFields.registerInto(configRegistry)
@@ -440,7 +416,6 @@ class AIEditorApp : Application(), Configuration.Provider {
         configRemoteDeviceFields.registerInto(configRegistry)
         configCredentialFields.registerInto(configRegistry)
         configBackupFields.registerInto(configRegistry)
-        configFtpFields.registerInto(configRegistry)
         // 目录迁移递归扫工作区、审计初始化建目录、SOUL.md 先释放再读回缓存：都是同步磁盘活，放主线程会
         // 顶在首帧前面。三者都不影响首帧（cachedMetadata 是 StateFlow，晚到不影响 UI），一起挑到后台。
         appScope.launch(Dispatchers.IO) {
@@ -559,8 +534,6 @@ class AIEditorApp : Application(), Configuration.Provider {
                 }.onFailure { FileLogger.e(TAG, "SSH 连接失败，将在首次命令时重试", it) }
             }
         }
-        // 连接与同步的「跟随当前工作区」由 RemoteRepository 内部监听工作区变化自动执行（启动注入即就绪）：
-        // 工作区就绪/切换时，自动断开非当前工作区的挂载，连接当前工作区里勾了「应用启动时自动连接」的挂载。
         // 后台保活常驻通知的唯一反应器：监听开关，启停 TerminalKeepaliveService 的常驻模式。
         // 既覆盖设置页实时切换，也覆盖冷启动恢复。仅在「由开变关」时发 disable，
         // 避免为关闭而凭空拉起从未开过的 Service。
@@ -642,10 +615,7 @@ class AIEditorApp : Application(), Configuration.Provider {
             kotlinx.coroutines.delay(10_000)
             resetCrashState(this@AIEditorApp)
         }
-        // 语言切换由 MainActivity 的 attachBaseContext + recreate() 统一管理。
-        // MainActivity 继承 ComponentActivity（非 AppCompatActivity），
-        // AppCompatDelegate.setApplicationLocales 的自动 recreate 不生效，
-        // 且两者同时设置 locale 会竞争导致偶发语言错乱。
+        // Application 与 MainActivity 的初始上下文均固定中文。
     }
 
     /** 记录设备/版本信息：用户报「某系统版本上容器起不来」时，日志里得先有系统与 ABI 上下文。 */

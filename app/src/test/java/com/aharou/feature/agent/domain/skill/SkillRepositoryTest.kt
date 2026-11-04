@@ -40,6 +40,42 @@ class SkillRepositoryTest {
     )
 
     @Test
+    fun deletedBuiltinStaysDeletedAfterRepositoryReloadAndDoesNotHideUserOverride() {
+        val access = spyk(provider)
+        var tombstones: String? = null
+        val path = "~/.aharou/skills.deleted-builtins.json"
+        every { access.isFile(path) } answers { tombstones != null }
+        every { access.readFile(path) } answers { tombstones!! }
+        every { access.writeFile(path, any(), any(), any()) } answers { tombstones = secondArg() }
+        every { builtinSource.listSkills() } returns listOf(skill("builtin"))
+        every { builtinSource.loadInstructions("builtin") } returns "builtin body"
+        every { globalSource.loadInstructions(any()) } returns null
+        every { projectSource.loadInstructions(any()) } returns null
+        val repo = SkillRepository(builtinSource, globalSource, projectSource, config, access, agents)
+        assertTrue(repo.deleteSkill("BUILTIN", SkillScope.BUILTIN))
+        val reloaded = SkillRepository(builtinSource, globalSource, projectSource, config, access, agents)
+        assertTrue(reloaded.listAllSkills().isEmpty())
+        assertNull(reloaded.loadInstructions("builtin"))
+        every { globalSource.listSkills() } returns listOf(skill("builtin"))
+        every { globalSource.loadInstructions("builtin") } returns "user body"
+        assertEquals(SkillScope.GLOBAL, reloaded.listAllSkills().single().scope)
+        assertEquals("user body", reloaded.loadInstructions("builtin"))
+        verify(exactly = 0) { access.deleteRecursively(any()) }
+    }
+
+    @Test
+    fun corruptedBuiltinDeletionRecordIsNotOverwritten() {
+        val access = spyk(provider)
+        val path = "~/.aharou/skills.deleted-builtins.json"
+        every { access.isFile(path) } returns true
+        every { access.readFile(path) } returns "invalid json"
+        every { builtinSource.listSkills() } returns listOf(skill("builtin"))
+        val repo = SkillRepository(builtinSource, globalSource, projectSource, config, access, agents)
+        assertTrue(runCatching { repo.deleteSkill("builtin", SkillScope.BUILTIN) }.isFailure)
+        verify(exactly = 0) { access.writeFile(any(), any(), any(), any()) }
+    }
+
+    @Test
     fun editorSave_switchesModesReloadsAndKeepsMetadata() {
         val temp = java.nio.file.Files.createTempDirectory("skill-editor-policy").toFile()
         try {

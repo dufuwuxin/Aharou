@@ -106,7 +106,6 @@ import com.aharou.feature.settings.data.local.ProviderPreset
 import com.aharou.feature.terminal.presentation.component.TerminalSettingsSheet
 
 /** 使用手册在线文档站地址。 */
-private const val USER_GUIDE_DOCS_URL = "https://github.com/520huxiangli/Aharou"
 
 /** 大屏设置页左侧常驻菜单宽度。 */
 private val SettingsMenuWidth = 320.dp
@@ -142,9 +141,8 @@ enum class SettingsSection(@param:StringRes val titleRes: Int) {
     // 详情页与市场页共用一个标题：层级靠返回箭头体现
     SkillMarketDetail(R.string.skills_market),
     Plugins(R.string.settings_plugins),
-    Extensions(R.string.settings_extensions),
     Knowledge(R.string.settings_knowledge_base),
-    SubAgents(R.string.settings_subagents), ScheduledTasks(R.string.settings_scheduled_tasks),
+    SubAgents(R.string.settings_subagents),
     SubAgentDetail(R.string.settings_subagents),
     SubAgentEditor(R.string.settings_subagents),
     Teams(R.string.settings_teams),
@@ -160,32 +158,15 @@ enum class SettingsSection(@param:StringRes val titleRes: Int) {
     Proxy(R.string.proxy_title),
     TelegramBot(R.string.settings_telegram_bot), WeixinBot(R.string.settings_weixin_bot), FeishuBot(R.string.settings_feishu_bot), QqBot(R.string.settings_qq_bot),
     Log(R.string.settings_log),
-    Permissions(R.string.settings_permissions),
     AppPermissions(R.string.settings_app_permissions),
     BackgroundRun(R.string.settings_category_background),
-    RemoteServers(R.string.settings_remote_servers),
     RemoteDevice(R.string.settings_remote_device_title),
     Storage(R.string.settings_storage),
     TokenStats(R.string.settings_token_stats_title),
     Backup(R.string.settings_backup),
-    About(R.string.settings_about),
-    AharouGroup(R.string.settings_category_aharou),
-    GeneralGroup(R.string.settings_category_general),
     AiGroup(R.string.settings_category_ai),
-    PermissionsGroup(R.string.settings_category_permissions),
-    MoreGroup(R.string.settings_category_more),
-    HelpGroup(R.string.settings_category_help)
 }
 
-/** 顶层菜单的全部分组：[SettingsMenu] 默认渲染这一份。 */
-private val GROUPS = listOf(
-    SettingsSection.AiGroup,
-    SettingsSection.AharouGroup,
-    SettingsSection.GeneralGroup,
-    SettingsSection.PermissionsGroup,
-    SettingsSection.MoreGroup,
-    SettingsSection.HelpGroup
-)
 /**
  * 分区层级：0 首页菜单，1 一级分区，2 分区里再翻一层的详情 / 编辑页，3 详情页之上的编辑页。
  *
@@ -256,8 +237,6 @@ fun SettingsScreen(
     val sendFileMaxSizeMb by viewModel.sendFileMaxSizeMb.collectAsStateWithLifecycle()
     val deleteExternalWorkspaceSessions by viewModel.deleteExternalWorkspaceSessions.collectAsStateWithLifecycle()
     val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
-    val themePresetId by viewModel.themePresetId.collectAsStateWithLifecycle()
-    val dynamicColorEnabled by viewModel.dynamicColorEnabled.collectAsStateWithLifecycle()
     val backgroundImagePath by viewModel.backgroundImagePath.collectAsStateWithLifecycle()
     val backgroundAlpha by viewModel.backgroundAlpha.collectAsStateWithLifecycle()
     val languageTag by viewModel.languageTag.collectAsStateWithLifecycle()
@@ -271,16 +250,7 @@ fun SettingsScreen(
     val imageGenModel by viewModel.imageGenModel.collectAsStateWithLifecycle()
     val memoryProviderId by viewModel.memoryProviderId.collectAsStateWithLifecycle()
     val memoryModel by viewModel.memoryModel.collectAsStateWithLifecycle()
-    val voiceSttProviderId by viewModel.voiceSttProviderId.collectAsStateWithLifecycle()
-    val voiceSttModel by viewModel.voiceSttModel.collectAsStateWithLifecycle()
-    val voiceTtsProviderId by viewModel.voiceTtsProviderId.collectAsStateWithLifecycle()
-    val voiceTtsModel by viewModel.voiceTtsModel.collectAsStateWithLifecycle()
-    val voiceTtsVoice by viewModel.voiceTtsVoice.collectAsStateWithLifecycle()
-    val autoReadAloud by viewModel.autoReadAloud.collectAsStateWithLifecycle()
-    val voiceWakeEnabled by viewModel.voiceWakeEnabled.collectAsStateWithLifecycle()
     val ocrForTextOnlyModels by viewModel.ocrForTextOnlyModels.collectAsStateWithLifecycle()
-    val voiceModelStatus by viewModel.voiceModelStatus.collectAsStateWithLifecycle()
-    val voiceModelState by viewModel.voiceModelState.collectAsStateWithLifecycle()
     val tessdataStatus by viewModel.tessdataStatus.collectAsStateWithLifecycle()
     val tessdataState by viewModel.tessdataState.collectAsStateWithLifecycle()
     val modelMetadata by viewModel.modelMetadata.collectAsStateWithLifecycle()
@@ -290,10 +260,6 @@ fun SettingsScreen(
     val containerOsMap by viewModel.containerOsMap.collectAsStateWithLifecycle()
     val remoteConnections by viewModel.remoteConnections.collectAsStateWithLifecycle()
     val tokenStats by viewModel.tokenStats.collectAsStateWithLifecycle()
-    val updateCheckEnabled by viewModel.updateCheckEnabled.collectAsStateWithLifecycle()
-    val updateCheckChannel by viewModel.updateCheckChannel.collectAsStateWithLifecycle()
-    val autoDownloadEnabled by viewModel.autoDownloadEnabled.collectAsStateWithLifecycle()
-    val autoInstallEnabled by viewModel.autoInstallEnabled.collectAsStateWithLifecycle()
     val containerAnnouncementText by viewModel.containerAnnouncementText.collectAsStateWithLifecycle()
     val containerAnnouncementOutdated by viewModel.containerAnnouncementOutdated.collectAsStateWithLifecycle()
     val imageCatalog by viewModel.imageCatalog.collectAsStateWithLifecycle()
@@ -309,12 +275,7 @@ fun SettingsScreen(
     var showTerminalSettingsSheet by remember { mutableStateOf(false) }
 
     val context = LocalContext.current
-    val currentLanguageDisplayName = if (languageTag.isNullOrBlank()) {
-        stringResource(R.string.language_follow_system)
-    } else {
-        com.aharou.core.util.LanguageRegistry.languages.firstOrNull { it.tag == languageTag }?.displayName
-            ?: stringResource(R.string.language_follow_system)
-    }
+
 
     // 单组页（如「配置」只展 AI 组）直接落到该组内容页，不再多一层可点的分组标题行；全量设置页从菜单开始。
     var section by remember { mutableStateOf(if (menuGroups.size == 1) menuGroups.first() else SettingsSection.Menu) }
@@ -418,7 +379,6 @@ fun SettingsScreen(
     var showContainerAddSheet by remember { mutableStateOf(false) }
     var showContainerAnnouncement by remember { mutableStateOf(false) }
     var showImageSourceSheet by remember { mutableStateOf(false) }
-    var showLanguageSheet by remember { mutableStateOf(false) }
     var showResetTokenStats by remember { mutableStateOf(false) }
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
@@ -429,37 +389,29 @@ fun SettingsScreen(
     // 返回键与顶栏返回箭头共用这一份判定，不再各写一套（之前两处不一致，镜像下载页返回会直接跳回菜单）。
     val parentSection: SettingsSection? = when (section) {
         SettingsSection.Menu -> null
-        SettingsSection.AharouGroup,
-        SettingsSection.AiGroup,
-        SettingsSection.GeneralGroup,
-        SettingsSection.PermissionsGroup,
-        SettingsSection.MoreGroup,
-        SettingsSection.HelpGroup -> if (section == configHome) null else (configHome ?: SettingsSection.Menu)
+        SettingsSection.AiGroup -> if (section == configHome) null else SettingsSection.Menu
         SettingsSection.Soul,
-        SettingsSection.ConfigAudit -> (configHome ?: SettingsSection.AharouGroup)
+        SettingsSection.ConfigAudit -> (configHome ?: SettingsSection.Menu)
         SettingsSection.Memory -> (configHome ?: SettingsSection.AiGroup)
         SettingsSection.AccountCenter -> (configHome ?: SettingsSection.AiGroup)
-        SettingsSection.Providers, SettingsSection.DefaultModels, SettingsSection.ScheduledTasks, SettingsSection.Extensions,
+        SettingsSection.Providers, SettingsSection.DefaultModels -> (configHome ?: SettingsSection.Menu)
         SettingsSection.TelegramBot, SettingsSection.WeixinBot, SettingsSection.FeishuBot, SettingsSection.QqBot -> (configHome ?: SettingsSection.AiGroup)
-        SettingsSection.Mcp, SettingsSection.Connectors, SettingsSection.Skills, SettingsSection.Plugins, SettingsSection.Knowledge -> (configHome ?: SettingsSection.Extensions)
-        SettingsSection.General, SettingsSection.Theme -> (configHome ?: SettingsSection.GeneralGroup)
-        SettingsSection.Permissions,
+        SettingsSection.Mcp, SettingsSection.Connectors, SettingsSection.Skills, SettingsSection.Plugins, SettingsSection.Knowledge -> (configHome ?: SettingsSection.Menu)
+        SettingsSection.General, SettingsSection.Theme -> (configHome ?: SettingsSection.Menu)
         SettingsSection.AppPermissions,
         SettingsSection.Accessibility,
-        SettingsSection.BackgroundRun -> (configHome ?: SettingsSection.PermissionsGroup)
+        SettingsSection.BackgroundRun -> (configHome ?: SettingsSection.Menu)
         SettingsSection.Container,
         SettingsSection.Proxy,
         SettingsSection.ShadowScreen,
         SettingsSection.Teams,
-        SettingsSection.RemoteServers,
         SettingsSection.RemoteDevice,
         SettingsSection.EnvVars,
         SettingsSection.Vault,
         SettingsSection.Storage,
         SettingsSection.TokenStats,
         SettingsSection.Backup,
-        SettingsSection.Experiments -> (configHome ?: SettingsSection.MoreGroup)
-        SettingsSection.About -> (configHome ?: SettingsSection.HelpGroup)
+        SettingsSection.Experiments -> (configHome ?: SettingsSection.Menu)
         SettingsSection.Tools, SettingsSection.Prompts, SettingsSection.Rules -> (configHome ?: SettingsSection.AiGroup)
         SettingsSection.ProviderEditor -> SettingsSection.Providers
         SettingsSection.Log -> logReturnSection.takeUnless { expanded && it == SettingsSection.Menu }
@@ -469,7 +421,6 @@ fun SettingsScreen(
         SettingsSection.SubAgentDetail -> SettingsSection.SubAgents
         // 角色改称「专家成员」并收进团队页：子代理页只能从团队页进去，不再是并行菜单项。
         SettingsSection.SubAgents -> SettingsSection.Teams
-        SettingsSection.Teams -> SettingsSection.MoreGroup
         SettingsSection.SubAgentEditor -> subAgentEditorReturn
         SettingsSection.PromptDetail -> SettingsSection.Prompts
         SettingsSection.PromptEditor -> promptEditorReturn
@@ -554,13 +505,11 @@ fun SettingsScreen(
         }
     }
 
-    val openManual: () -> Unit = {
-        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(USER_GUIDE_DOCS_URL)))
-    }
+
     // 分区入口：进日志页前刷新一次，并把返回目标指回「更多」分组
     val openSection: (SettingsSection) -> Unit = { target ->
         if (target == SettingsSection.Log) {
-            logReturnSection = SettingsSection.MoreGroup
+            logReturnSection = SettingsSection.Menu
             viewModel.refreshLogs(filterServerName = null)
         }
         section = target
@@ -575,7 +524,9 @@ fun SettingsScreen(
         SettingsMenu(
             scrollState = menuScrollState,
             onOpen = openSection,
-            menuGroups = menuGroups
+            themeMode = themeMode,
+            terminalSettings = terminalSettings,
+            onOpenTerminalSettingsSheet = { showTerminalSettingsSheet = true }
         )
     }
 
@@ -716,11 +667,6 @@ fun SettingsScreen(
                     onNavigateBack = { section = promptEditorReturn }
                 )
             }
-
-            current == SettingsSection.RemoteServers ->
-                com.aharou.feature.workspace.presentation.remote.RemoteServerScreen(
-                    onNavigateBack = { section = SettingsSection.MoreGroup }
-                )
 
             else -> {
             // 列表页用分区名；详情页带上条目身份，换成另一条技能 / 子代理 / 提示词进来不能继承上一条的滚动位置。
@@ -983,21 +929,6 @@ fun SettingsScreen(
                 // 大屏菜单已常驻左栏，右栏在没选中分区时给个占位提示
                 SettingsSection.Menu -> if (expanded) SettingsDetailPlaceholder() else menuBody()
                 SettingsSection.AiGroup -> SettingsAiGroupScreen(onOpen = openSection)
-                SettingsSection.AharouGroup -> SettingsAharouGroupScreen(onOpen = openSection)
-                SettingsSection.GeneralGroup -> SettingsGeneralGroupScreen(
-                    themeMode = themeMode,
-                    themePresetId = themePresetId,
-                    dynamicColorEnabled = dynamicColorEnabled,
-                    terminalSettings = terminalSettings,
-                    currentLanguageDisplayName = currentLanguageDisplayName,
-                    onOpenTheme = { openSection(SettingsSection.Theme) },
-                    onOpenTerminalSettingsSheet = { showTerminalSettingsSheet = true },
-                    onOpenLanguageSheet = { showLanguageSheet = true },
-                    onOpen = openSection
-                )
-                SettingsSection.PermissionsGroup -> SettingsPermissionsGroupScreen(onOpen = openSection)
-                SettingsSection.MoreGroup -> SettingsMoreGroupScreen(onOpen = openSection)
-                SettingsSection.HelpGroup -> SettingsHelpGroupScreen(onOpen = openSection, onOpenManual = openManual)
                 SettingsSection.Soul -> SoulSettingsSection()
                 SettingsSection.ConfigAudit -> ConfigAuditSection()
                 SettingsSection.ShadowScreen -> ShadowScreenSection()
@@ -1007,16 +938,11 @@ fun SettingsScreen(
                 SettingsSection.Accessibility -> AccessibilitySection()
                 SettingsSection.Memory -> MemorySection()
                 SettingsSection.Knowledge -> KnowledgeBaseSection()
-                SettingsSection.Extensions -> ExtensionsSection(onOpenSection = openSection)
                 SettingsSection.Theme -> ThemeSettingsSection(
                     selected = themeMode,
-                    selectedPresetId = themePresetId,
-                    dynamicColorEnabled = dynamicColorEnabled,
                     backgroundImagePath = backgroundImagePath,
                     backgroundAlpha = backgroundAlpha,
                     onSelected = { viewModel.setThemeMode(it) },
-                    onPresetSelected = { viewModel.setThemePreset(it) },
-                    onDynamicColorChanged = { viewModel.setDynamicColorEnabled(it) },
                     onPickBackgroundImage = { viewModel.setBackgroundImage(it) },
                     onBackgroundAlphaChange = { viewModel.setBackgroundAlpha(it) },
                     onRemoveBackgroundImage = { viewModel.clearBackgroundImage() }
@@ -1067,21 +993,8 @@ fun SettingsScreen(
                     titleModel = titleModel,
                     imageGenProviderId = imageGenProviderId,
                     imageGenModel = imageGenModel,
-                    voiceSttProviderId = voiceSttProviderId,
-                    voiceSttModel = voiceSttModel,
-                    voiceTtsProviderId = voiceTtsProviderId,
-                    voiceTtsModel = voiceTtsModel,
-                    voiceTtsVoice = voiceTtsVoice,
-                    autoReadAloud = autoReadAloud,
-                    onAutoReadAloudChange = viewModel::setAutoReadAloud,
-                    onToggleAutoReadAloud = { viewModel.toggleAutoReadAloud() },
-                    voiceWakeEnabled = voiceWakeEnabled,
-                    onToggleVoiceWake = { viewModel.toggleVoiceWake() },
                     ocrForTextOnlyModels = ocrForTextOnlyModels,
                     onToggleOcrForTextOnlyModels = { viewModel.toggleOcrForTextOnlyModels() },
-                    voiceModelStatus = voiceModelStatus,
-                    voiceModelState = voiceModelState,
-                    onDownloadVoiceModel = { viewModel.downloadVoiceModel() },
                     tessdataStatus = tessdataStatus,
                     tessdataState = tessdataState,
                     onDownloadTessdata = { viewModel.downloadTessdata() },
@@ -1099,15 +1012,6 @@ fun SettingsScreen(
                     memoryModel = memoryModel,
                     onSelectMemoryModel = { pid, m -> viewModel.setMemoryModel(pid, m) },
                     onClearMemoryModel = { viewModel.clearMemoryModel() },
-                    onSelectVoiceModel = { pid, m -> viewModel.setVoiceSttModel(pid, m) },
-                    onClearVoiceModel = { viewModel.clearVoiceSttModel() },
-                    onSelectVoiceTtsModel = { pid, m ->
-                        // 选模型时一并写入当前音色：setTtsModel 是三项整体覆写，不带上会把已配音色清掉。
-                        // pid/model 为空（重置）时不带音色，让 clear 那一路统一处理。
-                        viewModel.setVoiceTtsModel(pid, m, if (pid.isBlank()) "" else voiceTtsVoice)
-                    },
-                    onChangeVoiceTtsVoice = { viewModel.setVoiceTtsVoice(it) },
-                    onClearVoiceTtsModel = { viewModel.clearVoiceTtsModel() }
                 )
                 SettingsSection.Mcp -> McpSection(
                     entries = mcpEntries,
@@ -1204,7 +1108,6 @@ fun SettingsScreen(
                         }
                     )
                 }
-                SettingsSection.ScheduledTasks -> ScheduledTasksSection()
                 SettingsSection.SubAgents -> SubAgentsSection(
                     projectName = currentProjectName,
                     entries = subAgents,                    onDelete = { subAgentToDelete = it },
@@ -1227,6 +1130,18 @@ fun SettingsScreen(
                     },
                     onEdit = { entry ->
                         mcpDialogRequest = McpDialogRequest(editing = entry, prefill = null)
+                    },
+                    permissionContent = {
+                        PermissionsSection(
+                            projectName = currentProjectName,
+                            projectRules = projectRules,
+                            globalRules = globalRules,
+                            disableSafetyInterception = disableSafetyInterception,
+                            onToggleSafetyInterception = viewModel::setDisableSafetyInterception,
+                            onDeleteProject = viewModel::deleteProjectRule,
+                            onPromote = viewModel::promoteRuleToGlobal,
+                            onDeleteGlobal = viewModel::deleteGlobalRule
+                        )
                     }
                 )
                 SettingsSection.Prompts -> {
@@ -1336,26 +1251,14 @@ fun SettingsScreen(
                     onClearFilter = { viewModel.refreshLogs(filterServerName = null) },
                     onRefresh = { viewModel.refreshLogs(silent = true) }
                 )
-                SettingsSection.Permissions -> PermissionsSection(
-                    projectName = currentProjectName,
-                    projectRules = projectRules,
-                    globalRules = globalRules,
-                    disableSafetyInterception = disableSafetyInterception,
-                    onToggleSafetyInterception = { viewModel.setDisableSafetyInterception(it) },
-                    onDeleteProject = { viewModel.deleteProjectRule(it) },
-                    onPromote = { viewModel.promoteRuleToGlobal(it) },
-                    onDeleteGlobal = { viewModel.deleteGlobalRule(it) }
-                )
                 SettingsSection.AppPermissions -> {
                     val shizukuViewModel: ShizukuViewModel =
                         androidx.hilt.navigation.compose.hiltViewModel()
                     val shizukuState by shizukuViewModel.state.collectAsStateWithLifecycle()
                     val hostShellMode by shizukuViewModel.mode.collectAsStateWithLifecycle()
-                    val rootAvailable by shizukuViewModel.rootAvailable.collectAsStateWithLifecycle()
                     AppPermissionsSection(
                         shizukuState = shizukuState,
                         hostShellMode = hostShellMode,
-                        rootAvailable = rootAvailable,
                         onRequestShizukuPermission = { shizukuViewModel.requestPermission() },
                         onOpenShizuku = { shizukuViewModel.openShizukuApp() },
                         onRefreshHostShell = { shizukuViewModel.refresh() }
@@ -1389,18 +1292,7 @@ fun SettingsScreen(
                 SettingsSection.SkillEditor -> {} // 已在上方 early return 处理
                 SettingsSection.SubAgentEditor -> {} // 已在上方 early return 处理
                 SettingsSection.PromptEditor -> {} // 已在上方 early return 处理
-                SettingsSection.RemoteServers -> {} // 已在上方 early return 处理
-                SettingsSection.About -> AboutSection(
-                    updateCheckEnabled = updateCheckEnabled,
-                    updateCheckChannel = updateCheckChannel,
-                    autoDownloadEnabled = autoDownloadEnabled,
-                    autoInstallEnabled = autoInstallEnabled,
-                    onToggleUpdateCheck = { viewModel.setUpdateCheckEnabled(it) },
-                    onSelectChannel = { viewModel.setUpdateCheckChannel(it) },
-                    onToggleAutoDownload = { viewModel.setAutoDownloadEnabled(it) },
-                    onToggleAutoInstall = { viewModel.setAutoInstallEnabled(it) },
-                    onCheckUpdate = { viewModel.checkUpdate(manual = true) }, latestVersionCheck = viewModel.lastVersionCheck.collectAsStateWithLifecycle().value
-                )
+
             }
         }
     }
@@ -1497,13 +1389,6 @@ fun SettingsScreen(
         )
     }
 
-    if (showLanguageSheet) {
-        LanguageSelectionSheet(
-            currentTag = languageTag,
-            onSelect = { viewModel.setLanguage(it) },
-            onDismiss = { showLanguageSheet = false }
-        )
-    }
 
     if (showImageSourceSheet) {
         SourceSelectionSheet(
@@ -1681,46 +1566,24 @@ private fun SettingsDetailPlaceholder() {
     }
 }
 
-/** 设置首页：每个分区一个可点击的二级菜单入口。 */
+/** 设置首页与宽屏侧栏共用一个滚动容器。 */
 @Composable
 internal fun SettingsMenu(
     scrollState: ScrollState,
     onOpen: (SettingsSection) -> Unit,
-    menuGroups: List<SettingsSection> = emptyList()
+    themeMode: com.aharou.feature.settings.data.repository.AppThemeMode,
+    terminalSettings: com.aharou.feature.terminal.data.repository.TerminalSettings,
+    onOpenTerminalSettingsSheet: () -> Unit
 ) {
-    // 空列表 = 全展示；否则按给定列表过滤，支持「配置」页只显示 AI 组。
-    val displayGroups = if (menuGroups.isEmpty()) GROUPS else menuGroups
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(scrollState)
-            .padding(horizontal = Spacing.lg)
-            .padding(bottom = Spacing.xl),
+        modifier = Modifier.fillMaxSize().verticalScroll(scrollState)
+            .padding(horizontal = Spacing.lg).padding(bottom = Spacing.xl),
         verticalArrangement = Arrangement.spacedBy(Spacing.sm)
     ) {
-        if (displayGroups.contains(SettingsSection.AiGroup)) {
-            SettingsRow(icon = FeatherIcons.Cpu, title = stringResource(SettingsSection.AiGroup.titleRes), onClick = { onOpen(SettingsSection.AiGroup) })
-            SettingsDivider()
-        }
-        if (displayGroups.contains(SettingsSection.AharouGroup)) {
-            SettingsRow(icon = FeatherIcons.Smile, title = stringResource(SettingsSection.AharouGroup.titleRes), onClick = { onOpen(SettingsSection.AharouGroup) })
-            SettingsDivider()
-        }
-        if (displayGroups.contains(SettingsSection.GeneralGroup)) {
-            SettingsRow(icon = FeatherIcons.Sliders, title = stringResource(SettingsSection.GeneralGroup.titleRes), onClick = { onOpen(SettingsSection.GeneralGroup) })
-            SettingsDivider()
-        }
-        if (displayGroups.contains(SettingsSection.PermissionsGroup)) {
-            SettingsRow(icon = FeatherIcons.Shield, title = stringResource(SettingsSection.PermissionsGroup.titleRes), onClick = { onOpen(SettingsSection.PermissionsGroup) })
-            SettingsDivider()
-        }
-        if (displayGroups.contains(SettingsSection.MoreGroup)) {
-            SettingsRow(icon = FeatherIcons.Box, title = stringResource(SettingsSection.MoreGroup.titleRes), onClick = { onOpen(SettingsSection.MoreGroup) })
-            SettingsDivider()
-        }
-        if (displayGroups.contains(SettingsSection.HelpGroup)) {
-            SettingsRow(icon = FeatherIcons.Info, title = stringResource(SettingsSection.HelpGroup.titleRes), onClick = { onOpen(SettingsSection.HelpGroup) })
-        }
+        SettingsAharouRows(onOpen)
+        SettingsGeneralRows(themeMode, terminalSettings, { onOpen(SettingsSection.Theme) }, onOpenTerminalSettingsSheet, onOpen)
+        SettingsPermissionsRows(onOpen)
+        SettingsMoreRows(onOpen)
     }
 }
 

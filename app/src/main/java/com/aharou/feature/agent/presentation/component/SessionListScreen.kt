@@ -77,6 +77,7 @@ fun SessionListScreen(
     onSelect: (ChatSession) -> Unit,
     onDelete: (ChatSession) -> Unit,
     onNewSession: () -> Unit,
+    showNewSession: Boolean = true,
 ) {
     // 长按触发删除二次确认。
     var pendingDelete by remember { mutableStateOf<ChatSession?>(null) }
@@ -167,7 +168,7 @@ fun SessionListScreen(
             }
         }  // LazyColumn 闭合
     }  // Column 闭合；FAB 独立放在 Box 底右，不能用 align(BottomEnd) 放 Column 里（类型不匹配）
-    androidx.compose.material3.FloatingActionButton(
+    if (showNewSession) androidx.compose.material3.FloatingActionButton(
             onClick = onNewSession,
             containerColor = Brand.Orange,
             contentColor = androidx.compose.ui.graphics.Color.White,

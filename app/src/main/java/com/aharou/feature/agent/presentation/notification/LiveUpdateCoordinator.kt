@@ -5,8 +5,6 @@ import com.aharou.R
 import com.aharou.feature.agent.domain.runtime.AgentRuntimeStatus
 import com.aharou.feature.terminal.domain.TabInfo
 import com.aharou.feature.terminal.domain.TerminalSessionProvider
-import com.aharou.feature.voice.call.VoiceCallService
-import com.aharou.feature.voice.call.VoiceCallSession
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -19,12 +17,12 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 
 /**
- * 把三路运行态（语音通话 / Agent 任务 / 后台终端）汇成一条灵动岛通知。
+ * 把两路运行态（Agent 任务 / 后台终端）汇成一条灵动岛通知。
  *
  * 挂载点是 App 进程启动即拉起（见 AIEditorApp.onCreate），不挂在 [com.aharou.feature.pet.PetOverlayService]
  * 上——小染开关关着时也必须能用，故做成独立的 [Singleton]。
  *
- * 合并优先级（高到低）：通话中 > Agent 跑任务中 > 后台终端运行中 > 刚结束的收尾提示。
+ * 合并优先级（高到低）：Agent 跑任务中 > 后台终端运行中 > 刚结束的收尾提示。
  * 同优先级内多路只取一路代表（终端多开时取第一个标签，正文附总数）；收尾提示只显示 [DONE_WINDOW_MS]
  * 后自动收起，期间若有更高优先级状态出现则被顶掉。
  */
@@ -32,16 +30,12 @@ import kotlinx.coroutines.launch
 internal class LiveUpdateCoordinator @Inject constructor(
     @ApplicationContext private val context: Context,
     private val notifier: LiveUpdateNotifier,
-    private val callSession: VoiceCallSession,
     private val terminalSessionProvider: TerminalSessionProvider,
 ) {
 
     /** 所有 collector 都跑在主线程，共享状态读写天然串行，无需加锁。 */
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
-    private var callRunning = false
-    private var callState = VoiceCallSession.State.Idle
-    private var callDisplayText = ""
     private var agentState = AgentRuntimeStatus.State()
     private var runningTabs: List<TabInfo> = emptyList()
 
@@ -61,24 +55,9 @@ internal class LiveUpdateCoordinator @Inject constructor(
     private data class DoneEvent(val title: String, val text: String, val tabId: String? = null)
 
     fun start() {
-        scope.launch { observeCall() }
         scope.launch { observeAgent() }
         scope.launch { observeTerminal() }
         scope.launch { observeFinished() }
-    }
-
-    private suspend fun observeCall() {
-        combine(
-            VoiceCallService.running,
-            callSession.state,
-            callSession.displayText,
-        ) { running, state, display -> Triple(running, state, display) }
-            .collect { (running, state, display) ->
-                callRunning = running
-                callState = state
-                callDisplayText = display
-                render()
-            }
     }
 
     private suspend fun observeAgent() {
@@ -156,14 +135,6 @@ internal class LiveUpdateCoordinator @Inject constructor(
     }
 
     private fun decide(): LiveUpdateContent? {
-        if (callRunning) {
-            val text = callDisplayText.ifBlank { context.getString(callStateLabel(callState)) }
-            return LiveUpdateContent(
-                title = context.getString(R.string.voice_call_notification_title),
-                text = text,
-                ongoing = true,
-            )
-        }
         if (agentState.active) {
             val detail = agentState.toolName.ifBlank { agentState.statusText }
             return LiveUpdateContent(
@@ -190,15 +161,6 @@ internal class LiveUpdateCoordinator @Inject constructor(
         }
         done?.let { return LiveUpdateContent(it.title, it.text, ongoing = false) }
         return null
-    }
-
-    private fun callStateLabel(state: VoiceCallSession.State): Int = when (state) {
-        VoiceCallSession.State.Listening -> R.string.voice_call_state_listening
-        VoiceCallSession.State.WakeListening -> R.string.voice_wake_on
-        VoiceCallSession.State.Thinking -> R.string.voice_call_state_thinking
-        VoiceCallSession.State.Speaking -> R.string.voice_call_state_speaking
-        VoiceCallSession.State.Preparing -> R.string.voice_call_state_preparing
-        VoiceCallSession.State.Idle -> R.string.voice_call_state_idle
     }
 
     private companion object {

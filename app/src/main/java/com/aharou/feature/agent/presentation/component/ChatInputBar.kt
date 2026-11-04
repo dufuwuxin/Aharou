@@ -104,8 +104,6 @@ import com.aharou.core.util.FileLogger
 import com.aharou.core.ui.rememberImeBottomInset
 import com.aharou.feature.onboarding.domain.OnboardingStep
 import com.aharou.feature.onboarding.presentation.onboardingTarget
-import com.aharou.feature.voice.call.VoiceCallService
-import com.aharou.feature.voice.presentation.VoiceMicButton
 import com.aharou.feature.agent.domain.command.SlashCommand
 import com.aharou.feature.agent.domain.command.SlashCommandKind
 import com.aharou.feature.agent.domain.model.AgentMode
@@ -214,6 +212,7 @@ internal fun ChatInputBar(
     /** 消息列表正在滚动时内容区淡出到 40%，停止滚动恢复；用于长列表阅读时降低底部干扰（同 git 页 tab 栏）。 */
     isScrolling: Boolean = false,
     forceOpenModelSheet: Boolean = false,
+    modelChainWorkspace: String = "",
     onSelectModelInOnboarding: (() -> Unit)? = null,
     onModelSheetDismiss: (() -> Unit)? = null,
     modifier: Modifier = Modifier
@@ -222,8 +221,6 @@ internal fun ChatInputBar(
     val canSend = hasContent
     var showAttachmentSheet by remember { mutableStateOf(false) }
     var showFullScreenInput by remember { mutableStateOf(false) }
-    // TextField 的 String 重载在整串替换时会保留旧 selection 下标（点快捷命令补全时光标会停在中间），
-    // 这里自持 TextFieldValue：外部改值时把光标移到末尾。
     var inputFieldValue by remember { mutableStateOf(TextFieldValue(value, TextRange(value.length))) }
     LaunchedEffect(value) {
         if (inputFieldValue.text != value) {
@@ -600,6 +597,7 @@ internal fun ChatInputBar(
                             modifier = Modifier.onboardingTarget(OnboardingStep.OPEN_MODEL_PICKER)
                         )
 
+                        WorkspaceModelChainButton(modelChainWorkspace, providers, modelMetadata)
                         if (workspaceViewModel != null) {
                             WorkspaceIconButton(
                                 viewModel = workspaceViewModel,
@@ -619,24 +617,6 @@ internal fun ChatInputBar(
                             modelMetadata = activeProvider?.let { modelMetadata[modelMetadataKey(it.id, it.effectiveModel)] }
                         )
                     }
-                    val callContext = LocalContext.current
-                    val callRunning by VoiceCallService.running.collectAsState()
-                    val wakeRunning by VoiceCallService.wakeModeRunning.collectAsState()
-                    VoiceMicButton(
-                        enabled = !isBusy,
-                        callRunning = callRunning,
-                        wakeRunning = wakeRunning,
-                        onToggleCall = {
-                            when {
-                                !VoiceCallService.isRunning() -> VoiceCallService.start(callContext)
-                                // 唤醒常驻时点麦克风不是挂断，而是直接开始说话；
-                                // 挂断会连带把常驻监听一起停掉（再点一次只会起通话模式）。
-                                VoiceCallService.isWakeModeRunning() ->
-                                    VoiceCallService.requestListen(callContext)
-                                else -> VoiceCallService.stop(callContext)
-                            }
-                        }
-                    )
                     UploadIconButton(
                         enabled = !isBusy, icon = FeatherIcons.Plus,
                         contentDescription = stringResource(R.string.chat_add_attachment),

@@ -25,7 +25,6 @@ class PetRadialMenu(context: Context) : View(context) {
     data class Item(val id: String, val iconRes: Int, val label: String, val active: Boolean = false)
 
     companion object {
-        const val ID_CALL = "call"
         const val ID_SAY = "say"
         const val ID_SLEEP = "sleep"
         const val ID_HIDE = "hide"

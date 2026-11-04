@@ -72,7 +72,7 @@ object DistilledEntryParser {
             content = content,
             type = type,
             keywords = keywords,
-            pending = content.contains("待确认") || content.contains("相冲突"),
+            pending = true,
         )
     }
 

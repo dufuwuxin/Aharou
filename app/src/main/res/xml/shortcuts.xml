@@ -22,16 +22,4 @@
         </intent>
     </shortcut>
 
-    <shortcut
-        android:shortcutId="start_voice"
-        android:enabled="true"
-        android:icon="@drawable/ic_pet_mic"
-        android:shortcutShortLabel="@string/shortcut_start_voice">
-        <intent
-            android:action="com.aharou.intent.START_VOICE"
-            android:targetClass="com.aharou.MainActivity">
-            <categories android:name="android.intent.category.DEFAULT" />
-        </intent>
-    </shortcut>
-
 </shortcuts>

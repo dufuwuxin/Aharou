@@ -5,13 +5,6 @@ enum class RemoteProtocol {
     FTP
 }
 
-/** 远程挂载的实时连接健康度（由 SyncEngine 的探活/重连回写）。 */
-enum class SyncConnectionState {
-    CONNECTED,
-    RECONNECTING,
-    DISCONNECTED
-}
-
 data class RemoteConnection(
     val id: String,
     val name: String,
@@ -28,17 +21,4 @@ data class RemoteConnection(
     val passphrase: String? = null,
     /** 用户拖拽排序的显式顺序，越小越靠前。 */
     val sortOrder: Int = 0
-)
-
-data class RemoteMount(
-    val id: String,
-    val connectionId: String,
-    val remotePath: String,
-    val localMountPath: String,
-    val isActive: Boolean = false,
-    val autoConnect: Boolean = true,
-    /** 实时连接健康度；null 表示该挂载未激活。 */
-    val connectionState: SyncConnectionState? = null,
-    // Provide a convenient reference to the underlying connection when used in UI
-    val connection: RemoteConnection? = null
 )

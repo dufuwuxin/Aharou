@@ -14,9 +14,7 @@
     <!-- 前台服务类型对应权限：targetSdk 34 起，声明了 foregroundServiceType 却没申请对应权限，
          startForeground() 直接抛 SecurityException。两个前台服务统一用 specialUse（用例见各自 service）。 -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
-    <!-- 语音通话：麦克风类型前台服务。Android 14+ 要求 startForeground 时 RECORD_AUDIO 已授予，
-         且该类型只能从可见界面启动——通话因此必须由用户点按发起，不能后台自启。 -->
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Android 16 Live Update（灵动岛 / 流体云）：声明后方能请求系统把够格的常驻通知提升为胶囊。
@@ -33,7 +31,6 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
     <uses-permission android:name="android.permission.CAMERA" />
-    <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- 通话音频模式（MODE_IN_COMMUNICATION）与输出设备控制 -->
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
@@ -123,7 +120,6 @@
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
             <intent-filter>
-                <action android:name="com.aharou.intent.START_VOICE" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
             <!-- 「打开方式」入口：在文件管理器 / QQ 等选「用 Aharou 打开」。只收 content/file
@@ -135,7 +131,7 @@
                 <data android:scheme="file" />
                 <data android:mimeType="*/*" />
             </intent-filter>
-            <!-- 长按桌面图标弹出的静态快捷方式（新建对话 / 开始语音通话）。 -->
+
             <meta-data
                 android:name="android.app.shortcuts"
                 android:resource="@xml/shortcuts" />
@@ -311,91 +307,18 @@
             android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="用户主动开启的桌面伙伴悬浮窗，并显示 Agent 进度与通话字幕" />
+                android:value="用户主动开启的桌面伙伴悬浮窗，并显示 Agent 进度" />
         </service>
 
-        <!-- 语音通话：悬浮窗 + 实时语音回合。用 microphone 类型，通话期间必须持有麦克风。 -->
-        <service
-            android:name="com.aharou.feature.voice.call.VoiceCallService"
-            android:exported="false"
-            android:foregroundServiceType="microphone" />
 
-        <!-- 数字助手（可选）：用户把它选为默认助手后，系统会一直保活这个服务，
-             唤醒比普通前台服务稳，也能接长按 / 锁屏唤起。代价是系统同时只允许一个
-             默认助手，开了就会顶掉原有的（如小布）。 -->
-        <service
-            android:name="com.aharou.feature.voice.assistant.AharouVoiceInteractionService"
-            android:exported="true"
-            android:permission="android.permission.BIND_VOICE_INTERACTION">
-            <meta-data
-                android:name="android.voice_interaction"
-                android:resource="@xml/voice_interaction_service" />
-            <intent-filter>
-                <action android:name="android.service.voice.VoiceInteractionService" />
-            </intent-filter>
-        </service>
 
-        <!-- exported 必须为 true：系统（system uid）要去绑定它才能派发会话，
-             实际访问控制由 BIND_VOICE_INTERACTION（signature|privileged）兜住，第三方拿不到该权限。 -->
-        <service
-            android:name="com.aharou.feature.voice.assistant.AharouVoiceSessionService"
-            android:exported="true"
-            android:permission="android.permission.BIND_VOICE_INTERACTION" />
 
-        <!-- 重启/升级后把电源键监听拉回来（getevent 进程随重启消失）。 -->
-        <receiver
-            android:name="com.aharou.feature.voice.assistant.PowerKeyBootReceiver"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.intent.action.BOOT_COMPLETED" />
-                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
-            </intent-filter>
-        </receiver>
 
-        <!-- 长按电源键唤起：靠 Shizuku 跑 getevent 监听电源键（普通应用读不到 /dev/input）。 -->
-        <service
-            android:name="com.aharou.feature.voice.assistant.PowerKeyWatcherService"
-            android:exported="false"
-            android:foregroundServiceType="specialUse">
-            <property
-                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="通过 Shizuku 监视电源键长按，用于在任意应用里唤起助手浮层" />
-        </service>
 
-        <!-- 下拉快捷磁贴：ColorOS 把长按电源独占给自家小布，三方应用只能靠磁贴自己留一个常驻入口。 -->
-        <service
-            android:name="com.aharou.feature.voice.assistant.AssistantTileService"
-            android:exported="true"
-            android:icon="@mipmap/ic_launcher"
-            android:label="@string/assistant_tile_label"
-            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
-            <intent-filter>
-                <action android:name="android.service.quicksettings.action.QS_TILE" />
-            </intent-filter>
-        </service>
 
-        <!-- 助手浮层：由上面的会话经 startAssistantActivity 拉起，窗口由系统按助手规则摆好。
-             只由本应用启动，不进最近任务。 -->
-        <activity
-            android:name="com.aharou.feature.voice.assistant.presentation.AssistantOverlayActivity"
-            android:exported="false"
-            android:excludeFromRecents="true"
-            android:taskAffinity="com.aharou.assistant.overlay"
-            android:theme="@style/Theme.AICode.Assistant"
-            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout"
-            android:windowSoftInputMode="adjustResize" />
 
-        <!-- 官方要求数字助手必须同时提供识别服务（见 AOSP 语音交互简介）；
-             实际识别走自有引擎，这里只做合法占位。 -->
-        <service
-            android:name="com.aharou.feature.voice.assistant.AharouRecognitionService"
-            android:exported="true"
-            android:permission="android.permission.BIND_RECOGNITION_SERVICE">
-            <intent-filter>
-                <action android:name="android.speech.RecognitionService" />
-                <category android:name="android.intent.category.DEFAULT" />
-            </intent-filter>
-        </service>
+
+
 
         <!-- 开机与应用被更新后把悬浮窗服务拉回来。START_STICKY 只覆盖「被系统查杀」，
              包替换（pm install）与设备重启都不会自动拉起服务，用户会以为开关失效了。

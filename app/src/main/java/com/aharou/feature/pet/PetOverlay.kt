@@ -312,7 +312,6 @@ class PetOverlay(private val context: Context) {
     private var oneShot = false
 
     private var bubblePersistent = false
-    private var inCall = false
 
     private val passThrough: Boolean get() = prefs.getBoolean(KEY_PASS_THROUGH, false)
 
@@ -592,17 +591,6 @@ class PetOverlay(private val context: Context) {
         }
     }
 
-    /** 通话状态：只同步菜单里麦克风的开启态，屏幕上不再额外画光环。 */
-    fun setCallState(inCall: Boolean) {
-        mainHandler.post {
-            if (this.inCall == inCall) return@post
-            this.inCall = inCall
-            menu?.setItemActive(PetRadialMenu.ID_CALL, inCall)
-            // 通话等于有人在跟她说话，得醒着
-            if (inCall) markInteraction()
-        }
-    }
-
     // ── 视图 ────────────────────────────────────────────────
     private fun attach() {
         val frame = FrameLayout(context)
@@ -839,10 +827,6 @@ class PetOverlay(private val context: Context) {
         val cy = pad + bubbleH + spriteH * MENU_HEAD_CENTER_RATIO
         view.open(
             listOf(
-                PetRadialMenu.Item(
-                    PetRadialMenu.ID_CALL, R.drawable.ic_pet_mic,
-                    context.getString(R.string.pet_menu_call), inCall,
-                ),
                 PetRadialMenu.Item(
                     PetRadialMenu.ID_SHOT, R.drawable.ic_pet_shot,
                     context.getString(R.string.pet_menu_shot), false,
@@ -1436,8 +1420,6 @@ class PetOverlay(private val context: Context) {
     private fun enterSleep() {
         motion = Motion.IDLE
         targetX = null
-        // 通话中得醒着报字幕，不睡
-        if (inCall) return
         idle = Idle.NAP
         idleCooldowns[Idle.NAP] = System.currentTimeMillis() + NAP_COOLDOWN_MS
         sleeping = true

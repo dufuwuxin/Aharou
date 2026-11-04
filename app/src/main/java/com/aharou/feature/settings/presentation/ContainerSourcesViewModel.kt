@@ -99,7 +99,7 @@ class ContainerSourcesRepository @Inject constructor(
     private val mirrorHostKey = stringPreferencesKey("mirror_host")
     private val dnsKey = stringPreferencesKey("dns_mode")
 
-    /** 读失败一直重试：流一旦结束，收它的 UI 就再也拿不到值（同 VoiceWakeSettingsRepository）。 */
+    /** 读失败一直重试：流一旦结束，收它的 UI 就再也拿不到值。 */
     val settingsFlow: Flow<ContainerSourcesSettings> = dataStore.data
         .map { prefs ->
             ContainerSourcesSettings(

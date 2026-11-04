@@ -21,10 +21,10 @@ private const val PREFS_NAME = "language_prefs_sync"
 private const val PREFS_KEY = "language_tag"
 
 /**
- * 持久化用户选择的应用语言。
+ * 固定中文；忽略旧配置与备份中的语言值。
  *
- * 存储值为 BCP-47 language tag（如 "zh"、"en"），null 表示跟随系统。
- * 切换时写入同步 prefs，[com.aharou.MainActivity] 在 attachBaseContext 中读取并 recreate 生效。
+ * 对外读取始终返回 zh，恢复旧备份也写入 zh。
+ * Application 与 Activity 的初始上下文独立固定中文，不等待异步配置读取。
  */
 @Singleton
 class LanguageSettingsRepository @Inject constructor(
@@ -36,27 +36,27 @@ class LanguageSettingsRepository @Inject constructor(
 
     private val syncPrefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
-    val languageFlow: Flow<String?> = context.languageDataStore.data.map { prefs ->
-        prefs[LANGUAGE_KEY]
+    val languageFlow: Flow<String?> = context.languageDataStore.data.map {
+        "zh"
     }
 
-    suspend fun setLanguage(tag: String?) {
+    @Suppress("UNUSED_PARAMETER")
+    private suspend fun setLanguage(tag: String?) {
         context.languageDataStore.edit {
-            if (tag == null) it.remove(LANGUAGE_KEY) else it[LANGUAGE_KEY] = tag
+            it[LANGUAGE_KEY] = "zh"
         }
         syncPrefs.edit().apply {
-            if (tag == null) remove(PREFS_KEY) else putString(PREFS_KEY, tag)
+            putString(PREFS_KEY, "zh")
         }.apply()
     }
 
     suspend fun snapshot(): String? = languageFlow.first()
 
-    /** 同步读取语言 tag，供 attachBaseContext 在 Activity 创建前调用（此时 Hilt 尚未注入）。 */
-    fun getLanguageSync(): String? = syncPrefs.getString(PREFS_KEY, null)
+    /** 保留既有同步读取接口，旧偏好不再影响返回值。 */
+    fun getLanguageSync(): String? = "zh"
 
     suspend fun restore(value: String?) {
-        // 走 setLanguage 而不是直接写 DataStore：attachBaseContext 读的是 syncPrefs，
-        // 只写主存储会让导入后的冷启动仍按旧语言设 locale。
+        // 旧备份无论保存什么语言，都归一化成中文。
         setLanguage(value)
     }
 }

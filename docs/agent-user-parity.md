@@ -131,7 +131,7 @@
 
 | 用户能做什么 | 界面入口（file:line） | Agent 有对应工具吗 | 工具名与入口（file:line） | 差距说明 |
 |---|---|---|---|---|
-| 新建会话 | `component/ChatHeaderComponents.kt:115` → `AIChatPanel.kt:1209`（`newSession`） | 无 | 未找到（`task` 派生的是子代理会话，不是用户会话） | **缺口** |
+| 创建项目和批量任务草稿 | 项目页两字段创建，保存项目及草稿到同一快照 | 无 | 无项目写入工具 | 用户主导；普通会话不提供新建入口 |
 | 切换会话 | `MainActivity.kt:838`（`selectSession`） | 无 | `sessions` 只有 list/search/read | **缺口** |
 | 重命名会话 | `ChatDrawer.kt:436`、`:508` → `MainActivity.kt:840` | 无 | 未找到 | **缺口** |
 | 删除会话 | `ChatDrawer.kt:450`、`:471` → `MainActivity.kt:839` | 无 | 未找到 | **缺口** |
@@ -184,7 +184,7 @@
 15. MCP：重连接/刷新（`SettingsScreen.kt:755`）
 16. 远程设备：接受协助（`RemoteDeviceSection.kt:139`）
 17. IM：看连接状态（`TelegramBotSection.kt:100`）
-18. 会话：新建（`ChatHeaderComponents.kt:115`）
+18. 项目：创建及批量草稿（项目首页）
 19. 会话：切换（`MainActivity.kt:838`）
 20. 会话：重命名（`ChatDrawer.kt:508`）
 21. 会话：删除（`ChatDrawer.kt:471`）
@@ -257,3 +257,40 @@
 用户可在知识库页创建本地库并追加 Markdown，保存后立即进入现有检索范围。Agent 对应 `config` 的 `knowledge.local`（创建/移除）和 `knowledge.documents`（追加），检索仍用 `knowledge_search`。移除会删除本地文档，必须遵循删除授权。
 
 规则、记忆、提示词页面已补职责说明；提示词编辑页明确多条件 OR，不改变既有配置。
+
+## 设置重组与工作区模型顺序
+
+- 设置首页平铺供应商、默认模型、插件与连接器等入口；配置页保持独立。
+- 自动化任务与工具授权合入工具页，原配置通道继续生效。
+- 工作区模型顺序：聊天输入栏管理；`config` 的 `model.workspace_chain` 读取或修改当前工作区候选，每行 `providerId|model`。
+- 内置技能支持列表左滑删除；删除记录在 `skills.deleted-builtins.json`，同名用户覆盖不受影响。
+- 删除帮助关于及更新检查链路、连接挂载同步与 FTP 服务及其配置注册；保留既有 SSH 工作区和历史连接数据所需的共用类型。
+- 宿主命令只使用 Shizuku，不再探测或调用 `su`。
+
+### 固定中文与霞橙
+
+应用不再提供语言、皮肤、自定义配色或动态取色选择，config 同步移除 `app.language`、`appearance.theme_preset`、`appearance.dynamic_color` 与 `appearance.skins`；旧备份不能恢复这些能力。保留 `appearance.theme_mode` 的自动/深/浅模式及独立终端设置。
+
+## Project tasks and team routes
+
+| Capability | User interface | Agent channel |
+| --- | --- | --- |
+| Project creation, batch requirement drafts and parent tree | Project list and independent project tree/map routes | Creation and edits remain user-led; no task mutation tool is claimed |
+| Multiple execution sessions, explicit start, retained historical conversations | Independent task detail route | Existing session `read` accesses original messages on demand |
+| Compact task index and selected briefs | Task detail | `sessions(action="index"/"brief", task_ids=[...], since_version=..., offset=...)`, paged with `nextOffset`; no implicit message reads or model summaries |
+| Current-task context | Linked execution conversation | Budget-limited project title/requirements and task context matched by workspace and session id |
+| Unique team administrator and concrete stage-member routes | Team editor route map/form | Team configuration channel persists routes; `task(action="team_run")` uses routes when configured |
+
+Legacy teams without routes run serial stages, explicitly not graph dispatch. Legacy no/multiple-admin teams remain on disk but require correction. A reviewer verdict and bounded rework are execution gates; completion alone is not approval. UI task editing is intentionally not claimed as agent-editable. No new behavior toggles, database migration or dependencies are introduced.
+
+Routed members may emit `TEAM_HANDOFF: {"next":[{"stageId":"...","taskId":"..."}],"hold":false,"reason":"analysis"}`. Selection is restricted to saved outgoing forward routes. `hold:true` requires a reason and an empty next list. Missing markers mean backward-compatible static all-outgoing dispatch, never natural-language inference. Review verdicts are still mandatory. A successful selected branch does not approve or execute unselected branches.
+
+Second-pass corrections: long-session creation routes to project creation; explicit turn outcomes distinguish stopped from succeeded; application-wide normalized-workspace root turns serialize (including historical root sessions), while child teams do not reacquire the root mutex. Every configured review gate is required: empty selection cannot approve it; results include unselected nodes and pending/passed gates. Department/query tasks survive editor metadata changes. Task dependencies are validated and execution waits for current accepted prerequisites. Project tree branches expand/collapse; the bounded map draws parent/dependency edges without fixed-node pagination. Full task field retrieval uses `sessions(action="field", task_id="...", field="constraints", offset=0, limit=1000, task_version=...)`; arrays are reversible JSON strings, version changes reject stale reads. Cold interrupted runs preserve sessions and record interruption; optional task context failure does not disable legacy message history, and ghost sessions skip automatic task injection.
+
+## 项目入口与执行记录
+
+底栏为「项目 / 会话 / 配置 / 设置」，默认进入项目。创建只输入项目名称和需求正文，一次原子保存项目及全部任务草稿。编号、项目符号、换行/空行和缩进用于确定性拆分，单段文字按句拆分；这不是 AI 语义分析，不调用模型，不会自动开始执行。草稿可继续编辑，也可在项目内追加需求或添加任务。
+
+项目详情的「任务树 / 思维导图」分段控制切换同一组任务；层级树可展开收起，导图按父子分支向右布局并支持拖动、双指缩放及放大/缩小/复位，跨任务依赖保留虚线。点击任务进入独立可滚动详情，编辑、开始执行、停止和验收只在详情操作，次级协作字段可展开。
+
+会话页仅保留聊天记录，不混放任务，也不提供普通聊天新建按钮。项目任务执行会话从任务详情打开；旧独立会话不删除。旧无项目归属的任务保留在项目首页的「未归属任务」，不会自动变成项目。

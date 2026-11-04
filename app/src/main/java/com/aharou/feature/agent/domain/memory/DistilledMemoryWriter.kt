@@ -29,7 +29,7 @@ class DistilledMemoryWriter @Inject constructor(
      * 写入一批要点，返回真正落盘的条数。
      *
      * 名字由正文开头生成，模型换个说法就会生成新名字——所以写入前先用相似度找一遍，
-     * 命中就把内容合并进已有条目（保留原名），否则才新建。
+     * 仅更新仍待确认的蒸馏条目；已确认或手工条目保留原样，无命中才新建候选。
      */
     fun write(entries: List<DistilledEntry>, projectRoot: String? = null): Int {
         var written = 0
@@ -44,6 +44,10 @@ class DistilledMemoryWriter @Inject constructor(
                     limit = 1,
                     scope = MemoryScope.GLOBAL,
                 ).firstOrNull()
+            // 相似检索只证明主题接近，不足以授权总结器改写已确认的约定。
+            if (target != null && (!target.pending || !target.name.startsWith(DistilledEntryParser.NAME_PREFIX))) {
+                continue
+            }
             val targetName = target?.name ?: entry.name
             val result = memoryRepository.writeMemory(
                 name = targetName,
@@ -52,7 +56,7 @@ class DistilledMemoryWriter @Inject constructor(
                 scope = MemoryScope.GLOBAL,
                 projectRoot = projectRoot,
                 type = entry.type,
-                pending = entry.pending,
+                pending = true,
                 keywords = entry.keywords,
                 expectedVersion = target?.version ?: MemorySource.VERSION_NEW,
             )

@@ -51,6 +51,8 @@ class AgentTeamRepository @Inject constructor(
         val name = form.name.trim()
         if (!AgentDefinitionRepository.isValidName(name)) return AgentTeamSaveError.INVALID_NAME
 
+        if (form.admins.size != 1) return AgentTeamSaveError.INVALID_FLOW
+
         // 名单是唯一真源：阶段点名的成员必须在名单里，否则主代理看到的名单和实际调用会对不上。
         val roster = form.members.map { it.name.trim() }.filter { it.isNotEmpty() }
         val rosterLower = roster.map { it.lowercase() }.toSet()
@@ -95,7 +97,7 @@ class AgentTeamRepository @Inject constructor(
                             .firstOrNull()
                             ?.copy(prompt = prompt)
                             ?: AgentTeamTaskForm(agent = member, prompt = prompt)
-                    }
+                    } + keepTasks.filter { it.agent.isBlank() }
                 else -> keepTasks
             }.let { tasks ->
                 stage.copy(members = members, tasks = tasks.map { task ->
@@ -108,13 +110,19 @@ class AgentTeamRepository @Inject constructor(
         })
 
         val validStages = normalized.stages.filter { it.tasks.isNotEmpty() }
-        if (validStages.isEmpty()) return AgentTeamSaveError.EMPTY_STAGES
+        if (validStages.isEmpty() || normalized.stages.any { it.tasks.isEmpty() }) return AgentTeamSaveError.EMPTY_STAGES
         normalized.stages.forEach { stage ->
             stage.tasks.forEach { task ->
                 val hasMember = task.agent.isNotBlank() || task.department.isNotBlank() || task.agentQuery.isNotBlank()
                 if (task.prompt.isBlank() || !hasMember) return AgentTeamSaveError.INCOMPLETE_TASK
             }
         }
+
+        val flowTeam = AgentTeam(name, normalized.description, normalized.stages.map { stage ->
+            TeamStage(stage.title, stage.tasks.map { task -> TeamTask(agent = task.agent, prompt = task.prompt, id = task.id) },
+                isReview = stage.isReview, id = stage.id)
+        }, normalized.charter, normalized.admins, normalized.members, routes = normalized.routes)
+        if (TeamFlowGraph.validate(flowTeam) != null) return AgentTeamSaveError.INVALID_FLOW
 
         val scope = normalized.scope
         // 作用域是文件所在目录，编辑时不允许换：改名但换了目录等于搬文件，界面已按新建时锁住。

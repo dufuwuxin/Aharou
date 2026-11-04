@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""架构门禁：禁用组件 import、单文件行数棘轮、双语 strings 一致性。
+"""架构门禁：禁用组件 import、单文件行数棘轮、单中文资源与引用完整性。
 
 规则的事实源是根目录 `architecture-policy.json`；存量违规登记在 `.architecture-baseline.json`，
 基线只许缩减——修好一处就删掉对应条目，脚本会在 [WARN] 里提示可清理项，新增违规一律拦截。
@@ -14,6 +14,8 @@ import os
 import re
 import subprocess
 import sys
+import xml.etree.ElementTree as ET
+from pathlib import Path
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 POLICY_REL = "architecture-policy.json"
@@ -115,23 +117,72 @@ def check_file_lines(policy, baseline, errors, notes):
             errors.append("%s：%d 行超出上限 %d 行" % (rel, count, limit))
 
 
-def check_strings_parity(policy, errors):
-    cfg = _require(policy, "stringsParity", errors, "双语 strings 一致性检查")
+def check_chinese_resources(policy, errors):
+    cfg = _require(policy, "chineseResources", errors, "单中文资源与引用检查")
     if cfg is None:
         return
-    if not cfg.get("zh") or not cfg.get("en"):
-        errors.append("architecture-policy.json 的 stringsParity 缺少 zh / en 路径")
+    if cfg.get("res") != "app/src/main/res" or cfg.get("locale") != "zh":
+        errors.append("chineseResources 必须指定 app/src/main/res 与 zh")
         return
-
-    def names(rel):
-        with open(os.path.join(ROOT, rel), encoding="utf-8") as f:
-            return set(re.findall(r'<string name="([^"]+)"', f.read()))
-
-    zh, en = names(cfg["zh"]), names(cfg["en"])
-    for missing in sorted(en - zh):
-        errors.append("%s：英文有而中文缺 %s" % (cfg["zh"], missing))
-    for missing in sorted(zh - en):
-        errors.append("%s：中文有而英文缺 %s" % (cfg["en"], missing))
+    res = Path(ROOT) / cfg["res"]
+    names = {"string": set(), "plurals": set(), "array": set()}
+    if not (res / "values/strings.xml").is_file():
+        errors.append("缺少中文 values/strings.xml")
+    # 扫描全部 source set，禁止在 debug/flavor 下偷偷重新引入翻译。
+    for resource_dir in (Path(ROOT) / "app/src").glob("*/res"):
+        for folder in resource_dir.glob("values*"):
+            qualifiers = folder.name.split("-")[1:]
+            locales = [q for q in qualifiers if (re.fullmatch(r"[a-z]{2,3}", q)
+                           and q != "car") or q.startswith("b+")]
+            if any(q != "zh" and not q.startswith("b+zh+") for q in locales):
+                errors.append("禁止非中文 UI 资源目录：%s" % folder.relative_to(ROOT))
+            for file in folder.glob("*.xml"):
+                try:
+                    root = ET.parse(file).getroot()
+                except (ET.ParseError, OSError) as exc:
+                    errors.append("%s：XML 无效：%s" % (file.relative_to(ROOT), exc))
+                    continue
+                if folder != res / "values":
+                    continue
+                for node in root:
+                    kind = "array" if node.tag in ("string-array", "integer-array") else node.tag
+                    if node.tag == "item":
+                        kind = node.get("type")
+                    if kind not in names:
+                        continue
+                    name = node.get("name")
+                    if not name or name in names[kind]:
+                        errors.append("%s：资源名缺失或重复：%s" % (file.relative_to(ROOT), name))
+                    names[kind].add(name)
+    if not names["string"]:
+        errors.append("中文字符串资源不能为空")
+    locale_file = res / "xml/locales_config.xml"
+    try:
+        tags = [n.get("{http://schemas.android.com/apk/res/android}name")
+                for n in ET.parse(locale_file).getroot()]
+        if tags != ["zh"]:
+            errors.append("locales_config.xml 必须且只能声明 zh")
+    except (ET.ParseError, OSError) as exc:
+        errors.append("中文语言声明无效：%s" % exc)
+    # 排除 android.R 等外部命名空间，不把技术标识/许可证当翻译删除。
+    for file in (Path(ROOT) / "app/src").rglob("*"):
+        if file.suffix not in (".kt", ".java", ".xml"):
+            continue
+        text = file.read_text(encoding="utf-8")
+        if file.suffix == ".xml":
+            refs = re.findall(r"(?<![\\w:])@(string|plurals|array)/([A-Za-z0-9_]+)", text)
+        else:
+            # 先匹配字符串，避免 URL 中的 // 吞掉后续代码；保留 Kotlin 插值引用。
+            text = re.sub(
+                r'''""".*?"""|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|/\*.*?\*/|//[^\n]*''',
+                lambda match: " " if match[0].startswith(("//", "/*")) else match[0],
+                text,
+                flags=re.S,
+            )
+            refs = re.findall(r"(?<![\w.])(?:com\.aharou\.)?R\.(string|plurals|array)\.([A-Za-z0-9_]+)", text)
+        for kind, name in sorted(set(refs)):
+            if name not in names[kind]:
+                errors.append("%s：缺少中文资源 %s/%s" % (file.relative_to(ROOT), kind, name))
 
 
 def sync_baseline(policy, baseline):
@@ -205,7 +256,7 @@ def main():
             errors.append("architecture-policy.json 缺少 sourceRoots（三项检查都会空跑）")
         check_banned_imports(policy, baseline, errors, notes)
         check_file_lines(policy, baseline, errors, notes)
-        check_strings_parity(policy, errors)
+        check_chinese_resources(policy, errors)
     for note in notes:
         print("[WARN] %s" % note)
     if errors:
@@ -216,7 +267,7 @@ def main():
     if ratchet_only:
         print("[OK] 架构基线未上涨")
     else:
-        print("[OK] 架构门禁通过：无新增禁用组件、文件行数未越基线、双语 strings 一致")
+        print("[OK] 架构门禁通过：无新增禁用组件、文件行数未越基线、单中文资源与引用完整")
     return 0
 
 

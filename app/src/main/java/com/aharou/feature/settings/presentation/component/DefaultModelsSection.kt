@@ -30,8 +30,6 @@ import com.aharou.core.ui.AdaptiveModalBottomSheet
 import com.aharou.core.ui.AppSwitch
 import com.aharou.feature.agent.domain.ocr.TessdataState
 import com.aharou.feature.agent.domain.ocr.TessdataStatus
-import com.aharou.feature.voice.domain.VoiceModelState
-import com.aharou.feature.voice.domain.VoiceModelStatus
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -100,21 +98,8 @@ internal fun DefaultModelsSection(
     titleModel: String,
     imageGenProviderId: String,
     imageGenModel: String,
-    voiceSttProviderId: String,
-    voiceSttModel: String,
-    voiceTtsProviderId: String,
-    voiceTtsModel: String,
-    voiceTtsVoice: String,
-    autoReadAloud: Boolean = false,
-    onAutoReadAloudChange: (Boolean) -> Unit = {},
-    onToggleAutoReadAloud: () -> Unit = {},
-    voiceWakeEnabled: Boolean = false,
-    onToggleVoiceWake: () -> Unit = {},
     ocrForTextOnlyModels: Boolean = true,
     onToggleOcrForTextOnlyModels: () -> Unit = {},
-    voiceModelStatus: VoiceModelStatus,
-    voiceModelState: VoiceModelState = VoiceModelState.Idle,
-    onDownloadVoiceModel: () -> Unit = {},
     tessdataStatus: TessdataStatus,
     tessdataState: TessdataState = TessdataState.Idle,
     onDownloadTessdata: () -> Unit = {},
@@ -132,11 +117,6 @@ internal fun DefaultModelsSection(
     memoryModel: String,
     onSelectMemoryModel: (providerId: String, model: String) -> Unit,
     onClearMemoryModel: () -> Unit,
-    onSelectVoiceModel: (providerId: String, model: String) -> Unit,
-    onClearVoiceModel: () -> Unit,
-    onSelectVoiceTtsModel: (providerId: String, model: String) -> Unit,
-    onChangeVoiceTtsVoice: (String) -> Unit,
-    onClearVoiceTtsModel: () -> Unit,
     /** 各场景「实际生效的模型」只读视图；默认自取，调用方无需传。 */
     sceneViewModel: ModelSceneViewModel = hiltViewModel(),
 ) {
@@ -146,8 +126,6 @@ internal fun DefaultModelsSection(
     var showTitleSheet by remember { mutableStateOf(false) }
     var showImageGenSheet by remember { mutableStateOf(false) }
     var showMemorySheet by remember { mutableStateOf(false) }
-    var showVoiceSttSheet by remember { mutableStateOf(false) }
-    var showVoiceTtsSheet by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) { onLoadMetadata() }
 
@@ -179,18 +157,6 @@ internal fun DefaultModelsSection(
         stringResource(R.string.settings_memory_model_unconfigured)
     } else {
         memoryModel
-    }
-
-    val voiceSttValue = if (voiceSttProviderId.isBlank() || voiceSttModel.isBlank()) {
-        stringResource(R.string.settings_voice_local_fallback)
-    } else {
-        voiceSttModel
-    }
-
-    val voiceTtsValue = if (voiceTtsProviderId.isBlank() || voiceTtsModel.isBlank()) {
-        stringResource(R.string.settings_voice_tts_unconfigured)
-    } else {
-        voiceTtsModel
     }
 
     Column(
@@ -294,40 +260,6 @@ internal fun DefaultModelsSection(
             )
             SettingsDivider()
             SettingsRow(
-                icon = FeatherIcons.Mic,
-                title = stringResource(R.string.settings_voice_stt_model),
-                onClick = { showVoiceSttSheet = true },
-                trailing = {
-                    Text(
-                        text = voiceSttValue,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        textAlign = TextAlign.End,
-                        modifier = Modifier.weight(2f)
-                    )
-                }
-            )
-            SettingsDivider()
-            SettingsRow(
-                icon = FeatherIcons.Volume2,
-                title = stringResource(R.string.settings_voice_tts_model),
-                onClick = { showVoiceTtsSheet = true },
-                trailing = {
-                    Text(
-                        text = voiceTtsValue,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        textAlign = TextAlign.End,
-                        modifier = Modifier.weight(2f)
-                    )
-                }
-            )
-            SettingsDivider()
-            SettingsRow(
                 icon = FeatherIcons.Eye,
                 title = stringResource(R.string.settings_ocr_auto),
                 subtitle = stringResource(R.string.settings_ocr_auto_desc),
@@ -369,81 +301,6 @@ internal fun DefaultModelsSection(
                     Text(
                         text = if (tessdataDownloading != null) stringResource(R.string.settings_ocr_pack_downloading_short)
                         else stringResource(R.string.settings_ocr_pack_download),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.primary,
-                        maxLines = 1
-                    )
-                }
-            )
-            SettingsDivider()
-            SettingsRow(
-                icon = FeatherIcons.Volume2,
-                title = stringResource(R.string.settings_voice_auto_read),
-                subtitle = stringResource(R.string.settings_voice_auto_read_desc),
-                onClick = onToggleAutoReadAloud,
-                trailing = {
-                    AppSwitch(
-                        checked = autoReadAloud,
-                        // 不信界面上的 checked：界面状态一旦过期，按它算出来的目标值就是错的，
-                        // 表现就是「开关只能开、关不掉」。统一走「读存储真值再取反」。
-                        onCheckedChange = { onToggleAutoReadAloud() }
-                    )
-                }
-            )
-            SettingsDivider()
-            SettingsRow(
-                icon = FeatherIcons.Mic,
-                title = stringResource(R.string.voice_wake_title),
-                subtitle = stringResource(R.string.voice_wake_summary),
-                onClick = onToggleVoiceWake,
-                trailing = {
-                    AppSwitch(
-                        checked = voiceWakeEnabled,
-                        // 同自动朗读：不拿界面上的 checked 当真值，统一读存储再取反，
-                        // 否则界面状态一过期就会「只能开、关不掉」。
-                        onCheckedChange = { onToggleVoiceWake() }
-                    )
-                }
-            )
-            SettingsDivider()
-            val voiceState = voiceModelState
-            val voiceDownloading = voiceState as? VoiceModelState.Downloading
-            val voiceBusy = voiceDownloading != null || voiceState is VoiceModelState.Extracting
-            val voiceModelProblem = when {
-                voiceModelStatus.ready -> null
-                // 从未下载过（而不是下载残了），给「点右边下载」的提示，别一上来就报一堆文件缺失
-                voiceModelStatus.neverDownloaded -> stringResource(R.string.settings_voice_model_not_downloaded)
-                else -> {
-                    val missing = stringResource(R.string.settings_voice_model_missing)
-                    val mismatch = stringResource(R.string.settings_voice_model_size_mismatch)
-                    voiceModelStatus.files.filter { !it.ok }
-                        .joinToString("、") { f -> "${f.name}：" + if (f.actual == null) missing else mismatch }
-                }
-            }
-            SettingsRow(
-                icon = FeatherIcons.Mic,
-                title = stringResource(R.string.settings_voice_model_title),
-                subtitle = when {
-                    voiceDownloading != null -> stringResource(
-                        R.string.settings_voice_model_downloading,
-                        (voiceDownloading.progress * 100).toInt()
-                    )
-                    voiceState is VoiceModelState.Extracting -> stringResource(R.string.voice_model_extracting)
-                    voiceState is VoiceModelState.Failed -> if (voiceState.message.isBlank()) {
-                        stringResource(R.string.settings_voice_model_download_failed)
-                    } else {
-                        stringResource(R.string.settings_voice_model_download_failed_detail, voiceState.message)
-                    }
-                    voiceModelProblem != null -> voiceModelProblem
-                    else -> stringResource(R.string.settings_voice_model_ready)
-                },
-                onClick = { if (!voiceBusy) onDownloadVoiceModel() },
-                trailing = {
-                    Text(
-                        text = if (voiceBusy) stringResource(R.string.settings_voice_model_downloading_short)
-                        else if (voiceState is VoiceModelState.Failed || !voiceModelStatus.ready) {
-                            stringResource(R.string.settings_voice_model_download)
-                        } else stringResource(R.string.settings_voice_model_ready),
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.primary,
                         maxLines = 1
@@ -554,63 +411,7 @@ internal fun DefaultModelsSection(
         )
     }
 
-    if (showVoiceSttSheet) {
-        ModelSelectionSheet(
-            title = stringResource(R.string.settings_voice_stt_model),
-            noModelsText = stringResource(R.string.voice_no_models),
-            providers = providers,
-            currentProviderId = voiceSttProviderId,
-            currentModel = voiceSttModel,
-            modelMetadata = modelMetadata,
-            modelFilter = ::isSpeechModel,
-            onSelect = { pid, model ->
-                onSelectVoiceModel(pid, model)
-                showVoiceSttSheet = false
-            },
-            onClear = {
-                onClearVoiceModel()
-                showVoiceSttSheet = false
-            },
-            onDismiss = { showVoiceSttSheet = false }
-        )
-    }
-
-    if (showVoiceTtsSheet) {
-        ModelSelectionSheet(
-            title = stringResource(R.string.settings_voice_tts_model),
-            noModelsText = stringResource(R.string.voice_tts_no_models),
-            providers = providers,
-            currentProviderId = voiceTtsProviderId,
-            currentModel = voiceTtsModel,
-            modelMetadata = modelMetadata,
-            modelFilter = ::isSpeechModel,
-            voiceField = VoiceFieldState(
-                value = voiceTtsVoice,
-                onValueChange = onChangeVoiceTtsVoice,
-                placeholder = stringResource(R.string.settings_voice_tts_voice_hint)
-            ),
-            onSelect = { pid, model ->
-                onSelectVoiceTtsModel(pid, model)
-                showVoiceTtsSheet = false
-            },
-            onClear = {
-                onClearVoiceTtsModel()
-                showVoiceTtsSheet = false
-            },
-            onDismiss = { showVoiceTtsSheet = false }
-        )
-    }
 }
-
-/**
- * 合成音色输入框的状态。音色名各家格式不同（`alloy` / `longxiaochun` /
- * `FunAudioLLM/CosyVoice2-0.5B:alex`），无法用统一枚举，故纯文本输入、原样透传。
- */
-internal data class VoiceFieldState(
-    val value: String,
-    val onValueChange: (String) -> Unit,
-    val placeholder: String
-)
 
 /**
  * 场景绑定失效时的行内提示：让用户看到「已绑定但实际会回退」，而不是被行尾的
@@ -651,10 +452,8 @@ internal fun ModelSelectionSheet(
     onSelect: (providerId: String, model: String) -> Unit,
     onClear: (() -> Unit)?,
     onDismiss: () -> Unit,
-    /** 模型名过滤：语音模型等专用场景用它把不相关的模型挡在外面。 */
+    /** 专用场景可按模型名筛选。 */
     modelFilter: ((String) -> Boolean)? = null,
-    /** 非空时在列表上方插一个音色输入框（仅语音合成用）。 */
-    voiceField: VoiceFieldState? = null
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val context = LocalContext.current
@@ -732,28 +531,7 @@ internal fun ModelSelectionSheet(
                 placeholder = stringResource(R.string.provider_filter_models_hint)
             )
 
-            voiceField?.let { field ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = Spacing.lg),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = stringResource(R.string.settings_voice_tts_voice),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.width(64.dp)
-                    )
-                    AppTextField(
-                        value = field.value,
-                        onValueChange = field.onValueChange,
-                        placeholder = field.placeholder,
-                        singleLine = true,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-            }
+
 
             val activeProviders = providers.filter { it.isEnabled && it.models.isNotEmpty() }
             // 过滤后的可选项：过滤为空时视为该 provider 无可用模型，不展示它的分组
@@ -980,25 +758,3 @@ private fun formatTokenLimit(tokens: Int): String =
         tokens >= 1_000 -> "${tokens / 1_000.0}".trimDecimal() + "K"
         else -> tokens.toString()
     }
-
-/**
- * 判断模型名是否属于「语音模型」（语音转文字 / 文字转语音）。
- *
- * 供应商的 `/v1/models` 返回的是自家全部模型，其中绝大多数是对话模型，而语音模型没有统一的能力字段
- * 可供筛选——这里按业界常见的命名约定做关键词匹配。匹配不到时用户仍可在供应商里手动添加模型名。
- */
-internal fun isSpeechModel(model: String): Boolean {
-    val name = model.lowercase()
-    return SPEECH_MODEL_KEYWORDS.any { name.contains(it) }
-}
-
-private val SPEECH_MODEL_KEYWORDS = listOf(
-    // 语音转文字
-    "whisper", "transcrib", "sensevoice", "paraformer", "funasr",
-    "speech-to-text", "stt", "asr", "-speech", "speech-", "audio-transcri",
-    // 文字转语音
-    "tts", "text-to-speech", "cosyvoice", "sovits", "fish-speech", "fishaudio",
-    "chattts", "moss-ttsd", "index-tts", "f5-tts", "kokoro",
-    // 语音对话类
-    "voice-", "-voice", "realtime-audio", "audio-preview",
-)

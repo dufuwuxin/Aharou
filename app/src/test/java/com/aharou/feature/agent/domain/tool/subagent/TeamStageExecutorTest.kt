@@ -17,7 +17,7 @@ class TeamStageExecutorTest {
         TeamStage("prepare", listOf(task())),
         TeamStage("implement", listOf(task())),
         TeamStage("review", listOf(task(), task()), isReview = true, rejectTo = "implement")
-    ), "constraints")
+    ), "constraints", admins = listOf("worker"), members = listOf(com.aharou.feature.agent.domain.subagent.TeamMemberRef("worker")))
     private fun result(batch: JsonArray, review: String = "TEAM_REVIEW: PASS", state: String = "done") = ToolResult.Success(buildJsonObject {
         put("state", state)
         put("outputs", buildJsonObject { batch.forEach { put(it.jsonObject.getValue("id").jsonPrimitive.content, review) } })
@@ -122,5 +122,114 @@ class TeamStageExecutorTest {
         val deps = plan.pipeline.last().jsonObject.getValue("dependsOn").jsonArray
         assertEquals(3, deps.size)
         assertTrue(plan.pipeline.first().jsonObject.getValue("prompt").jsonPrimitive.content.contains("s2-b1-t1"))
+    }
+    private fun routedTeam(): AgentTeam {
+        val a = com.aharou.feature.agent.domain.subagent.TeamFlowNode("a", "t")
+        val b = com.aharou.feature.agent.domain.subagent.TeamFlowNode("b", "t")
+        val c = com.aharou.feature.agent.domain.subagent.TeamFlowNode("c", "t")
+        val stageList = listOf("a", "b", "c").map { TeamStage(it, listOf(task().copy(id = "t")), id = it) }
+        return AgentTeam("routed", "", stageList, "", admins = listOf("worker"),
+            members = listOf(com.aharou.feature.agent.domain.subagent.TeamMemberRef("worker")),
+            routes = listOf(com.aharou.feature.agent.domain.subagent.TeamRoute(a, b, com.aharou.feature.agent.domain.subagent.TeamRouteAction.REVIEW),
+                com.aharou.feature.agent.domain.subagent.TeamRoute(b, c),
+                com.aharou.feature.agent.domain.subagent.TeamRoute(b, a, com.aharou.feature.agent.domain.subagent.TeamRouteAction.REJECT)))
+    }
+    @Test fun routedReviewWithoutVerdictNeverStartsDownstream() = runBlocking {
+        val calls = mutableListOf<JsonArray>()
+        val output = TeamStageExecutor(TeamRunRegistry()).run(routedTeam(), "goal", listOf(role), 2, "parent") { batch ->
+            calls += batch
+            result(batch, "unstructured text")
+        } as ToolResult.Success
+        assertEquals("blocked", output.data.jsonObject.getValue("state").jsonPrimitive.content)
+        assertEquals(2, calls.size)
+        assertFalse(calls.any { batch -> batch.any { it.jsonObject.getValue("id").jsonPrimitive.content.startsWith("s3-") } })
+    }
+    @Test fun routedRejectionsStopAtTwoRounds() = runBlocking {
+        var calls = 0
+        val output = TeamStageExecutor(TeamRunRegistry()).run(routedTeam(), "goal", listOf(role), 2, "parent") { batch ->
+            calls++
+            result(batch, if (calls % 2 == 0) "TEAM_REVIEW: REJECT fix required" else "original delivery")
+        } as ToolResult.Success
+        assertEquals("blocked", output.data.jsonObject.getValue("state").jsonPrimitive.content)
+        assertEquals(2, output.data.jsonObject.getValue("reworkRounds").jsonPrimitive.int)
+        assertEquals(6, calls)
+    }
+    @Test fun administratorMisconfigurationStopsBeforeAnyDispatch() = runBlocking {
+        var dispatched = false
+        val result = TeamStageExecutor(TeamRunRegistry()).run(routedTeam().copy(admins = emptyList()), "goal", listOf(role), 2, "parent") {
+            dispatched = true; result(it)
+        }
+        assertTrue(result is ToolResult.Error)
+        assertFalse(dispatched)
+    }
+    @Test fun routeTargetReceivesOnlyItsImmediateRequiredPredecessors() = runBlocking {
+        val a = com.aharou.feature.agent.domain.subagent.TeamFlowNode("a", "t")
+        val b = com.aharou.feature.agent.domain.subagent.TeamFlowNode("b", "t")
+        val c = com.aharou.feature.agent.domain.subagent.TeamFlowNode("c", "t")
+        val base = routedTeam().copy(routes = listOf(com.aharou.feature.agent.domain.subagent.TeamRoute(a, b),
+            com.aharou.feature.agent.domain.subagent.TeamRoute(b, c)))
+        val prompts = mutableListOf<String>()
+        val output = TeamStageExecutor(TeamRunRegistry()).run(base, "goal", listOf(role), 2, "parent") { batch ->
+            prompts += batch.single().jsonObject.getValue("prompt").jsonPrimitive.content
+            result(batch, if (prompts.size == 1) "PRIVATE_FIRST_NODE_EVIDENCE" else "DIRECT_PREDECESSOR_EVIDENCE")
+        } as ToolResult.Success
+        assertEquals("done", output.data.jsonObject.getValue("state").jsonPrimitive.content)
+        assertTrue(prompts[1].contains("PRIVATE_FIRST_NODE_EVIDENCE"))
+        assertFalse(prompts[2].contains("PRIVATE_FIRST_NODE_EVIDENCE"))
+        assertTrue(prompts[2].contains("DIRECT_PREDECESSOR_EVIDENCE"))
+    }
+    @Test fun structuredHandoffCanHoldOrSelectNoDownstreamButCannotInventOne() = runBlocking {
+        val executor = TeamStageExecutor(TeamRunRegistry())
+        val all = listOf(
+            "TEAM_HANDOFF: {\"next\":[],\"hold\":true,\"reason\":\"missing evidence\"}" to "blocked",
+            "TEAM_HANDOFF: {\"next\":[],\"hold\":false,\"reason\":\"not needed\"}" to "incomplete",
+            "TEAM_HANDOFF: {\"next\":[{\"stageId\":\"c\",\"taskId\":\"t\"}],\"hold\":false,\"reason\":\"skip review\"}" to "blocked")
+        for ((decision, expected) in all) {
+            var calls = 0
+            val output = executor.run(routedTeam(), "goal", listOf(role), 2, "parent") { batch -> calls++; result(batch, decision) } as ToolResult.Success
+            assertEquals(expected, output.data.jsonObject.getValue("state").jsonPrimitive.content)
+            if (expected == "incomplete") {
+                assertTrue(output.data.jsonObject.getValue("unselected").jsonArray.any { it.jsonPrimitive.content.startsWith("s2-") })
+                assertEquals("PENDING", output.data.jsonObject.getValue("reviewGates").jsonObject.getValue("s2-b1-t1").jsonPrimitive.content)
+            }
+            assertEquals(1, calls)
+        }
+        assertNull(TeamStageExecutor.handoff("TEAM_HANDOFF: not-json"))
+        assertNull(TeamStageExecutor.handoff("TEAM_HANDOFF: {\"next\":[],\"hold\":true}"))
+        assertNull(TeamStageExecutor.handoff("no marker")?.next)
+    }
+    @Test fun explicitFanoutSelectionDoesNotWakeAllSuccessors() = runBlocking {
+        val a = com.aharou.feature.agent.domain.subagent.TeamFlowNode("a", "t")
+        val b = com.aharou.feature.agent.domain.subagent.TeamFlowNode("b", "t")
+        val c = com.aharou.feature.agent.domain.subagent.TeamFlowNode("c", "t")
+        val team = routedTeam().copy(routes = listOf(com.aharou.feature.agent.domain.subagent.TeamRoute(a, b), com.aharou.feature.agent.domain.subagent.TeamRoute(a, c)))
+        val ids = mutableListOf<String>()
+        val output = TeamStageExecutor(TeamRunRegistry()).run(team, "goal", listOf(role), 2, "parent") { batch ->
+            ids += batch.single().jsonObject.getValue("id").jsonPrimitive.content
+            result(batch, if (ids.size == 1) "TEAM_HANDOFF: {\"next\":[{\"stageId\":\"b\",\"taskId\":\"t\"}],\"hold\":false,\"reason\":\"only b is necessary\"}" else "delivery")
+        } as ToolResult.Success
+        assertEquals("done", output.data.jsonObject.getValue("state").jsonPrimitive.content)
+        assertEquals(listOf("s1-b1-t1", "s2-b1-t1"), ids)
+    }
+    @Test fun twoRejectingReviewersAreBothIncludedInTargetRework() = runBlocking {
+        val n = listOf("a", "b", "c").associateWith { com.aharou.feature.agent.domain.subagent.TeamFlowNode(it, "t") }
+        val action = com.aharou.feature.agent.domain.subagent.TeamRouteAction.REVIEW
+        val reject = com.aharou.feature.agent.domain.subagent.TeamRouteAction.REJECT
+        val t = routedTeam().copy(routes = listOf(
+            com.aharou.feature.agent.domain.subagent.TeamRoute(n.getValue("a"), n.getValue("b"), action),
+            com.aharou.feature.agent.domain.subagent.TeamRoute(n.getValue("a"), n.getValue("c"), action),
+            com.aharou.feature.agent.domain.subagent.TeamRoute(n.getValue("b"), n.getValue("a"), reject),
+            com.aharou.feature.agent.domain.subagent.TeamRoute(n.getValue("c"), n.getValue("a"), reject)))
+        var calls = 0; var rework = ""
+        TeamStageExecutor(TeamRunRegistry()).run(t, "goal", listOf(role), 2, "parent") { batch ->
+            calls++
+            if (calls == 3) rework = batch.single().jsonObject.getValue("prompt").jsonPrimitive.content
+            ToolResult.Success(buildJsonObject { put("state", "done"); put("outputs", buildJsonObject {
+                batch.forEach { raw -> val id = raw.jsonObject.getValue("id").jsonPrimitive.content
+                    put(id, if (calls == 2) "TEAM_REVIEW: REJECT reason-$id" else if (calls > 3) "TEAM_REVIEW: PASS" else "original") }
+            }) })
+        }
+        assertTrue(rework.contains("reason-s2-b1-t1"))
+        assertTrue(rework.contains("reason-s3-b1-t1"))
     }
 }

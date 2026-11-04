@@ -10,7 +10,7 @@
 | --- | --- |
 | `rules.d/10-build-verify.md` | 构建闸门、命令选择、产物与交付、CI 全景 |
 | `rules.d/20-architecture.md` | 架构地图、数据库与迁移 |
-| `rules.d/30-assets-sync.md` | 提示词 / 文档 / config 通道 / 双语文案同步 |
+| `rules.d/30-assets-sync.md` | 提示词 / 文档 / config 通道 / 单中文文案同步 |
 | `rules.d/40-git-release.md` | 提交规范、分支工作流、PR 合并、发版 |
 | `rules.d/50-issue-review.md` | Issue 评估与审查报告 |
 | `rules.d/60-principles.md` | 产品与实现原则、记忆写作纪律 |
@@ -59,4 +59,3 @@
 
 - **minSdk 26**：用新 API 前先确认它在 Android 8.0 上存在。不要用 `InputStream.readNBytes(int)`（API 33+，低版本抛 `NoSuchMethodError`）——需要「最多读 N 字节」时用 `core/util/BoundedLineReader.kt` 的 `readFileHead`。`Array` 没有 `asReversed()`（那是 `MutableList` 的扩展），数组要用 `reversedArray()` / `reversed()`。
 - **`AdaptiveModalBottomSheet` 的调用点必须自带 `@OptIn(ExperimentalMaterial3Api::class)`**：它的签名暴露了实验类型 `SheetState` / `ModalBottomSheetProperties`，删掉 OptIn 会直接编译失败（设置页灵魂图标弹层就踩过）。
-- **英文 `strings.xml` 里的撇号必须转义成 `\'`**（`Don\'t`、`The backup\'s`）：漏了会 aapt2 报 `Apostrophe not preceded by \`，整包编不过。

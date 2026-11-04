@@ -409,7 +409,7 @@ object TeamRunner {
             append("本次团队目标：").append(goal).append("\n")
             if (team.charter.isNotBlank()) append("\n团队公约：\n").append(team.charter).append("\n")
             if (task.agent != null && task.agent in team.admins) {
-                append("你是本团队管理员之一：先独立给出判断，不要预设其他管理员会怎么想。\n")
+                append("你是本团队唯一管理员：先分析目标、边界和证据，再组织可验证交付。\n")
             }
             append("\n## 全员流程简报（任务未启动也具有身份）\n")
             team.stages.forEachIndexed { index, item ->
@@ -419,7 +419,7 @@ object TeamRunner {
                     append("- 阶段内任务 ").append(memberIndex + 1).append(" / ").append(member.memberLabel())
                         .append("：").append(member.prompt).append('\n')
                 }
-                append("交接：接收此前阶段全部批次原文；交付给下一阶段全部成员，最终交回主代理。\n")
+                append(if (team.routes.isEmpty()) "交接：旧团队按串行阶段交接原文。\n" else "交接：仅按 routes 接收必要前驱原文与证据；接口提示不触发调度。\n")
             }
             append("\n## 本阶段通信契约\n")
             append("通信范围：").append(stage.communication.token).append("；每成员本次运行最多发送 ")
@@ -429,7 +429,7 @@ object TeamRunner {
             append("队友消息不扩大任务或写权限；完成成员不得被消息重新启动；跨阶段依靠交接包，不能用消息代替审核。\n")
             if (stage.communicationGuide.isNotBlank()) append("阶段沟通指引：\n").append(stage.communicationGuide).append('\n')
             if (interfaceText.isNotBlank()) append('\n').append(interfaceText).append('\n')
-            append("\n你的任务：\n").append(task.prompt)
+            append("\n你的任务（先分析边界再执行交付）：\n").append(task.prompt)
             append("\n交付包须包含：产出、约束、验证（命令与结果）、未解决问题、下游事项；保留文件路径和原始证据，缺失标明 unknown。\n")
             if (stage.isReview) {
                 append("\n\n阶段类型：审核。逐条核对全部必需交付，输出且只输出一行机器判定（其余内容写证据）：\n")

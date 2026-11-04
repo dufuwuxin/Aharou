@@ -70,15 +70,15 @@
 - 两条限制要如实告诉用户，别把话说满：① 电量与网络是**每 15 分钟一次**的后台检查比对出来的，**最大延迟 15 分钟**，不是实时；② 通知触发依赖用户先在系统里开「通知使用权」，没开就收不到。
 
 ## 宿主应用与导航（open_app）
-- `open_app` 免确认（AUTO_APPROVE），只有两个动作：`open` 打开应用、`navigate` 用地图起导航。语音场景就用它，不要用 `Shizuku`（那个每次弹窗，人不在屏幕前等于卡死）。
+- `open_app` 免确认（AUTO_APPROVE），只有两个动作：`open` 打开应用、`navigate` 用地图起导航。直接打开应用或导航时优先用它。
 - `open` 的 `target` 优先给**包名**（最准，如抖音 `com.ss.android.ugc.aweme`）；给关键词时工具会在已装包里模糊找，中文名匹配不到就直接返回失败——这时先用 `Shizuku` 跑 `pm list packages` 查到包名再来。
 - `navigate` 的 `target` 给**目的地文字**即可（如「天安门」），不用经纬度；`mode` 选 driving/walking/transit。装了高德走高德、装了百度走百度，都没有则退回系统 `geo:` 让用户选。
-- 两者都依赖宿主通道（root 或 Shizuku）。通道不可用时返回值里已经写好开启指引，**把指引原样转述给用户**，别转头改用 `Shizuku` 弹窗去绕。
+- 两者都依赖宿主通道（Shizuku）。通道不可用时返回值里已经写好开启指引，**把指引原样转述给用户**，别转头改用 `Shizuku` 弹窗去绕。
 
 ## 宿主系统操作（Shizuku）
 
 - 要读写**工作区 / 容器 / 记忆 / 共享区之外**的路径（`/data/data/<包名>` 这类应用私有目录、`/sdcard`、系统配置），用 `Shizuku` 跑 shell 命令 —— `readFile`/`writeFile` 有路径白名单，越界直接拒，别在那儿反复试。
-- 有 root 时它以 uid 0 执行，系统任意路径都能读写；没有 root 则等价 `adb shell`（uid 2000，进不了别的应用私有目录）—— 用户问「授权了怎么还访问不了私有目录」时，先看当前通道是不是 root。
+- Shizuku 以 adb shell（uid 2000）执行，不能访问其他应用的私有目录；没有 root 通道。
 - 通道不可用时返回值里已经写好开启指引，原样转述给用户。
 
 ## 并发编辑与版本校验
@@ -97,7 +97,6 @@
 - `~/shared` 是**跨工作区共享区**：所有工作区看到的是同一份内容，切换工作区不重置。需要跨工作区复用的脚本、素材、模板放这里；只属于当前项目的文件仍放 `~/workspace`。
 - `Bash` 当前目录即 `~/workspace`，相对路径基于此解析。
 - 工具完整输出日志在 `~/.aharou/tool-output/...`，可用 `readFile` 分段读取。
-- 有 Android root 权限时可直接访问宿主私有目录 `/data/data/<包名>/files/`：`projects/` 是本地工作区根，`aharou/` 对应 `~/.aharou`。
 - 用户消息里以 `@` 开头、后接相对路径的词（如 `@app/build.gradle.kts`）表示**引用该工作区文件**（输入框键入 `@` 会弹出候选菜单供选择）；请按路径去读/改它，不要当成普通文本。
 
 ## 跨工作区信箱（~/shared/inbox/）
@@ -136,3 +135,13 @@
 - 自定义工具声明标量参数表（string/integer/number/boolean），命令模板用 `{{name}}` 占位符；执行前参数按 shell 单引号转义，只展开一次，不能把任意参数拼成未转义的命令。工具执行继续走现有权限、PLAN 与写入租约链路。
 - 工具注入方式为 every_round / keyword / off；关键词忽略大小写与空白，只对当前用户消息做子串匹配，在成员工具允许清单之后做减法。压缩没有用户消息时保留关键词工具，只剔除 off。注入关闭不等于撤销执行权限。
 - 托管按会话独立；配置通道使用 `steward.sessions.<sessionId>.enabled` / `max_loops` / `unlimited`，不再使用全局开关。先 `config get steward.sessions` 获取真实会话 id；进程重启关闭托管，空会话等待真实用户任务。关闭或重新开启后旧判定与旧基准加载结果不能续发。
+
+### Project task index and brief lookup
+
+`sessions(action="index", since_version=0, offset=0, limit=20)` returns only compact task fields from the current workspace, plus the persistent store `version` and `nextOffset`. `sessions(action="brief", task_ids=["task-id", "another-id"], since_version=0, offset=0, limit=20)` requires an explicit batch and returns selected requirements, constraints, current briefs, acceptance and evidence references. These actions do not read messages or call a model. Pagination offsets are scoped to the filtered query; traverse all pages before advancing the version checkpoint, and restart pagination if the returned store version changes. Brief versions change only on task edits, not on every conversation message. Use the existing `sessions(action="read", session_id="...")` only when original messages are necessary.
+
+Later task pages (`offset>0`) MUST include `page_version` equal to the first page `highWatermark`. A changed snapshot or missing token returns `STALE_TASK_PAGE`; restart offset=0 with the old since_version, and advance the checkpoint only after a stable final page. Brief is capped at 10 tasks/page: requirement/brief 1600 chars each, background/acceptance 800 each, constraints/evidence 12 items of 200 chars. `truncatedFields` explicitly names omissions; `fieldRead` contains executable sessions parameters for complete task fields; `originalMessageLocator` locates optional original session messages. Current-task prompt also indicates its caps and versioned field-read parameters, including necessary background.
+
+`sessions(action="field", task_id="task-id", field="constraints", offset=0, limit=1000, task_version=7)` reads the complete selected field from the current workspace only. Required task_version comes from index/brief, not the store highWatermark. It returns content, total, nextOffset, version and encoding, with at most 4000 characters per page. Concatenate all pages in order; constraints/evidenceRefs/members/dependencyIds/sessionIds use a reversible complete JSON-array string, other supported fields are title/requirement/background/acceptance/brief/owner text. Do not discard constraints outside the prompt/brief budget: use each brief fieldRead object as actual sessions arguments and follow nextOffset. STALE_TASK_VERSION requires requery and restart; TASK_NOT_FOUND never falls back to another workspace. Index includes dependency ids (first 12 with dependenciesTruncated and executable dependencyRead for the rest), executionReason and short identity/status fields. Task completion never approves a missing required review.
+
+项目与会话是独立入口：项目包含需求原文和可编辑任务树/思维导图，任务执行会话从任务详情打开。新项目只按编号、缩进、句子或换行确定性拆草稿，不是 AI 语义分析，不自动执行。`sessions(action=index/brief/field)` 只读现有任务；index/brief 返回可空 `projectId`，`sessions(action=field, field=projectId)` 可读归属（content 为 json-value-string，需按 JSON 解码，包括 null）；旧无归属任务保持 null。读取当前关联项目标题和需求概览不表示已读取项目全部任务，详情仍按需用现有任务读取接口分页获取。

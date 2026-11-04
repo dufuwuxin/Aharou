@@ -147,7 +147,6 @@ export default defineConfig({
             { text: '三种模式（Build / Plan / Auto）', link: '/guide/modes' },
             { text: '检查点与撤销', link: '/guide/checkpoint' },
             { text: '终端', link: '/guide/terminal' },
-            { text: '语音通话与朗读', link: '/guide/voice' },
             { text: '内置浏览器', link: '/guide/browser' },
             { text: '文件浏览与代码编辑', link: '/guide/files' },
             { text: 'Git 版本管理', link: '/guide/git' },
@@ -169,7 +168,6 @@ export default defineConfig({
             { text: '容器与镜像', link: '/guide/container' },
             { text: '环境变量', link: '/guide/env-vars' },
             { text: '远程 SSH 模式', link: '/guide/remote-ssh' },
-            { text: '工作区同步', link: '/guide/sync' },
             { text: '网络代理', link: '/guide/proxy' },
             { text: 'Shizuku 执行后端', link: '/guide/shizuku' },
             { text: '影子屏', link: '/guide/shadow-screen' }
@@ -212,7 +210,6 @@ export default defineConfig({
             { text: '常见错误提示', link: '/guide/error-codes' },
             { text: '存储空间', link: '/guide/storage' },
             { text: '备份与还原', link: '/guide/backup' },
-            { text: '关于与更新', link: '/guide/about' }
           ]
         }
       ],

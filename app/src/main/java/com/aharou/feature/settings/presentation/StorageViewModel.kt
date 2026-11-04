@@ -37,7 +37,6 @@ data class StorageUiState(
             CleanupKind.Logs to (entries[StorageCategory.Logs]?.bytes ?: 0L),
             CleanupKind.ToolOutput to aiConfigDetail(StorageDetailKey.TOOL_OUTPUT),
             CleanupKind.VisionSessions to aiConfigDetail(StorageDetailKey.VISION_SESSIONS),
-            CleanupKind.VoiceModels to (entries[StorageCategory.VoiceModels]?.bytes ?: 0L),
             CleanupKind.OcrTessdata to (entries[StorageCategory.OcrTessdata]?.bytes ?: 0L),
             CleanupKind.PetAssets to (entries[StorageCategory.PetAssets]?.bytes ?: 0L)
         )

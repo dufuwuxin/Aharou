@@ -17,7 +17,6 @@ import com.aharou.feature.credentials.domain.repository.CredentialRepository
 import com.aharou.feature.git.data.GitHubTokenStore
 import com.aharou.feature.git.domain.GitRepository
 import com.aharou.feature.vault.VaultRepository
-import com.aharou.feature.workspace.domain.repository.RemoteRepository
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import java.util.UUID
@@ -29,7 +28,7 @@ import javax.inject.Singleton
  *
  * 四项各按真实存储形态接入：
  * - `git.github_token`：GitHub API 令牌，[GitHubTokenStore] 里按 host 存（值经 Keystore 加密），这里固定接 github.com 这一条。
- * - `credentials.auto_inject`：按远程服务器隔离的「自动注入 git 凭证」开关，服务器集合由 [RemoteRepository] 的连接列表派生
+ * - `credentials.auto_inject`：按远程服务器隔离的「自动注入 git 凭证」开关，服务器集合由 数据库中的连接列表派生
  *   （[CredentialInjectSettingsRepository] 只暴露按哈希 key 读写、无法枚举，故用连接列表当枚举源）。
  * - `ssh.login_keys`：SSH 登录私钥条目，[SshLoginKeyStore] 本身有 entries/add/remove，天然是集合。
  * - `vault.names`：通用凭据库的条目名列表，只读（理由见 [vaultNamesField]）。
@@ -41,7 +40,7 @@ class ConfigCredentialFields @Inject constructor(
     private val githubTokens: GitHubTokenStore,
     private val injectSettings: CredentialInjectSettingsRepository,
     private val loginKeyStore: SshLoginKeyStore,
-    private val remote: RemoteRepository,
+    private val remote: com.aharou.feature.workspace.data.local.dao.RemoteConnectionDao,
     private val vault: VaultRepository,
     private val credentialRepository: CredentialRepository,
     private val gitRepository: GitRepository,
@@ -223,7 +222,7 @@ class ConfigCredentialFields @Inject constructor(
         writer = { throw ConfigError.PermissionDenied("凭据库条目名为只读字段") },
     )
 
-    private fun connections() = runBlocking { remote.getConnections().first() }
+    private fun connections() = runBlocking { remote.getAllConnections().first() }
 
     /** 服务器标识（[CredentialInjectSettingsRepository.serverKey]）列表，由现有远程连接派生。 */
     private fun serverKeys(): List<String> =
@@ -237,13 +236,13 @@ class ConfigCredentialFields @Inject constructor(
             ?.let { "${it.host}:${it.port}" }
             ?: key
 
-    /** 「自动注入 git 凭证」按远程服务器隔离；服务器由 remote.connections 派生，故不支持手动增删。 */
+    /** 「自动注入 git 凭证」按远程服务器隔离；服务器由既有连接记录派生，故不支持手动增删。 */
     private inner class AutoInjectCollection : ConfigCollection {
         override val basePath = "credentials.auto_inject"
         override val displayName = "远程 git 凭证自动注入"
         override val description =
             "按远程服务器（host:port）记忆是否把本机 git 凭据自动注入到该服务器。子字段：enabled / asked。" +
-                "服务器集合来自 remote.connections，不能在此增删（去 remote.connections 里加）。"
+                "服务器集合来自既有连接记录，此处只管理凭据注入开关。"
 
         override val addable = false
         override val removable = false
@@ -281,10 +280,10 @@ class ConfigCredentialFields @Inject constructor(
         }
 
         override fun add(payload: ConfigValue): String =
-            throw ConfigError.InvalidValue("服务器来自 remote.connections，不支持手动新增")
+            throw ConfigError.InvalidValue("此处只管理既有连接的凭据注入开关")
 
         override fun remove(id: String) {
-            throw ConfigError.PermissionDenied("不支持在此删除服务器（去 remote.connections 里删）")
+            throw ConfigError.PermissionDenied("此处不支持删除连接记录")
         }
     }
 

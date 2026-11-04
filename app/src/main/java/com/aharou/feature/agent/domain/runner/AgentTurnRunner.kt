@@ -42,6 +42,7 @@ import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
@@ -94,6 +95,8 @@ class AgentTurnRunner @Inject constructor(
     private val defaultModelSettingsRepository: DefaultModelSettingsRepository,
     private val modelReasoningEffortRepository: ModelReasoningEffortRepository,
     private val sessionUseCase: SessionUseCase,
+    private val projectExecution: com.aharou.feature.agent.domain.task.ProjectTaskExecutionCoordinator,
+    private val projectTasks: com.aharou.feature.agent.data.task.ProjectTaskRepository,
     private val messagePersistenceUseCase: MessagePersistenceUseCase,
     private val checkpointManager: CheckpointManager,
     private val agentDefinitionRepository: AgentDefinitionRepository,
@@ -187,6 +190,17 @@ class AgentTurnRunner @Inject constructor(
      * 跑一轮。冷流，collect 期间完成落库；调用方只消费事件用于展示。
      */
     fun run(turn: AgentTurnRequest): Flow<AgentEvent> = flow {
+        val session = sessionUseCase.getSessionById(turn.sessionId)
+        val workspace = projectExecution.executionWorkspace(turn.projectRoot, session?.workspacePath, currentWorkspacePath())
+        if (session?.parentId == null) {
+            projectExecution.withWorkspace(workspace) {
+                projectTasks.requireExecutionReady(workspace, turn.sessionId)
+                runUncoordinated(turn).collect { emit(it) }
+            }
+        } else runUncoordinated(turn).collect { emit(it) }
+    }
+
+    private fun runUncoordinated(turn: AgentTurnRequest): Flow<AgentEvent> = flow {
         val sessionId = turn.sessionId
 
         // 兼容历史会话：尚未绑定 provider/model 的会话，发消息时固化下来，

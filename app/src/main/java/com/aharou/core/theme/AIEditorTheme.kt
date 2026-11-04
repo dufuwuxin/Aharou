@@ -1,10 +1,7 @@
 package com.aharou.core.theme
 
-import android.os.Build
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -12,8 +9,6 @@ import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -210,7 +205,6 @@ object StorageUsagePalette {
     val ContainerImages = Color(0xFFA78BFA)
     val Workspaces = Color(0xFF22C55E)
     val AiConfig = Color(0xFF14B8A6)
-    val VoiceModels = Color(0xFFEC4899)
     val OcrTessdata = Color(0xFF0EA5E9)
     val PetAssets = Color(0xFFF43F5E)
     val Checkpoints = Color(0xFFF59E0B)
@@ -232,30 +226,14 @@ private val AppTypography = Typography().run {
 }
 
 /**
- * @param preset 用户选定的配色主题。
- * @param dynamicColor 是否启用系统莫奈取色；低于 Android 12 时自动回退到 [preset]。
  */
 @Composable
 fun AIEditorTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
-    preset: AppThemePreset = AppThemePreset.DEFAULT,
-    dynamicColor: Boolean = false,
     content: @Composable () -> Unit
 ) {
-    val context = LocalContext.current
-    val themeColors = remember(darkTheme, preset, dynamicColor, context) {
-        if (dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            val dynamicScheme =
-                if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-            deriveDynamicThemeColors(dynamicScheme, darkTheme)
-        } else if (darkTheme) {
-            preset.dark
-        } else {
-            preset.light
-        }
-    }
-
-    // 莫奈取色只改颜色，皮肤仍负责圆角性格与光晕质感，所以这里始终取当前预设的皮肤。
+    val preset = AppThemePreset.DEFAULT
+    val themeColors = if (darkTheme) preset.dark else preset.light
     val skin = if (darkTheme) preset.darkSkin else preset.lightSkin
     val radius = remember(skin) { AppRadiusSet.scaled(skin.radiusScale) }
     val motion = rememberAppMotion()

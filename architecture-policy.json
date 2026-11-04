@@ -29,8 +29,8 @@
       "message": "禁止裸写带下划线的原生 TextField，优先使用 core/ui/AppTextField.kt"
     }
   ],
-  "stringsParity": {
-    "zh": "app/src/main/res/values/strings.xml",
-    "en": "app/src/main/res/values-en/strings.xml"
+  "chineseResources": {
+    "res": "app/src/main/res",
+    "locale": "zh"
   }
 }

@@ -52,7 +52,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
- * 「工具授权」二级页：与设置页其它二级页一致的 iOS 分组列表。
+ * 工具页中的授权规则分组。
  * 顶部是「安全防护」开关；其下按「当前项目 / 全局」分组列出已保存的授权规则，分组可折叠收起；
  * 规则左滑删除；项目规则可「提升为全局」。
  */
@@ -74,8 +74,7 @@ internal fun PermissionsSection(
 
     Column(
         modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
+            .fillMaxWidth()
             .padding(horizontal = Spacing.lg)
             .padding(bottom = Spacing.xl),
         verticalArrangement = Arrangement.spacedBy(Spacing.sm)

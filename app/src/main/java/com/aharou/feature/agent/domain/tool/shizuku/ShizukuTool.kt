@@ -21,11 +21,11 @@ import kotlinx.serialization.json.longOrNull
 import javax.inject.Inject
 
 /**
- * 在宿主 Android 系统上执行命令的工具：有 root 走 root（uid 0），否则走 Shizuku（adb shell，uid 2000）。
+ * 在宿主 Android 系统上执行命令的工具：通过 Shizuku（adb shell，uid 2000）。
  *
  * 与 [com.aharou.feature.agent.domain.tool.container.ExecuteCommandTool]（本地容器 / 远程 SSH）不同，
  * 本工具直接作用于 Android 系统本身：可执行 `pm` / `am` / `cmd` 等系统命令、读写 `/sdcard` 等。
- * 需用户已授予本应用 root 权限，或安装并授权 Shizuku，否则返回错误提示。
+ * 需用户安装并授权 Shizuku，否则返回错误提示。
  *
  * 执行是同步、一次性的（无逐行回传），故不实现流式输出。
  */
@@ -42,12 +42,8 @@ class ShizukuTool @Inject constructor(
     override val name = "Shizuku"
 
     override val description =
-        "在宿主 Android 系统上执行命令（有 root 时为 uid 0，否则等价 `adb shell`）：" +
-            "`pm`/`am`/`cmd` 等系统操作、读写 /sdcard，以及**系统任意路径**——有 root 时含 " +
-            "`/data/data/<包名>` 这类应用私有目录。" +
-            "注意 `readFile`/`writeFile` 只允许工作区、容器 rootfs、AI 配置、记忆与共享区，" +
-            "要读写别处的路径就用本工具跑 shell 命令，别在文件工具上死磕。" +
-            "需已授予 root 权限或安装并授权 Shizuku，且每次调用都会弹窗确认。"
+        "通过 Shizuku 以 adb shell（uid 2000）身份执行宿主 Android 命令：pm/am/cmd 等系统操作与共享存储读写。" +
+            "不能访问其他应用的私有目录；需安装、启动并授权 Shizuku。每次调用按工具权限策略确认。"
 
     override val permissionPolicy = ToolPermissionPolicy.ASK
     override val capabilities = setOf(ToolCapability.EXECUTE_COMMANDS)
@@ -84,7 +80,7 @@ class ShizukuTool @Inject constructor(
             toolName = name,
             title = "确认执行 Shizuku 命令",
             summary = command,
-            details = "将以 root（或 adb shell）身份在 Android 系统上执行。\n超时：${timeoutSeconds} 秒",
+            details = "将以 adb shell身份在 Android 系统上执行。\n超时：${timeoutSeconds} 秒",
             argsPreview = argsPreview
         )
     }
@@ -96,7 +92,7 @@ class ShizukuTool @Inject constructor(
         if (hostShell.ensureMode() == HostShellMode.UNAVAILABLE) {
             val state = hostShell.shizukuState.value
             return ToolResult.Error(
-                "宿主命令通道不可用：${stateHint(state)}；也可以给本应用授予 root 权限后重试",
+                "宿主命令通道不可用：${stateHint(state)}；请检查 Shizuku 的安装、运行和授权状态",
                 code = "SHIZUKU_NOT_READY"
             )
         }

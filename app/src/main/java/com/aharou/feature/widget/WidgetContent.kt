@@ -2,13 +2,9 @@ package com.aharou.feature.widget
 
 import android.content.Context
 import android.content.res.Configuration
-import android.os.Build
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.ui.graphics.toArgb
 import com.aharou.core.theme.AppThemeColors
 import com.aharou.core.theme.AppThemePreset
-import com.aharou.core.theme.deriveDynamicThemeColors
 import com.aharou.feature.agent.data.local.dao.ChatSessionDao
 import com.aharou.feature.settings.data.repository.AppThemeMode
 import com.aharou.feature.settings.data.repository.ThemeSettingsRepository
@@ -35,7 +31,7 @@ internal data class WidgetSnapshot(
  * 从 App 主题解析出的扁平配色（ARGB int）。
  *
  * RemoteViews 跑在 Launcher 进程，拿不到 Compose 主题，所以在 App 进程里把当前主题
- * （配色预设 / 莫奈取色 / 深浅色）换算成具体颜色，再逐个下发。
+ * （霞橙 / 深浅色）换算成具体颜色，再逐个下发。
  */
 internal data class WidgetPalette(
     /** 组件背景（页面底色）。 */
@@ -100,15 +96,8 @@ internal object WidgetContent {
             AppThemeMode.LIGHT -> false
             AppThemeMode.AUTO -> isSystemDark(context)
         }
-        val dynamic = repo.dynamicColorFlow.first()
-        if (dynamic && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            val scheme =
-                if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-            toPalette(deriveDynamicThemeColors(scheme, dark))
-        } else {
-            val preset = AppThemePreset.findById(repo.themePresetIdFlow.first())
-            toPalette(if (dark) preset.dark else preset.light)
-        }
+        val preset = AppThemePreset.DEFAULT
+        toPalette(if (dark) preset.dark else preset.light)
     }.getOrElse {
         val preset = AppThemePreset.DEFAULT
         toPalette(if (isSystemDark(context)) preset.dark else preset.light)

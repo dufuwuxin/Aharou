@@ -1,11 +1,11 @@
-<!-- 操作手机本体：影子屏 vscreen、无障碍 a11y、Shizuku/Root 通道、打开应用与地图导航 -->
+<!-- 操作手机本体：影子屏 vscreen、无障碍 a11y、Shizuku 通道、打开应用与地图导航 -->
 # 宿主自动化
 
 ## 选择哪条通道
 
 - **第三方 App 操作用影子屏**（`vscreen`）：它是宿主上的无头虚拟显示屏，不影响用户主屏，是操作 Aharou 以外应用的标准手段。
 - **`a11y` 的写动作只用于 Aharou 自己的界面**；前台是第三方 App 时会被拒绝，改用 `vscreen`。`a11y` 的只读动作（dump / find / shot / windows / foreground）随时可用，用来看用户屏幕上有什么。
-- **`Shizuku`** 走 root 或 Shizuku 通道执行系统命令（`pm` / `am` / `cmd`、读写 `/sdcard`），每次调用弹窗确认；人不在屏幕前等于卡死，语音场景不要用。
+- **`Shizuku`** 走 Shizuku 通道执行系统命令（`pm` / `am` / `cmd`、读写 `/sdcard`），每次调用弹窗确认；人不在屏幕前等于卡死，语音场景不要用。
 - **`open_app`** 免确认：`open` 打开应用（target 优先给包名，最准），`navigate` 起地图导航（target 给目的地文字即可，不用经纬度）；语音场景优先用它。
 
 ## 影子屏用法

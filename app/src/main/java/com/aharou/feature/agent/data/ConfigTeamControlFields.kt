@@ -10,6 +10,9 @@ import com.aharou.core.config.fields.ClosureField
 import com.aharou.feature.agent.domain.subagent.AgentTeamEntry
 import com.aharou.feature.agent.domain.subagent.AgentTeamRepository
 import com.aharou.feature.agent.domain.subagent.AgentTeamStageForm
+import com.aharou.feature.agent.domain.subagent.TeamFlowNode
+import com.aharou.feature.agent.domain.subagent.TeamRoute
+import com.aharou.feature.agent.domain.subagent.TeamRouteAction
 import com.aharou.feature.agent.domain.subagent.TeamCommunication
 import com.aharou.feature.agent.domain.subagent.toForm
 import javax.inject.Inject
@@ -17,7 +20,7 @@ import javax.inject.Singleton
 
 @Singleton
 class ConfigTeamControlFields @Inject constructor(private val teams: AgentTeamRepository) {
-    fun registerInto(registry: ConfigRegistry) { registry.register(Stages()) }
+    fun registerInto(registry: ConfigRegistry) { registry.register(Stages()); registry.register(Teams()) }
 
     private fun entries(): Map<String, Pair<AgentTeamEntry, Int>> = buildMap {
         teams.listAll().forEach { entry -> entry.team.stages.indices.forEach { index ->
@@ -39,6 +42,54 @@ class ConfigTeamControlFields @Inject constructor(private val teams: AgentTeamRe
         teams.save(form.copy(stages = stages), entry.team.name)?.let {
             throw ConfigError.InvalidValue("Failed to save team: $it")
         }
+    }
+
+    /** Team-scoped routes are part of the team collection, not global behavior switches. */
+    private inner class Teams : ConfigCollection {
+        override val basePath = "teams"
+        override val displayName = "Team workflow"
+        override val description = "Stable scope:hex-name ids; routes use concrete stage/task ids."
+        override val addable = false
+        override val removable = false
+        private fun all() = entries().mapKeys { (id, _) -> id.substringBeforeLast(':') }
+            .mapValues { (_, value) -> value.first }
+        override fun childIds() = all().keys.toList()
+        override fun fields(forId: String): List<ConfigField> {
+            if (forId !in all()) return emptyList()
+            fun entry() = all()[forId] ?: throw ConfigError.InvalidValue("Unknown team")
+            return listOf(
+                ClosureField(path = "$basePath.$forId.nodes", displayName = "Workflow endpoints",
+                    description = "Read-only stable stage/task ids and member labels.", valueSchema = ConfigSchema.Json,
+                    reader = { ConfigValue.Arr(entry().team.stages.flatMap { stage -> stage.tasks.map { task ->
+                        ConfigValue.Obj(mapOf("stageId" to ConfigValue.Str(stage.id), "stage" to ConfigValue.Str(stage.title),
+                            "taskId" to ConfigValue.Str(task.id), "member" to ConfigValue.Str(task.agent.orEmpty())))
+                    } }) }, writer = { throw ConfigError.PermissionDenied("Edit members and stages in the team editor") }),
+                ClosureField(path = "$basePath.$forId.routes", displayName = "Conditional workflow routes",
+                    description = "Array of fromStage/fromTask/toStage/toTask/action; EXECUTE, REVIEW or REJECT. Applied next run.",
+                    valueSchema = ConfigSchema.Json,
+                    reader = { ConfigValue.Arr(entry().team.routes.map { route -> ConfigValue.Obj(mapOf(
+                        "fromStage" to ConfigValue.Str(route.from.stageId), "fromTask" to ConfigValue.Str(route.from.taskId),
+                        "toStage" to ConfigValue.Str(route.to.stageId), "toTask" to ConfigValue.Str(route.to.taskId),
+                        "action" to ConfigValue.Str(route.action.name))) }) }, writer = { value ->
+                        val array = (value as? ConfigValue.Arr)?.value ?: throw ConfigError.TypeMismatch("array")
+                        val routes = array.map { item ->
+                            val fields = (item as? ConfigValue.Obj)?.value ?: throw ConfigError.TypeMismatch("object")
+                            fun str(key: String) = (fields[key] as? ConfigValue.Str)?.value?.takeIf { it.isNotBlank() }
+                                ?: throw ConfigError.InvalidValue("Missing $key")
+                            val action = TeamRouteAction.entries.firstOrNull { it.name == str("action") }
+                                ?: throw ConfigError.InvalidValue("Invalid route action")
+                            TeamRoute(TeamFlowNode(str("fromStage"), str("fromTask")), TeamFlowNode(str("toStage"), str("toTask")), action)
+                        }
+                        val current = entry()
+                        val form = current.team.toForm(current.scope)
+                        teams.save(form.copy(routes = routes, stages = form.stages.map { it.copy(prompt = "") }), current.team.name)?.let {
+                            throw ConfigError.InvalidValue("Invalid team workflow: $it")
+                        }
+                    })
+            )
+        }
+        override fun add(payload: ConfigValue): String = throw ConfigError.PermissionDenied("Use the team editor")
+        override fun remove(id: String) { throw ConfigError.PermissionDenied("Use the team editor") }
     }
 
     private inner class Stages : ConfigCollection {

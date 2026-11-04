@@ -82,7 +82,6 @@ import compose.icons.feathericons.Zap
 internal fun AppPermissionsSection(
     shizukuState: ShizukuState,
     hostShellMode: HostShellMode,
-    rootAvailable: Boolean?,
     onRequestShizukuPermission: () -> Unit,
     onOpenShizuku: () -> Unit,
     onRefreshHostShell: () -> Unit
@@ -137,7 +136,6 @@ internal fun AppPermissionsSection(
 
         val runtimePermRows = listOf(
             RuntimePermRow(Manifest.permission.CAMERA, R.string.permissions_camera, R.string.permissions_camera_desc, FeatherIcons.Camera),
-            RuntimePermRow(Manifest.permission.RECORD_AUDIO, R.string.permissions_mic, R.string.permissions_mic_desc, FeatherIcons.Mic),
             RuntimePermRow(Manifest.permission.ACCESS_FINE_LOCATION, R.string.permissions_location, R.string.permissions_location_desc, FeatherIcons.MapPin),
             RuntimePermRow(Manifest.permission.READ_CONTACTS, R.string.permissions_contacts, R.string.permissions_contacts_desc, FeatherIcons.Users),
             RuntimePermRow(Manifest.permission.READ_CALENDAR, R.string.permissions_calendar, R.string.permissions_calendar_desc, FeatherIcons.Calendar),
@@ -419,32 +417,6 @@ internal fun AppPermissionsSection(
             )
             SettingsDivider()
             SettingsRow(
-                icon = FeatherIcons.Shield,
-                title = stringResource(R.string.settings_root_title),
-                subtitle = stringResource(
-                    when (rootAvailable) {
-                        true -> R.string.settings_root_hint_granted
-                        false -> R.string.settings_root_hint_denied
-                        null -> R.string.settings_root_hint_unknown
-                    }
-                ),
-                onClick = onRefreshHostShell,
-                trailing = {
-                    Text(
-                        text = stringResource(
-                            when (rootAvailable) {
-                                true -> R.string.settings_root_status_granted
-                                false -> R.string.settings_root_status_denied
-                                null -> R.string.settings_root_status_unknown
-                            }
-                        ),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            )
-            SettingsDivider()
-            SettingsRow(
                 icon = FeatherIcons.Cpu,
                 title = stringResource(R.string.settings_host_channel_title),
                 subtitle = stringResource(R.string.settings_host_channel_subtitle),
@@ -613,7 +585,6 @@ internal fun ShizukuState.statusRes(): Int = when (this) {
 /** 实际执行通道对应的名称。 */
 @StringRes
 internal fun HostShellMode.statusRes(): Int = when (this) {
-    HostShellMode.ROOT -> R.string.settings_host_channel_root
     HostShellMode.SHIZUKU -> R.string.settings_host_channel_shizuku
     HostShellMode.UNAVAILABLE -> R.string.settings_host_channel_unavailable
 }

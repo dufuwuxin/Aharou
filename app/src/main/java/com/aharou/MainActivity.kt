@@ -15,6 +15,11 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -95,7 +100,12 @@ import com.aharou.core.ui.rememberViewerDecodeSpec
 import com.aharou.feature.agent.presentation.AIAgentViewModel
 import com.aharou.feature.agent.presentation.AgentAttachment
 import com.aharou.feature.agent.presentation.component.AIChatPanel
+import com.aharou.feature.agent.presentation.component.ProjectTaskWorkbench
+import com.aharou.feature.agent.presentation.component.ProjectListScreen
+import com.aharou.feature.agent.presentation.component.ProjectTaskDetailScreen
 import com.aharou.feature.agent.presentation.component.SessionListScreen
+import com.aharou.feature.agent.presentation.ProjectTaskViewModel
+import kotlinx.coroutines.flow.collect
 import com.aharou.feature.agent.presentation.component.ChatDrawerContent
 import com.aharou.feature.agent.presentation.component.DrawerSearchOpenRequest
 import com.aharou.feature.agent.presentation.component.chatImageLoader
@@ -114,21 +124,14 @@ import com.aharou.feature.onboarding.presentation.LocalOnboardingTargetRegistry
 import com.aharou.feature.onboarding.presentation.OnboardingOverlay
 import com.aharou.feature.onboarding.presentation.OnboardingTargetRegistry
 import com.aharou.feature.settings.data.repository.KeepaliveSettingsRepository
-import com.aharou.feature.settings.data.repository.VoiceWakeSettingsRepository
-import com.aharou.feature.voice.call.VoiceCallService
 import com.aharou.feature.settings.data.repository.BackgroundSettingsRepository
 import com.aharou.feature.settings.data.repository.ScreenOnSettingsRepository
 import com.aharou.feature.settings.data.repository.ThemeSettingsRepository
 import com.aharou.feature.settings.presentation.SettingsViewModel
-import com.aharou.feature.settings.presentation.UpdateCheckUiState
-import com.aharou.feature.settings.presentation.component.githubReleaseUrl
-import com.aharou.feature.settings.presentation.component.installDownloadedApk
 import com.aharou.feature.settings.presentation.component.AppThemeHost
 import com.aharou.feature.settings.presentation.component.SettingsScreen
 import com.aharou.feature.settings.presentation.component.rememberAppAppearance
-import com.aharou.feature.settings.presentation.component.UpdateCheckDialog
 import com.aharou.feature.settings.presentation.component.decodeBackgroundBitmap
-import com.aharou.feature.settings.presentation.component.openUrl
 import com.aharou.feature.settings.presentation.component.settingsPageBackground
 import com.aharou.feature.pet.PetOverlayService
 import com.aharou.feature.terminal.domain.TerminalKeepaliveService
@@ -139,6 +142,7 @@ import com.aharou.feature.widget.WidgetActions
 import dagger.hilt.android.AndroidEntryPoint
 import compose.icons.FeatherIcons
 import compose.icons.feathericons.Home
+import compose.icons.feathericons.MessageSquare
 import compose.icons.feathericons.Settings
 import compose.icons.feathericons.Sliders
 import kotlinx.coroutines.Dispatchers
@@ -153,7 +157,6 @@ import com.aharou.R
 
 /** 桌面快捷方式的自定义 action，需与 res/xml/shortcuts.xml 及清单里的 intent-filter 保持一致。 */
 private const val ACTION_NEW_CHAT = "com.aharou.intent.NEW_CHAT"
-private const val ACTION_START_VOICE = "com.aharou.intent.START_VOICE"
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
@@ -161,10 +164,6 @@ class MainActivity : ComponentActivity() {
     /** 用于冷启动时在前台恢复常驻保活通知（App.onCreate 的启动可能被后台 FGS 限制挡掉）。 */
     @Inject
     lateinit var keepaliveSettings: KeepaliveSettingsRepository
-
-    /** 语音唤醒开关：回到前台时用它补回常驻监听（进程重启后服务不会自己回来）。 */
-    @Inject
-    lateinit var voiceWakeSettings: VoiceWakeSettingsRepository
 
     @Inject
     lateinit var themeSettings: ThemeSettingsRepository
@@ -210,21 +209,10 @@ class MainActivity : ComponentActivity() {
     /** 划词 / 桌面快捷方式等外部入口的一次性 Intent，交给 AppNavigation 落到具体界面。 */
     private val pendingExternalIntent = MutableStateFlow<Intent?>(null)
 
-    /** 快捷方式「开始语音通话」：延到 onResume（Activity 已可见）再启动 microphone 型前台服务。 */
-    private var pendingStartVoice = false
-
     override fun attachBaseContext(newBase: android.content.Context) {
-        // 在 Activity 创建前同步应用用户选择的语言，确保冷启动也生效。
-        // Hilt 尚未注入，直接从 SharedPreferences 同步读取。
-        val tag = newBase.getSharedPreferences("language_prefs_sync", android.content.Context.MODE_PRIVATE)
-            .getString("language_tag", null)
-        val context = if (tag.isNullOrBlank()) {
-            newBase
-        } else {
-            val config = android.content.res.Configuration(newBase.resources.configuration)
-            config.setLocale(java.util.Locale.forLanguageTag(tag))
-            newBase.createConfigurationContext(config)
-        }
+        val config = android.content.res.Configuration(newBase.resources.configuration)
+        config.setLocale(java.util.Locale.SIMPLIFIED_CHINESE)
+        val context = newBase.createConfigurationContext(config)
         super.attachBaseContext(context)
     }
 
@@ -318,7 +306,6 @@ class MainActivity : ComponentActivity() {
     private fun handleLaunchIntent(intent: Intent?) {
         if (intent == null) return
         when (intent.action) {
-            ACTION_START_VOICE -> pendingStartVoice = true
             Intent.ACTION_PROCESS_TEXT, ACTION_NEW_CHAT,
             WidgetActions.ACTION_OPEN_CHAT -> pendingExternalIntent.value = intent
         }
@@ -337,25 +324,6 @@ class MainActivity : ComponentActivity() {
         // 同一个，靠 savedInstanceState 判断，避免每次重建都重复触发。
         if (savedInstanceState == null) handleLaunchIntent(intent)
 
-        // 监听语言偏好变化，更新 Application/Activity locale 后重建。
-        lifecycleScope.launch {
-            languageSettings.languageFlow.drop(1).distinctUntilChanged().collect { tag ->
-                // 同步更新 Application context 的 Configuration，确保非 Activity 来源的
-                // Resources（如 ViewModel 中 context.getString）也能拿到正确 locale。
-                val app = applicationContext
-                if (tag.isNullOrBlank()) {
-                    // 跟随系统：重置为系统默认 Configuration
-                    val sysConfig = android.content.res.Configuration(resources.configuration)
-                    sysConfig.setLocale(java.util.Locale.getDefault())
-                    app.resources.updateConfiguration(sysConfig, app.resources.displayMetrics)
-                } else {
-                    val config = android.content.res.Configuration(app.resources.configuration)
-                    config.setLocale(java.util.Locale.forLanguageTag(tag))
-                    app.resources.updateConfiguration(config, app.resources.displayMetrics)
-                }
-                recreate()
-            }
-        }
         // 屏幕常亮：窗口标志只在 Activity 可见时约束屏幕，退到后台系统自动放开，无需手动释放。
         lifecycleScope.launch {
             screenOnSettings.enabledFlow.collect { enabled ->
@@ -454,22 +422,6 @@ class MainActivity : ComponentActivity() {
                 runCatching { remoteSshConnection.tryReconnectIfDisconnected() }
             }
         }
-        // 语音唤醒是常驻监听，但服务是 START_NOT_STICKY，装包 / 被系统清理后不会自己回来，
-        // 而开关仍是「开」——不补这一下，用户看到的就是「开关开着、喊她不答应」。
-        // microphone 型前台服务要求 App 可见才能启动，所以放在这里而不是 Application.onCreate。
-        lifecycleScope.launch {
-            runCatching {
-                if (voiceWakeSettings.isEnabled() && !VoiceCallService.isRunning()) {
-                    VoiceCallService.start(this@MainActivity, wakeMode = true)
-                }
-            }
-        }
-        // 快捷方式「开始语音通话」：确认 Activity 已可见（onResume）再启动，否则 Android 14+
-        // 会拒绝启动 microphone 型前台服务。放在通话唤醒补启之后，让用户显式发起的通话优先。
-        if (pendingStartVoice) {
-            pendingStartVoice = false
-            VoiceCallService.start(this)
-        }
     }
 
     override fun onDestroy() {
@@ -505,10 +457,11 @@ fun AppNavigation(
     val navController = rememberNavController()
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
+    var taskCreateRequested by remember { mutableStateOf(false) }
 
     val currentBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = currentBackStackEntry?.destination?.route
-    val isPrimaryPage = currentRoute == "sessions" || currentRoute == "config" || currentRoute == "settings"
+    val isPrimaryPage = currentRoute == "projects" || currentRoute == "sessions" || currentRoute == "config" || currentRoute == "settings"
     var bottomBarHeightPx by remember { mutableIntStateOf(0) }
     val bottomBarHeight = with(LocalDensity.current) { bottomBarHeightPx.toDp() }
 
@@ -517,6 +470,15 @@ fun AppNavigation(
     }
 
     val agentViewModel: AIAgentViewModel = hiltViewModel()
+    // Activity-scoped shared owner: navigating tree/detail/chat must not cancel execution.
+    val projectTaskViewModel: ProjectTaskViewModel = hiltViewModel()
+    val projectTaskState by projectTaskViewModel.state.collectAsStateWithLifecycle()
+    LaunchedEffect(projectTaskViewModel) {
+        projectTaskViewModel.openSession.collect { sessionId ->
+            agentViewModel.selectSession(sessionId)
+            navController.navigate("chat") { launchSingleTop = true }
+        }
+    }
     val settingsViewModel: SettingsViewModel = hiltViewModel()
     val workspaceViewModel: WorkspaceViewModel = hiltViewModel()
 
@@ -554,16 +516,12 @@ fun AppNavigation(
         }
     }
 
-    // 自动检查更新：进入主页时异步检测（开关开启且每天最多一次，失败静默）
-    LaunchedEffect(Unit) {
-        settingsViewModel.checkUpdate(manual = false)
-    }
-
     // 返回键：抽屉开着先收起；否则退到后台而不是结束任务（理由见 RootBackHandler）。
     RootBackHandler(drawerOpen = drawerState.isOpen) { scope.launch { drawerState.close() } }
 
     // 侧边栏需要的数据。
     val currentWorkspace by workspaceViewModel.current.collectAsStateWithLifecycle()
+    LaunchedEffect(currentWorkspace?.path) { projectTaskViewModel.workspace(currentWorkspace?.path.orEmpty()) }
     androidx.compose.runtime.LaunchedEffect(currentWorkspace) {
         // 远程模式连接未就绪时 currentWorkspace 为 null，不触发 setWorkspace，避免空路径点燃 session 加载
         val path = currentWorkspace?.path ?: return@LaunchedEffect
@@ -593,17 +551,8 @@ fun AppNavigation(
                 }
 
                 ACTION_NEW_CHAT -> {
-                    // 等当前工作区就绪：newSession() 在工作区为空时直接返回，冷启动会落空。
-                    var waited = 0
-                    while (currentWorkspace?.path.isNullOrBlank() && waited < 3000) {
-                        delay(50)
-                        waited += 50
-                    }
-                    agentViewModel.newSession()
-                    navController.navigate("chat") {
-                        launchSingleTop = true
-                        popUpTo("chat") { inclusive = false }
-                    }
+                    taskCreateRequested = true
+                    navController.navigate("projects") { launchSingleTop = true }
                 }
 
                 WidgetActions.ACTION_OPEN_CHAT -> {
@@ -623,7 +572,11 @@ fun AppNavigation(
 
     // 侧边栏按文件夹（工作区）分成两层，要跨工作区的会话，不能只取当前工作区那份。
     val sessionsByWorkspace by agentViewModel.sessionsByWorkspace.collectAsStateWithLifecycle()
-    val sessions = remember(sessionsByWorkspace) { sessionsByWorkspace.values.flatten() }
+    val sessions = remember(sessionsByWorkspace, projectTaskState.projectSessionIds, projectTaskState.indexedSessionWorkspaces) {
+        sessionsByWorkspace.filterKeys { it in projectTaskState.indexedSessionWorkspaces }.values.flatten()
+            .filterNot { it.id in projectTaskState.projectSessionIds }
+    }
+    LaunchedEffect(sessionsByWorkspace.keys) { projectTaskViewModel.indexSessions(sessionsByWorkspace.keys.toList()) }
     val allWorkspaces by workspaceViewModel.workspaces.collectAsStateWithLifecycle()
     val currentSessionId by agentViewModel.currentSessionId.collectAsStateWithLifecycle()
     val agentStates by agentViewModel.agentStates.collectAsStateWithLifecycle()
@@ -888,9 +841,10 @@ fun AppNavigation(
     val navBody: @Composable () -> Unit = {
         NavHost(
             navController = navController,
-            startDestination = "sessions",
+            startDestination = "projects",
             // 过渡期间退场页会向左移出自身区域，大屏下不夹住会画到左侧常驻会话侧栏上。
             modifier = Modifier.fillMaxSize().clipToBounds()
+                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
                 .padding(bottom = if (isPrimaryPage) bottomBarHeight else 0.dp),
             enterTransition = { pageEnter(forward = true) },
             exitTransition = { pageExit(forward = true) },
@@ -970,6 +924,7 @@ fun AppNavigation(
                                 onOpenDrawer = { scope.launch { drawerState.open() } },
                                 showMenuButton = !permanentDrawer,
                                 onBackToSessions = { navController.navigate("sessions") { popUpTo(navController.graph.startDestinationId) { inclusive = true } } },
+                                onCreateTask = { taskCreateRequested = true; navController.navigate("projects") { popUpTo("projects"); launchSingleTop = true } },
                                 onNavigateToTerminal = { openWorkbench(WorkbenchPaneKind.TERMINAL) },
                                 onNavigateToGit = { openWorkbench(WorkbenchPaneKind.GIT) },
                                 onNavigateToBrowser = { openWorkbench(WorkbenchPaneKind.BROWSER) },
@@ -1004,32 +959,48 @@ fun AppNavigation(
                     },
                 )
             }
-            composable("sessions") {
-                // 会话列表首页：启动先落在这里，点进任意会话才进「chat」。
-                val currentWsPath = currentWorkspace?.path.orEmpty()
-                val workspaceLabel = currentWsPath
-                    .removePrefix("~/workspace/")
-                    .removePrefix("/")
-                    .substringAfterLast('/')
-                SessionListScreen(
-                    sessions = sessionsByWorkspace[currentWsPath].orEmpty(),
-                    currentSessionId = currentSessionId,
-                    agentStates = agentStates,
-                    awaitingPermissionSessionIds = awaitingPermissionSessionIds,
-                    workspaceName = workspaceLabel,
-                    onSelect = { session ->
-                        agentViewModel.selectSession(session.id)
-                        navController.navigate("chat") {
-                            launchSingleTop = true
+            composable("projects") {
+                ProjectListScreen(projectTaskViewModel, taskCreateRequested, { taskCreateRequested = false },
+                    onOpenProject = { id -> projectTaskViewModel.selectProject(id); navController.navigate("projects/$id") },
+                    onOpenTask = { id -> projectTaskViewModel.select(id); navController.navigate("tasks/$id") })
+            }
+            composable("projects/{projectId}") { entry ->
+                ProjectTaskWorkbench(projectId = entry.arguments?.getString("projectId").orEmpty(), viewModel = projectTaskViewModel,
+                    onOpenTask = { id -> projectTaskViewModel.select(id); navController.navigate("tasks/$id") },
+                    onBack = { navController.popBackStack() })
+            }
+            composable("tasks/{taskId}") { entry ->
+                ProjectTaskDetailScreen(taskId = entry.arguments?.getString("taskId").orEmpty(), viewModel = projectTaskViewModel,
+                    onBack = { navController.popBackStack() },
+                    onSelectSession = { id -> agentViewModel.selectSession(id); navController.navigate("chat") { launchSingleTop = true } },
+                    runExecution = { sessionId, requirement, workspace ->
+                        val turnId = java.util.UUID.randomUUID().toString()
+                        val job = agentViewModel.executeAgentRequestStream(request = requirement,
+                            projectRoot = workspace, targetSessionId = sessionId, skipTitleUpdate = true,
+                            skipCommandDispatch = true, executionTurnId = turnId)
+                        try { job.join() } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                            agentViewModel.stopAgentSession(sessionId)
+                            throw cancelled
                         }
-                    },
-                    onDelete = { session -> agentViewModel.deleteSession(session.id) },
-                    onNewSession = {
-                        agentViewModel.newSession()
-                        navController.navigate("chat") {
-                            launchSingleTop = true
-                        }
+                        agentViewModel.executionOutcome(sessionId, turnId)
                     }
+                )
+            }
+            composable("sessions") {
+                val currentWsPath = currentWorkspace?.path.orEmpty()
+                if (currentWsPath !in projectTaskState.indexedSessionWorkspaces) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
+                        androidx.compose.material3.Text(stringResource(if (currentWsPath in projectTaskState.failedSessionWorkspaces)
+                            R.string.project_session_index_failed else R.string.project_session_index_loading))
+                    }
+                } else SessionListScreen(
+                    sessions = sessionsByWorkspace[currentWsPath].orEmpty().filterNot { it.id in projectTaskState.projectSessionIds },
+                    currentSessionId = currentSessionId, agentStates = agentStates,
+                    awaitingPermissionSessionIds = awaitingPermissionSessionIds,
+                    workspaceName = currentWsPath.substringAfterLast('/'),
+                    onSelect = { session -> agentViewModel.selectSession(session.id); navController.navigate("chat") { launchSingleTop = true } },
+                    onDelete = { session -> agentViewModel.deleteSession(session.id) },
+                    onNewSession = {}, showNewSession = false
                 )
             }
             composable("config") {
@@ -1054,13 +1025,6 @@ fun AppNavigation(
                     },
                     onStopAllAndCloseTerminal = { agentViewModel.stopAllAndCloseTerminal() },
                     // 「设置」页：除 AI 组（已拆到「配置」）外的其他分组。
-                    menuGroups = listOf(
-                        com.aharou.feature.settings.presentation.component.SettingsSection.AharouGroup,
-                        com.aharou.feature.settings.presentation.component.SettingsSection.GeneralGroup,
-                        com.aharou.feature.settings.presentation.component.SettingsSection.PermissionsGroup,
-                        com.aharou.feature.settings.presentation.component.SettingsSection.MoreGroup,
-                        com.aharou.feature.settings.presentation.component.SettingsSection.HelpGroup
-                    ),
                     onboardingStep = onboardingUiState.step.takeIf { onboardingUiState.active },
                     onOnboardingModelAdded = {
                         if (onboardingUiState.active && onboardingUiState.step == OnboardingStep.SIMULATE_FETCH_DIALOG) {
@@ -1284,10 +1248,11 @@ fun AppNavigation(
         }
     }
 
-    // 三个一级页共享底栏实测高度（含底边距），聊天等子路由不留空白。
+    // 四个一级页共享底栏实测高度（含底边距），聊天等子路由不留空白。
     val activeTab = when (currentRoute) {
-        "config" -> 1
-        "settings" -> 2
+        "sessions" -> 1
+        "config" -> 2
+        "settings" -> 3
         else -> 0
     }
     if (isPrimaryPage) {
@@ -1301,8 +1266,9 @@ fun AppNavigation(
                     // 点当前 tab 不重复导航；点其它一级 tab 切过去（popUpTo 起点，不叠加返回栈）。
                     if (i != activeTab) {
                         val route = when (i) {
-                            0 -> "sessions"
-                            1 -> "config"
+                            0 -> "projects"
+                            1 -> "sessions"
+                            2 -> "config"
                             else -> "settings"
                         }
                         navController.navigate(route) {
@@ -1313,7 +1279,8 @@ fun AppNavigation(
                     }
                 },
                 items = listOf(
-                    FloatingTabItem(FeatherIcons.Home, stringResource(R.string.bottom_tab_home)),
+                    FloatingTabItem(FeatherIcons.Home, stringResource(R.string.project_home)),
+                    FloatingTabItem(FeatherIcons.MessageSquare, stringResource(R.string.project_sessions)),
                     FloatingTabItem(FeatherIcons.Sliders, stringResource(R.string.bottom_tab_config)),
                     FloatingTabItem(FeatherIcons.Settings, stringResource(R.string.bottom_tab_settings)),
                 ),
@@ -1324,30 +1291,6 @@ fun AppNavigation(
                     .padding(bottom = 8.dp),
             )
         }
-    }
-
-    // 检查更新弹窗（全局宿主：自动检测与关于页手动检查共用，覆盖所有页面）
-    val updateCheckState by settingsViewModel.updateCheckState.collectAsStateWithLifecycle()
-    val updateDownloadState by settingsViewModel.updateDownloadState.collectAsStateWithLifecycle()
-    if (updateCheckState != UpdateCheckUiState.Idle) {
-        val version = remember {
-            runCatching {
-                context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "unknown"
-            }.getOrDefault("unknown")
-        }
-        UpdateCheckDialog(
-            state = updateCheckState,
-            downloadState = updateDownloadState,
-            currentVersion = version,
-            onDismiss = { settingsViewModel.dismissUpdateCheck() },
-            onDownload = { settingsViewModel.downloadUpdate() },
-            onCancelDownload = { settingsViewModel.cancelDownload() },
-            onInstall = { apkPath -> installDownloadedApk(context, apkPath) },
-            onOpenRelease = { tag ->
-                openUrl(context, githubReleaseUrl(tag))
-                settingsViewModel.dismissUpdateCheck()
-            }
-        )
     }
 
     // 外部分享进来的文件：确认「预览 / 插入输入框 / 取消」后才投给聊天面板。

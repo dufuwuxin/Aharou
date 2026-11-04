@@ -14,6 +14,7 @@ import kotlinx.coroutines.test.runTest
 import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import retrofit2.HttpException
 import retrofit2.Response
@@ -185,14 +186,14 @@ class RetryPolicyTest {
                 maxRetries = 1,
                 attemptOnce = { onContent ->
                     withFirstContentTimeout(100) { guard ->
-                        onContent()
                         if (attempt++ == 0) {
-                            send("content-1")
+                            send("waiting")
                             // 会合点挂起（消费端 delay 中），超时取消信号落点
                             send("content-2")
                             org.junit.Assert.fail("首次尝试应在挂起的 send 上被首字节超时打断")
                         } else {
                             guard.receivedContent()
+                            onContent()
                             send("recovered")
                         }
                     }
@@ -205,11 +206,11 @@ class RetryPolicyTest {
             delay(1_000)
             events.add(it)
         }
-        assertEquals(listOf("content-1", "retry-1", "recovered"), events)
+        assertEquals(listOf("waiting", "retry-1", "recovered"), events)
     }
 
     @Test
-    fun partialContentDisconnects_respectRetryLimit() = runTest {
+    fun partialContentDisconnects_neverReplayEvenWhenRetriesRemain() = runTest {
         var requests = 0
         val retries = mutableListOf<Int>()
         try {
@@ -225,8 +226,8 @@ class RetryPolicyTest {
             )
             org.junit.Assert.fail("Expected IOException")
         } catch (_: IOException) {
-            assertEquals(3, requests)
-            assertEquals(listOf(1, 2), retries)
+            assertEquals(1, requests)
+            assertTrue(retries.isEmpty())
         }
     }
 

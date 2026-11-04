@@ -497,7 +497,7 @@ class MemoryTool @Inject constructor(
         val memory = memoryRepository.findMemory(name, projectRoot, scope)
             ?: return ToolResult.Error("未找到记忆「$name」", "MEMORY_NOT_FOUND")
         memoryRepository.recordUsage(memory.name, memory.scope, projectRoot)
-        val notice = if (memory.pending) "待确认：此条记忆存在冲突，未经用户确认不得作为已确认约定或自动裁决。\n\n" else ""
+        val notice = if (memory.pending) "待确认：此条记忆尚未核对原始证据或存在未裁决冲突，未经用户确认不得作为已确认约定或自动裁决。\n\n" else ""
         return ToolResult.Success(JsonPrimitive(notice + versionHeader(memory.version) + memory.content))
     }
 
@@ -621,7 +621,7 @@ class MemoryTool @Inject constructor(
         val versionLine = stored?.version?.takeIf { it.isNotBlank() }
             ?.let { "当前 version: $it（再次修改请作为 version 参数传回）。" }
             .orEmpty()
-        val typeNote = if (stored?.pending == true) "它仍待确认，需保留冲突双方，不能作为已确认约定。" else when (stored?.type ?: type) {
+        val typeNote = if (stored?.pending == true) "它仍待确认，需核对原始证据；若有冲突应保留双方，不能作为已确认约定。" else when (stored?.type ?: type) {
             MemoryType.IDENTITY -> "它属于长期约定，正文会在下一次会话启动时直接进系统提示词常驻（无需再 read）。"
             MemoryType.EVENT -> "它被标为一次性事件：只留档，不进注入清单，需要时用 search / read 取回。"
             else -> "它将在下一次会话启动时自动注入摘要。"

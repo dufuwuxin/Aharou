@@ -115,6 +115,7 @@ android {
     defaultConfig {
         applicationId = "com.aharou.agent.fork"
         minSdk = 26
+        resourceConfigurations += listOf("zh")
         // targetSdk 从 28 升到 35：28 是当年为了绕开 proot 的 W^X / SELinux 限制而锁的，后来 proot 全套
         // 改由 jniLibs 装进 nativeLibraryDir（apk_data_file，允许 execve），就不再需要锁这么低。
         //   · 34 的门槛：前台服务必须声明类型并申请对应权限（否则 startForeground 抛异常）、
@@ -370,14 +371,12 @@ dependencies {
     // YAML 解析 (用于 Skill Frontmatter)
     implementation("org.yaml:snakeyaml:2.2")
 
-    // 远程同步 (SFTP/FTP) 与内置 FTP 服务端
+    // 远程工作区 SSH/SFTP
     implementation("com.hierynomus:sshj:0.38.0")
     // BouncyCastle：sshj 0.38.0 用 X25519 密钥交换，Android 自带裁剪版 BC 不含该算法，
     // 需显式引入完整版并注册替换（见 AIEditorApp.registerBouncyCastle）。
     // 1.75 命中 CVE-2024-30172（Ed25519 验证死循环 DoS），1.78 起修复；取与 sshj 0.39.0 对齐的 1.78.1。
     implementation("org.bouncycastle:bcprov-jdk18on:1.78.1")
-    implementation("commons-net:commons-net:3.10.0")
-    implementation("org.apache.ftpserver:ftpserver-core:1.2.0")
     implementation("org.slf4j:slf4j-simple:2.0.9")
 
     // 本地模型（端侧 LLM 推理）：SmolChatAndroidLib 内含预编译 llama.cpp JNI + 多档 NEON .so，

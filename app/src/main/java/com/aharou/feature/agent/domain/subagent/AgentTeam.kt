@@ -62,7 +62,8 @@ data class TeamTask(
     val agentQuery: String? = null,
     val prompt: String,
     val writePaths: List<String> = emptyList(),
-    val interfaces: List<TeamInterface> = emptyList()
+    val interfaces: List<TeamInterface> = emptyList(),
+    val id: String = java.util.UUID.randomUUID().toString()
 )
 
 /**
@@ -100,14 +101,15 @@ data class TeamStage(
     val rejectTo: String? = null,
     val communication: TeamCommunication = TeamCommunication.RUN,
     val messageLimit: Int = 8,
-    val communicationGuide: String = ""
+    val communicationGuide: String = "",
+    val id: String = java.util.UUID.randomUUID().toString()
 )
 
 /**
  * 团队，来自 `teams/<name>.md`：frontmatter 是名单（成员 / 管理员）+ 流程，正文是团队公约。
  *
  * [charter] 既是团队的用途介绍，也是拼在每条成员指令前的共同约束——写一次，全队生效。
- * [admins] 是管理员组：多个管理员时同一阶段并行思考，最后由主代理汇总成策略建议。
+ * [admins] 保留历史文件格式，但保存和运行均要求名单内恰好一个管理员。
  */
 data class AgentTeam(
     val name: String,
@@ -116,7 +118,8 @@ data class AgentTeam(
     val charter: String,
     val admins: List<String> = emptyList(),
     val members: List<TeamMemberRef> = emptyList(),
-    val filePath: String? = null
+    val filePath: String? = null,
+    val routes: List<TeamRoute> = emptyList()
 ) {
     val taskCount: Int get() = stages.sumOf { it.tasks.size }
 
@@ -151,7 +154,8 @@ data class AgentTeamTaskForm(
     val prompt: String = "",
     val writePaths: String = "",
     /** 接口边：编辑界面还没有专门的输入控件，但回填与保存都要带着它，否则改一次团队就丢一次声明。 */
-    val interfaces: List<TeamInterface> = emptyList()
+    val interfaces: List<TeamInterface> = emptyList(),
+    val id: String = java.util.UUID.randomUUID().toString()
 )
 
 /**
@@ -172,7 +176,8 @@ data class AgentTeamStageForm(
     val interfaces: List<TeamInterfaceEdgeForm> = emptyList(),
     val communication: TeamCommunication = TeamCommunication.SAME_STAGE,
     val messageLimit: Int = 8,
-    val communicationGuide: String = ""
+    val communicationGuide: String = "",
+    val id: String = java.util.UUID.randomUUID().toString()
 )
 
 /** 团队的编辑表单；[charter] 是正文里的团队公约（也是用途介绍）。 */
@@ -183,7 +188,8 @@ data class AgentTeamForm(
     val charter: String = "",
     val admins: List<String> = emptyList(),
     val members: List<TeamMemberRef> = emptyList(),
-    val stages: List<AgentTeamStageForm> = listOf(AgentTeamStageForm())
+    val stages: List<AgentTeamStageForm> = listOf(AgentTeamStageForm()),
+    val routes: List<TeamRoute> = emptyList()
 )
 
 /** 保存失败的原因；界面按枚举映射成对应文案。 */
@@ -210,7 +216,8 @@ enum class AgentTeamSaveError {
     BAD_REJECT_TARGET,
 
     /** 写盘失败。 */
-    IO_FAILED
+    IO_FAILED,
+    INVALID_FLOW
 }
 
 /**
@@ -225,9 +232,11 @@ fun AgentTeam.toForm(scope: AgentDefinitionScope): AgentTeamForm = AgentTeamForm
     charter = charter,
     admins = admins,
     members = members,
+    routes = routes,
     stages = stages.map { stage ->
         AgentTeamStageForm(
             title = stage.title,
+            id = stage.id,
             level = stage.level,
             members = stage.tasks.mapNotNull { it.agent },
             prompt = stage.tasks.map { it.prompt }.distinct().singleOrNull().orEmpty(),
@@ -246,6 +255,7 @@ fun AgentTeam.toForm(scope: AgentDefinitionScope): AgentTeamForm = AgentTeamForm
             tasks = stage.tasks.map { task ->
                 AgentTeamTaskForm(
                     agent = task.agent.orEmpty(),
+                    id = task.id,
                     department = task.department.orEmpty(),
                     agentQuery = task.agentQuery.orEmpty(),
                     prompt = task.prompt,
@@ -256,3 +266,12 @@ fun AgentTeam.toForm(scope: AgentDefinitionScope): AgentTeamForm = AgentTeamForm
         )
     }
 )
+
+/** A member edit may rebuild named tasks only; selector tasks are independent preserved configuration. */
+fun AgentTeamStageForm.withFlowTasks(): AgentTeamStageForm {
+    if (prompt.isBlank()) return this
+    val named = members.distinct().map { member ->
+        tasks.firstOrNull { it.agent == member }?.copy(prompt = prompt) ?: AgentTeamTaskForm(agent = member, prompt = prompt)
+    }
+    return copy(tasks = named + tasks.filter { it.agent.isBlank() && (it.department.isNotBlank() || it.agentQuery.isNotBlank()) })
+}

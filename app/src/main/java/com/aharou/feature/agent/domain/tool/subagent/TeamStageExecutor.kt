@@ -2,6 +2,10 @@ package com.aharou.feature.agent.domain.tool.subagent
 
 import com.aharou.feature.agent.domain.subagent.AgentDefinition
 import com.aharou.feature.agent.domain.subagent.AgentTeam
+import com.aharou.feature.agent.domain.subagent.TeamFlowGraph
+import com.aharou.feature.agent.domain.subagent.TeamHandoff
+import com.aharou.feature.agent.domain.subagent.TeamFlowNode
+import com.aharou.feature.agent.domain.subagent.TeamRouteAction
 import com.aharou.feature.agent.domain.tool.ToolResult
 import com.aharou.feature.agent.domain.model.AgentContext
 import com.aharou.feature.agent.domain.subagent.SubAgentEvent
@@ -29,6 +33,7 @@ class TeamStageExecutor @Inject constructor(private val registry: TeamRunRegistr
     suspend fun run(team: AgentTeam, goal: String, enabled: List<AgentDefinition>, maxRunning: Int,
         parent: String, exec: suspend (JsonArray) -> ToolResult): ToolResult {
         if (parent.isBlank()) return ToolResult.Error("缺少会话上下文", "NO_SESSION")
+        TeamFlowGraph.validate(team)?.let { return ToolResult.Error(it, "INVALID_TEAM_FLOW") }
         val plan = TeamRunner.build(team, goal, enabled, maxRunning)
         if (plan is TeamRunner.Plan.Rejected) return ToolResult.Error(plan.message, plan.code)
         plan as TeamRunner.Plan.Ready
@@ -40,6 +45,7 @@ class TeamStageExecutor @Inject constructor(private val registry: TeamRunRegistr
                 return ToolResult.Error("驳回目标必须是唯一的早先阶段：${stage.title}", "INVALID_REJECT_TARGET")
             }
         }
+        if (team.routes.isNotEmpty()) return runGraph(team, plan, parent, maxRunning, exec)
         val run = registry.begin(parent, plan.pipeline)
         val outputs = linkedMapOf<String, String>()
         val history = mutableListOf<JsonObject>()
@@ -102,6 +108,112 @@ class TeamStageExecutor @Inject constructor(private val registry: TeamRunRegistr
             stageIndex++
         }
         return finish("done", "所有必需执行和审核阶段均已通过")
+    }
+
+    /** Routes alter actual scheduling; interfaces remain prompt-only collaboration hints. */
+    private suspend fun runGraph(team: AgentTeam, plan: TeamRunner.Plan.Ready, parent: String,
+        maxRunning: Int, exec: suspend (JsonArray) -> ToolResult): ToolResult {
+        val batchSize = maxRunning.coerceAtLeast(1)
+        val taskByNode = linkedMapOf<TeamFlowNode, JsonObject>()
+        val pipelineById = plan.pipeline.map { it.jsonObject }.associateBy { it.getValue("id").jsonPrimitive.content }
+        team.stages.forEachIndexed { si, stage -> stage.tasks.forEachIndexed { ti, task ->
+            taskByNode[TeamFlowNode(stage.id, task.id)] = pipelineById.getValue("s${si + 1}-b${ti / batchSize + 1}-t${ti % batchSize + 1}")
+        } }
+        fun id(node: TeamFlowNode) = taskByNode.getValue(node).getValue("id").jsonPrimitive.content
+        val run = registry.begin(parent, plan.pipeline)
+        val outputs = linkedMapOf<TeamFlowNode, String>()
+        val feedback = mutableMapOf<TeamFlowNode, String>()
+        val completed = mutableSetOf<TeamFlowNode>()
+        val history = mutableListOf<JsonObject>()
+        val scheduled = TeamFlowGraph.ready(team, emptySet()).toMutableSet()
+        val selections = mutableMapOf<TeamFlowNode, Set<TeamFlowNode>>()
+        var rounds = 0
+        fun finish(state: String, reason: String) = ToolResult.Success(buildJsonObject {
+            put("state", state); put("reason", reason); put("runId", run); put("reworkRounds", rounds)
+            put("routing", "routes")
+            put("unselected", JsonArray(taskByNode.keys.filter { it !in scheduled }.map { JsonPrimitive(id(it)) }))
+            put("reviewGates", buildJsonObject { taskByNode.keys.filter { TeamFlowGraph.isReview(team, it) }.forEach {
+                put(id(it), if (it in completed && review(outputs[it].orEmpty()) == Review.PASS) "PASSED" else "PENDING")
+            } })
+            put("outputs", buildJsonObject { outputs.forEach { (node, text) -> put(id(node), text) } })
+            put("history", JsonArray(history))
+        })
+        while (!completed.containsAll(scheduled)) {
+            val ready = TeamFlowGraph.selectedReady(team, scheduled, completed, selections).take(batchSize)
+            if (ready.isEmpty()) return finish("blocked", "No eligible route target; predecessors are missing")
+            val batch = JsonArray(ready.map { node ->
+                val original = taskByNode.getValue(node)
+                val handoff = buildString {
+                    append("## Necessary predecessor evidence (original text)\n")
+                    TeamFlowGraph.predecessors(team, node).forEach { upstream ->
+                        append("### ").append(id(upstream)).append('\n').append(outputs.getValue(upstream)).append("\n\n")
+                    }
+                    feedback[node]?.let { append("## Rework reason and original evidence\n").append(it).append('\n') }
+                    append("Analyze before deciding whether to dispatch the next stage. Completion alone is not approval.\n")
+                    val allowed = TeamFlowGraph.forward(team).filter { it.from == node }.map { it.to }
+                    append("Allowed outgoing endpoints: ").append(allowed.joinToString { "${it.stageId}/${it.taskId}" }).append('\n')
+                    append("Optional structured decision, exactly one line: TEAM_HANDOFF: {\"next\":[{\"stageId\":\"...\",\"taskId\":\"...\"}],\"hold\":false,\"reason\":\"analysis\"}. Only existing outgoing endpoints may be selected.\n")
+                    append("For pause use next:[], hold:true and a required reason. No marker means legacy static ALL outgoing edges; natural language never selects routes.\n")
+                    if (TeamFlowGraph.isReview(team, node)) append("Return exactly one verdict: TEAM_REVIEW: PASS or TEAM_REVIEW: REJECT <required reason and corrections>.\n")
+                }
+                JsonObject(original.toMutableMap().apply {
+                    put("dependsOn", JsonArray(emptyList())) // Required predecessors already completed in this run.
+                    put("prompt", JsonPrimitive(handoff + original.getValue("prompt").jsonPrimitive.content))
+                    put("_teamRunId", JsonPrimitive(run))
+                })
+            })
+            val result = exec(batch)
+            val data = (result as? ToolResult.Success)?.data as? JsonObject
+            val produced = data?.get("outputs") as? JsonObject
+            history += buildJsonObject { put("round", rounds); put("targets", JsonArray(ready.map { JsonPrimitive(id(it)) }))
+                if (data != null) put("result", data)
+                if (result is ToolResult.Error) { put("error", result.code); put("message", result.message) }
+            }
+            if (data?.get("state")?.jsonPrimitive?.content != "done" || ready.any { produced?.get(id(it))?.jsonPrimitive?.contentOrNull.isNullOrBlank() }) {
+                return finish("blocked", "Route target failed, timed out, or has no accepted delivery")
+            }
+            ready.forEach { outputs[it] = produced!!.getValue(id(it)).jsonPrimitive.content }
+            val reviewers = ready.filter { TeamFlowGraph.isReview(team, it) }
+            if (reviewers.any { review(outputs.getValue(it)) == Review.INVALID }) return finish("blocked", "Review verdict is missing or invalid")
+            val rejecting = reviewers.filter { review(outputs.getValue(it)) == Review.REJECT }
+            for (node in ready.filter { it !in rejecting }) {
+                val decision = handoff(outputs.getValue(node)) ?: return finish("blocked", "Invalid structured handoff")
+                TeamFlowGraph.validateHandoff(team, node, decision)?.let { return finish("blocked", it) }
+                if (decision.hold) return finish("blocked", "Explicit hold: " + decision.reason)
+                val chosen = decision.next ?: TeamFlowGraph.forward(team).filter { it.from == node }.map { it.to }.toSet()
+                selections[node] = chosen
+                scheduled.addAll(chosen)
+            }
+            if (rejecting.isNotEmpty()) {
+                if (!TeamFlowGraph.canRework(rounds)) return finish("blocked", "Rework limit reached (2 rounds)")
+                val targets = mutableSetOf<TeamFlowNode>()
+                val rejectionTexts = mutableMapOf<TeamFlowNode, MutableList<String>>()
+                for (reviewer in rejecting) {
+                    val edges = team.routes.filter { it.from == reviewer && it.action == TeamRouteAction.REJECT }
+                    if (edges.isEmpty()) return finish("blocked", "Rejected without an explicit upstream reject route")
+                    edges.forEach { edge ->
+                        targets += edge.to
+                        rejectionTexts.getOrPut(edge.to) { mutableListOf() } += id(reviewer) + "\n" + outputs.getValue(reviewer)
+                    }
+                }
+                rejectionTexts.forEach { (target, texts) ->
+                    feedback[target] = texts.joinToString("\n\n") + "\nPrevious delivery:\n" + outputs[target].orEmpty()
+                }
+                val affected = TeamFlowGraph.descendants(team, targets)
+                // A rejecting branch invalidates only its downstream closure; independent branches retain deliveries.
+                completed.addAll(ready)
+                completed.removeAll(affected)
+                affected.forEach { outputs.remove(it); selections.remove(it) }
+                scheduled.removeAll(affected)
+                scheduled.addAll(targets)
+                registry.reset(run, affected.map(::id).toSet())
+                rounds++
+            } else completed.addAll(ready)
+        }
+        val pendingReviews = taskByNode.keys.filter { TeamFlowGraph.isReview(team, it) &&
+            (it !in completed || review(outputs[it].orEmpty()) != Review.PASS) }
+        if (pendingReviews.isNotEmpty()) return finish("incomplete", "Required review gates remain unpassed")
+        return finish("done", "Selected targets delivered and every configured required review gate passed")
     }
 
     suspend fun pipeline(args: Map<String, JsonElement>, context: AgentContext, eventBus: SubAgentEventBus,
@@ -340,6 +452,29 @@ class TeamStageExecutor @Inject constructor(private val registry: TeamRunRegistr
         }
         fun dependenciesReady(dependencies: Set<String>, states: Map<String, String>): Boolean =
             dependencies.all { states[it] == "succeeded" }
+
+        /** Missing marker = documented static-all-outgoing compatibility, malformed marker = blocked. */
+        fun handoff(output: String): TeamHandoff? {
+            val lines = output.lineSequence().map { it.trim() }.filter { it.startsWith("TEAM_HANDOFF:") }.toList()
+            if (lines.isEmpty()) return TeamHandoff()
+            if (lines.size != 1) return null
+            return try {
+                val obj = kotlinx.serialization.json.Json.parseToJsonElement(lines.single().removePrefix("TEAM_HANDOFF:").trim()).jsonObject
+                val next = obj["next"] as? JsonArray ?: return null
+                val holdValue = obj["hold"] as? JsonPrimitive ?: return null
+                if (holdValue.isString) return null
+                val hold = holdValue.content.let { if (it == "true") true else if (it == "false") false else return null }
+                val reason = (obj["reason"] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: return null
+                val nodes = next.map { raw ->
+                    val endpoint = raw as? JsonObject ?: return null
+                    val stage = (endpoint["stageId"] as? JsonPrimitive)?.takeIf { it.isString }?.content?.takeIf { it.isNotBlank() } ?: return null
+                    val task = (endpoint["taskId"] as? JsonPrimitive)?.takeIf { it.isString }?.content?.takeIf { it.isNotBlank() } ?: return null
+                    TeamFlowNode(stage, task)
+                }
+                if (nodes.distinct().size != nodes.size) return null
+                TeamHandoff(nodes.toSet(), hold, reason)
+            } catch (_: IllegalArgumentException) { null }
+        }
 
         fun review(output: String): Review {
             val lines = output.lineSequence().map { it.trim() }.filter { it.startsWith("TEAM_REVIEW:") }.toList()

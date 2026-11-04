@@ -34,13 +34,14 @@ internal fun ToolManagementSection(
     onToggle: (McpServerEntry, Boolean) -> Unit,
     onDelete: (McpServerEntry) -> Unit,
     onEdit: (McpServerEntry) -> Unit,
+    permissionContent: @Composable () -> Unit,
 ) {
     var selected by rememberSaveable { mutableStateOf(0) }
     val customViewModel: ToolsViewModel = androidx.hilt.navigation.compose.hiltViewModel()
     val customState by customViewModel.state.collectAsStateWithLifecycle()
     LaunchedEffect(selected) { if (selected == 2) customViewModel.refresh() }
     var createScript by rememberSaveable { mutableStateOf(false) }
-    Column(Modifier.fillMaxSize()) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         SegmentedTabs(
             selected = selected,
             labels = listOf(stringResource(R.string.settings_mcp), stringResource(R.string.script_tools_title), stringResource(R.string.tools_group_custom)),
@@ -48,17 +49,20 @@ internal fun ToolManagementSection(
             modifier = Modifier.padding(horizontal = Spacing.lg),
         )
         if (selected == 2) {
-            ToolsSection(state = customState, viewModel = customViewModel)
+            ToolsSection(state = customState, viewModel = customViewModel, embedded = true)
         } else if (selected == 1) {
-            ScriptToolsSection(createRequested = createScript, onCreateHandled = { createScript = false })
+            ScriptToolsSection(createRequested = createScript, onCreateHandled = { createScript = false }, embedded = true)
         } else {
-            Column(Modifier.verticalScroll(rememberScrollState()).padding(bottom = Spacing.xl)) {
+            Column(Modifier.padding(bottom = Spacing.xl)) {
                 if (entries.isEmpty()) {
                     Text(stringResource(R.string.settings_tools_empty), Modifier.padding(Spacing.lg))
                 }
                 McpToolsSection(entries, statuses, onToggle, onDelete, onEdit)
             }
         }
+        ScheduledTasksSection()
+        SettingsGroupHeader(text = stringResource(R.string.settings_permissions))
+        permissionContent()
     }
     if (createRequested) {
         AlertDialog(

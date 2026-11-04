@@ -56,6 +56,7 @@ import com.aharou.feature.agent.domain.subagent.AgentTeamForm
 import com.aharou.feature.agent.domain.subagent.AgentTeamSaveError
 import com.aharou.feature.agent.domain.subagent.AgentTeamStageForm
 import com.aharou.feature.agent.domain.subagent.TeamMemberRef
+import com.aharou.feature.agent.domain.subagent.withFlowTasks
 import com.aharou.feature.agent.domain.subagent.toForm
 import com.aharou.feature.settings.presentation.AgentTeamSaveState
 import compose.icons.FeatherIcons
@@ -101,8 +102,6 @@ internal fun TeamEditorSheet(
     var admins by remember(initial) {
         mutableStateOf(initial?.let { entry -> entry.team.toForm(entry.scope).admins } ?: emptyList())
     }
-    /** 管理员组手动输入的名字：候选成员列表为空（还没有建任何子代理角色）时也能先填上管理员。 */
-    var adminTextInput by remember { mutableStateOf("") }
     var stages by remember(initial) {
         mutableStateOf(
             initial?.let { entry -> entry.team.toForm(entry.scope).stages }
@@ -110,13 +109,15 @@ internal fun TeamEditorSheet(
         )
     }
 
+    var routes by remember(initial) { mutableStateOf(initial?.team?.routes.orEmpty()) }
+
     LaunchedEffect(saveState) {
         if (saveState is AgentTeamSaveState.Saved) onSaved()
     }
 
     // 阶段里可点选的成员：只列团队自己的成员（不是 all availableMembers），避免还没添加的人被选中。
     val stageMembers = remember(members) { members.map { it.name } }
-    val canSave = name.isNotBlank() && stages.any { it.members.isNotEmpty() || it.prompt.isNotBlank() }
+    val canSave = admins.size == 1 && members.any { it.name == admins.singleOrNull() } && name.isNotBlank() && stages.any { it.members.isNotEmpty() || it.prompt.isNotBlank() }
 
     AdaptiveModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -230,7 +231,7 @@ internal fun TeamEditorSheet(
                 )
             }
 
-            // 3. 管理员组：可多个，多模型并行出判断，主代理汇总成策略建议
+            // One administrator, selected only from this team roster.
             SettingsGroupHeader(text = stringResource(R.string.team_editor_admins))
             Text(
                 text = stringResource(R.string.team_editor_admins_hint),
@@ -244,47 +245,13 @@ internal fun TeamEditorSheet(
                         FilterChip(
                             selected = picked,
                             onClick = {
-                                admins = if (picked) admins - ref.name else admins + ref.name
+                                admins = listOf(ref.name)
                             },
                             label = { Text(ref.name) }
                         )
                     }
                 }
             }
-            // 手动添加：成员名单为空（还没有建子代理角色）时这是唯一入口；输入的名字不要求在名单里
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = Spacing.xs),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                AppTextField(
-                    value = adminTextInput,
-                    onValueChange = { adminTextInput = it },
-                    label = stringResource(R.string.team_editor_admin_add_hint),
-                    singleLine = true,
-                    modifier = Modifier.weight(1f)
-                )
-                Spacer(modifier = Modifier.width(Spacing.xs))
-                val trimmed = adminTextInput.trim()
-                Button(
-                    onClick = {
-                        if (trimmed.isNotBlank() && trimmed.length <= 64 && !admins.contains(trimmed)) {
-                            admins = admins + trimmed
-                            adminTextInput = ""
-                        }
-                    },
-                    enabled = trimmed.isNotBlank() && !admins.contains(trimmed),
-                    modifier = Modifier.height(48.dp)
-                ) {
-                    Icon(
-                        imageVector = FeatherIcons.Plus,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp)
-                    )
-                }
-            }
-
             // 4. 团队流程：阶段 + 关卡 + 驳回回边
             SettingsGroupHeader(text = stringResource(R.string.team_editor_process))
             Text(
@@ -292,7 +259,7 @@ internal fun TeamEditorSheet(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            TextButton(onClick = { stages = standardFiveStages(members) }) {
+            TextButton(onClick = { stages = standardFiveStages(members).map { it.withFlowTasks() }; routes = emptyList() }) {
                 Text(stringResource(R.string.team_editor_preset_standard))
             }
 
@@ -308,7 +275,7 @@ internal fun TeamEditorSheet(
                     rejectTargets = stages.take(index).map { it.title.trim() }.filter { it.isNotEmpty() },
                     expanded = expanded,
                     onToggleExpand = { expanded = it },
-                    onChange = { updated -> stages = stages.toMutableList().also { it[index] = updated } },
+                    onChange = { updated -> stages = stages.toMutableList().also { it[index] = updated.withFlowTasks() } },
                     onRemove = { stages = stages.filterIndexed { i, _ -> i != index } },
                     canRemove = stages.size > 1,
                     members = stageMembers
@@ -323,6 +290,9 @@ internal fun TeamEditorSheet(
             }) {
                 Text(stringResource(R.string.team_editor_add_stage))
             }
+
+            TeamFlowMap(admins, stages, routes)
+            TeamRouteEditor(stages, routes) { routes = it }
 
             // 5. 团队公约：团队的用途介绍，也是每个成员指令前的共同约束
             SettingsGroupHeader(text = stringResource(R.string.team_editor_charter))
@@ -350,7 +320,8 @@ internal fun TeamEditorSheet(
                             charter = charter,
                             admins = admins,
                             members = members,
-                            stages = stages
+                            stages = stages,
+                            routes = routes
                         ),
                         initial?.team?.name
                     )
@@ -670,6 +641,7 @@ private fun AgentTeamSaveError.messageRes(): Int = when (this) {
     AgentTeamSaveError.UNKNOWN_MEMBER -> R.string.team_editor_error_unknown_member
     AgentTeamSaveError.ADMIN_NOT_MEMBER -> R.string.team_editor_error_admin_not_member
     AgentTeamSaveError.BAD_REJECT_TARGET -> R.string.team_editor_error_bad_reject
+    AgentTeamSaveError.INVALID_FLOW -> R.string.team_flow_invalid
     AgentTeamSaveError.IO_FAILED -> R.string.team_editor_error_io
 }
 

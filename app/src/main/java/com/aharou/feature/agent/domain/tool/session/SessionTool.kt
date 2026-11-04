@@ -29,6 +29,7 @@ import kotlinx.serialization.json.put
  * 再校验其归属，跨工作区一律拒绝。工作区之间是有意隔离的（不同于 `task` 那条按父子关系走的口子）。
  */
 class SessionTool @Inject constructor(
+    private val projectTasks: com.aharou.feature.agent.data.task.ProjectTaskRepository,
     private val sessionUseCase: SessionUseCase,
     private val chatSessionDao: ChatSessionDao,
     private val messagePersistenceUseCase: MessagePersistenceUseCase,
@@ -48,7 +49,7 @@ class SessionTool @Inject constructor(
     override val name = "sessions"
 
     override val description =
-        "查看当前工作区下的其他会话。action=list 列出本工作区会话；search 在本工作区聊天记录里搜关键词；" +
+        "index returns the task index including nullable projectId (legacy unassigned tasks remain null); brief returns selected task briefs (task_ids), since_version and offset/nextOffset supported; neither reads messages. 查看当前工作区下的其他会话。action=list 列出本工作区会话；search 在本工作区聊天记录里搜关键词；" +
             "read 读某个会话的消息（传 session_id，取自 list）。" +
             "只能访问当前工作区的会话——其它工作区是有意隔离的，一律看不到。"
 
@@ -60,8 +61,15 @@ class SessionTool @Inject constructor(
             "action", ParameterType.STRING,
             "操作：list 列出当前工作区会话 / search 在当前工作区聊天记录里搜关键词 / read 读某个会话的消息",
             true,
-            enum = listOf("list", "search", "read"),
+            enum = listOf("list", "search", "read", "index", "brief", "field"),
         ),
+        "task_id" to ToolParameter("task_id", ParameterType.STRING, "field: explicit task id", false),
+        "field" to ToolParameter("field", ParameterType.STRING, "field: projectId/title/requirement/background/constraints/acceptance/brief/evidenceRefs/members/owner/dependencyIds/sessionIds", false),
+        "task_version" to ToolParameter("task_version", ParameterType.INTEGER, "field: exact task version from index/brief; requery after edits", false),
+        "task_ids" to ToolParameter("task_ids", ParameterType.ARRAY, "Task ids; brief requires an explicit nonempty batch", false, itemsSchema = mapOf("type" to "string")),
+        "since_version" to ToolParameter("since_version", ParameterType.INTEGER, "Only tasks changed after this version", false),
+        "page_version" to ToolParameter("page_version", ParameterType.INTEGER, "Required on later pages; use first page highWatermark, restart on STALE_TASK_PAGE", false),
+        "offset" to ToolParameter("offset", ParameterType.INTEGER, "Offset for index/brief pagination", false),
         "session_id" to ToolParameter(
             "session_id", ParameterType.STRING,
             "read 专用：目标会话 id（取自 list 结果）", false,
@@ -83,6 +91,35 @@ class SessionTool @Inject constructor(
         val limit = (args["limit"] as? JsonPrimitive)?.intOrNull
         return try {
             when (action) {
+                "field" -> {
+                    val taskId = (args["task_id"] as? JsonPrimitive)?.contentOrNull ?: return ToolResult.Error("task_id required", "MISSING_ARGS")
+                    val field = (args["field"] as? JsonPrimitive)?.contentOrNull ?: return ToolResult.Error("field required", "MISSING_ARGS")
+                    val version = (args["task_version"] as? JsonPrimitive)?.contentOrNull?.toLongOrNull() ?: return ToolResult.Error("task_version required", "MISSING_ARGS")
+                    val snapshot = projectTasks.load(workspace)
+                    val task = snapshot.tasks.firstOrNull { it.workspace == workspace && it.id == taskId }
+                        ?: return ToolResult.Error("Task does not exist in current workspace", "TASK_NOT_FOUND")
+                    if (task.version != version) return ToolResult.Error("Task changed; requery brief and restart field offset=0", "STALE_TASK_VERSION")
+                    if (field !in ProjectTaskQueries.readableFields) return ToolResult.Error("Unsupported task field", "INVALID_TASK_FIELD")
+                    ToolResult.Success(ProjectTaskQueries.field(snapshot.tasks, workspace, taskId, field,
+                        (args["offset"] as? JsonPrimitive)?.intOrNull ?: 0, limit ?: 1000, version))
+                }
+                "index", "brief" -> {
+                    val ids = (args["task_ids"] as? kotlinx.serialization.json.JsonArray).orEmpty()
+                        .mapNotNull { (it as? JsonPrimitive)?.contentOrNull }.toSet()
+                    if (action == "brief" && ids.isEmpty()) return ToolResult.Error("brief requires task_ids", "MISSING_ARGS")
+                    val snapshot = projectTasks.load(workspace)
+                    val offset = (args["offset"] as? JsonPrimitive)?.intOrNull ?: 0
+                    val pageVersion = (args["page_version"] as? JsonPrimitive)?.contentOrNull?.toLongOrNull()
+                    if (!ProjectTaskQueries.pageValid(snapshot.version, offset, pageVersion)) {
+                        return ToolResult.Error("Task snapshot changed or page_version missing; restart offset=0 with unchanged since_version", "STALE_TASK_PAGE")
+                    }
+                    val page = ProjectTaskQueries.query(snapshot.tasks, workspace, action, ids,
+                        (args["since_version"] as? JsonPrimitive)?.contentOrNull?.toLongOrNull() ?: 0,
+                        (args["offset"] as? JsonPrimitive)?.intOrNull ?: 0, limit ?: DEFAULT_LIST_LIMIT)
+                    ToolResult.Success(kotlinx.serialization.json.JsonObject(page + mapOf(
+                        "version" to JsonPrimitive(snapshot.version), "highWatermark" to JsonPrimitive(snapshot.version),
+                        "paginationPolicy" to JsonPrimitive("Restart offset=0 with the old since_version if version changes between pages; advance checkpoint only after stable final page."))))
+                }
                 "list" -> listSessions(workspace, limit)
                 "search" -> searchMessages(workspace, args, limit)
                 "read" -> readSession(workspace, args, limit)

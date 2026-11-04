@@ -490,14 +490,14 @@ suspend fun streamWithStaircaseRetry(
         } catch (e: Throwable) {
             coroutineContext.ensureActive()
             if (!isRetriableNetworkError(e)) {
-                if (onKeyFailure?.invoke(e, !receivedContent) == true) {
+                if (onKeyFailure?.invoke(e, !receivedContent) == true && !receivedContent) {
                     attempt = 0
                     continue
                 }
                 // 同上：单 Key 撞限流时退避重试；已吐过字则不重发（避免用户看到重复内容）。
                 if (!isRateLimitError(e) || receivedContent) throw e
             }
-            if (attempt >= maxRetries) throw e
+            if (receivedContent || attempt >= maxRetries) throw e
             awaitNetworkIfOffline()
             val wait = retryDelayMillis(attempt, e)
             FileLogger.w(TAG, "流式请求失败，第 ${attempt + 1}/$maxRetries 次重试（等待 ${wait}ms）: ${e.describeForRetryLog()}")

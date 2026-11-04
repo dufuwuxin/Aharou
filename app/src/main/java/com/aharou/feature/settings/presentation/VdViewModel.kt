@@ -23,14 +23,11 @@ class VdViewModel @Inject constructor(
 
     val vdState: StateFlow<VdInfo?> = vdController.state
 
-    /** 实际执行的通道：root / Shizuku / 不可用。 */
+    /** 实际执行的通道：Shizuku / 不可用。 */
     val hostShellMode: StateFlow<HostShellMode> = hostShell.mode
 
     /** Shizuku 侧的细分状态，通道不可用时给出具体原因。 */
     val shizukuState: StateFlow<ShizukuState> = hostShell.shizukuState
-
-    /** root 探测结论；null = 尚未探测。 */
-    val rootAvailable: StateFlow<Boolean?> = hostShell.rootAvailable
 
     private val _busy = MutableStateFlow(false)
     val busy: StateFlow<Boolean> = _busy.asStateFlow()

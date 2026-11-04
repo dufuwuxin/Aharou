@@ -44,40 +44,9 @@ class AppSkinContrastTest {
         }
     }
 
-    /**
-     * 自定义皮肤的主色是用户随便选的，这里拿几个最容易翻车的色压一压：
-     * 荧光黄、纯蓝、纯红、中性灰、近黑、纯白、青绿。
-     */
     @Test
-    fun customSkinFromAnySeedColorMeetsContrastFloor() {
-        val seeds = mapOf(
-            "荧光黄" to Color(0xFFFFEB3B),
-            "纯蓝" to Color(0xFF0000FF),
-            "纯红" to Color(0xFFFF0000),
-            "中性灰" to Color(0xFF9E9E9E),
-            "近黑" to Color(0xFF1A1A1A),
-            "纯白" to Color(0xFFFFFFFF),
-            "青绿" to Color(0xFF00C2A8)
-        )
-        seeds.forEach { (seedName, seed) ->
-            val light = customSkinTokens(seed)
-            val dark = light.oppositeVariant(SkinBrightness.LIGHT)
-            mapOf("浅色" to light, "深色" to dark).forEach { (modeName, skin) ->
-                val label = "$seedName/$modeName"
-                assertTrue(
-                    "$label 正文对比度不足：${contrast(skin.text, skin.pageBackground)}",
-                    contrast(skin.text, skin.pageBackground) >= 4.5f
-                )
-                // 自定义主色可能很亮，次要文字同样只卡“不糊”。
-                assertTrue(
-                    "$label 次要文字对比度不足：${contrast(skin.textSecondary, skin.pageBackground)}",
-                    contrast(skin.textSecondary, skin.pageBackground) >= 2.5f
-                )
-                assertTrue(
-                    "$label 主按钮文字对比度不足：${contrast(skin.onPrimary, skin.primary)}",
-                    contrast(skin.onPrimary, skin.primary) >= 3f
-                )
-            }
-        }
+    fun onlyXiaochengIsAvailable() {
+        assertTrue(AppSkins.all.map { it.id } == listOf("xiaocheng"))
+        assertTrue(AppThemePreset.DEFAULT.id == "xiaocheng")
     }
 }

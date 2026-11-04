@@ -65,9 +65,9 @@ class MemoryRepository @Inject constructor(
      *   单条命中数封顶，避免长描述凭字数压过精心填写的 keywords；
      * - 中文没有空格分词，一段 CJK 短语整串几乎不可能原样出现在用户句子里，故对 CJK 词额外
      *   拆成字符二元组（bigram）参与命中，让「代码调研」这类词在「帮我做代码调研」里也能命中；
-     * - 相关度全为 0（含 [query] 为空）时退化为按文件 mtime 倒序，与旧行为一致。
+     * - 相关度相同（含 [query] 为空）时按读取次数、最近读取、mtime 倒序，再按名称排序。
      *
-     * 排序稳定：相关度 → mtime 倒序 → name 升序，三层都确定，保证同一 (projectRoot, query)
+     * 排序稳定，各层都确定，保证同一 (projectRoot, query)
      * 每次渲染顺序一致，不因目录扫描顺序抖动，避免无谓地打断 KV Cache。
      */
     fun listMemoriesForPrompt(
@@ -102,22 +102,18 @@ class MemoryRepository @Inject constructor(
                     PromptCandidate(memory, relevanceScore(memory, normalizedQuery, candidates.size, frequencies), usageCount, lastUsed)
                 }
             }
-            // 排序目标不是「写得好看」而是「真用得上的先占位」：先看这条过去被取用过没有，
-            // 用过的（≥2 次）整体优先，再在层内按相关度、次数、最近使用与修改时间排。
-            // 否则常驻预算会被「写的时候觉得重要」但从未被读过的条目占满，真正常用的反而被挤回索引。
+            // 读过不代表已验证；读取频次仅在任务相关度相同时用于排序。
             .sortedWith(
-                compareByVerifiedUsage()
-                    .thenByDescending { it.relevance }
+                compareByDescending<PromptCandidate> { it.relevance }
                     .thenByDescending { it.usageCount }
                     .thenByDescending { it.lastUsedAt }
                     .thenByDescending { it.memory.file?.lastModified() ?: 0L }
                     .thenBy { it.memory.name.lowercase() }
             )
-            // 清单按类型配额：identity 先占名额，剩下的给其他类型。
-            // 否则 60 条会被「用过的事实」占满，红线一条都进不来（全库上千条时这一步才真正生效）。
+            // 已确认的长期约定先占配额，候选不能挤掉正在生效的红线。
             .let { ranked ->
-                val identities = ranked.filter { it.memory.type == MemoryType.IDENTITY }.take(limit)
-                val others = ranked.filterNot { it.memory.type == MemoryType.IDENTITY }
+                val identities = ranked.filter { it.memory.type == MemoryType.IDENTITY && !it.memory.pending }.take(limit)
+                val others = ranked.filterNot { it.memory.type == MemoryType.IDENTITY && !it.memory.pending }
                 identities + others.take((limit - identities.size).coerceAtLeast(0))
             }
             .map { it.memory }
@@ -130,14 +126,6 @@ class MemoryRepository @Inject constructor(
         val usageCount: Int,
         val lastUsedAt: Long,
     )
-
-    /** 真正被取用过（≥2 次）的条目整体排在前面：一次可能是偶然，两次开始算「常用」。 */
-    private fun compareByVerifiedUsage(): Comparator<PromptCandidate> =
-        compareByDescending {
-            // identity 靠常驻生效、天生不走 read，用「读了几次」排序等于系统性把红线排到后面
-            //（2026-10-28 加使用证据时漏了这层）。它们与「真被用过」的条目同级，层内再比。
-            it.memory.type == MemoryType.IDENTITY || it.usageCount >= VERIFIED_USAGE_THRESHOLD
-        }
 
     /** 注入清单条数上限，供 stats 等只读展示引用，避免两处写死不一致。 */
     fun injectedMemoryLimit(): Int = MAX_INJECTED_MEMORIES
@@ -372,9 +360,6 @@ class MemoryRepository @Inject constructor(
 
         /** 自动降级标记落在用量存储的这个作用域下，与真实使用记录分开。 */
         private const val DEMOTED_SCOPE = "auto-demoted"
-
-        /** 视为「常用」的取用次数下限：一次可能是偶然，两次开始算真在用。 */
-        private const val VERIFIED_USAGE_THRESHOLD = 2
 
         /** 遗忘阈值（天）：超过这么久没改动的普通条目不再注入。 */
         const val STALE_MEMORY_DAYS = 180L

@@ -25,7 +25,7 @@ class SkillRepository @Inject constructor(
 ) {
     /** 全部技能（含来源作用域），未过滤禁用；同名按 内置 < 全局 < 项目 逐级覆盖。 */
     fun listAllSkills(): List<SkillEntry> = mergeAll(
-        builtinSkillSource.listSkills(),
+        visibleBuiltinSkills(),
         globalDirectorySkillSource.listSkills(),
         projectDirectorySkillSource.listSkills()
     )
@@ -112,7 +112,7 @@ class SkillRepository @Inject constructor(
         if (name.lowercase() in skillConfigRepository.disabledNames()) return null
         return projectDirectorySkillSource.loadInstructions(name)
             ?: globalDirectorySkillSource.loadInstructions(name)
-            ?: builtinSkillSource.loadInstructions(name)
+            ?: if (name.lowercase() in deletedBuiltinNames()) null else builtinSkillSource.loadInstructions(name)
     }
 
     /** 技能是否在任一作用域中被禁用。 */
@@ -238,7 +238,7 @@ class SkillRepository @Inject constructor(
      * 结果就是「目标已有同名」判不出来，删除 / 导出也定位不到目录。
      */
     private fun entriesIn(scope: SkillScope): List<Skill> = when (scope) {
-        SkillScope.BUILTIN -> builtinSkillSource.listSkills()
+        SkillScope.BUILTIN -> visibleBuiltinSkills()
         SkillScope.GLOBAL -> globalDirectorySkillSource.listSkills()
         SkillScope.PROJECT -> projectDirectorySkillSource.listSkills()
     }
@@ -262,7 +262,7 @@ class SkillRepository @Inject constructor(
     }
 
     private fun exportBuiltin(name: String): ByteArray? {
-        val skill = builtinSkillSource.listSkills()
+        val skill = visibleBuiltinSkills()
             .firstOrNull { it.name.equals(name, ignoreCase = true) } ?: return null
         val text = SkillParser.serialize(
             name = skill.name,
@@ -276,9 +276,32 @@ class SkillRepository @Inject constructor(
         )
     }
 
-    /** 删除指定作用域的技能（删除其目录，不可恢复）。返回是否成功；内置技能不可删。 */
+    private val deletedBuiltinsPath = "~/.aharou/skills.deleted-builtins.json"
+
+    private fun deletedBuiltinNames(): Set<String> {
+        if (!fileAccess.isFile(deletedBuiltinsPath)) return emptySet()
+        val entries = kotlinx.serialization.json.Json.parseToJsonElement(fileAccess.readFile(deletedBuiltinsPath))
+        require(entries is kotlinx.serialization.json.JsonArray)
+        return entries.map {
+            require(it is kotlinx.serialization.json.JsonPrimitive && it.isString)
+            it.content.lowercase()
+        }.toSet()
+    }
+
+    private fun visibleBuiltinSkills(): List<Skill> {
+        val deleted = deletedBuiltinNames()
+        return builtinSkillSource.listSkills().filterNot { it.name.lowercase() in deleted }
+    }
+
+    /** APK 资产不可写；内置技能保存删除记录，其余技能删除目录。 */
     fun deleteSkill(name: String, scope: SkillScope): Boolean {
-        if (scope == SkillScope.BUILTIN) return false
+        if (scope == SkillScope.BUILTIN) return synchronized(this) {
+            if (builtinSkillSource.listSkills().none { it.name.equals(name, true) }) return@synchronized false
+            val deleted = deletedBuiltinNames() + name.lowercase()
+            val json = kotlinx.serialization.json.JsonArray(deleted.sorted().map { kotlinx.serialization.json.JsonPrimitive(it) })
+            fileAccess.writeFile(deletedBuiltinsPath, json.toString(), overwrite = true)
+            true
+        }
         val dirPath = entriesIn(scope).firstOrNull { it.name.equals(name, ignoreCase = true) }
             ?.dirPath ?: return false
         return safeDeleteSkillDir(fileAccess, dirPath)

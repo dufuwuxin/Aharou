@@ -107,7 +107,6 @@ import com.aharou.feature.agent.presentation.hasVisibleContent
 import com.aharou.feature.agent.presentation.turnKeyOf
 import com.aharou.feature.onboarding.domain.OnboardingStep
 import com.aharou.feature.onboarding.presentation.onboardingTarget
-import com.aharou.feature.voice.presentation.ReadAloudViewModel
 import com.aharou.feature.settings.presentation.SettingsViewModel
 import com.aharou.feature.settings.domain.model.DashboardContext
 import com.aharou.feature.settings.domain.model.ProviderDashboardState
@@ -143,6 +142,7 @@ fun AIChatPanel(
     showMenuButton: Boolean = true,
     /** 从会话详情页顶部返回到会话列表页；null 表示当前没有该入口（如大屏常驻侧栏场景）。 */
     onBackToSessions: (() -> Unit)? = null,
+    onCreateTask: (() -> Unit)? = null,
     /** 大屏右栏当前开的是终端 / Git 时，顶栏对应图标高亮。 */
     terminalActive: Boolean = false,
     gitActive: Boolean = false,
@@ -194,7 +194,6 @@ fun AIChatPanel(
     val currentSessionId by viewModel.currentSessionId.collectAsStateWithLifecycle()
     // 顶栏中轴展示的会话标题：取当前会话在会话列表里的标题，未命中（新会话未命名）则不显示。
     val allSessions by viewModel.sessions.collectAsStateWithLifecycle()
-    val activeSessionTitle = allSessions.firstOrNull { it.id == currentSessionId }?.title
     // 软打断后 agentState 立即回到 Idle，但协程仍在后台跑当前这一步；长按强打断的入口要靠它保底。
     val activeAgentSessions by viewModel.activeAgentSessions.collectAsStateWithLifecycle()
     // 工具卡片入场调度：只排本次浏览期间新追加到尾部的 TOOL 消息，逐个错开淡入。
@@ -260,16 +259,6 @@ fun AIChatPanel(
     val currentMode by viewModel.currentSessionMode.collectAsStateWithLifecycle()
     val slashCommands by viewModel.slashCommands.collectAsStateWithLifecycle()
 
-    // 朗读：气泡上的喇叭按钮读这一条；开了自动朗读时，每条回复落地就念
-    val readAloudViewModel: ReadAloudViewModel = hiltViewModel()
-    val readingText by readAloudViewModel.currentText.collectAsStateWithLifecycle()
-    // 边回边念：流式文本每帧喂给播报队列（开关关着时 ViewModel 会直接丢）；
-    // 文本清空 = 本轮结束，收尾把最后没成句的尾巴也读掉。
-    LaunchedEffect(streamingText) {
-        val text = streamingText
-        if (!text.isNullOrBlank()) readAloudViewModel.feedStream(text)
-        else readAloudViewModel.finishStream()
-    }
     // 输入草稿只认 ViewModel 这一份：本地 remember 活不过切页，双份必然对不上。
     val inputText by viewModel.inputDraft.collectAsStateWithLifecycle()
     val fileMentionState by viewModel.fileMentionState.collectAsStateWithLifecycle()
@@ -1193,8 +1182,6 @@ fun AIChatPanel(
                     variantCount = message.variantCount,
                     onVariantSelect = onVariantSelect,
                     onVariantDelete = onVariantDelete,
-                    onReadAloud = { readAloudViewModel.toggle(it.content) },
-                    isReadingAloud = readingText == message.content,
                     showSoulHeader = item.showSoulHeader,
                     reasoningVisible = item.reasoningVisible,
                     contentPadding = if (item.groupMember) ToolGroupMemberPadding else PaddingValues(0.dp),
@@ -1230,7 +1217,6 @@ fun AIChatPanel(
                 inputTokens = sessionInputTokens,
                 outputTokens = sessionOutputTokens,
                 sessionId = currentSessionId,
-                sessionTitle = activeSessionTitle,
                 onBackToSessions = onBackToSessions,
                 onOpenDrawer = {
                     keyboardController?.hide()
@@ -1501,7 +1487,7 @@ fun AIChatPanel(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.weight(1f),
                     )
-                    TextButton(onClick = { viewModel.newSession() }) {
+                    TextButton(onClick = { onCreateTask?.invoke() ?: onBackToSessions?.invoke() }) {
                         Text(stringResource(R.string.chat_long_session_new), fontSize = 12.sp)
                     }
                 }
@@ -1534,7 +1520,7 @@ fun AIChatPanel(
                     },
                     activeProvider = activeProvider,
                     providers = providers,
-                    modelMetadata = modelMetadata,
+                    modelMetadata = modelMetadata, modelChainWorkspace = projectRoot,
                     onSelectModel = { p, m ->
                         viewModel.setSessionProviderModel(p, m)
                     },
@@ -1866,5 +1852,4 @@ fun AIChatPanel(
         ArtifactPreviewStateHost() // 产物预览（HTML/SVG）：全屏宿主挂主窗口，避开独立 sheet 窗口的 WebView 合成问题
     }
 }
-
 

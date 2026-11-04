@@ -57,21 +57,6 @@
             android:textColor="#0F172A"
             android:textSize="12sp" />
 
-        <TextView
-            android:id="@+id/widget_entry_voice"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:layout_marginStart="4dp"
-            android:gravity="center"
-            android:background="#E9E9EB"
-            android:paddingTop="9dp"
-            android:paddingBottom="9dp"
-            android:singleLine="true"
-            android:ellipsize="end"
-            android:text="@string/widget_entry_voice"
-            android:textColor="#0F172A"
-            android:textSize="12sp" />
     </LinearLayout>
 
     <!-- 分隔线用 LinearLayout 而不是 <View>：RemoteViews 只允许带 @RemoteView 注解的类，

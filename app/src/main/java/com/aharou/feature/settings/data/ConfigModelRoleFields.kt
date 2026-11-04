@@ -35,9 +35,28 @@ class ConfigModelRoleFields @Inject constructor(
     private val imageGenModel: ImageGenModelSettingsRepository,
     private val reasoningEffort: ModelReasoningEffortRepository,
     private val memoryModel: MemoryModelSettingsRepository,
+    private val workspaceModels: com.aharou.feature.settings.data.repository.WorkspaceModelChainRepository,
+    private val workspaces: com.aharou.feature.workspace.data.repository.WorkspaceRepository,
 ) {
 
     fun registerInto(registry: ConfigRegistry) {
+        registry.register(ClosureField(
+            path = "model.workspace_chain", displayName = "工作区模型顺序",
+            description = "当前工作区的主对话候选模型；每行 providerId|model，按顺序重试后切换。空串恢复单模型选择。",
+            valueSchema = ConfigSchema.Str(), revertable = true,
+            reader = { runBlocking {
+                val workspace = workspaces.current.first()?.path ?: throw ConfigError.InvalidValue("未选择工作区")
+                ConfigValue.Str(com.aharou.feature.settings.domain.model.encodeFallbackChain(workspaceModels.get(workspace)))
+            } },
+            writer = { value -> runBlocking {
+                val raw = (value as? ConfigValue.Str)?.value ?: throw ConfigError.TypeMismatch("string")
+                val workspace = workspaces.current.first()?.path ?: throw ConfigError.InvalidValue("未选择工作区")
+                val chain = com.aharou.feature.settings.domain.model.parseFallbackChain(raw)
+                if (chain.size != raw.lineSequence().count { it.isNotBlank() } || chain.any { it.model.isBlank() })
+                    throw ConfigError.InvalidValue("每行须为 providerId|model")
+                workspaceModels.set(workspace, chain)
+            } }
+        ))
         registry.register(
             roleField(
                 path = "model.roles.default",

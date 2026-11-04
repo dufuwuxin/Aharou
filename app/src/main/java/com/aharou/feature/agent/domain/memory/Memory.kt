@@ -28,8 +28,8 @@ data class Memory(
     val keywords: List<String> = emptyList(),
     val expiresAt: Long? = null,
     /**
-     * 待确认：与另一条记忆的说法冲突、暂时两条并存，等使用者裁决。
-     * 由整理器判为冲突时打上；在设置页保存这条记忆即视为已确认（标记清除）。
+     * 待确认：自动蒸馏候选尚未核对，或存在未裁决冲突。
+     * 设置页仅在明确选择「确认此条并保存」后清除；普通保存不代表确认。
      */
     val pending: Boolean = false,
     val version: String = ""

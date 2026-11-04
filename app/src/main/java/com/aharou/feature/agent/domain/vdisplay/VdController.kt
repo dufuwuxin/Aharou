@@ -62,7 +62,7 @@ data class VdInfo(
  * 影子屏控制器：在宿主上创建一块**不在设备屏幕显示**的虚拟显示屏。
  *
  * 机制参考并改编自 Genymobile/scrcpy 的 new-display（Apache-2.0，源码见
- * `tools/aharou-vd/`）：资产里内置一个约 3KB 的 runner，经 root 或 Shizuku 以 shell
+ * `tools/aharou-vd/`）：资产里内置一个约 3KB 的 runner，经 Shizuku 以 shell
  * 身份 `app_process` 拉起——创建无头虚拟屏后保活；后续启动 App / 截图 / 触控
  * 全部经同一条命令行通道完成，用户主屏零打扰。
  */
@@ -157,7 +157,7 @@ class VdController @Inject constructor(
     val state: StateFlow<VdInfo?> = _state.asStateFlow()
 
     /**
-     * runner 出图的落点：App 私有外部目录。runner 以 shell/root 身份可写，App 又能直接读，
+     * runner 出图的落点：App 私有外部目录。runner 以 shell 身份可写，App 又能直接读，
      * 二进制不经 shell 文本通道（那是给命令输出用的）。
      */
     /** 文件名带实例后缀：正式包与调试包各自开影子屏时，画面不会互相覆盖。 */
@@ -184,7 +184,7 @@ class VdController @Inject constructor(
     private suspend fun exec(command: String, timeoutMs: Long = 60_000L): ShellCommandResult {
         val mode = hostShell.ensureMode()
         check(mode != HostShellMode.UNAVAILABLE) {
-            "影子屏需要 root 或 Shizuku 就绪（当前通道：$mode，Shizuku: ${hostShell.shizukuState.value}）"
+            "影子屏需要 Shizuku 就绪（当前通道：$mode，Shizuku: ${hostShell.shizukuState.value}）"
         }
         return hostShell.run(command, timeoutMs)
     }

@@ -26,7 +26,7 @@ Tag 驱动发版，平时 `master` 上的提交不影响发布包。
 2. **拉到本地**：`git fetch origin pull/<N>/head:pr-<N>`。勿用 `gh pr checkout`，它会改当前分支的跟踪关系。
 3. **审查**：`gh pr diff <N> > /tmp/pr<N>.diff` 通读。**PR 描述与 CodeRabbit 结论都不算证据**，逐项落地核实：
    - 新引入的库在 `app/build.gradle.kts` 里是否已有
-   - 新用的 `R.string.xxx` 在中英两份 `strings.xml` 里是否都存在
+   - 新用的 `R.string.xxx` 在中文 `values/strings.xml` 里是否都存在
    - 调用的既有组件签名是否匹配；被改了签名的组件用 `rg` 找出全部调用点确认都改到
    - 新交互是否复用既有实现（例：模型拖拽排序对照 `ProvidersAndLogSection.kt` 的手柄写法）
    - 安全面：可疑网络请求、凭据外发、命令拼接

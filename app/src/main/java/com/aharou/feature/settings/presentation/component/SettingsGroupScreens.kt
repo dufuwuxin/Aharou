@@ -2,6 +2,7 @@ package com.aharou.feature.settings.presentation.component
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -15,9 +16,9 @@ import androidx.compose.ui.res.stringResource
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aharou.R
-import com.aharou.core.theme.AppThemePreset
+import com.aharou.feature.onboarding.domain.OnboardingStep
+import com.aharou.feature.onboarding.presentation.onboardingTarget
 import com.aharou.core.theme.Spacing
-import com.aharou.core.theme.isDynamicColorSupported
 import com.aharou.core.theme.semanticColors
 import com.aharou.core.ui.AppSwitch
 import com.aharou.feature.settings.data.repository.AppThemeMode
@@ -54,16 +55,15 @@ import compose.icons.feathericons.Users
 /**
  * 设置首页六个分组各自的内容页。
  *
- * 首页只列六个入口（AI 配置、Aharou 助手、通用设置、权限与后台、更多、帮助与关于），
+ * 首页按配置、助手、通用、权限与后台、更多分组，
  * 点进去才是组里的各项。每一页都是「一个分组标题 + 一张卡片」的形态。
  */
 
 @Composable
-internal fun SettingsAharouGroupScreen(onOpen: (SettingsSection) -> Unit) {
+internal fun SettingsAharouRows(onOpen: (SettingsSection) -> Unit) {
     Column(
         modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
+            .fillMaxWidth()
             .padding(bottom = Spacing.xl),
         verticalArrangement = Arrangement.spacedBy(Spacing.sm)
     ) {
@@ -170,27 +170,36 @@ internal fun SettingsAiGroupScreen(onOpen: (SettingsSection) -> Unit) {
 }
 
 @Composable
-internal fun SettingsGeneralGroupScreen(
+internal fun SettingsGeneralRows(
     themeMode: AppThemeMode,
-    themePresetId: String?,
-    dynamicColorEnabled: Boolean,
     terminalSettings: TerminalSettings,
-    currentLanguageDisplayName: String,
     onOpenTheme: () -> Unit,
     onOpenTerminalSettingsSheet: () -> Unit,
-    onOpenLanguageSheet: () -> Unit,
     onOpen: (SettingsSection) -> Unit,
     cleanupViewModel: TerminalCleanupSettingsViewModel = hiltViewModel()
 ) {
     val autoCloseAgentTabs by cleanupViewModel.autoCloseFinishedAgentTabs.collectAsStateWithLifecycle()
     Column(
         modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
+            .fillMaxWidth()
             .padding(bottom = Spacing.xl),
         verticalArrangement = Arrangement.spacedBy(Spacing.sm)
     ) {
         SettingsGroupHeader(text = stringResource(R.string.settings_category_general))
+        SettingsGroup {
+            SettingsRow(
+                icon = FeatherIcons.Server,
+                title = stringResource(SettingsSection.Providers.titleRes),
+                onClick = { onOpen(SettingsSection.Providers) },
+                modifier = Modifier.onboardingTarget(OnboardingStep.CONFIG_PROVIDER)
+            )
+            SettingsDivider()
+            SettingsRow(icon = FeatherIcons.Zap, title = stringResource(SettingsSection.DefaultModels.titleRes), onClick = { onOpen(SettingsSection.DefaultModels) })
+            SettingsDivider()
+            SettingsRow(icon = FeatherIcons.Tool, title = stringResource(SettingsSection.Plugins.titleRes), onClick = { onOpen(SettingsSection.Plugins) })
+            SettingsDivider()
+            SettingsRow(icon = FeatherIcons.Tool, title = stringResource(SettingsSection.Connectors.titleRes), onClick = { onOpen(SettingsSection.Connectors) })
+        }
         SettingsGroup {
             SettingsRow(
                 icon = FeatherIcons.Sliders,
@@ -203,11 +212,7 @@ internal fun SettingsGeneralGroupScreen(
                 title = stringResource(R.string.settings_theme_title),
                 onClick = onOpenTheme,
                 trailing = {
-                    val colorLabel = if (dynamicColorEnabled && isDynamicColorSupported) {
-                        stringResource(R.string.theme_dynamic_color)
-                    } else {
-                        stringResource(AppThemePreset.findById(themePresetId).nameRes)
-                    }
+                    val colorLabel = stringResource(R.string.skin_xiaocheng)
                     Text(
                         text = "${stringResource(themeMode.labelRes)} · $colorLabel",
                         style = MaterialTheme.typography.bodyMedium,
@@ -240,40 +245,21 @@ internal fun SettingsGeneralGroupScreen(
                     )
                 }
             )
-            SettingsDivider()
-            SettingsRow(
-                icon = FeatherIcons.Globe,
-                title = stringResource(R.string.settings_language),
-                onClick = onOpenLanguageSheet,
-                trailing = {
-                    Text(
-                        text = currentLanguageDisplayName,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.semanticColors.subtleText
-                    )
-                }
-            )
+
         }
     }
 }
 
 @Composable
-internal fun SettingsPermissionsGroupScreen(onOpen: (SettingsSection) -> Unit) {
+internal fun SettingsPermissionsRows(onOpen: (SettingsSection) -> Unit) {
     Column(
         modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
+            .fillMaxWidth()
             .padding(bottom = Spacing.xl),
         verticalArrangement = Arrangement.spacedBy(Spacing.sm)
     ) {
         SettingsGroupHeader(text = stringResource(R.string.settings_category_permissions))
         SettingsGroup {
-            SettingsRow(
-                icon = FeatherIcons.Lock,
-                title = stringResource(SettingsSection.Permissions.titleRes),
-                onClick = { onOpen(SettingsSection.Permissions) }
-            )
-            SettingsDivider()
             SettingsRow(
                 icon = FeatherIcons.Shield,
                 title = stringResource(SettingsSection.AppPermissions.titleRes),
@@ -296,11 +282,10 @@ internal fun SettingsPermissionsGroupScreen(onOpen: (SettingsSection) -> Unit) {
 }
 
 @Composable
-internal fun SettingsMoreGroupScreen(onOpen: (SettingsSection) -> Unit) {
+internal fun SettingsMoreRows(onOpen: (SettingsSection) -> Unit) {
     Column(
         modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
+            .fillMaxWidth()
             .padding(bottom = Spacing.xl),
         verticalArrangement = Arrangement.spacedBy(Spacing.sm)
     ) {
@@ -338,12 +323,6 @@ internal fun SettingsMoreGroupScreen(onOpen: (SettingsSection) -> Unit) {
             )
             SettingsDivider()
             SettingsRow(
-                icon = FeatherIcons.Server,
-                title = stringResource(SettingsSection.RemoteServers.titleRes),
-                onClick = { onOpen(SettingsSection.RemoteServers) }
-            )
-            SettingsDivider()
-            SettingsRow(
                 icon = FeatherIcons.Smartphone,
                 title = stringResource(SettingsSection.RemoteDevice.titleRes),
                 onClick = { onOpen(SettingsSection.RemoteDevice) }
@@ -377,35 +356,6 @@ internal fun SettingsMoreGroupScreen(onOpen: (SettingsSection) -> Unit) {
                 icon = FeatherIcons.Save,
                 title = stringResource(SettingsSection.Backup.titleRes),
                 onClick = { onOpen(SettingsSection.Backup) }
-            )
-        }
-    }
-}
-
-@Composable
-internal fun SettingsHelpGroupScreen(
-    onOpen: (SettingsSection) -> Unit,
-    onOpenManual: () -> Unit
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(bottom = Spacing.xl),
-        verticalArrangement = Arrangement.spacedBy(Spacing.sm)
-    ) {
-        SettingsGroupHeader(text = stringResource(R.string.settings_category_help))
-        SettingsGroup {
-            SettingsRow(
-                icon = FeatherIcons.BookOpen,
-                title = stringResource(R.string.settings_user_guide),
-                onClick = onOpenManual
-            )
-            SettingsDivider()
-            SettingsRow(
-                icon = FeatherIcons.Info,
-                title = stringResource(SettingsSection.About.titleRes),
-                onClick = { onOpen(SettingsSection.About) }
             )
         }
     }

@@ -1,6 +1,6 @@
 # Telegram 机器人
 
-「设置 → 更多 → Telegram 机器人」把 Aharou 接到 Telegram：你在 Telegram 里给机器人发消息，本机跑一轮 AI 并把回复流式刷回聊天。人不在手机前也能远程指挥。
+「设置 → Telegram 机器人」把 Aharou 接到 Telegram：你在 Telegram 里给机器人发消息，本机跑一轮 AI 并把回复流式刷回聊天。人不在手机前也能远程指挥。
 
 ## 前置：申请一个机器人
 

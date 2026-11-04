@@ -77,6 +77,7 @@ internal fun ScriptToolsSection(
     createRequested: Boolean,
     onCreateHandled: () -> Unit,
     viewModel: ScriptToolsViewModel = hiltViewModel(),
+    embedded: Boolean = false,
 ) {
     val definitions by viewModel.definitions.collectAsState()
     val error by viewModel.error.collectAsState()
@@ -103,7 +104,7 @@ internal fun ScriptToolsSection(
         }
     }
 
-    Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(Modifier.then(if (embedded) Modifier else Modifier.verticalScroll(rememberScrollState())).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         SettingsGroupHeader(stringResource(R.string.script_tools_title))
         if (error) Text(stringResource(R.string.script_tools_save_failed), color = MaterialTheme.colorScheme.error)
         if (showEditor) {

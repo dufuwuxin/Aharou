@@ -77,7 +77,7 @@ class VdTool @Inject constructor(
             "type 往焦点输入框输文字（text=内容，可选 submit=true 回车，支持中文；优先直接写进输入框，不弹键盘、不动用户剪贴板）。" +
             "task 把「看屏→决策→动作→再看屏」的多步循环交给手机操作子代理：goal 是要完成的事，一次调用返回一个结果（不逐步吃上下文）；" +
             "子代理内部的动作坐标是 0..1000 归一化值（换分辨率不失效），与本工具 tap/swipe 用的像素坐标不是一套，不要把两者混用；" +
-            "trace 列出或回放手机操作记录（traceId 为空则列出）。需 root 或 Shizuku 就绪；未就绪时改用 a11y 并在操作前告知用户。"
+            "trace 列出或回放手机操作记录（traceId 为空则列出）。需 Shizuku 就绪；未就绪时改用 a11y 并在操作前告知用户。"
 
     override val permissionPolicy = ToolPermissionPolicy.ASK
 

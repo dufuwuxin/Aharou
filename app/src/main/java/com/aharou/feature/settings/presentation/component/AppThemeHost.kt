@@ -8,8 +8,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aharou.core.theme.AIEditorTheme
-import com.aharou.core.theme.AppThemePreset
-import com.aharou.core.theme.SkinBrightness
 import com.aharou.feature.agent.data.repository.ChatAppearance
 import com.aharou.feature.agent.data.repository.ChatAppearanceRepository
 import com.aharou.feature.agent.presentation.component.LocalChatAppearance
@@ -20,19 +18,17 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
 
-/** 外观决议结果：最终皮肤、明暗、莫奈开关与聊天气泡外观。 */
+/** 外观决议结果：明暗与聊天气泡外观。 */
 data class AppAppearance(
-    val preset: AppThemePreset,
     val darkTheme: Boolean,
-    val dynamicColor: Boolean,
     val chatAppearance: ChatAppearance
 )
 
 /**
- * 把「皮肤自带明暗」与「明暗模式开关」合成最终结果。
+ * 固定霞橙，按用户选择解析深浅色。
  *
- * 自动模式尊重皮肤自带明暗（夜墨、玄青在任何系统设置下都是深色）；
- * 手动选浅色或深色时取该皮肤对应的那一版，另一版由皮肤派生。
+ * 自动模式跟随系统；
+ * 手动选浅色或深色时使用霞橙对应的配色。
  */
 @Composable
 fun rememberAppAppearance(themeSettings: ThemeSettingsRepository): AppAppearance {
@@ -44,15 +40,10 @@ fun rememberAppAppearance(themeSettings: ThemeSettingsRepository): AppAppearance
     }
     val themeMode by themeSettings.themeModeFlow
         .collectAsStateWithLifecycle(initialValue = AppThemeMode.AUTO)
-    val skinId by themeSettings.themePresetIdFlow.collectAsStateWithLifecycle(initialValue = null)
-    val customSkins by themeSettings.customSkinsFlow
-        .collectAsStateWithLifecycle(initialValue = emptyList())
-    val dynamicColor by themeSettings.dynamicColorFlow.collectAsStateWithLifecycle(initialValue = false)
     val systemDark = isSystemInDarkTheme()
-    val preset = AppThemePreset.findById(skinId, customSkins)
-    val darkTheme = remember(themeMode, preset, systemDark) {
+    val darkTheme = remember(themeMode, systemDark) {
         when (themeMode) {
-            AppThemeMode.AUTO -> preset.brightness == SkinBrightness.DARK || systemDark
+            AppThemeMode.AUTO -> systemDark
             AppThemeMode.DARK -> true
             AppThemeMode.LIGHT -> false
         }
@@ -60,9 +51,7 @@ fun rememberAppAppearance(themeSettings: ThemeSettingsRepository): AppAppearance
     val chatAppearance by chatRepository.settingsFlow
         .collectAsStateWithLifecycle(initialValue = ChatAppearance())
     return AppAppearance(
-        preset = preset,
         darkTheme = darkTheme,
-        dynamicColor = dynamicColor,
         chatAppearance = chatAppearance
     )
 }
@@ -73,8 +62,6 @@ fun AppThemeHost(appearance: AppAppearance, content: @Composable () -> Unit) {
     CompositionLocalProvider(LocalChatAppearance provides appearance.chatAppearance) {
         AIEditorTheme(
             darkTheme = appearance.darkTheme,
-            preset = appearance.preset,
-            dynamicColor = appearance.dynamicColor,
             content = content
         )
     }

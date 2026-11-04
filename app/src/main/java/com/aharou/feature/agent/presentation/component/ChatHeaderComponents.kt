@@ -64,8 +64,6 @@ internal fun ChatHeader(
     outputTokens: Int,
     /** 当前会话 id：定时任务胶囊据此判断本会话是不是某个任务的目标。 */
     sessionId: String? = null,
-    /** 当前会话标题（单行截断居中展示）；调用方不传时留空以维持三列布局。 */
-    sessionTitle: String? = null,
     /** 从会话详情页顶部返回到会话列表页；仅在小屏入口场景下传非空。 */
     onBackToSessions: (() -> Unit)? = null,
     onOpenDrawer: () -> Unit,
@@ -126,24 +124,7 @@ internal fun ChatHeader(
                 } else {
                     Spacer(modifier = Modifier.width(Spacing.sm))
                 }
-                // 中轴：当前会话标题（单行截断、weight 居中）；调用方未传时留空，三列布局保持不变
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(horizontal = Spacing.xs),
-                    contentAlignment = Alignment.Center
-                ) {
-                    sessionTitle?.takeIf { it.isNotBlank() }?.let { title ->
-                        Text(
-                            text = title,
-                            style = MaterialTheme.typography.titleSmall,
-                            color = MaterialTheme.colorScheme.onBackground,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
-                }
+                Spacer(modifier = Modifier.weight(1f))
 
                 if (toolsExpanded) {
                     // 展开态：只有工具三入口 + 收起，其余一律让位

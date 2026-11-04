@@ -207,7 +207,7 @@ internal fun SkillsSection(
                         if (index > 0) SettingsDivider()
                         SkillRow(
                             entry = entry,
-                            onDelete = null,
+                            onDelete = { onDelete(entry) },
                             onLongClick = { actionEntry = entry },
                             onClick = { onOpenDetail(entry) },
                             selectionMode = selection.selectionMode
@@ -344,7 +344,7 @@ internal fun SkillsSection(
 }
 
 /**
- * 技能行：图标 + 名称/描述 + 右箭头。[onDelete] 为 null 表示不可删除（内置技能），
+ * 技能行：图标 + 名称/描述 + 右箭头。[onDelete] 为 null 表示不提供删除操作，
  * 此时连左滑手势都不接——免得滑出个按钮让人以为能删；长按仍可用（弹操作单，只给导出）。
  *
  * 多选态下不可删的行也不接点击：叠在整页多选里再去开详情页只会让人失去选中上下文。

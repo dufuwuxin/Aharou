@@ -26,8 +26,9 @@ class LauncherShortcutOverrides : ContentProvider() {
     override fun onCreate(): Boolean {
         val ctx = context ?: return true
         runCatching {
+            ShortcutManagerCompat.removeDynamicShortcuts(ctx, listOf("start_voice"))
+            ShortcutManagerCompat.disableShortcuts(ctx, listOf("start_voice"), null)
             push(ctx, "new_chat", R.string.shortcut_new_chat, R.drawable.ic_pet_say, ACTION_NEW_CHAT)
-            push(ctx, "start_voice", R.string.shortcut_start_voice, R.drawable.ic_pet_mic, ACTION_START_VOICE)
         }.onFailure { e ->
             // 快捷方式推送失败绝不能影响启动。
             FileLogger.e(TAG, "覆盖静态快捷方式失败", e)
@@ -68,6 +69,5 @@ class LauncherShortcutOverrides : ContentProvider() {
     private companion object {
         const val TAG = "LauncherShortcutOverrides"
         const val ACTION_NEW_CHAT = "com.aharou.intent.NEW_CHAT"
-        const val ACTION_START_VOICE = "com.aharou.intent.START_VOICE"
     }
 }

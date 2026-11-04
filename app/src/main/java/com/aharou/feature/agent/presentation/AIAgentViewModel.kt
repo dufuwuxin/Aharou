@@ -197,6 +197,7 @@ class AIAgentViewModel @Inject constructor(
     private val inboxDirectory: InboxDirectory,
     private val agentPermissionNotifier: AgentPermissionNotifier,
     private val agentTurnRunner: AgentTurnRunner,
+    private val projectExecution: com.aharou.feature.agent.domain.task.ProjectTaskExecutionCoordinator,
     private val turnEndBridge: AgentTurnEndBridge,
     private val sessionPanels: SessionPanelController,
     private val scheduledTaskDao: ScheduledTaskDao,
@@ -2106,7 +2107,8 @@ class AIAgentViewModel @Inject constructor(
         /** 技能等场景：request 以 `/` 开头但已由调用方处理，跳过斜杠命令再派发，避免重入死循环。 */
         skipCommandDispatch: Boolean = false,
         /** /init 等场景：调用方已先落过命令文本，这轮不再落用户消息，避免落出两条。 */
-        persistUserMessage: Boolean = true
+        persistUserMessage: Boolean = true,
+        executionTurnId: String = UUID.randomUUID().toString()
     ): Job = viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
         val sessionId = targetSessionId ?: ensureSession()
         if (sessionId.isBlank()) {
@@ -2132,6 +2134,7 @@ class AIAgentViewModel @Inject constructor(
                     null -> Unit
                 }
             }
+            projectExecution.begin(sessionId, executionTurnId)
             sessionJobs[sessionId] = currentJob
             turnEndBridge.onRequestStarted(sessionId, request, isAutoTrigger)
             _activeAgentSessions.value = _activeAgentSessions.value + sessionId
@@ -2284,6 +2287,7 @@ class AIAgentViewModel @Inject constructor(
                         removeRunningTool(sessionId, msgId)
                     }
                     is AgentEvent.Failed -> {
+                        projectExecution.finish(sessionId, executionTurnId, com.aharou.feature.agent.domain.task.ProjectTaskExecutionOutcome.FAILED)
                         failed = true
                         setCompacting(sessionId, false)
                         val failureMessage = describeFailure(event)
@@ -2293,6 +2297,7 @@ class AIAgentViewModel @Inject constructor(
                         // 子代理失败时通知父会话的事在 runner 里做
                     }
                     AgentEvent.Completed -> {
+                        if (!failed) projectExecution.finish(sessionId, executionTurnId, com.aharou.feature.agent.domain.task.ProjectTaskExecutionOutcome.SUCCEEDED)
                         setRetryState(sessionId, null)
                         setKeySwitchState(sessionId, null)
                         setCompacting(sessionId, false)
@@ -2347,6 +2352,7 @@ class AIAgentViewModel @Inject constructor(
             setStreamingReasoning(sessionId, null)
 
         } catch (e: CancellationException) {
+            projectExecution.finish(sessionId, executionTurnId, com.aharou.feature.agent.domain.task.ProjectTaskExecutionOutcome.STOPPED)
             val cancelledState = _agentStates.value[sessionId]
             val isOwnJob = sessionJobs[sessionId] == coroutineContext[Job]
             FileLogger.d(TAG, "stream cancelled: sid=$sessionId isOwnJob=$isOwnJob state=$cancelledState")
@@ -2358,6 +2364,7 @@ class AIAgentViewModel @Inject constructor(
             }
             throw e
         } catch (e: Exception) {
+             projectExecution.finish(sessionId, executionTurnId, com.aharou.feature.agent.domain.task.ProjectTaskExecutionOutcome.FAILED)
              stewardNext = null
              FileLogger.e(TAG, "executeAgentRequestStream 失败: request=$request", e)
              if (sessionJobs[sessionId] === currentJob) {
@@ -2367,6 +2374,7 @@ class AIAgentViewModel @Inject constructor(
                  _completedSessions.value = _completedSessions.value - sessionId
              }
         } finally {
+            projectExecution.failIfRunning(sessionId, executionTurnId)
             val isOwnJob = sessionJobs[sessionId] == coroutineContext[Job]
             FileLogger.d(TAG, "stream finally: sid=$sessionId isOwnJob=$isOwnJob state=${_agentStates.value[sessionId]}")
             if (isOwnJob) {
@@ -2417,6 +2425,7 @@ class AIAgentViewModel @Inject constructor(
         // 就再也回不来了（之后 task(create) 永久报「已达上限」），故取消前逐个归还。
         subAgentEventBus.activeSubSessionIds.value.toList()
             .forEach { subAgentEventBus.release(it) }
+        sessionJobs.keys.forEach { projectExecution.stop(it) }
         jobs.forEach { it.cancel() }
         sessionJobs.clear()
         _activeAgentSessions.value = emptySet()
@@ -2431,6 +2440,8 @@ class AIAgentViewModel @Inject constructor(
     }
 
     /** 软打断当前会话正在运行的 agent：不取消协程，只投一条 USER_INTERRUPT，见 [stopAgentSession]。 */
+    fun executionOutcome(sessionId: String, turnId: String) = projectExecution.outcome(sessionId, turnId)
+
     fun stopAgent() {
         val sessionId = _currentSessionId.value ?: return
         stopAgentSession(sessionId)
@@ -2454,6 +2465,7 @@ class AIAgentViewModel @Inject constructor(
         if (sessionId in stoppingSessions) return
         val job = sessionJobs[sessionId] ?: return
         if (!job.isActive) return
+        projectExecution.stop(sessionId)
         releaseStoppedSubAgent(sessionId)
         agentNotificationCenter.enqueue(
             sessionId,
@@ -2496,6 +2508,7 @@ class AIAgentViewModel @Inject constructor(
      */
     fun forceStopAgentSession(sessionId: String) {
         val job = sessionJobs[sessionId]
+        if (job?.isActive == true) projectExecution.stop(sessionId)
         releaseStoppedSubAgent(sessionId)
         // 取消前先取快照：协程被取消后 _runningTools 与待授权请求会随之清空，那时就取不到了。
         val runningTools = _runningTools.value[sessionId]?.values?.toList() ?: emptyList()
@@ -3291,13 +3304,11 @@ class AIAgentViewModel @Inject constructor(
         if (trimmed.isEmpty()) return@launch
         sessionUseCase.updateTitle(id, trimmed)
     }
-
     /** 置顶/取消置顶会话。置顶后排在列表最前（置顶分组），不改 updatedAt。 */
     fun togglePinSession(id: String) = viewModelScope.launch {
         val pinned = sessions.value.find { it.id == id }?.isPinned ?: return@launch
         sessionUseCase.updatePinned(id, !pinned)
     }
-
     /** 导出单个会话为无密码备份格式（tar.gz），流式写入 [output]（调用方打开，本方法负责关闭）。成功回调 true，失败回调 false。 */
     fun exportSession(sessionId: String, output: OutputStream, onResult: (Boolean) -> Unit) = viewModelScope.launch {
         try {
@@ -3310,7 +3321,6 @@ class AIAgentViewModel @Inject constructor(
             runCatching { output.close() }
         }
     }
-
     private suspend fun ensureSession(): String {
         _currentSessionId.value?.let { return it }
         val ws = _currentWorkspace.value
@@ -3319,23 +3329,19 @@ class AIAgentViewModel @Inject constructor(
         _currentSessionId.value = id
         return id
     }
-
     /** 新建会话并落库，返回 id。 */
     private suspend fun createAndUpsertSession(workspacePath: String): String {
         val s = createSession(workspacePath)
         sessionUseCase.upsertSession(s)
         return s.id
     }
-
     /**
      * 创建新会话并按「新会话默认模型」绑定 provider/model；未设置默认时回退全局 active provider。
      * 所有新建会话的入口（冷启动、新建、删除兜底、ensureSession）都走这里。
      */
     private suspend fun createSession(workspacePath: String): ChatSessionEntity =
         agentTurnRunner.createSessionEntity(workspacePath)
-
     // endregion
-
     fun updateMessageContent(messageId: String, newContent: String) = viewModelScope.launch {
         try {
             messagePersistenceUseCase.updateContent(messageId, newContent)
@@ -3343,7 +3349,6 @@ class AIAgentViewModel @Inject constructor(
             FileLogger.e(TAG, "更新消息失败", e)
         }
     }
-
     fun deleteMessage(messageId: String) = viewModelScope.launch {
         try {
             messagePersistenceUseCase.deleteMessage(messageId)
@@ -3351,7 +3356,6 @@ class AIAgentViewModel @Inject constructor(
             FileLogger.e(TAG, "删除消息失败", e)
         }
     }
-
     /**
      * 「从此处新建分支」：以消息 [messageId]（含）之前的历史另起一个会话，并自动切过去。
      *
@@ -3370,7 +3374,6 @@ class AIAgentViewModel @Inject constructor(
             if (cut < 0) return@launch
             val head = trimIncompleteTail(all.subList(0, cut + 1))
             if (head.isEmpty()) return@launch
-
             val fork = sessionUseCase.newSessionEntity(
                 workspacePath = source.workspacePath.ifBlank { _currentWorkspace.value },
                 providerId = source.providerId,
@@ -3411,7 +3414,6 @@ class AIAgentViewModel @Inject constructor(
             FileLogger.e(TAG, "分叉会话失败", e)
         }
     }
-
     /**
      * 截掉历史尾部的不完整轮次：结果未回的 TOOL 行、tool_use 没拿到全部结果的 ASSISTANT 行。
      *
@@ -3438,12 +3440,10 @@ class AIAgentViewModel @Inject constructor(
         }
         return if (end <= 0) emptyList() else messages.take(end)
     }
-
     /** ASSISTANT 行上的 tool_calls id；非工具行、或快照被截断解析不了时返回空表。 */
     private fun AgentMessageEntity.toolCallIds(): Set<String> =
         toolCallsJson?.takeIf { it.isNotBlank() }
             ?.let { raw -> runCatching { json.decodeFromString<List<ToolCall>>(raw) }.getOrNull() }
             ?.mapTo(HashSet<String>()) { it.id }
             .orEmpty()
-
 }

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="workspace_model_chain_short">模型顺序</string>
+    <string name="workspace_model_chain_title">工作区模型顺序</string>
+    <string name="workspace_model_chain_hint">主对话按顺序使用模型，重试耗尽且尚未输出内容时切换下一项。全部失败则停止。保存后从下一轮生效；清空列表则恢复原来的单模型选择。</string>
+    <string name="workspace_model_chain_add">添加候选模型</string>
+    <string name="workspace_model_chain_empty">请先在设置中添加供应商和模型。</string>
+    <string name="workspace_model_chain_up">上移</string>
+    <string name="workspace_model_chain_down">下移</string>
+    <string name="workspace_model_chain_error">模型顺序读取或保存失败，请重试。</string>
+</resources>

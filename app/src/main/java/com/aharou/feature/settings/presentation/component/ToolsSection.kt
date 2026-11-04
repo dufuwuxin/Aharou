@@ -238,7 +238,8 @@ internal fun McpToolsSection(
 @Composable
 internal fun ToolsSection(
     state: ToolsUiState,
-    viewModel: ToolsViewModel
+    viewModel: ToolsViewModel,
+    embedded: Boolean = false
 ) {
     val context = LocalContext.current
     var pendingDelete by remember { mutableStateOf<ToolUiEntry?>(null) }
@@ -260,19 +261,18 @@ internal fun ToolsSection(
         viewModel.clearMessage()
     }
 
-    Column(modifier = Modifier.fillMaxSize()) {
+    Column(modifier = Modifier.fillMaxWidth().then(if (embedded) Modifier else Modifier.verticalScroll(rememberScrollState()))) {
         if (state.loading) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(modifier = Modifier.size(28.dp), strokeWidth = 2.dp)
             }
         } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = Spacing.xl),
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(bottom = Spacing.xl),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 if (state.entries.isEmpty()) {
-                    item {
+                    androidx.compose.runtime.key("empty") {
                         Text(
                             text = stringResource(R.string.tools_empty),
                             style = MaterialTheme.typography.bodyMedium,
@@ -281,7 +281,7 @@ internal fun ToolsSection(
                         )
                     }
                 }
-                item(key = "practical-templates") {
+                androidx.compose.runtime.key("practical-templates") {
                     Column(modifier = Modifier.padding(horizontal = Spacing.lg), verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
                         Text(stringResource(R.string.tools_templates_title), style = MaterialTheme.typography.labelLarge)
                         Text(stringResource(R.string.tools_templates_hint), style = MaterialTheme.typography.bodySmall)
@@ -293,15 +293,17 @@ internal fun ToolsSection(
                 TOOL_GROUP_ORDER.forEach { source ->
                     val entries = state.entries.filter { it.source == source }.sortedBy { it.name.lowercase() }
                     if (entries.isEmpty()) return@forEach
-                    item(key = "tools-header-${source.name}") {
+                    androidx.compose.runtime.key("tools-header-${source.name}") {
                         SettingsGroupHeader(text = stringResource(groupTitleRes(source)))
                     }
-                    items(entries, key = { "${source.name}:${it.name}" }) { entry ->
+                    entries.forEach { entry ->
+                        androidx.compose.runtime.key(source, entry.name) {
                         ToolRow(
                             entry = entry,
                             onClick = { viewModel.openEditor(entry.name) },
                             onDelete = { pendingDelete = entry }
                         )
+                        }
                     }
                 }
             }

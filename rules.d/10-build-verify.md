@@ -26,7 +26,7 @@ Aharou 特有的部分是：子代理交付后只做只读核实（读文件、�
 | 推送前单测 | `./gradlew :app:testArmsoloDebugUnitTest` |
 | 推送前迁移对账 | `python3 scripts/check_migrations.py`（或 `./gradlew checkMigrations`） |
 | 推送前技能自检 | `python3 scripts/check_skills.py`（frontmatter/命名、description、验收用例齐全、市场配置与文档同步） |
-| 推送前架构门禁 | `python3 scripts/check_architecture.py`（或 `./gradlew checkArchitecture`；已挂 `preBuild`，禁用组件 import、单文件行数棘轮、双语 strings 不一致会直接编不过） |
+| 推送前架构门禁 | `python3 scripts/check_architecture.py`（或 `./gradlew checkArchitecture`；已挂 `preBuild`，禁用组件 import、单文件行数棘轮、单中文资源或引用不合规会直接编不过） |
 | proot 资产校验 | `python3 scripts/check_proot_assets.py`（或 `./gradlew checkProotAssets`；已挂 `preBuild`，换了 .so 却没同步 `assets/proot-runtime.json` 时拦下） |
 | 发版构建 APK | `./gradlew :app:assembleArmsoloRelease`（CI 的 release workflow 只出 APK，不发 AAB） |
 

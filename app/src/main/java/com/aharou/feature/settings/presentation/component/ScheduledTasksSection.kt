@@ -98,8 +98,7 @@ internal fun ScheduledTasksSection(viewModel: ScheduledTasksViewModel = hiltView
 
     Column(
         modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
+            .fillMaxWidth()
             .padding(bottom = Spacing.xl),
         verticalArrangement = Arrangement.spacedBy(Spacing.sm)
     ) {

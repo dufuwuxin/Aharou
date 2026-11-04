@@ -55,6 +55,7 @@ class SystemPromptProvider @Inject constructor(
     private val chatSessionDao: ChatSessionDao,
     private val sharedInbox: SharedInbox,
     private val containerProfileResolver: com.aharou.feature.agent.domain.container.ContainerProfileResolver, private val projectIndex: ProjectIndex,
+    private val projectTaskContext: ProjectTaskContext,
     private val injectedContextStore: InjectedContextStore
 ) {
     // 抽象独立的 Source
@@ -675,7 +676,7 @@ class SystemPromptProvider @Inject constructor(
      * 包一层而不是在 6 条 return 前逐个插代码：漏一条面板就少一段。
      */
     fun build(agentContext: AgentContext, consumeInbox: Boolean = true): String =
-        buildUnrecorded(agentContext, consumeInbox)
+        (buildUnrecorded(agentContext, consumeInbox) + (projectTaskContext.build(agentContext.sessionId, agentContext.projectRoot, isGhostSession(agentContext))?.let { "\n\n$it" } ?: ""))
             .also { injectedContextStore.record(agentContext.sessionId, it) }
 
     private fun buildUnrecorded(agentContext: AgentContext, consumeInbox: Boolean): String {
@@ -685,11 +686,7 @@ class SystemPromptProvider @Inject constructor(
             return buildCustomOnly(agentContext, consumeInbox)
         }
 
-        // 1. 获取各个 Source 的基线快照。
-        // 隐身会话只保留核心档案：记忆清单与常驻记忆全部不注入（写入侧已由 GhostModeStore 拦住，
-        // 读取侧不拦的话，「隐身」只挡住了落盘、挡不住模型把旧会话里的用户信息读进上下文）。
         val ghost = isGhostSession(agentContext)
-        // 用户在提示词页关掉的动态区块：不取内容也不追加（与片段里的 {{AICODE_*}} 变量同一语义）。
         val offBlocks = promptFragmentCatalog.disabledBlocks()
         val rawStatic = staticRuleSource.build(agentContext)
         val soulContent = gate(InjectionBlock.SOUL, offBlocks) { soulSource.build(agentContext) }
@@ -702,14 +699,11 @@ class SystemPromptProvider @Inject constructor(
         val rulesContent = gate(InjectionBlock.RULES, offBlocks) { availableRulesSource.build(agentContext) }
         val workspaceTypeContent = gate(InjectionBlock.WORKSPACE_TYPE, offBlocks) { workspaceTypeSource.build(agentContext) }
         val modelIdentityContent = gate(InjectionBlock.MODEL_IDENTITY, offBlocks) { modelIdentitySource.build(agentContext) }
-        // 隐身会话不读也不消费信箱：不把其他工作区的内容带进隐身对话，也不替用户吃掉这些消息。
         val inboxContent = gate(InjectionBlock.INBOX, offBlocks) { if (ghost) null else sharedInboxSource.build(agentContext, consumeInbox) }
 
-        // 2. Workspace 上下文固定输出（内容已精简，无需快照占位）
         val effectiveWorkspaceContent = if (InjectionBlock.WORKSPACE.key in offBlocks) "" else workspaceSource.build(agentContext)
         val timeContent = if (InjectionBlock.TIME.key in offBlocks) null else currentTimeSource.build(agentContext)
 
-        // 3. 变量就地展开：片段里写了 {{AICODE_*}} 就替换为真实内容，并跳过下方对应的自动追加，避免重复。
         val staticContent = renderVariables(
             rawStatic,
             skillsContent,
@@ -721,8 +715,6 @@ class SystemPromptProvider @Inject constructor(
             rulesContent
         )
 
-        // 4. 组装最终提示词：静态基线在前（享受 KV Cache），易变段落统一交给
-        //    [PromptTailAssembler] 按固定顺序追加。
         return staticContent + PromptTailAssembler.render(
             rawStatic,
             PromptTail(

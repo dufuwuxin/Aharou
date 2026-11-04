@@ -64,7 +64,8 @@ object AgentTeamParser {
             charter = body.trim(),
             admins = parseNames(frontmatter["admins"]),
             members = parseMemberRefs(frontmatter["members"]),
-            filePath = filePath
+            filePath = filePath,
+            routes = parseRoutes(frontmatter["routes"])
         )
     }
 
@@ -84,9 +85,20 @@ object AgentTeamParser {
             appendLine("  - name: ${Frontmatter.quote(member.name.trim())}")
             appendLine("    level: ${member.level.coerceAtLeast(1)}")
         }
+        if (form.routes.isNotEmpty()) {
+            appendLine("routes:")
+            form.routes.forEach { route ->
+                appendLine("  - fromStage: ${Frontmatter.quote(route.from.stageId)}")
+                appendLine("    fromTask: ${Frontmatter.quote(route.from.taskId)}")
+                appendLine("    toStage: ${Frontmatter.quote(route.to.stageId)}")
+                appendLine("    toTask: ${Frontmatter.quote(route.to.taskId)}")
+                appendLine("    action: ${route.action.name}")
+            }
+        }
         appendLine("stages:")
         form.stages.forEach { stage ->
             appendLine("  - title: ${Frontmatter.quote(stage.title.trim())}")
+            appendLine("    id: ${Frontmatter.quote(stage.id)}")
             appendLine("    level: ${stage.level.coerceAtLeast(1)}")
             val stageMembers = stage.members.map { it.trim() }.filter { it.isNotEmpty() }
             if (stageMembers.isNotEmpty()) {
@@ -110,6 +122,7 @@ object AgentTeamParser {
                     val query = task.agentQuery.trim()
                     if (query.isNotEmpty()) appendLine("        agentQuery: ${Frontmatter.quote(query)}")
                 }
+                appendLine("        id: ${Frontmatter.quote(task.id)}")
                 appendLine("        prompt: ${Frontmatter.quote(task.prompt.trim())}")
                 if (task.interfaces.isNotEmpty()) {
                     appendLine("        interfaces:")
@@ -129,6 +142,19 @@ object AgentTeamParser {
         }
         appendLine("---")
         if (form.charter.isNotBlank()) appendLine(form.charter.trim())
+    }
+
+    private fun parseRoutes(raw: Any?): List<TeamRoute> {
+        if (raw == null) return emptyList()
+        // Keep malformed routes as invalid endpoints, never silently downgrade to legacy serial execution.
+        val list = raw as? List<*> ?: listOf(raw)
+        return list.map { item ->
+            val map = item as? Map<*, *> ?: emptyMap<Any, Any>()
+            val action = TeamRouteAction.entries.firstOrNull { it.name == map["action"]?.toString()?.uppercase() }
+            TeamRoute(TeamFlowNode(map["fromStage"]?.toString().orEmpty(), map["fromTask"]?.toString().orEmpty()),
+                TeamFlowNode(map["toStage"]?.toString().orEmpty(), map["toTask"]?.toString().orEmpty()),
+                action ?: TeamRouteAction.EXECUTE).let { if (action == null) it.copy(from = TeamFlowNode("", "")) else it }
+        }
     }
 
     /** `admins` 这类纯名字列表：字符串或 `{name: x}` 都认。 */
@@ -186,7 +212,8 @@ object AgentTeamParser {
             ?.toString()?.trim()?.takeIf { it.isNotBlank() }
         return TeamStage(
             title = title,
-            tasks = tasks,
+            id = map["id"]?.toString()?.takeIf { it.isNotBlank() } ?: "stage-${index + 1}",
+            tasks = tasks.mapIndexed { i, task -> task.copy(id = task.id.ifBlank { "task-${i + 1}" }) },
             level = level.coerceAtLeast(1),
             isReview = isReview,
             rejectTo = rejectTo,
@@ -206,7 +233,7 @@ object AgentTeamParser {
             return emptyList()
         }
         val writePaths = AgentDefinitionParser.stringList(map["writePaths"])
-        return parseNames(map["members"]).map { TeamTask(agent = it, prompt = prompt, writePaths = writePaths) }
+        return parseNames(map["members"]).mapIndexed { i, name -> TeamTask(agent = name, prompt = prompt, writePaths = writePaths, id = "task-${i + 1}") }
     }
 
     private fun parseTaskList(raw: Any?, stageTitle: String, filePath: String): List<TeamTask> =
@@ -227,6 +254,7 @@ object AgentTeamParser {
             return null
         }
         return TeamTask(
+            id = map["id"]?.toString().orEmpty(),
             agent = agent,
             department = department,
             agentQuery = agentQuery,

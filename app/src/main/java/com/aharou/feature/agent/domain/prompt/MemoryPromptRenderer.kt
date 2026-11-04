@@ -36,13 +36,13 @@ internal object MemoryPromptRenderer {
     private const val LONG_BODY_LABEL = "（正文较长未内联，用 memory(action=read) 取全文）"
 
     /**
-     * 待确认（冲突未裁决）条目的索引标注。
+     * 待确认（证据未核对或冲突未裁决）条目的索引标注。
      *
      * 这类条目是同一件事的两种说法并存、等用户拍板的中间态：既要出现在清单里（静默隐藏
      * 等于把分歧抹掉，用户再也看不到），又必须让模型看出它是有争议的内容——否则渲染成
      * 普通摘要行后，「未经确认的说法」会被当成既定事实直接照着做。
      */
-    private const val PENDING_LABEL = "（待确认：与另一条说法冲突、尚未裁决，不得当作既定事实）"
+    private const val PENDING_LABEL = "（待确认：尚未核对原始证据或存在未裁决冲突，不得当作既定事实）"
 
     /**
      * 跨设备冲突里本机这一份的索引标注。

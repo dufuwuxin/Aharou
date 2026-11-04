@@ -209,4 +209,34 @@ class AgentTeamParserTest {
         assertEquals("前端工程专家", interfaces.single().with)
         assertEquals("HTTP 响应字段", interfaces.single().about)
     }
+    @Test fun routeAndEndpointIdsSurviveEditAndSerializeRoundtrip() {
+        val a = AgentTeamStageForm(title = "prepare", id = "s-a", tasks = listOf(AgentTeamTaskForm(agent = "worker", prompt = "deliver", id = "t-a")))
+        val b = AgentTeamStageForm(title = "review", id = "s-b", isReview = true, tasks = listOf(AgentTeamTaskForm(agent = "worker", prompt = "verify", id = "t-b")))
+        val routes = listOf(TeamRoute(TeamFlowNode("s-a", "t-a"), TeamFlowNode("s-b", "t-b"), TeamRouteAction.REVIEW),
+            TeamRoute(TeamFlowNode("s-b", "t-b"), TeamFlowNode("s-a", "t-a"), TeamRouteAction.REJECT))
+        val form = AgentTeamForm(name = "roundtrip", admins = listOf("worker"), members = listOf(TeamMemberRef("worker")),
+            stages = listOf(a, b), routes = routes)
+        val parsed = parseFile(write("roundtrip.md", AgentTeamParser.serialize(form)))!!
+        assertEquals(routes, parsed.routes)
+        val renamed = parsed.toForm(AgentDefinitionScope.GLOBAL).let { it.copy(stages = it.stages.map { stage -> stage.copy(title = stage.title + " renamed") }) }
+        val again = parseFile(write("again.md", AgentTeamParser.serialize(renamed)))!!
+        assertEquals(routes, again.routes)
+        assertEquals(listOf("s-a", "s-b"), again.stages.map { it.id })
+        assertEquals(listOf("t-a", "t-b"), again.stages.flatMap { it.tasks }.map { it.id })
+    }
+    @Test fun editingStageMetadataPreservesDepartmentAndMixedTasks() {
+        val department = AgentTeamTaskForm(department = "engineering", agentQuery = "api", prompt = "original", writePaths = "src/api", interfaces = listOf(TeamInterface("worker", "contract")), id = "department-task")
+        for (named in listOf(emptyList(), listOf(AgentTeamTaskForm(agent = "worker", prompt = "original", id = "named-task")))) {
+            val stage = AgentTeamStageForm(title = "old", id = "stable-stage", prompt = "original", members = named.map { it.agent }, tasks = named + department)
+            val changed = stage.copy(title = "renamed", messageLimit = 19).withFlowTasks()
+            assertEquals(department, changed.tasks.first { it.id == department.id })
+            val form = AgentTeamForm(name = "preserve", stages = listOf(changed), admins = listOf("worker"), members = listOf(TeamMemberRef("worker")))
+            val parsed = parseFile(write("preserve.md", AgentTeamParser.serialize(form)))!!
+            val actual = parsed.stages.single().tasks.first { it.id == department.id }
+            assertEquals("engineering", actual.department)
+            assertEquals("api", actual.agentQuery)
+            assertEquals(listOf("src/api"), actual.writePaths)
+            assertEquals(department.interfaces, actual.interfaces)
+        }
+    }
 }

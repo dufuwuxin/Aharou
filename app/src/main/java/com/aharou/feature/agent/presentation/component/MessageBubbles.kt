@@ -245,9 +245,7 @@ internal fun AgentMessageItem(
     /** 是否在正文上方渲染「身份行」（Soul 图标 + 名字）：每轮助手回复的首条为 true。 */
     showSoulHeader: Boolean = false,
     /** 朗读本条回复；null 时不显示朗读按钮（未配置语音合成模型）。 */
-    onReadAloud: ((AgentUIMessage) -> Unit)? = null,
     /** 本条是否正在朗读中（按钮变停止图标）。 */
-    isReadingAloud: Boolean = false,
     /** 消息变体：本条在当前变体组中的展示位次（0 起）与版本总数；总数 > 1 时气泡下方显示 ‹ n/N ›。 */
     variantPosition: Int = 0,
     variantCount: Int = 1,
@@ -558,19 +556,6 @@ internal fun AgentMessageItem(
                         if (!isUser && actionsVisible && hasContent) {
                             if (emitted) Spacer(Modifier.width(Spacing.sm))
                             copyButton()
-                            emitted = true
-                        }
-                        // 朗读紧跟在复制后面：两者都是对这条回复的整体操作
-                        if (!isUser && actionsVisible && hasContent && onReadAloud != null) {
-                            if (emitted) Spacer(Modifier.width(Spacing.xs))
-                            MessageActionIconButton(
-                                icon = if (isReadingAloud) FeatherIcons.VolumeX else FeatherIcons.Volume2,
-                                contentDescription = stringResource(
-                                    if (isReadingAloud) R.string.voice_stop_read_aloud else R.string.voice_read_aloud
-                                ),
-                                tint = if (isReadingAloud) MaterialTheme.colorScheme.primary else iconTint,
-                                onClick = { onReadAloud(message) }
-                            )
                             emitted = true
                         }
                         // 「更多选项」排在这一行的**最后**：助手消息里它跟在复制按钮后面（先给信息，

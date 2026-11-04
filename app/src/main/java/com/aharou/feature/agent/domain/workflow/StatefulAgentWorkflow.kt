@@ -137,6 +137,7 @@ class StatefulAgentWorkflow @Inject constructor(
     private val keyRotator: ProviderKeyRotator,
     private val generatedImagePersister: GeneratedImagePersister,
     private val failoverCoordinator: ProviderFailoverCoordinator,
+    private val workspaceModelChain: WorkspaceModelChain,
     private val agentNotificationCenter: AgentNotificationCenter,
     private val eventInjector: AgentEventInjector,
     private val memoryCurator: MemoryCurator,
@@ -455,16 +456,11 @@ class StatefulAgentWorkflow @Inject constructor(
         FileLogger.memoryCheckpoint(TAG, "prompt.ready",
             elapsedMs = (System.nanoTime() - promptStartedNs) / 1_000_000,
             details = "operation=$promptStartedNs promptChars=${systemPrompt.length}")
-        val aiProvider = getEffectiveProvider(currentContext.sessionId)
-        val metadata = modelMetadataService.resolve(aiProvider.providerId, when (aiProvider) {
-            is AnthropicAdapter -> ProviderType.ANTHROPIC
-            is GeminiAdapter -> ProviderType.GEMINI
-            else -> ProviderType.OPENAI
-        }, aiProvider.model)
+        val chainConfig = workspaceModelChain.begin(currentContext.projectRoot, currentContext.sessionId,
+            currentContext.agentDefinition == null && currentContext.sessionId?.let { sessionUseCase.getSessionById(it)?.parentId } == null)
+        val aiProvider = chainConfig?.let { createStandaloneProvider(it, currentContext.sessionId) } ?: getEffectiveProvider(currentContext.sessionId)
+        val metadata = modelMetadataService.configureChatModel(aiProvider)
         val inputBudget = ModelContextPolicy.effectiveInputBudget(metadata)
-        if (aiProvider is AnthropicAdapter) {
-            aiProvider.maxOutputTokens = ModelContextPolicy.outputReserveTokens(metadata)
-        }
         val historyStartedNs = System.nanoTime()
         FileLogger.memoryCheckpoint(TAG, "history.start", details = "operation=$historyStartedNs")
         val lastAssistantIndex = currentContext.history.indexOfLast { it is AgentMessage.AssistantMessage && it.inputTokens > 0 }
@@ -509,7 +505,6 @@ class StatefulAgentWorkflow @Inject constructor(
                             currentTools = currentTools,
                             systemPrompt = systemPrompt,
                             aiProvider = aiProvider,
-                            inputBudget = inputBudget,
                             budget = llmBudget,
                             actionQueue = actionQueue,
                             emit = emit,
@@ -601,14 +596,15 @@ class StatefulAgentWorkflow @Inject constructor(
         currentTools: List<AgentTool>,
         systemPrompt: String,
         aiProvider: AIProvider,
-        inputBudget: Int,
         budget: LlmCallBudgetState,
         actionQueue: ArrayDeque<AgentAction>,
         emit: suspend (AgentEvent) -> Unit,
         telemetry: AgentTurnTelemetry
     ): AgentSessionState {
-        var state = initialState
-        val providerInUse = aiProvider
+        var state = initialState.copy(messages = initialState.messages + drainInsertedUserMessages(currentContext.sessionId))
+        val providerInUse = workspaceModelChain.current(currentContext.sessionId)?.let { createStandaloneProvider(it, currentContext.sessionId) } ?: aiProvider
+        val callMetadata = modelMetadataService.configureChatModel(providerInUse)
+        val inputBudget = ModelContextPolicy.effectiveInputBudget(callMetadata)
         val requestSystemPrompt = appendMiddlewarePrompt(providerInUse.providerId, systemPrompt)
         val promptTools = requestTools(currentTools)
         val compactionProvider = resolveCompactionFallbackProvider(currentContext.sessionId) ?: providerInUse
@@ -616,7 +612,7 @@ class StatefulAgentWorkflow @Inject constructor(
         var compactedMessages = state.messages
         // 送模型前的图片投影只算这一次：压缩触发估算、超预算判定与实际发送共用同一份结果。
         // 算两遍迟早因视觉能力解析或占位文案不同而漂移，那会反向低估、真撞窗口。
-        val supportsVision = activeModelSupportsVision(currentContext.sessionId)
+        val supportsVision = callMetadata.supportsVision
         val trimRounds = generalSettingsRepository.contextTrimRounds()
         var sendProjection = keepNewestImages(sanitizeImagesForModel(state.messages, supportsVision)).trimToRecentRounds(trimRounds)
         if (!budget.compactionAttemptFailed) {
@@ -624,7 +620,7 @@ class StatefulAgentWorkflow @Inject constructor(
             val estimate = withContext(Dispatchers.Default) { ContextTokenEstimator.estimate(systemPrompt, sendProjection, promptTools) }
             val predictedInput = ContextTokenEstimator.calibrated(estimate, budget.baselineEstimate, budget.baselineUsage)
             val compaction = contextCompactor.compactIfNeeded(state.messages, compactionProvider, currentContext.sessionId,
-                windowProvider = aiProvider, systemPrompt = if (reuseMainPrefix) requestSystemPrompt else "", tools = if (reuseMainPrefix) promptTools else emptyList(),
+                windowProvider = providerInUse, systemPrompt = if (reuseMainPrefix) requestSystemPrompt else "", tools = if (reuseMainPrefix) promptTools else emptyList(),
                 currentInputTokens = ContextTokenEstimator.forCompactionTrigger(estimate, budget.baselineEstimate, budget.baselineUsage)) { event ->
                 if (event is AgentEvent.CompactionFailed) budget.compactionAttemptFailed = true
                 emit(event)
@@ -705,13 +701,8 @@ class StatefulAgentWorkflow @Inject constructor(
         try {
             // 早轮次里已落盘的工具结果换成引用，长会话不必每轮重发全文。图片投影沿用上面那份：估算的就是发出去的。
             val outboundMasker = outboundMaskerOrNull(generalSettingsRepository.privacyMaskingEnabled())
-            // 强制插入：用户在这批工具执行期间插进来的话，随本次请求直接送到模型面前，
-            // 不必等下一批工具结果或本轮结束。掩码必须跟着一起做，否则开了隐私掩码时这段话会裸奔出站。
-            val insertedUserMessages = drainInsertedUserMessages(currentContext.sessionId)
-                .let { list -> if (outboundMasker == null) list else list.maskedForOutbound(outboundMasker) }
             val messagesToSend = foldStoredToolResults(sendProjection)
-                .let { list -> if (outboundMasker == null) list else list.maskedForOutbound(outboundMasker) } +
-                insertedUserMessages
+                .let { list -> if (outboundMasker == null) list else list.maskedForOutbound(outboundMasker) }
             // 采样循环检测：命中后 takeWhile 会取消上游流，模型不再继续把重复内容刷下去。
             var samplingLoopCut = false
             // 用户打断：与采样检测共用同一个 takeWhile，命中即掉断上游流，不再继续吐字。
@@ -799,7 +790,7 @@ class StatefulAgentWorkflow @Inject constructor(
             if (aiResponse.stopReason == "model_context_window_exceeded" && !budget.overflowRecoveryAttempted) {
                 budget.overflowRecoveryAttempted = true
                 val recovery = contextCompactor.compactIfNeeded(state.messages, compactionProvider,
-                    currentContext.sessionId, force = true, windowProvider = aiProvider,
+                    currentContext.sessionId, force = true, windowProvider = providerInUse,
                     systemPrompt = if (reuseMainPrefix) requestSystemPrompt else "", tools = if (reuseMainPrefix) promptTools else emptyList(), currentInputTokens = predictedInput) { emit(it) }
                 if (recovery.compacted) {
                     state = state.copy(messages = recovery.messages)
@@ -827,20 +818,23 @@ class StatefulAgentWorkflow @Inject constructor(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            // provider 级失败且本轮未吐出内容：沿「备用模型」链往下切一跳重发（放在溢出恢复之前，压缩救不回来这类错）
-            if (finalResponse == null && acc.isEmpty() && reasoningAcc.isEmpty() && (e.isKeySwitchFailure() || e.isQuotaExhausted())) {
-                val origin = aiProviderRepository.getProviderById(providerInUse.providerId)
-                val target = origin?.let { failoverCoordinator.next(currentContext.sessionId, it) }
+            if (finalResponse == null && !captureSnapshot().hasSnapshotData() &&
+                (workspaceModelChain.configured(currentContext.sessionId) || e.isKeySwitchFailure() || e.isQuotaExhausted())) {
+                val target = if (workspaceModelChain.configured(currentContext.sessionId)) workspaceModelChain.next(currentContext.sessionId)
+                    else aiProviderRepository.getProviderById(providerInUse.providerId)?.let { failoverCoordinator.next(currentContext.sessionId, it) }
                 if (target != null) {
+                    callError = e.message ?: e.javaClass.simpleName
+                    telemetry.llmStreamFailed(callId, callError ?: "unknown", 0)
+                    budget.baselineUsage = 0; budget.baselineEstimate = 0
                     val fb = createStandaloneProvider(target, currentContext.sessionId)
                     return executeLlmEffect(state, currentContext, currentTools, systemPrompt, fb,
-                        inputBudget, budget, actionQueue, emit, telemetry)
+                        budget, actionQueue, emit, telemetry)
                 }
             }
             if (finalResponse == null && !budget.overflowRecoveryAttempted && acc.isEmpty() && reasoningAcc.isEmpty() && isContextOverflow(e)) {
                 budget.overflowRecoveryAttempted = true
                 val recovery = contextCompactor.compactIfNeeded(state.messages, compactionProvider,
-                    currentContext.sessionId, force = true, windowProvider = aiProvider,
+                    currentContext.sessionId, force = true, windowProvider = providerInUse,
                     systemPrompt = if (reuseMainPrefix) requestSystemPrompt else "", tools = if (reuseMainPrefix) promptTools else emptyList(), currentInputTokens = predictedInput) { emit(it) }
                 if (recovery.compacted) {
                     state = state.copy(messages = recovery.messages)
@@ -1180,12 +1174,6 @@ class StatefulAgentWorkflow @Inject constructor(
         } catch (e: Exception) {
             ToolRunResult(toolError(toolCall, "工具执行失败: ${e.message}", "TOOL_EXECUTION_FAILED"), true)
         }
-    }
-
-    private suspend fun activeModelSupportsVision(sessionId: String?): Boolean {
-        val config = resolveProviderConfig(sessionId) ?: return false
-        val metadata = modelMetadataService.resolve(config.id, config.type, config.effectiveModel)
-        return metadata.supportsVision
     }
 
     /**

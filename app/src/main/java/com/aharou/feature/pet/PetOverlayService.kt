@@ -39,8 +39,6 @@ import com.aharou.feature.agent.presentation.component.appendAttachmentsToReques
 import com.aharou.feature.agent.presentation.component.toAgentAttachments
 import com.aharou.feature.agent.presentation.component.toAgentImages
 import com.aharou.feature.terminal.domain.TerminalSessionProvider
-import com.aharou.feature.voice.call.VoiceCallService
-import com.aharou.feature.voice.call.VoiceCallSession
 import com.aharou.feature.workspace.domain.FileAccessProvider
 import com.aharou.feature.workspace.domain.WorkspacePathMapper
 import dagger.hilt.android.AndroidEntryPoint
@@ -231,10 +229,6 @@ class PetOverlayService : Service() {
     private val always = MutableStateFlow(false)
     private val hidden = MutableStateFlow(false)
 
-    /** 通话状态要从服务里拿（跨进程级的单例）。 */
-    @Inject
-    internal lateinit var callSession: VoiceCallSession
-
     /** 两个审批管理器：用来知道她是不是正卡在等主人点确认。 */
     @Inject
     internal lateinit var toolPermissionManager: ToolPermissionManager
@@ -324,7 +318,6 @@ class PetOverlayService : Service() {
         overlay = PetOverlay(this).also { pet ->
             pet.onMenuAction = { id ->
                 when (id) {
-                    PetRadialMenu.ID_CALL -> toggleCall()
                     PetRadialMenu.ID_HIDE -> setHidden(true)
                     PetRadialMenu.ID_PASS -> setPassThrough(true)
                     PetRadialMenu.ID_SHOT -> captureScreen()
@@ -344,11 +337,8 @@ class PetOverlayService : Service() {
                 combine(
                     AgentRuntimeStatus.state,
                     appForeground,
-                    VoiceCallService.running,
-                    callSession.state,
-                    callSession.displayText,
-                ) { status, foreground, callRunning, callState, displayText ->
-                    Core(status, foreground, callRunning, callState, displayText)
+                ) { status, foreground ->
+                    Core(status, foreground)
                 },
                 always,
                 hidden,
@@ -358,9 +348,6 @@ class PetOverlayService : Service() {
                 Snapshot(
                     status = core.status,
                     foreground = core.foreground,
-                    callRunning = core.callRunning,
-                    callState = core.callState,
-                    displayText = core.displayText,
                     always = alwaysNow,
                     hidden = hiddenNow,
                     bgTasks = backgroundNow,
@@ -592,7 +579,7 @@ class PetOverlayService : Service() {
 
         // 隐藏状态下只有通话能把她叫出来，否则「隐藏」等于把通话也一起断了。
         val working = snap.status.active && !snap.foreground
-        val shouldShow = snap.callRunning || (!snap.hidden && (snap.always || working))
+        val shouldShow = (!snap.hidden && (snap.always || working))
 
         if (!shouldShow) {
             wasShown = false
@@ -617,18 +604,14 @@ class PetOverlayService : Service() {
             getString(R.string.pet_bg_count),
         )
         val persistent = when {
-            snap.callRunning && snap.displayText.isNotBlank() -> snap.displayText
-            snap.callRunning -> getString(callStateLabel(snap.callState))
             working && snap.status.statusText.isNotBlank() -> withBackground(snap.status.statusText, bgLine)
             working -> withBackground(getString(R.string.floating_thinking), bgLine)
             bgLine != null -> bgLine
             else -> ""
         }
-        overlay.showStatus(persistent, busy = bgLine != null && !snap.callRunning)
-        overlay.setCallState(snap.callRunning)
+        overlay.showStatus(persistent, busy = bgLine != null)
 
         val notificationText = when {
-            snap.callRunning -> getString(R.string.pet_notification_call)
             working -> getString(R.string.pet_notification_working)
             bgLine != null -> getString(R.string.pet_notification_background)
             else -> getString(R.string.pet_notification_text)
@@ -645,31 +628,6 @@ class PetOverlayService : Service() {
     }
 
     private fun prefs() = getSharedPreferences(PetOverlay.PREFS, Context.MODE_PRIVATE)
-
-    /** 通话开关：唤醒常驻时点一下直接说话；普通通话中点一下挂断；没在跑就接通。 */
-    private fun toggleCall() {
-        if (VoiceCallService.isRunning()) {
-            // 唤醒常驻中点它不能当挂断：挂断会把常驻监听一起停掉，
-            // 再点一次又只会起通话模式（不通唤醒词）。
-            if (VoiceCallService.isWakeModeRunning()) {
-                callSession.triggerListen()
-                return
-            }
-            VoiceCallService.stop(this)
-            return
-        }
-        if (!canRecord()) {
-            // 没录音权限她张不了嘴：明说一句，并把 App 叫到前台去设置里授权
-            overlay.say(getString(R.string.pet_no_mic), holdMs = 6_000L)
-            openApp()
-            return
-        }
-        VoiceCallService.start(this)
-    }
-
-    private fun canRecord(): Boolean =
-        ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
-            PackageManager.PERMISSION_GRANTED
 
     private fun openApp() {
         runCatching {
@@ -788,22 +746,10 @@ class PetOverlayService : Service() {
         )
     }
 
-    private fun callStateLabel(state: VoiceCallSession.State): Int = when (state) {
-        VoiceCallSession.State.Listening -> R.string.voice_call_state_listening
-        VoiceCallSession.State.WakeListening -> R.string.voice_wake_on
-        VoiceCallSession.State.Thinking -> R.string.voice_call_state_thinking
-        VoiceCallSession.State.Speaking -> R.string.voice_call_state_speaking
-        VoiceCallSession.State.Preparing -> R.string.voice_call_state_preparing
-        VoiceCallSession.State.Idle -> R.string.voice_call_state_idle
-    }
-
-    /** 合并后的显示状态：Agent 进度 + 通话 + 用户的两个开关。 */
+    /** 合并后的显示状态：Agent 进度 + 用户的两个开关。 */
     private data class Snapshot(
         val status: AgentRuntimeStatus.State,
         val foreground: Boolean,
-        val callRunning: Boolean,
-        val callState: VoiceCallSession.State,
-        val displayText: String,
         val always: Boolean,
         val hidden: Boolean,
         val bgTasks: List<PetTaskRef> = emptyList(),
@@ -813,9 +759,6 @@ class PetOverlayService : Service() {
     private data class Core(
         val status: AgentRuntimeStatus.State,
         val foreground: Boolean,
-        val callRunning: Boolean,
-        val callState: VoiceCallSession.State,
-        val displayText: String,
     )
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {

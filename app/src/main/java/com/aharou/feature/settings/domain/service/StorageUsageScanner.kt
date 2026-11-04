@@ -19,7 +19,6 @@ import com.aharou.feature.settings.domain.model.StorageDetail
 import com.aharou.feature.settings.domain.model.StorageDetailKey
 import com.aharou.feature.settings.domain.model.StorageEntry
 import com.aharou.feature.settings.domain.model.formatStorageSize
-import com.aharou.feature.voice.domain.VoiceModels
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -72,7 +71,6 @@ class StorageUsageScanner @Inject constructor(
         emit(imagesEntry())
         emit(otherDataEntry(cancelled))
         emit(aiConfigEntry(cancelled))
-        emit(voiceModelsEntry(cancelled))
         emit(tessdataEntry())
         emit(petAssetsEntry(cancelled))
         emit(workspacesEntry(cancelled))
@@ -94,8 +92,6 @@ class StorageUsageScanner @Inject constructor(
             CleanupKind.Logs -> FileLogger.clearLogs() + AILogger.clearLogs()
             CleanupKind.ToolOutput -> clearDirContents(toolOutputStore.outputDir)
             CleanupKind.VisionSessions -> clearDirContents(visionSessionStore.sessionDir)
-            // 整个 voice_models 一起清：里面的 .staging 与没删干净的 tar.bz2 都是同一批下载的残留
-            CleanupKind.VoiceModels -> clearDirContents(File(context.filesDir, VOICE_MODELS_DIR))
             // 整个 tessdata-parent 一起清：里面的 .part 与 tessdata/ 都是同一批下载的残留
             CleanupKind.OcrTessdata -> clearDirContents(File(context.filesDir, TESSDATA_PARENT_DIR))
             CleanupKind.PetAssets -> clearDirContents(File(context.filesDir, PET_ASSETS_DIR))
@@ -217,16 +213,6 @@ class StorageUsageScanner @Inject constructor(
     private fun checkpointsEntry(cancelled: () -> Boolean): StorageEntry =
         StorageEntry(StorageCategory.Checkpoints, dirSize(File(context.filesDir, CHECKPOINTS_DIR), cancelled))
 
-    /** 离线语音模型：`filesDir/voice_models`，按模型逐个列出（目录名即模型标识）。 */
-    private fun voiceModelsEntry(cancelled: () -> Boolean): StorageEntry {
-        val root = File(context.filesDir, VOICE_MODELS_DIR)
-        val models = root.listFiles { f: File -> f.isDirectory }?.sortedBy { it.name } ?: emptyList()
-        val details = models
-            .map { StorageDetail(label = it.name, bytes = dirSize(it, cancelled)) }
-            .filter { it.bytes > 0 }
-        return StorageEntry(StorageCategory.VoiceModels, details.sumOf { it.bytes }, details)
-    }
-
     /**
      * 本机 OCR 语言包：`filesDir/tessdata-parent/tessdata`，按语言包文件逐个列出。
      * 下载中断留下的 `.part` 也算在内——清掉后才和下载器看到的状态一致。
@@ -321,7 +307,6 @@ class StorageUsageScanner @Inject constructor(
         private const val IMAGES_DIR = "rootfs_images"
         private const val PROJECTS_DIR = "projects"
         private const val CHECKPOINTS_DIR = "checkpoints"
-        private const val VOICE_MODELS_DIR = VoiceModels.MODEL_ROOT_DIR
         /** OCR 语言包根目录（内含 tessdata/），与 [TessdataPack] 同一来源。 */
         private const val TESSDATA_PARENT_DIR = TessdataPack.PARENT_DIR
         /** 用户导入的桌宠形象根目录（内置角色在 assets，不在这）。 */
@@ -335,7 +320,7 @@ class StorageUsageScanner @Inject constructor(
          * 不含 AI 配置目录：它已改名为 aharou，由 [ContainerInstaller.aharouDir] 提供，见 [otherDataEntry]。
          */
         private val CLASSIFIED_DIRS = setOf(
-            PROJECTS_DIR, IMAGES_DIR, CHECKPOINTS_DIR, VOICE_MODELS_DIR, TESSDATA_PARENT_DIR,
+            PROJECTS_DIR, IMAGES_DIR, CHECKPOINTS_DIR, TESSDATA_PARENT_DIR,
             PET_ASSETS_DIR, "logs", "ai-logs"
         )
 
