@@ -1874,8 +1874,8 @@ class AIAgentViewModel @Inject constructor(
         if (sessionId in stoppingSessions || sessionJobs[sessionId]?.isCompleted == false) return
         val items = agentNotificationCenter.peek(sessionId)
         if (items.isEmpty()) return
-        // 已落库的插话不重复送；队友消息只搭车当前轮，绝不经空闲消费路径起新轮，
-        // 因而发送后结束、或查询期间结束的竞态也不会唤醒队友。父子通知不受影响。
+        // 已落库的插话不重复送；peek 已按 acceptsSiblingNotification 清掉不可达队友消息，这里一并拦下其余 fromSibling，
+        // 使队友消息只搭车当前轮、绝不经空闲消费路径起新轮；发送/查询期间结束的竞态也不唤醒。父子通知不受影响。
         val fresh = agentNotificationCenter.freshForNewRound(items)
         if (fresh.isEmpty()) return agentNotificationCenter.ack(sessionId, items.map { it.seq })
         FileLogger.d(TAG, "flushPendingNotifications: sid=$sessionId items=${fresh.size} state=${_agentStates.value[sessionId]}")

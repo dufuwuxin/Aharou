@@ -10,6 +10,9 @@ object SkillParser {
     private const val SKILL_FILE = "SKILL.md"
     private const val CLAUDE_FILE = "CLAUDE.md"
 
+    fun parseKeywordInput(text: String): List<String> = text.split(',', '，', '\n')
+        .map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+
     /**
      * 解析一个 skill 目录；无 SKILL.md / CLAUDE.md 或无 name 时视为非法，返回 null。
      * 目录经 [provider] 以容器路径读取，本地/远程统一。

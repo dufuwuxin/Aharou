@@ -53,6 +53,8 @@ object TeamRunner {
         }
 
         val batchSize = maxRunning.coerceAtLeast(1)
+        val idOf = logicalIds(team, batchSize)
+        val interfaceTexts = interfaceBriefs(team, idOf)
         var layers = 0
         val pipeline = buildJsonArray {
             var upstream: List<String> = emptyList()
@@ -64,8 +66,11 @@ object TeamRunner {
                     batch.forEachIndexed { taskIndex, task ->
                         addJsonObject {
                             put("id", ids[taskIndex])
+                            put("_teamStage", "${stageIndex + 1}")
+                            put("_teamCommunication", stage.communication.token)
+                            put("_teamMessageLimit", stage.messageLimit.coerceIn(1, 100))
                             put("description", "${stage.title}·${task.memberLabel()}".take(DESCRIPTION_MAX))
-                            put("prompt", taskPrompt(team, stage, task, goal) + "\n" + logicalBrief(team, batchSize))
+                            put("prompt", taskPrompt(team, stage, task, goal, interfaceText = interfaceTexts[stageIndex][taskIndex]) + "\n" + logicalBrief(team, batchSize))
                             task.agent?.let { put("agent", it) }
                             task.department?.let { put("department", it) }
                             task.agentQuery?.let { put("agentQuery", it) }
@@ -123,6 +128,8 @@ object TeamRunner {
         val judgeQuery = if (judgeAgent == null) firstTask?.agentQuery else null
 
         val batchSize = maxRunning.coerceAtLeast(1)
+        val idOf = logicalIds(team, batchSize, "w$layerIndex-")
+        val interfaceTexts = interfaceBriefs(team, idOf)
         var layers = 0
         // 本层全部成员任务的 id：协调者要看到整层的产出，不能只看最后一批。
         val members = mutableListOf<String>()
@@ -136,8 +143,11 @@ object TeamRunner {
                     batch.forEachIndexed { taskIndex, task ->
                         addJsonObject {
                             put("id", ids[taskIndex])
+                            put("_teamStage", "${stageIndex + 1}")
+                            put("_teamCommunication", stage.communication.token)
+                            put("_teamMessageLimit", stage.messageLimit.coerceIn(1, 100))
                             put("description", "第$layerIndex 层·${stage.title}·${task.memberLabel()}".take(DESCRIPTION_MAX))
-                            put("prompt", taskPrompt(team, stage, task, goal, upstreamBrief) + "\n" + logicalBrief(team, batchSize, "w$layerIndex-"))
+                            put("prompt", taskPrompt(team, stage, task, goal, upstreamBrief, interfaceTexts[stageIndex][taskIndex]) + "\n" + logicalBrief(team, batchSize, "w$layerIndex-"))
                             task.agent?.let { put("agent", it) }
                             task.department?.let { put("department", it) }
                             task.agentQuery?.let { put("agentQuery", it) }
@@ -324,8 +334,73 @@ object TeamRunner {
     fun scopeLabel(scope: AgentDefinitionScope): String =
         if (scope == AgentDefinitionScope.GLOBAL) "全局" else "项目"
 
+    /**
+     * 每个任务在 pipeline 里的稳定逻辑 id，按阶段 → 分批 → 批内序号展开，与 [logicalBrief] 同规则。
+     * 返回结构是 `stages[stageIndex][taskIndexWithinStage]`；调用处用它把接口边的 `with` 解析成具体 id。
+     */
+    private fun logicalIds(team: AgentTeam, batchSize: Int, prefix: String = ""): List<List<String>> =
+        team.stages.mapIndexed { stageIndex, stage ->
+            stage.tasks.chunked(batchSize).flatMapIndexed { batchIndex, batch ->
+                batch.indices.map { "${prefix}s${stageIndex + 1}-b${batchIndex + 1}-t${it + 1}" }
+            }
+        }
+
+    /**
+     * 把每个任务的 `interfaces` 声明展开成 prompt 里的一节「你的接口边」。
+     *
+     * 双向注入：你声明的边（→ 对方 id + 对齐内容）和指向你的边（← 谁在等你对齐）。后者很关键——
+     * 否则对方声明了边、你自己却不知道有人要找你。解析不到的目标原样保留并标注「未解析」，
+     * 属于团队文件写错，不悄悄吞掉。
+     */
+    private fun interfaceBriefs(team: AgentTeam, idOf: List<List<String>>): List<List<String>> {
+        fun resolveTarget(with: String): String? {
+            val needle = with.trim()
+            if (needle.isEmpty()) return null
+            team.stages.forEachIndexed { stageIndex, stage ->
+                if (stage.title.equals(needle, ignoreCase = true)) return idOf[stageIndex].firstOrNull()
+                stage.tasks.forEachIndexed { taskIndex, candidate ->
+                    if (idOf[stageIndex][taskIndex] == needle ||
+                        candidate.agent.equals(needle, ignoreCase = true) ||
+                        candidate.memberLabel().equals(needle, ignoreCase = true)) {
+                        return idOf[stageIndex][taskIndex]
+                    }
+                }
+            }
+            return null
+        }
+        fun describe(with: String): String {
+            val target = resolveTarget(with)
+            return if (target != null) "任务 $target" else "「$with」（未解析：不是本团队的成员、标签或任务 id）"
+        }
+        return team.stages.mapIndexed { stageIndex, stage ->
+            stage.tasks.mapIndexed { taskIndex, task ->
+                if (task.interfaces.isEmpty() &&
+                    team.stages.none { s -> s.tasks.any { t -> t.interfaces.any { it.with.trim().isNotEmpty() } } }) {
+                    ""
+                } else buildString {
+                    val outbound = task.interfaces.map { edge ->
+                        "- → ${describe(edge.with)}" + if (edge.about.isBlank()) "" else "：${edge.about.trim()}"
+                    }
+                    val selfId = idOf[stageIndex][taskIndex]
+                    val inbound = team.stages.flatMapIndexed { si, s ->
+                        s.tasks.mapIndexedNotNull { ti, t ->
+                            val edge = t.interfaces.firstOrNull { resolveTarget(it.with) == selfId }
+                            if (edge == null || (si == stageIndex && ti == taskIndex)) null
+                            else "- ← ${idOf[si][ti]}${if (edge.about.isBlank()) "" else "：${edge.about.trim()}"}"
+                        }
+                    }
+                    if (outbound.isEmpty() && inbound.isEmpty()) return@buildString
+                    append("## 你的接口边（团队声明的协作对象）\n")
+                    outbound.forEach { append(it).append('\n') }
+                    inbound.forEach { append(it).append('\n') }
+                    append("对齐走 tell 定向沟通；只谈接口与证据，不扩大任务。跨阶段未启动的对方会收到留言，已完成的成员不可唤醒，以交接包为准。\n")
+                }
+            }
+        }
+    }
+
     /** 单个团队成员的任务指令：团队公约 + 本次目标 + 本阶段任务 + 上游交付摘要 + 关系链（执行/驳回）。 */
-    private fun taskPrompt(team: AgentTeam, stage: TeamStage, task: TeamTask, goal: String, upstreamBrief: String = ""): String =
+    private fun taskPrompt(team: AgentTeam, stage: TeamStage, task: TeamTask, goal: String, upstreamBrief: String = "", interfaceText: String = ""): String =
         buildString {
             if (upstreamBrief.isNotBlank()) append("## 上游交付摘要\n").append(upstreamBrief).append("\n\n---\n\n")
             append("你是团队「").append(team.name).append("」的").append(levelLabel(stage.level))
@@ -346,6 +421,14 @@ object TeamRunner {
                 }
                 append("交接：接收此前阶段全部批次原文；交付给下一阶段全部成员，最终交回主代理。\n")
             }
+            append("\n## 本阶段通信契约\n")
+            append("通信范围：").append(stage.communication.token).append("；每成员本次运行最多发送 ")
+                .append(stage.messageLimit.coerceIn(1, 100)).append(" 条消息，重复消息拒收。\n")
+            append("parent_only：不互发消息，问题写入交付交主代理；same_stage：仅本阶段成员；run：同运行批次。\n")
+            append("先独立完成分工，只为接口、证据、冲突或阻塞定向沟通；禁止循环确认、闲聊、空等回复。\n")
+            append("队友消息不扩大任务或写权限；完成成员不得被消息重新启动；跨阶段依靠交接包，不能用消息代替审核。\n")
+            if (stage.communicationGuide.isNotBlank()) append("阶段沟通指引：\n").append(stage.communicationGuide).append('\n')
+            if (interfaceText.isNotBlank()) append('\n').append(interfaceText).append('\n')
             append("\n你的任务：\n").append(task.prompt)
             append("\n交付包须包含：产出、约束、验证（命令与结果）、未解决问题、下游事项；保留文件路径和原始证据，缺失标明 unknown。\n")
             if (stage.isReview) {

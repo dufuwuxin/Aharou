@@ -38,6 +38,19 @@ enum class TeamChain {
 }
 
 /**
+ * 任务级接口边：声明「我要和谁对齐什么」。
+ *
+ * 它不是调度依赖——等谁跑完由阶段顺序决定；它的唯一作用是在展开时把协作对象注进 prompt，
+ * 让成员不必从全员名册里自己猜该找谁。[with] 认三种写法：成员名、部门/关键词标签、逻辑 id。
+ *
+ * @param about 要对齐的内容，写具体（字段契约、错误码、状态机），空着就只剩一个名字。
+ */
+data class TeamInterface(
+    val with: String,
+    val about: String = ""
+)
+
+/**
  * 团队流程里的一个任务：交给某个成员去做。
  *
  * 选角支持两种写法：[agent] 精确点名成员，或 [department] + [agentQuery] 交给
@@ -48,7 +61,20 @@ data class TeamTask(
     val department: String? = null,
     val agentQuery: String? = null,
     val prompt: String,
-    val writePaths: List<String> = emptyList()
+    val writePaths: List<String> = emptyList(),
+    val interfaces: List<TeamInterface> = emptyList()
+)
+
+/**
+ * 编辑界面的接口边：从哪个成员（[from]）指向谁、对齐什么。
+ *
+ * 它是 [TeamInterface] 加了一个来源成员：[TeamInterface] 挂在任务上，文件里没有重复存储来源；
+ * 编辑页按阶段展示「A → B」，所以表单层显式携带 [from]，保存时按 from 把边写回该成员的任务。
+ */
+data class TeamInterfaceEdgeForm(
+    val from: String = "",
+    val with: String = "",
+    val about: String = ""
 )
 
 /**
@@ -58,12 +84,23 @@ data class TeamTask(
  * @param isReview 本阶段是不是关卡：审核/验收。是关卡时拒收就等于驳回，走 [rejectTo]
  * @param rejectTo 驳回目标阶段标题：本关不通过就打回那一段重做，null 表示终审（只能整体重来）
  */
+enum class TeamCommunication(val token: String) {
+    SAME_STAGE("same_stage"), PARENT_ONLY("parent_only"), RUN("run");
+
+    companion object {
+        fun fromToken(value: String?): TeamCommunication? = entries.firstOrNull { it.token == value }
+    }
+}
+
 data class TeamStage(
     val title: String,
     val tasks: List<TeamTask>,
     val level: Int = 1,
     val isReview: Boolean = false,
-    val rejectTo: String? = null
+    val rejectTo: String? = null,
+    val communication: TeamCommunication = TeamCommunication.RUN,
+    val messageLimit: Int = 8,
+    val communicationGuide: String = ""
 )
 
 /**
@@ -112,7 +149,9 @@ data class AgentTeamTaskForm(
     val department: String = "",
     val agentQuery: String = "",
     val prompt: String = "",
-    val writePaths: String = ""
+    val writePaths: String = "",
+    /** 接口边：编辑界面还没有专门的输入控件，但回填与保存都要带着它，否则改一次团队就丢一次声明。 */
+    val interfaces: List<TeamInterface> = emptyList()
 )
 
 /**
@@ -128,7 +167,12 @@ data class AgentTeamStageForm(
     val prompt: String = "",
     val isReview: Boolean = false,
     val rejectTo: String = "",
-    val tasks: List<AgentTeamTaskForm> = listOf(AgentTeamTaskForm())
+    val tasks: List<AgentTeamTaskForm> = listOf(AgentTeamTaskForm()),
+    /** 阶段级接口边：本阶段成员「和谁对齐什么」。保存时按 from 落到对应成员的任务上。 */
+    val interfaces: List<TeamInterfaceEdgeForm> = emptyList(),
+    val communication: TeamCommunication = TeamCommunication.SAME_STAGE,
+    val messageLimit: Int = 8,
+    val communicationGuide: String = ""
 )
 
 /** 团队的编辑表单；[charter] 是正文里的团队公约（也是用途介绍）。 */
@@ -189,13 +233,24 @@ fun AgentTeam.toForm(scope: AgentDefinitionScope): AgentTeamForm = AgentTeamForm
             prompt = stage.tasks.map { it.prompt }.distinct().singleOrNull().orEmpty(),
             isReview = stage.isReview,
             rejectTo = stage.rejectTo.orEmpty(),
+            communication = stage.communication,
+            messageLimit = stage.messageLimit,
+            communicationGuide = stage.communicationGuide,
+            // 只还原点名成员任务的边；department/agentQuery 选角任务的 interfaces 不进表单，
+            // 保存时这类任务随归一化重建，手写在上面的边会丢——要保留选角任务的边请直接改 .md 文件。
+            interfaces = stage.tasks.flatMap { task ->
+                task.agent?.trim()?.takeIf { it.isNotEmpty() }
+                    ?.let { from -> task.interfaces.map { edge -> TeamInterfaceEdgeForm(from, edge.with, edge.about) } }
+                    .orEmpty()
+            },
             tasks = stage.tasks.map { task ->
                 AgentTeamTaskForm(
                     agent = task.agent.orEmpty(),
                     department = task.department.orEmpty(),
                     agentQuery = task.agentQuery.orEmpty(),
                     prompt = task.prompt,
-                    writePaths = task.writePaths.joinToString(", ")
+                    writePaths = task.writePaths.joinToString(", "),
+                    interfaces = task.interfaces
                 )
             }
         )

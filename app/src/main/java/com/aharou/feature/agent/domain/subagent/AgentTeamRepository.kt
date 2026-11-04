@@ -79,17 +79,32 @@ class AgentTeamRepository @Inject constructor(
 
         // 成员名单 + 阶段指令 → 一人一条任务；界面只填名单与共享指令，不手写 tasks。
         // 两边都有时以名单为准（改名单就得真的改执行人），只在没写阶段指令时才回退到旧 tasks。
+        // 接口边以阶段级声明为准，按 from 落到对应成员的任务；from 不在本阶段名单里的边随名单一起丢弃。
+        // stageEdges 去重：手写脏数据（同一成员多条任务各带边）会回填出重复阶段边，不去重会固化落盘。
         val normalized = form.copy(stages = form.stages.map { stage ->
-            val members = stage.members.map { it.trim() }.filter { it.isNotEmpty() }
+            val members = stage.members.map { it.trim() }.filter { it.isNotEmpty() }.distinctBy { it.lowercase() }
             val prompt = stage.prompt.trim()
             val keepTasks = stage.tasks.filter { it.prompt.isNotBlank() }
-            val tasks = when {
+            val stageEdges = stage.interfaces.filter { it.from.isNotBlank() && it.with.isNotBlank() }
+                .distinctBy { it.from.lowercase() to it.with.lowercase() }
+            when {
                 prompt.isNotEmpty() && members.isNotEmpty() ->
-                    members.map { AgentTeamTaskForm(agent = it, prompt = prompt) }
-                keepTasks.isNotEmpty() -> keepTasks
-                else -> emptyList()
+                    // 同一成员多条任务只保留第一条：界面口径是一人一条任务，手写重名任务被归并
+                    members.map { member ->
+                        keepTasks.filter { it.agent.equals(member, ignoreCase = true) }
+                            .firstOrNull()
+                            ?.copy(prompt = prompt)
+                            ?: AgentTeamTaskForm(agent = member, prompt = prompt)
+                    }
+                else -> keepTasks
+            }.let { tasks ->
+                stage.copy(members = members, tasks = tasks.map { task ->
+                    if (task.agent.isBlank()) task else task.copy(
+                        interfaces = stageEdges.filter { it.from.equals(task.agent, ignoreCase = true) }
+                            .map { TeamInterface(it.with.trim(), it.about.trim()) }
+                    )
+                })
             }
-            stage.copy(members = members, tasks = tasks)
         })
 
         val validStages = normalized.stages.filter { it.tasks.isNotEmpty() }

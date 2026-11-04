@@ -9,6 +9,8 @@ import com.aharou.feature.agent.domain.tool.custom.CustomToolDefinition
 import com.aharou.feature.agent.domain.tool.custom.CustomToolParameter
 import com.aharou.feature.agent.domain.tool.custom.ToolInjectionMode
 import com.aharou.feature.agent.domain.tool.custom.ToolOverride
+import com.aharou.feature.agent.domain.tool.custom.ToolSchemaOverride
+import com.aharou.feature.agent.domain.tool.custom.PracticalToolTemplates
 import com.aharou.feature.agent.domain.tool.custom.ToolSettingsStore
 import com.google.gson.GsonBuilder
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -28,7 +30,7 @@ import kotlinx.serialization.json.Json
 enum class ToolSource { CUSTOM, BUILTIN, MCP }
 
 /** 编辑目标：[name] 为 null 表示新建，否则编辑该名字的工具。 */
-data class ToolEditorTarget(val name: String? = null)
+data class ToolEditorTarget(val name: String? = null, val template: CustomToolDefinition? = null)
 
 /** 一次性反馈（界面转成 Toast 后清掉），避免失败被静默吞掉。 */
 enum class ToolsMessage { SAVE_FAILED, DELETE_FAILED, LOAD_FAILED }
@@ -36,7 +38,7 @@ enum class ToolsMessage { SAVE_FAILED, DELETE_FAILED, LOAD_FAILED }
 /**
  * 工具页的一行。
  *
- * [schemaJson] 是只读展示用的 schema（内置/MCP 由代码或服务端给，自定义由参数表生成）；
+ * [schemaJson] 是兼容覆盖后的 schema；[originalSchemaJson] 保留原始执行契约供编辑校验；
  * [parametersJson] 只在自定义工具上有值，是编辑器里那份可改的参数 JSON。
  */
 data class ToolUiEntry(
@@ -52,6 +54,7 @@ data class ToolUiEntry(
     val permission: com.aharou.feature.agent.domain.tool.ToolPermissionPolicy = com.aharou.feature.agent.domain.tool.ToolPermissionPolicy.ASK,
     val deferred: Boolean = false,
     val category: ToolCategory = ToolCategory.OTHER,
+    val originalSchemaJson: String = schemaJson,
 )
 
 data class ToolsUiState(
@@ -121,6 +124,11 @@ class ToolsViewModel @Inject constructor(
         _state.update { it.copy(editor = ToolEditorTarget(null)) }
     }
 
+    fun startTemplate(name: String) {
+        val template = PracticalToolTemplates.all.firstOrNull { it.name == name } ?: return
+        _state.update { it.copy(editor = ToolEditorTarget(template = template)) }
+    }
+
     fun openEditor(name: String) {
         _state.update { it.copy(editor = ToolEditorTarget(name)) }
     }
@@ -171,15 +179,18 @@ class ToolsViewModel @Inject constructor(
     fun setDescriptionOverride(name: String, description: String?) =
         updateSettings(name, description = description)
 
-    /** 编辑器「保存」：一次把描述 / 注入方式 / 关键词写回去。 */
-    fun saveToolSettings(name: String, description: String?, mode: ToolInjectionMode, keywords: List<String>) =
-        updateSettings(name, mode = mode, keywords = keywords, description = description)
+    /** 编辑器保存：一次写回描述、注入方式、关键词与兼容的 schema 元数据。 */
+    fun saveToolSettings(name: String, description: String?, mode: ToolInjectionMode, keywords: List<String>, schemaJson: String?) =
+        updateSettings(name, mode = mode, keywords = keywords, description = description,
+            schemaJson = schemaJson, replaceEditorFields = true)
 
     private fun updateSettings(
         name: String,
         mode: ToolInjectionMode? = null,
         keywords: List<String>? = null,
-        description: String? = null
+        description: String? = null,
+        schemaJson: String? = null,
+        replaceEditorFields: Boolean = false
     ) {
         val custom = store.snapshotCustomTool(name)
         if (custom != null) {
@@ -194,16 +205,19 @@ class ToolsViewModel @Inject constructor(
         }
         val previous = store.snapshotOverrides()[name]
         val merged = ToolOverride(
-            description = description ?: previous?.description,
+            description = if (replaceEditorFields) description else description ?: previous?.description,
             injectionMode = mode ?: previous?.injectionMode,
-            keywords = keywords ?: previous?.keywords
+            keywords = keywords ?: previous?.keywords,
+            schemaJson = if (replaceEditorFields) schemaJson else previous?.schemaJson
         ).normalized()
         // 全部回到默认值（每轮注入 + 无描述覆盖 + 无关键词）等价于没有覆盖，落盘时直接删条目
         val isDefault = merged.injectionMode == ToolInjectionMode.EVERY_ROUND &&
-            merged.description == null && merged.keywords.isNullOrEmpty()
+            merged.description == null && merged.keywords.isNullOrEmpty() && merged.schemaJson == null
         mutate(
             failure = ToolsMessage.SAVE_FAILED,
             write = {
+                val original = registry.getTool(name)?.toJsonSchema() ?: return@mutate false
+                if (merged.schemaJson != null && !ToolSchemaOverride.isCompatible(original, merged.schemaJson)) return@mutate false
                 if (isDefault || merged.isEmpty) store.clearOverride(name) else store.saveOverride(name, merged)
             }
         )
@@ -254,7 +268,8 @@ class ToolsViewModel @Inject constructor(
                         tool.name.startsWith(MCP_NAME_PREFIX) -> ToolSource.MCP
                         else -> ToolSource.BUILTIN
                     },
-                    schemaJson = gson.toJson(tool.toJsonSchema()),
+                    originalSchemaJson = gson.toJson(tool.toJsonSchema()),
+                    schemaJson = gson.toJson(ToolSchemaOverride.apply(tool.toJsonSchema(), override?.schemaJson)),
                     injectionMode = custom?.injectionMode
                         ?: override?.injectionMode
                         ?: ToolInjectionMode.EVERY_ROUND,

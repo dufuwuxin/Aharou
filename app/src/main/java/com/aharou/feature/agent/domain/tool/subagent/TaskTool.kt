@@ -598,7 +598,10 @@ class TaskTool @Inject constructor(
         }
         result?.let { return SubAgentCommGate.messageResult(target, it) }
         if (delivery.state !in setOf("queued", "duplicate")) {
-            return ToolResult.Error("成员通信被拒绝：${delivery.state}；预算耗尽或目标已结束时不要重试，交回主代理。", "SIBLING_${delivery.state.uppercase()}")
+            return ToolResult.Error(
+                "成员通信被拒绝：${delivery.reason ?: delivery.state}。遵守阶段通信范围与额度；预算耗尽或目标已结束时不要重试，交回主代理。",
+                "SIBLING_${(delivery.reason ?: delivery.state).uppercase()}"
+            )
         }
         return ToolResult.Success(buildJsonObject { put("state", delivery.state); put("to", target) })
     }

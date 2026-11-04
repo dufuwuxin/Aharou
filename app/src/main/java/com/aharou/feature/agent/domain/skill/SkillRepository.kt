@@ -137,13 +137,12 @@ class SkillRepository @Inject constructor(
         if (!isValidName(name)) return@synchronized SkillSaveError.INVALID_NAME
         if (form.instructions.isBlank()) return@synchronized SkillSaveError.EMPTY_INSTRUCTIONS
         val scopeSkills = entriesIn(scope)
-        val persisted = originalName?.let { old -> scopeSkills.firstOrNull { it.name.equals(old, true) } }
-        val keywordEnabled = persisted?.keywordEnabled ?: form.keywordEnabled
-        val keywords = persisted?.keywords ?: form.keywords
-        if (!validKeywordPolicy(keywordEnabled, keywords)) return@synchronized SkillSaveError.IO_FAILED
+        val keywordEnabled = form.keywordEnabled
+        val keywords = form.keywords.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+        if (!validKeywordPolicy(keywordEnabled, keywords)) return@synchronized SkillSaveError.EMPTY_KEYWORDS
         if (keywordEnabled && agents.listAll().any { entry ->
             entry.definition.skills.any { it.equals(originalName ?: name, true) || it.equals(name, true) }
-        }) return@synchronized SkillSaveError.IO_FAILED
+        }) return@synchronized SkillSaveError.BOUND_KEYWORD_POLICY
         val keepingName = originalName != null && originalName.equals(name, ignoreCase = true)
         if (originalName != null && !keepingName && agents.listAll().any { entry ->
             entry.definition.skills.any { it.equals(originalName, ignoreCase = true) }
@@ -170,7 +169,30 @@ class SkillRepository @Inject constructor(
             val dir = existingDir?.takeIf { provider.isDirectory(it) } ?: "${skillsRoot(scope)}/$name"
             provider.mkdirs(dir)
             val target = instructionFile(provider, dir) ?: "${dir.trimEnd('/')}/$INSTRUCTION_FILE"
-            provider.writeFile(target, text, overwrite = true)
+            val original = if (provider.exists(target)) provider.readFile(target) else null
+            // Keep unknown/translated frontmatter. Only fields owned by this form are patched.
+            val updated = if (original == null) text else {
+                val normalized = original.replace("\r\n", "\n")
+                val end = if (normalized.startsWith("---\n")) normalized.indexOf("\n---", 3) else -1
+                val yaml = org.yaml.snakeyaml.Yaml()
+                val fields = if (end >= 0) {
+                    (yaml.load<Map<String, Any>>(normalized.substring(4, end)) ?: emptyMap()).toMutableMap()
+                } else mutableMapOf()
+                fields["name"] = name
+                fields["description"] = form.description
+                fields["required_tools"] = form.requiredTools
+                fields["keyword_enabled"] = keywordEnabled
+                fields["keywords"] = keywords
+                "---\n${yaml.dump(fields)}---\n${form.instructions.trim()}\n"
+            }
+            try {
+                provider.writeFile(target, updated, overwrite = true)
+            } catch (failure: Exception) {
+                if (original != null) try {
+                    provider.writeFile(target, original, overwrite = true)
+                } catch (rollback: Exception) { failure.addSuppressed(rollback) }
+                throw failure
+            }
             null
         } catch (e: Exception) {
             FileLogger.e(TAG, "保存技能失败: $name", e)

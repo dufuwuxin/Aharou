@@ -40,6 +40,67 @@ class SkillRepositoryTest {
     )
 
     @Test
+    fun editorSave_switchesModesReloadsAndKeepsMetadata() {
+        val temp = java.nio.file.Files.createTempDirectory("skill-editor-policy").toFile()
+        try {
+            val dir = File(temp, "editable").apply { mkdirs() }
+            val file = File(dir, "SKILL.md").apply {
+                writeText("---\nname: editable\ndescription_zh: translated\ncustom_key: keep\nrequired_tools: [Bash]\n---\nbody")
+            }
+            every { globalSource.listSkills() } answers {
+                listOf(SkillParser.parseText(file.readText(), "editable").copy(dirPath = dir.path))
+            }
+            val form = SkillForm("editable", "desc", "new body", listOf("Bash"), true, listOf(" Kotlin ", "", "Kotlin"))
+            assertNull(repository.save(form, SkillScope.GLOBAL, "editable"))
+            val reloaded = repository.listAllSkills().single().skill
+            assertTrue(reloaded.keywordEnabled)
+            assertEquals(listOf("Kotlin"), reloaded.keywords)
+            assertEquals(listOf("Bash"), reloaded.requiredTools)
+            assertTrue(file.readText().contains("description_zh"))
+            assertTrue(file.readText().contains("custom_key"))
+            assertTrue(repository.listSkillsForAgent(null, "poetry").isEmpty())
+            assertEquals(listOf("editable"), repository.listSkillsForAgent(null, "KOTLIN task").map { it.name })
+            assertNull(repository.save(form.copy(keywordEnabled = false), SkillScope.GLOBAL, "editable"))
+            assertTrue(!repository.listAllSkills().single().skill.keywordEnabled)
+            assertEquals(listOf("editable"), repository.listSkillsForAgent(null, "poetry").map { it.name })
+        } finally { temp.deleteRecursively() }
+    }
+
+    @Test
+    fun editorSave_rejectsEmptyKeywordsAndBoundSkillWithoutUnbinding() {
+        assertEquals(SkillSaveError.EMPTY_KEYWORDS, repository.save(
+            SkillForm("conditional", "", "body", keywordEnabled = true, keywords = listOf(" ")), SkillScope.GLOBAL))
+        val owner = com.aharou.feature.agent.domain.subagent.AgentDefinition("owner", "", skills = listOf("conditional"), prompt = "role")
+        every { agents.listAll() } returns listOf(com.aharou.feature.agent.domain.subagent.AgentDefinitionEntry(
+            owner, com.aharou.feature.agent.domain.subagent.AgentDefinitionScope.GLOBAL))
+        assertEquals(SkillSaveError.BOUND_KEYWORD_POLICY, repository.save(
+            SkillForm("conditional", "", "body", keywordEnabled = true, keywords = listOf("task")), SkillScope.GLOBAL))
+        verify(exactly = 0) { agents.setSkillBinding(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun editorSave_rollsBackPartialFileWrite() {
+        val temp = java.nio.file.Files.createTempDirectory("skill-editor-rollback").toFile()
+        try {
+            val file = File(temp, "SKILL.md").apply { writeText("---\nname: editable\n---\noriginal") }
+            every { globalSource.listSkills() } returns listOf(skill("editable").copy(dirPath = temp.path))
+            val failing = spyk(provider)
+            var first = true
+            every { failing.writeFile(file.path, any(), any(), any()) } answers {
+                if (first) {
+                    first = false
+                    file.writeText("partial")
+                    throw java.io.IOException("write failed")
+                } else callOriginal()
+            }
+            val repo = SkillRepository(builtinSource, globalSource, projectSource, config, failing, agents)
+            val original = file.readText()
+            assertEquals(SkillSaveError.IO_FAILED, repo.save(SkillForm("editable", "", "new"), SkillScope.GLOBAL, "editable"))
+            assertEquals(original, file.readText())
+        } finally { temp.deleteRecursively() }
+    }
+
+    @Test
     fun boundSkillRename_isRejectedWithoutMakingItPublic() {
         val owner = com.aharou.feature.agent.domain.subagent.AgentDefinition("owner", "", skills = listOf("private"), prompt = "role")
         every { agents.listAll() } returns listOf(com.aharou.feature.agent.domain.subagent.AgentDefinitionEntry(

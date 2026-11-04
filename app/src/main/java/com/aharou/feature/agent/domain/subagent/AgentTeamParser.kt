@@ -92,6 +92,9 @@ object AgentTeamParser {
             if (stageMembers.isNotEmpty()) {
                 appendLine("    members: [${stageMembers.joinToString(", ") { Frontmatter.quote(it) }}]")
             }
+            appendLine("    communication: ${stage.communication.token}")
+            appendLine("    messageLimit: ${stage.messageLimit.coerceIn(1, 100)}")
+            if (stage.communicationGuide.isNotBlank()) appendLine("    communicationGuide: ${Frontmatter.quote(stage.communicationGuide.trim())}")
             if (stage.isReview) appendLine("    review: true")
             val rejectTo = stage.rejectTo.trim()
             if (rejectTo.isNotEmpty()) appendLine("    rejectTo: ${Frontmatter.quote(rejectTo)}")
@@ -108,6 +111,15 @@ object AgentTeamParser {
                     if (query.isNotEmpty()) appendLine("        agentQuery: ${Frontmatter.quote(query)}")
                 }
                 appendLine("        prompt: ${Frontmatter.quote(task.prompt.trim())}")
+                if (task.interfaces.isNotEmpty()) {
+                    appendLine("        interfaces:")
+                    task.interfaces.forEach { edge ->
+                        appendLine("          - with: ${Frontmatter.quote(edge.with.trim())}")
+                        if (edge.about.isNotBlank()) {
+                            appendLine("            about: ${Frontmatter.quote(edge.about.trim())}")
+                        }
+                    }
+                }
                 // 全角逗号也认：手机输入法默认就是它。
                 val paths = task.writePaths.split(',', '，').map { it.trim() }.filter { it.isNotEmpty() }
                 if (paths.isNotEmpty()) {
@@ -177,7 +189,12 @@ object AgentTeamParser {
             tasks = tasks,
             level = level.coerceAtLeast(1),
             isReview = isReview,
-            rejectTo = rejectTo
+            rejectTo = rejectTo,
+            communication = if (map.containsKey("communication")) {
+                TeamCommunication.fromToken(map["communication"]?.toString()) ?: TeamCommunication.PARENT_ONLY
+            } else TeamCommunication.RUN,
+            messageLimit = map["messageLimit"]?.toString()?.toIntOrNull()?.coerceIn(1, 100) ?: 8,
+            communicationGuide = map["communicationGuide"]?.toString()?.trim().orEmpty()
         )
     }
 
@@ -214,7 +231,32 @@ object AgentTeamParser {
             department = department,
             agentQuery = agentQuery,
             prompt = prompt,
-            writePaths = AgentDefinitionParser.stringList(map["writePaths"])
+            writePaths = AgentDefinitionParser.stringList(map["writePaths"]),
+            interfaces = parseInterfaces(map["interfaces"], stageTitle, filePath)
         )
     }
+
+    /**
+     * 任务级接口边：`- with: 后端工程师` + 可选 `about:`；纯字符串条目等价于只写 with。
+     * 条目缺 with 只丢这一条，不连带丢任务。
+     */
+    private fun parseInterfaces(raw: Any?, stageTitle: String, filePath: String): List<TeamInterface> =
+        (raw as? List<*>).orEmpty().mapNotNull { item ->
+            when (item) {
+                is Map<*, *> -> {
+                    val with = (item["with"] ?: item["member"] ?: item["target"])
+                        ?.toString()?.trim()?.takeIf { it.isNotBlank() }
+                    if (with == null) {
+                        FileLogger.w(TAG, "阶段「$stageTitle」有接口边缺 with，已跳过: $filePath")
+                        null
+                    } else {
+                        TeamInterface(
+                            with = with,
+                            about = (item["about"] ?: item["align"])?.toString()?.trim().orEmpty()
+                        )
+                    }
+                }
+                else -> item?.toString()?.trim()?.takeIf { it.isNotBlank() }?.let { TeamInterface(it) }
+            }
+        }
 }

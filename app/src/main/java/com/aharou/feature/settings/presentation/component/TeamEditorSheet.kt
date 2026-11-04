@@ -298,7 +298,7 @@ internal fun TeamEditorSheet(
 
             // 流程图：节点按顺序竖向排列，连线走左侧，驳回边用虚线标出
             stages.forEachIndexed { index, stage ->
-                var expanded by remember(stage.title) { mutableStateOf(false) }
+                var expanded by remember(index) { mutableStateOf(false) }
                 ProcessNodeCard(
                     index = index + 1,
                     stage = stage,
@@ -395,14 +395,6 @@ private fun StageEditor(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.weight(1f)
             )
-            if (canRemove) {
-                TextButton(onClick = onRemove) {
-                    Text(
-                        text = stringResource(R.string.team_editor_remove_stage),
-                        color = MaterialTheme.colorScheme.error
-                    )
-                }
-            }
         }
         AppTextField(
             value = stage.title,
@@ -417,7 +409,12 @@ private fun StageEditor(
                     selected = picked,
                     onClick = {
                         val next = if (picked) stage.members - memberName else stage.members + memberName
-                        onChange(stage.copy(members = next))
+                        // 成员出阶段时，以其为来源的协作边一起清掉，免留指向已走人的悬空边；
+                        // with 侧有意不清：目标可以是部门/标签，未必是本阶段成员
+                        onChange(stage.copy(
+                            members = next,
+                            interfaces = stage.interfaces.filter { edge -> next.any { it.equals(edge.from, ignoreCase = true) } }
+                        ))
                     },
                     label = { Text(memberName) }
                 )
@@ -431,6 +428,29 @@ private fun StageEditor(
             minLines = 2,
             maxLines = 5
         )
+        // 对齐只在阶段内选中的成员之间建立；成员勾选产生的空边已在勾选时同步清除
+        InterfaceEdgeEditor(stage = stage, members = stage.members, onChange = onChange)
+        Text(stringResource(R.string.team_communication_title), style = MaterialTheme.typography.bodyMedium)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+            com.aharou.feature.agent.domain.subagent.TeamCommunication.entries.forEach { policy ->
+                FilterChip(selected = stage.communication == policy,
+                    onClick = { onChange(stage.copy(communication = policy)) },
+                    label = { Text(stringResource(when (policy) {
+                        com.aharou.feature.agent.domain.subagent.TeamCommunication.SAME_STAGE -> R.string.team_communication_stage
+                        com.aharou.feature.agent.domain.subagent.TeamCommunication.PARENT_ONLY -> R.string.team_communication_parent
+                        com.aharou.feature.agent.domain.subagent.TeamCommunication.RUN -> R.string.team_communication_run
+                    })) })
+            }
+        }
+        Text(stringResource(R.string.team_communication_hint), style = MaterialTheme.typography.bodySmall)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(stringResource(R.string.team_message_limit, stage.messageLimit), Modifier.weight(1f))
+            TextButton(enabled = stage.messageLimit > 1, onClick = { onChange(stage.copy(messageLimit = stage.messageLimit - 1)) }) { Text("−") }
+            TextButton(enabled = stage.messageLimit < 100, onClick = { onChange(stage.copy(messageLimit = stage.messageLimit + 1)) }) { Text("+") }
+        }
+        AppTextField(value = stage.communicationGuide,
+            onValueChange = { onChange(stage.copy(communicationGuide = it)) },
+            label = stringResource(R.string.team_communication_guide), singleLine = false, minLines = 2, maxLines = 5)
         Text(text = stringResource(R.string.team_editor_stage_type), style = MaterialTheme.typography.bodyMedium)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
             FilterChip(
@@ -467,6 +487,7 @@ private fun StageEditor(
         }
     }
 }
+
 
 /** 层级步进器：1~5 级够表达「一级高管组 / 二级组长 / 三级组员」这类结构，再多就该拆团队了。
  * 文案按角色定位展示：一级=高管、二级=组长、三级=组员，n级保留数字占位。
@@ -732,7 +753,15 @@ private fun ProcessNodeCard(
                         Text(
                             text = stage.members.joinToString(", "),
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(end = Spacing.xs)
+                        )
+                    }
+                    if (stage.interfaces.isNotEmpty()) {
+                        Text(
+                            text = stringResource(R.string.team_interface_count, stage.interfaces.size),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary
                         )
                     }
                 }

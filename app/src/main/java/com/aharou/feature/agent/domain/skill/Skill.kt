@@ -43,6 +43,12 @@ enum class SkillSaveError {
 
     BOUND_RENAME,
 
+    /** 关键词模式必须至少有一个非空关键词。 */
+    EMPTY_KEYWORDS,
+
+    /** 绑定技能不能在编辑器中隐式解除绑定。 */
+    BOUND_KEYWORD_POLICY,
+
     /** 写盘失败。 */
     IO_FAILED,
 

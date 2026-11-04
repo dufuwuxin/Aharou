@@ -21,7 +21,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.aharou.core.ui.AppTextField
 import com.aharou.feature.settings.presentation.SettingsViewModel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
@@ -67,7 +66,7 @@ internal fun SkillDetailSection(
     var keywordEnabled by remember(entry.name, entry.keywordEnabled) { mutableStateOf(entry.keywordEnabled) }
     var keywords by remember(entry.name, entry.keywords) { mutableStateOf(entry.keywords) }
     var showKeywords by remember(entry.name) { mutableStateOf(false) }
-    var draft by remember(entry.name) { mutableStateOf("") }
+    var draft by remember(entry.name) { mutableStateOf(listOf("", "")) }
     var confirmUnbind by remember(entry.name) { mutableStateOf(false) }
     var keywordSaving by remember(entry.name) { mutableStateOf(false) }
     var keywordError by remember(entry.name) { mutableStateOf(false) }
@@ -88,19 +87,22 @@ internal fun SkillDetailSection(
         }
     }
     if (showKeywords) {
-        val words = draft.split(Regex("[,，\\n]")).map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+        val words = com.aharou.feature.agent.domain.skill.SkillParser.parseKeywordInput(draft.joinToString("\n"))
         AlertDialog(
             onDismissRequest = { if (!keywordSaving) showKeywords = false },
             title = { Text(stringResource(R.string.skills_keyword_title)) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                Column(
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(Spacing.sm)
+                ) {
                     Text(stringResource(R.string.skills_keyword_hint))
-                    AppTextField(value = draft, onValueChange = { draft = it }, singleLine = false)
+                    SkillKeywordFields(values = draft, onValuesChange = { draft = it }, enabled = !keywordSaving)
                     if (boundCount > 0) {
                         Text(stringResource(R.string.skills_keyword_unbind, boundCount))
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(stringResource(R.string.skills_keyword_confirm), Modifier.weight(1f))
-                            AppSwitch(checked = confirmUnbind, onCheckedChange = { confirmUnbind = it })
+                            AppSwitch(checked = confirmUnbind, enabled = !keywordSaving, onCheckedChange = { confirmUnbind = it })
                         }
                     }
                     if (keywordError) Text(stringResource(R.string.skills_keyword_error), color = MaterialTheme.colorScheme.error)
@@ -194,14 +196,14 @@ internal fun SkillDetailSection(
                     AppSwitch(checked = keywordEnabled, enabled = !keywordSaving, onCheckedChange = { enabled ->
                         keywordError = false
                         if (enabled) {
-                            draft = keywords.joinToString(", ")
+                            draft = keywords + List((2 - keywords.size).coerceAtLeast(0)) { "" }
                             confirmUnbind = false
                             showKeywords = true
                         } else persistKeywords(false, keywords, false)
                     })
                 }
                 if (keywordEnabled) TextButton(enabled = !keywordSaving, onClick = {
-                    draft = keywords.joinToString(", "); confirmUnbind = false; showKeywords = true
+                    draft = keywords + List((2 - keywords.size).coerceAtLeast(0)) { "" }; confirmUnbind = false; showKeywords = true
                 }) { Text(keywords.joinToString(", ")) }
                 if (keywordError && !showKeywords) Text(stringResource(R.string.skills_keyword_error), color = MaterialTheme.colorScheme.error)
             }

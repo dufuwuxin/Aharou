@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.dp
 import com.aharou.R
 import com.aharou.core.theme.Spacing
 import com.aharou.core.ui.AppTextField
+import com.aharou.core.ui.AppSwitch
 import com.aharou.feature.agent.domain.skill.SkillForm
 import com.aharou.feature.agent.domain.skill.SkillSaveError
 import com.aharou.feature.agent.domain.skill.SkillScope
@@ -66,6 +67,11 @@ internal fun SkillEditorScreen(
     var name by rememberSaveable { mutableStateOf(initial?.name ?: "") }
     var description by rememberSaveable { mutableStateOf(initial?.description ?: "") }
     var instructions by rememberSaveable { mutableStateOf(initial?.instructions ?: "") }
+    var keywordEnabled by rememberSaveable { mutableStateOf(initial?.keywordEnabled ?: false) }
+    var keywordInputs by rememberSaveable {
+        mutableStateOf(initial?.keywords.orEmpty().let { it + List((2 - it.size).coerceAtLeast(0)) { "" } })
+    }
+    val keywords = com.aharou.feature.agent.domain.skill.SkillParser.parseKeywordInput(keywordInputs.joinToString("\n"))
     var scopeIsGlobal by rememberSaveable {
         mutableStateOf(initial?.scope?.let { it == SkillScope.GLOBAL } ?: (defaultScope == SkillScope.GLOBAL))
     }
@@ -77,7 +83,7 @@ internal fun SkillEditorScreen(
     BackHandler { onNavigateBack() }
 
     val scope = if (scopeIsGlobal) SkillScope.GLOBAL else SkillScope.PROJECT
-    val canSave = name.isNotBlank() && instructions.isNotBlank()
+    val canSave = name.isNotBlank() && instructions.isNotBlank() && (!keywordEnabled || keywords.isNotEmpty())
 
     Scaffold(
         containerColor = settingsPageBackground(),
@@ -109,8 +115,8 @@ internal fun SkillEditorScreen(
                                     description = description.trim(),
                                     instructions = instructions.trim(),
                                     requiredTools = initial?.requiredTools ?: emptyList(),
-                                    keywordEnabled = initial?.keywordEnabled ?: false,
-                                    keywords = initial?.keywords ?: emptyList()
+                                    keywordEnabled = keywordEnabled,
+                                    keywords = keywords
                                 ),
                                 scope
                             )
@@ -194,6 +200,39 @@ internal fun SkillEditorScreen(
                 }
             }
 
+            SettingsGroupHeader(text = stringResource(R.string.skills_keyword_editor_title))
+            SettingsGroup {
+                Column(
+                    modifier = Modifier.padding(Spacing.lg),
+                    verticalArrangement = Arrangement.spacedBy(Spacing.md)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.md)) {
+                        Text(stringResource(R.string.skills_keyword_editor_title), modifier = Modifier.weight(1f))
+                        AppSwitch(
+                            checked = keywordEnabled,
+                            enabled = saveState !is SkillSaveState.Saving,
+                            onCheckedChange = { keywordEnabled = it }
+                        )
+                    }
+                    Text(
+                        stringResource(if (keywordEnabled) R.string.skills_keyword_editor_hint else R.string.skills_normal_editor_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (keywordEnabled) {
+                        SkillKeywordFields(
+                            values = keywordInputs,
+                            onValuesChange = { keywordInputs = it },
+                            enabled = saveState !is SkillSaveState.Saving
+                        )
+                        if (keywords.isEmpty()) Text(
+                            stringResource(R.string.skills_editor_error_empty_keywords),
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                }
+            }
+
             SettingsGroupHeader(text = stringResource(R.string.skills_instructions))
             SettingsGroup {
                 AppTextField(
@@ -216,6 +255,8 @@ private fun SkillSaveError.messageRes(): Int = when (this) {
     SkillSaveError.EMPTY_INSTRUCTIONS -> R.string.skills_editor_error_empty_instructions
     SkillSaveError.NAME_CONFLICT -> R.string.skills_editor_error_name_conflict
     SkillSaveError.BOUND_RENAME -> R.string.skills_editor_error_bound_rename
+    SkillSaveError.EMPTY_KEYWORDS -> R.string.skills_editor_error_empty_keywords
+    SkillSaveError.BOUND_KEYWORD_POLICY -> R.string.skills_editor_error_bound_keywords
     SkillSaveError.IO_FAILED -> R.string.skills_editor_error_io
     SkillSaveError.READ_ONLY -> R.string.skills_editor_error_read_only
 }

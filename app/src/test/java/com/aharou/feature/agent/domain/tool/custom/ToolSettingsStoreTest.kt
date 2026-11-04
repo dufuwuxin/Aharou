@@ -37,6 +37,25 @@ class ToolSettingsStoreTest {
         )
 
     @Test
+    fun schemaOverride_survivesReloadAndClearsWithoutLosingPolicy() = runBlocking {
+        val global = tempDir("schema-override")
+        val locator = FakeLocator(global)
+        val schema = """{"type":"object","title":"Edited"}"""
+        val store = ToolSettingsStore(locator)
+        assertTrue(store.saveOverride("Bash", ToolOverride(schemaJson = schema, injectionMode = ToolInjectionMode.KEYWORD, keywords = listOf("run"))))
+        val reloaded = ToolSettingsStore(locator)
+        reloaded.refresh()
+        val override = reloaded.snapshotOverrides().getValue("Bash")
+        assertEquals(schema, override.schemaJson)
+        assertEquals(ToolInjectionMode.KEYWORD, override.injectionMode)
+        assertTrue(reloaded.saveOverride("Bash", override.copy(schemaJson = null)))
+        val reset = ToolSettingsStore(locator)
+        reset.refresh()
+        assertNull(reset.snapshotOverrides()["Bash"]?.schemaJson)
+        assertEquals(listOf("run"), reset.snapshotOverrides()["Bash"]?.keywords)
+    }
+
+    @Test
     fun saveAndDelete_roundTrip() = runBlocking {
         val global = tempDir("save")
         val store = ToolSettingsStore(FakeLocator(global))

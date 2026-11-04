@@ -227,9 +227,19 @@ class SubAgentEventBus @Inject constructor(
         synchronized(activeLock) { parentOfSub[subSessionId] = parentSessionId }
     }
 
+    /**
+     * 两边只要有一方已绑进团队运行，就必须同批；都没绑定（纯兄弟直连）不做运行校验。
+     * 跨运行批次互不可达，与注册表 [TeamRunRegistry.route] 的口径一致。
+     */
+    private fun sameRunBound(fromSessionId: String, toSessionId: String): Boolean {
+        val fromRun = runRegistry.runOf(fromSessionId)
+        val toRun = runRegistry.runOf(toSessionId)
+        return (fromRun == null || toRun == null || fromRun == toRun)
+    }
+
     /** 消费端在异步查询之后复查，登记关系不代表成员仍在运行。 */
     fun canReceiveSiblingMessage(fromSessionId: String, toSessionId: String): Boolean {
-        val sameRun = runRegistry.canCommunicate(fromSessionId, toSessionId)
+        val sameRun = sameRunBound(fromSessionId, toSessionId)
         return synchronized(activeLock) {
             sameRun && communicationEnabled() && areSiblings(fromSessionId, toSessionId) &&
                 fromSessionId in _activeSubSessionIds.value && toSessionId in _activeSubSessionIds.value
@@ -242,7 +252,7 @@ class SubAgentEventBus @Inject constructor(
 
     /** 校验、去重、投递及计数与生命周期串行，失败和重复均不占用预算。 */
     fun sendToSiblingResult(fromSessionId: String, toSessionId: String, message: String): SiblingSendResult {
-        val sameRun = runRegistry.canCommunicate(fromSessionId, toSessionId)
+        val sameRun = sameRunBound(fromSessionId, toSessionId)
         return synchronized(activeLock) {
             val text = message.trim()
             val rejection = when {
