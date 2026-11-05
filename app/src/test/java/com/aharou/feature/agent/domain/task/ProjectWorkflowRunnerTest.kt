@@ -29,6 +29,7 @@ class ProjectWorkflowRunnerTest {
         rejectAt: Int? = null, waitAt: Int? = null, capacityWait: Boolean = false, fullChecks: Int = 2, holdFirstMember: Boolean = false,
         beforeCommit: ((ProjectTaskSnapshot) -> ProjectTaskSnapshot)? = null,
         afterMemberEnds: ((ProjectTaskSnapshot) -> ProjectTaskSnapshot)? = null,
+        commitStatus: ProjectTaskStatus = ProjectTaskStatus.REVIEW,
         seed: (ProjectTask) -> ProjectTask = { it }): Triple<ProjectWorkflowRunner, () -> ProjectTaskSnapshot, ((ProjectTaskSnapshot) -> ProjectTaskSnapshot) -> Unit> {
         val repository = mockk<ProjectTaskRepository>()
         val guard = Any()
@@ -41,20 +42,26 @@ class ProjectWorkflowRunnerTest {
         var lateWrite = afterMemberEnds
         // A write that lands between the runner's read and its write, once member-a has ended.
         fun landLateWrite() { if (memberEnded) lateWrite?.let { change -> lateWrite = null; snapshot = change(snapshot) } }
+        var hook = beforeCommit
+        // A write that lands just as the lock is taken for the first write that moves a task into [commitStatus].
+        fun landBeforeCommit(proposed: List<ProjectTask>) {
+            if (proposed.none { t -> t.status == commitStatus && snapshot.tasks.firstOrNull { it.id == t.id }?.status != commitStatus }) return
+            hook?.let { change -> hook = null; snapshot = change(snapshot) }
+        }
         coEvery { repository.save(any()) } answers {
             val t = firstArg<ProjectTask>()
             synchronized(guard) {
+                landBeforeCommit(listOf(t))
                 landLateWrite()
                 check(snapshot.tasks.firstOrNull { it.id == t.id }?.let { it.version == t.version } != false) { "STALE_TASK_VERSION" }
                 snapshot = snapshot.copy(tasks = snapshot.tasks.map { if (it.id == t.id) t else it })
             }
             t
         }
-        var hook = beforeCommit
         coEvery { repository.transact("w", any()) } answers {
             val build = secondArg<(ProjectTaskSnapshot) -> List<ProjectTaskChange>>()
             synchronized(guard) {
-                hook?.let { change -> hook = null; snapshot = change(snapshot) } // A write that lands just as the lock is taken.
+                landBeforeCommit(build(snapshot).map { it.task }) // Dry run: only to see which status this write commits.
                 landLateWrite()
                 val changes = build(snapshot)
                 snapshot = snapshot.copy(tasks = snapshot.tasks.map { t -> changes.firstOrNull { it.task.id == t.id }?.task ?: t })
@@ -161,6 +168,29 @@ class ProjectWorkflowRunnerTest {
         assertEquals(ProjectTaskStatus.REVIEW, first.status)
         assertEquals("SUCCEEDED", first.executionReason)
         assertEquals(ProjectTaskStatus.REVIEW, snapshot().tasks[1].status)
+    }
+
+    @Test fun aSupplementCommittedBeforeTheRunningMarkRunsTheMemberOnTheNewRequirements() = runBlocking {
+        val (runner, snapshot) = fixture(true, commitStatus = ProjectTaskStatus.RUNNING, beforeCommit = { store ->
+            store.reviseA { it.copy(requirement = "a v2", version = it.version + 1) } })
+        runner.run("p", "w")
+        val first = snapshot().tasks[0]
+        assertEquals("a v2", first.requirement)
+        assertEquals(listOf("member-a"), first.processSessionIds)
+        assertEquals(ProjectTaskStatus.REVIEW, first.status)
+        assertEquals(2L, first.processRequirementsVersion)
+    }
+
+    @Test fun aSupplementCommittedAsAMemberFailsKeepsTheMemberFailureAndBlocksTheTask() = runBlocking {
+        val (runner, snapshot) = fixture(false, commitStatus = ProjectTaskStatus.BLOCKED, beforeCommit = { store ->
+            store.copy(tasks = store.tasks.map { if (it.id == "a") it.copy(supplements = listOf("late"), version = it.version + 1) else it }) })
+        try { runner.run("p", "w"); fail("must stop after rejection") } catch (expected: IllegalStateException) {
+            assertEquals("PROJECT_MEMBER_FAILED", expected.message)
+        }
+        val first = snapshot().tasks[0]
+        assertEquals(ProjectTaskStatus.BLOCKED, first.status)
+        assertEquals(listOf("late"), first.supplements)
+        assertEquals("FAILED", first.executionReason)
     }
 
     @Test fun aBranchDuringASingleTaskRunRunsTheBranchAndThenTheTask() = runBlocking {

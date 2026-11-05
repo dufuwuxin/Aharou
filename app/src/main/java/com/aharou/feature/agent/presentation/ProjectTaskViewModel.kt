@@ -175,7 +175,7 @@ class ProjectTaskViewModel @Inject constructor(
                 projectJobs.remove(projectId)
                 mutable.update { it.copy(activeProjectIds = projectJobs.keys.toSet()) }
             }
-            if (rerunAfterFlow.remove(projectId) && completed && hasPendingTasks(projectId, workspace)) startProjectIn(projectId, workspace)
+            if (rerunAfterFlow.remove(projectId) && completed && hasPendingTasks(projectId, workspace)) startProjectIn(projectId, workspace, continueAfterRun = true)
         }
         projectJobs[projectId] = job
         mutable.update { it.copy(activeProjectIds = projectJobs.keys.toSet(), error = null) }
