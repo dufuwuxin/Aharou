@@ -323,29 +323,22 @@ class SystemPromptProvider @Inject constructor(
     }
 
     /**
-     * 按工作区类型注入工程规约（Android / Flutter / Node）：识别特征文件后读取
-     * `prompts/agent/workspace-<type>.md`；未识别出类型时不注入。
+     * 按工作区类型注入工程规约（Android / Rust / Python）：[WorkspaceTypeDetector] 识别出的每种类型
+     * 各读一次 `prompts/agent/workspace-<type>.md`，按识别顺序拼接；一个类型都没识别出时不注入。
      */
     private inner class WorkspaceTypeSource : PromptSource {
         private val cachedByType = ConcurrentHashMap<String, String>()
 
         override fun build(ctx: AgentContext): String? {
             if (ctx.projectRoot.isBlank()) return null
-            val type = detectType(ctx.projectRoot) ?: return null
-            cachedByType[type]?.let { return it.ifEmpty { null } }
-            val body = resolvePrompt("agent/workspace-$type.md").replace(LEADING_COMMENT, "").trim()
-            cachedByType[type] = body
-            return body.ifEmpty { null }
-        }
-
-        private fun detectType(projectRoot: String): String? {
-            val dir = File(projectRoot)
-            return when {
-                File(dir, "settings.gradle.kts").isFile || File(dir, "settings.gradle").isFile -> "android"
-                File(dir, "pubspec.yaml").isFile -> "flutter"
-                File(dir, "package.json").isFile -> "node"
-                else -> null
-            }
+            val bodies = WorkspaceTypeDetector.detect(File(ctx.projectRoot))
+                .map { type ->
+                    cachedByType.getOrPut(type) {
+                        resolvePrompt("agent/workspace-$type.md").replace(LEADING_COMMENT, "").trim()
+                    }
+                }
+                .filter { it.isNotEmpty() }
+            return bodies.joinToString("\n\n").ifEmpty { null }
         }
     }
 
@@ -997,4 +990,18 @@ class SystemPromptProvider @Inject constructor(
         const val DATE_VAR = PromptVars.DATE_VAR
         const val RULES_VAR = PromptVars.RULES_VAR
     }
+}
+
+/**
+ * 工作区工程类型识别（纯文件逻辑，便于单测）：返回全部命中类型，顺序固定 android → rust → python，各至多一次。
+ * Rust 常是 Android 工程里的子 crate（如 `native/`），所以一级子目录的 `Cargo.toml` 也算；Python 只看根目录。
+ */
+internal object WorkspaceTypeDetector {
+    fun detect(root: File): List<String> = buildList {
+        if (has(root, "settings.gradle.kts", "settings.gradle")) add("android")
+        if (has(root, "Cargo.toml") || root.listFiles().orEmpty().any { it.isDirectory && has(it, "Cargo.toml") }) add("rust")
+        if (has(root, "pyproject.toml", "requirements.txt", "setup.py")) add("python")
+    }
+
+    private fun has(dir: File, vararg names: String) = names.any { File(dir, it).isFile }
 }

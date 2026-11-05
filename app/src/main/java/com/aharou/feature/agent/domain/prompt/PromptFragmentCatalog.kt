@@ -548,8 +548,8 @@ class PromptFragmentCatalog @Inject constructor(
             "agent/memory-discipline.md",
             "agent/stuck-nudge.md",
             "agent/workspace-android.md",
-            "agent/workspace-flutter.md",
-            "agent/workspace-node.md"
+            "agent/workspace-rust.md",
+            "agent/workspace-python.md"
         )
         val LEADING_COMMENT = Regex("(?s)^\\s*<!--.*?-->\\s*")
         val DESCRIPTION = Regex("^\\s*<!--\\s*(.*?)\\s*-->", RegexOption.DOT_MATCHES_ALL)

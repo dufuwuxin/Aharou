@@ -70,7 +70,7 @@ private fun auxiliaryRuleTrigger(name: String): String = stringResource(
         "subagent-base" -> R.string.rules_runtime_trigger_subagent
         "memory-discipline" -> R.string.rules_runtime_trigger_memory
         "stuck-nudge" -> R.string.rules_runtime_trigger_stuck
-        "workspace-android", "workspace-flutter", "workspace-node" -> R.string.rules_runtime_trigger_workspace
+        "workspace-android", "workspace-rust", "workspace-python" -> R.string.rules_runtime_trigger_workspace
         else -> R.string.rules_runtime_trigger_unknown
     }
 )
