@@ -34,6 +34,12 @@ class ProjectWorkflowPlanTest {
         }
     }
 
+    @Test fun memberPromptMentionsProjectTasksOnlyWhenTheRoleCanCallIt() {
+        val a = task("a")
+        assertFalse(ProjectWorkflowPlan.prompt(a, listOf(a), "r").contains("project_tasks"))
+        assertTrue(ProjectWorkflowPlan.prompt(a, listOf(a), "r", projectTools = true).contains("project_tasks(action=\"outline\""))
+    }
+
     @Test fun tasksSavedBeforeSupplementsExistDecodeWithEmptySupplements() {
         val old = Json { ignoreUnknownKeys = true }.decodeFromString(ProjectTask.serializer(),
             """{"id":"t","workspace":"w","title":"old","requirement":"old","status":"REVIEW","requirementsVersion":3,"legacyField":1}""")

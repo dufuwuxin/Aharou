@@ -1,6 +1,8 @@
 package com.aharou.feature.agent.domain.task
 
 object ProjectWorkflowPlan {
+    const val PROJECT_TASKS_TOOL = "project_tasks"
+
     fun participants(task: ProjectTask): List<String> =
         (listOf(task.owner) + task.members).map(String::trim).filter(String::isNotBlank).ifEmpty { listOf("") }
 
@@ -19,6 +21,24 @@ object ProjectWorkflowPlan {
 
     fun dependenciesDelivered(task: ProjectTask, tasks: List<ProjectTask>): Boolean =
         task.dependencyIds.all { id -> tasks.any { it.id == id && delivered(it) } }
+
+    /**
+     * Single-task run: the task itself once its dependencies are delivered; before that, the first member-made branch in
+     * its subtree that it (transitively) waits on, is undelivered and can run now. Null when nothing there can run.
+     */
+    fun nextWithin(tasks: List<ProjectTask>, taskId: String): ProjectTask? {
+        val task = tasks.firstOrNull { it.id == taskId } ?: return null
+        if (dependenciesDelivered(task, tasks)) return task
+        val inside = ProjectTaskGraph.subtree(taskId, tasks).associateBy { it.id }
+        val needed = hashSetOf<String>()
+        val queue = java.util.ArrayDeque(task.dependencyIds)
+        while (queue.isNotEmpty()) {
+            val id = queue.removeFirst()
+            val dependency = inside[id]?.takeIf { it.createdBySessionId != null && !delivered(it) } ?: continue
+            if (needed.add(id)) queue.addAll(dependency.dependencyIds)
+        }
+        return ProjectTaskGraph.tree(tasks).map { it.task }.firstOrNull { it.id in needed && dependenciesDelivered(it, tasks) }
+    }
 
     fun runnable(tasks: List<ProjectTask>, taskId: String): ProjectTask {
         val task = tasks.firstOrNull { it.id == taskId } ?: error("PROJECT_TASK_NOT_FOUND")
@@ -46,7 +66,8 @@ object ProjectWorkflowPlan {
     }
 
     fun prompt(task: ProjectTask, tasks: List<ProjectTask>, requirements: String,
-        member: String = task.owner, ordinal: Int = 1, previous: List<String> = emptyList()): String = buildString {
+        member: String = task.owner, ordinal: Int = 1, previous: List<String> = emptyList(),
+        projectTools: Boolean = false): String = buildString {
         append("Project requirements:\n").append(requirements)
         append("\n\nTask ID: ").append(task.id).append("\nTask: ").append(task.title)
         append("\nRequirement:\n").append(task.requirement)
@@ -65,6 +86,7 @@ object ProjectWorkflowPlan {
             append(previous.joinToString("\n\n"))
         }
         append("\n\nExecute only this task as a member of the project workflow. Return the result, evidence, and anything unresolved. Do not start a separate project flow or mark work accepted without evidence.")
-        append(" If part of this task needs separate research first, call project_tasks(action=\"branch\") and end this turn at once; the flow runs the branch and then reruns this task with its result. Use project_tasks(action=\"add\") for follow-up subtasks that run after this task.")
+        // Roles whose tool whitelist drops project_tasks never see instructions for a tool they cannot call.
+        if (projectTools) append(" If part of this task needs separate research first, call project_tasks(action=\"branch\") and end this turn at once; the flow runs the branch and then reruns this task with its result. Use project_tasks(action=\"add\") for follow-up subtasks that run after this task, and project_tasks(action=\"outline\", query=\"...\") to look up project tasks line by line.")
     }
 }

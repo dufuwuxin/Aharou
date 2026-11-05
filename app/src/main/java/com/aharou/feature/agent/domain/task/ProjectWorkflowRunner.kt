@@ -49,18 +49,14 @@ class ProjectWorkflowRunner @Inject constructor(
         messages.persist(parent.id, MessageRole.USER, project.requirements)
         var active: ProjectTask? = null
         var child: String? = null
-        var rerunOnly = false
         try {
             while (true) {
                 val snapshot = repository.load(workspace)
                 val currentProject = snapshot.projects.first { it.id == projectId }
                 val projectTasks = snapshot.tasks.filter { it.projectId == projectId }
-                // A superseded single-task run reruns only while its own predecessors stay delivered (a new branch is not).
-                if (rerunOnly && onlyTaskId != null && projectTasks.firstOrNull { it.id == onlyTaskId }
-                        ?.let { ProjectWorkflowPlan.dependenciesDelivered(it, projectTasks) } != true) break
-                rerunOnly = false
+                // A single-task run first runs the member branches its task now waits on, then the task itself.
                 val next = if (onlyTaskId == null) ProjectWorkflowPlan.next(projectTasks) ?: break
-                    else ProjectWorkflowPlan.runnable(projectTasks, onlyTaskId)
+                    else ProjectWorkflowPlan.nextWithin(projectTasks, onlyTaskId) ?: break
                 val participants = ProjectWorkflowPlan.participants(next)
                 val reused = ProjectWorkflowPlan.reusableRuns(next)
                 active = repository.save(next.copy(status = ProjectTaskStatus.RUNNING, executionReason = "",
@@ -75,6 +71,7 @@ class ProjectWorkflowRunner @Inject constructor(
                             outputs += memberOutput(index, member, reusedId)
                             continue
                         }
+                        val projectTools = projectToolsFor(member)
                         while (child == null) {
                             while (events.isFull) delay(100)
                             requireCurrent(workspace, next, participants)
@@ -82,7 +79,7 @@ class ProjectWorkflowRunner @Inject constructor(
                             withContext(NonCancellable) {
                                 val args = buildJsonObject {
                                     put("action", "create"); put("description", next.title)
-                                    put("prompt", ProjectWorkflowPlan.prompt(next, projectTasks, currentProject.requirements, member, index + 1, outputs.toList()))
+                                    put("prompt", ProjectWorkflowPlan.prompt(next, projectTasks, currentProject.requirements, member, index + 1, outputs.toList(), projectTools))
                                     if (member.isNotBlank()) put("agent", member)
                                 }
                                 val result = tasks.executeWithContext(args, context)
@@ -114,14 +111,21 @@ class ProjectWorkflowRunner @Inject constructor(
                     requireCurrent(workspace, next, participants)
                 } catch (_: ProjectTaskSuperseded) {
                     withContext(NonCancellable) { supersede(workspace, next.id, child, context) }
-                    active = null; child = null; rerunOnly = true
+                    active = null; child = null
                     continue
                 }
-                val latest = repository.load(workspace).tasks.first { it.id == next.id }
-                repository.save(latest.copy(status = ProjectTaskStatus.REVIEW, processRequirementsVersion = next.requirementsVersion,
-                    brief = outputs.joinToString("\n\n"), executionReason = "SUCCEEDED"))
+                // Compared and saved under the store lock: a supplement or branch committed after the last check is never overwritten.
+                var superseded = false
+                repository.transact(workspace) { store ->
+                    val latest = store.tasks.first { it.id == next.id }
+                    superseded = latest.requirementsVersion != next.requirementsVersion || ProjectWorkflowPlan.participants(latest) != participants
+                    listOf(ProjectTaskChange(if (superseded) latest.copy(status = ProjectTaskStatus.READY, processRequirementsVersion = null,
+                        executionReason = "UPSTREAM_CHANGED") else latest.copy(status = ProjectTaskStatus.REVIEW,
+                        processRequirementsVersion = next.requirementsVersion, brief = outputs.joinToString("\n\n"), executionReason = "SUCCEEDED")))
+                }
                 active = null
-                if (onlyTaskId != null) break
+                if (superseded) continue
+                if (onlyTaskId != null && next.id == onlyTaskId) break
             }
         } catch (failure: Exception) {
             withContext(NonCancellable) {
@@ -154,6 +158,15 @@ class ProjectWorkflowRunner @Inject constructor(
         val latest = repository.load(workspace).tasks.firstOrNull { it.id == started.id } ?: return
         if (latest.requirementsVersion != started.requirementsVersion || ProjectWorkflowPlan.participants(latest) != participants)
             throw ProjectTaskSuperseded()
+    }
+
+    /** The member prompt mentions project_tasks only when the role's tool filter keeps it; the default member keeps every tool. */
+    internal suspend fun projectToolsFor(member: String): Boolean {
+        if (member.isBlank()) return true
+        return try {
+            withContext(Dispatchers.IO) { definitions.find(member) }
+                ?.filterToolNames(listOf(ProjectWorkflowPlan.PROJECT_TASKS_TOOL))?.isNotEmpty() == true
+        } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { false }
     }
 
     /** Same stop path as a failed attempt, but the member record is SUPERSEDED and the task returns to the queue. */

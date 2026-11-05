@@ -27,6 +27,7 @@ class ProjectWorkflowRunnerTest {
 
     private fun fixture(accepted: Boolean, wait: Boolean = false, owner: String = "", members: List<String> = emptyList(),
         rejectAt: Int? = null, waitAt: Int? = null, capacityWait: Boolean = false, fullChecks: Int = 2, holdFirstMember: Boolean = false,
+        beforeCommit: ((ProjectTaskSnapshot) -> ProjectTaskSnapshot)? = null,
         seed: (ProjectTask) -> ProjectTask = { it }): Triple<ProjectWorkflowRunner, () -> ProjectTaskSnapshot, ((ProjectTaskSnapshot) -> ProjectTaskSnapshot) -> Unit> {
         val repository = mockk<ProjectTaskRepository>()
         val guard = Any()
@@ -39,6 +40,16 @@ class ProjectWorkflowRunnerTest {
             val t = firstArg<ProjectTask>()
             synchronized(guard) { snapshot = snapshot.copy(tasks = snapshot.tasks.map { if (it.id == t.id) t else it }) }
             t
+        }
+        var hook = beforeCommit
+        coEvery { repository.transact("w", any()) } answers {
+            val build = secondArg<(ProjectTaskSnapshot) -> List<ProjectTaskChange>>()
+            synchronized(guard) {
+                hook?.let { change -> hook = null; snapshot = change(snapshot) } // A write that lands just as the lock is taken.
+                val changes = build(snapshot)
+                snapshot = snapshot.copy(tasks = snapshot.tasks.map { t -> changes.firstOrNull { it.task.id == t.id }?.task ?: t })
+                changes.map { it.task }
+            }
         }
         val sessions = mockk<SessionUseCase>(relaxed = true)
         val turns = mockk<AgentTurnRunner>()
@@ -115,6 +126,46 @@ class ProjectWorkflowRunnerTest {
         assertEquals(listOf("member-b"), tasks.getValue("b").processSessionIds)
         assertTrue(tasks.values.all { it.status == ProjectTaskStatus.REVIEW })
         assertEquals(2L, tasks.getValue("a").processRequirementsVersion)
+    }
+
+    @Test fun aSupplementCommittedAfterTheLastCheckIsNotOverwrittenByTheReviewSave() = runBlocking {
+        val (runner, snapshot) = fixture(true, beforeCommit = { store ->
+            store.reviseA { it.copy(requirement = "a with late supplement", supplements = listOf("late")) } })
+        runner.run("p", "w")
+        val first = snapshot().tasks[0]
+        assertEquals("a with late supplement", first.requirement)
+        assertEquals(listOf("member-a", "member-a-2"), first.processSessionIds)
+        assertEquals(ProjectTaskStatus.REVIEW, first.status)
+        assertEquals(2L, first.processRequirementsVersion)
+        assertEquals(listOf("member-b"), snapshot().tasks[1].processSessionIds)
+    }
+
+    @Test fun aBranchDuringASingleTaskRunRunsTheBranchAndThenTheTask() = runBlocking {
+        val (runner, snapshot, edit) = fixture(true, holdFirstMember = true)
+        val job = launch { runner.run("p", "w", "a") }
+        withTimeout(3000) { while (snapshot().tasks[0].processSessionIds.isEmpty()) delay(5) }
+        edit { store -> store.reviseA { it.copy(dependencyIds = listOf("c")) }.let { revised ->
+            revised.copy(tasks = revised.tasks + task("c").copy(parentId = "a", order = 3, status = ProjectTaskStatus.READY,
+                createdBySessionId = "member-a")) } }
+        withTimeout(5000) { job.join() }
+        val tasks = snapshot().tasks.associateBy { it.id }
+        assertEquals(listOf("member-c"), tasks.getValue("c").processSessionIds)
+        assertEquals(listOf("member-a", "member-a-2"), tasks.getValue("a").processSessionIds)
+        assertEquals(ProjectTaskStatus.REVIEW, tasks.getValue("a").status)
+        assertTrue(tasks.getValue("b").processSessionIds.isEmpty())
+    }
+
+    @Test fun onlyMembersWhoseToolFilterKeepsProjectTasksAreToldAboutIt() = runBlocking {
+        val definitions = mockk<AgentDefinitionRepository>()
+        every { definitions.find("narrow") } returns AgentDefinition(name = "narrow", description = "", allowedTools = listOf("readFile"), prompt = "")
+        every { definitions.find("wide") } returns AgentDefinition(name = "wide", description = "", prompt = "")
+        every { definitions.find("gone") } returns null
+        val runner = ProjectWorkflowRunner(mockk(), mockk(), mockk(), javax.inject.Provider<com.aharou.feature.agent.domain.tool.ToolRegistry> { mockk() }, mockk(), definitions, mockk(),
+            ProjectTaskExecutionCoordinator())
+        assertTrue(runner.projectToolsFor(""))
+        assertTrue(runner.projectToolsFor("wide"))
+        assertFalse(runner.projectToolsFor("narrow"))
+        assertFalse(runner.projectToolsFor("gone"))
     }
 
     @Test fun aSupplementDuringTheRunRerunsTheTaskInsteadOfEndingTheFlow() = runBlocking {

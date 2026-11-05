@@ -98,15 +98,27 @@ class ProjectPlannerTest {
         assertTrue(changes.first { it.task.id == "anchor" }.force)
     }
 
-    @Test fun revisionWithoutAModelAppendsTheSupplementToTheAnchor() = runBlocking {
+    @Test fun revisionWithoutAModelRerunsTheAnchorWithoutCopyingTheSupplement() = runBlocking {
         val anchor = task("anchor")
         for (raw in listOf(null, "{\"operations\":[]}", "{\"operations\":[{\"op\":\"edit\",\"taskId\":\"elsewhere\",\"requirement\":\"x\"}]}")) {
             answer(raw)
             val revision = planner.revise(project, anchor, listOf(anchor), "also handle offline", emptyList())
             assertTrue(raw.toString(), revision.ruleFallback)
-            assertEquals("anchor\n\nalso handle offline", revision.change(anchor).task.requirement)
-            assertFalse(revision.change(anchor).force)
+            assertEquals(listOf("anchor"), revision.touched)
+            assertEquals("anchor", revision.change(anchor).task.requirement)
+            assertTrue(revision.change(anchor).force)
+            val prompt = ProjectWorkflowPlan.prompt(revision.change(anchor.copy(supplements = listOf("also handle offline"))).task, listOf(anchor), "r")
+            assertEquals(1, Regex.fromLiteral("also handle offline").findAll(prompt).count())
         }
+    }
+
+    @Test fun anUnknownParentKeyFallsBackToTheDefaultParent() = runBlocking {
+        val existing = listOf(task("old"))
+        answer("""{"tasks":[{"key":"n","title":"Orphan","parentKey":"no-such-task-or-key"}]}""")
+        assertNull(planner.plan(project, "x", existing, emptyList()).tasks.single().parentId)
+        assertEquals("old", planner.plan(project, "x", existing, emptyList(), parentId = "old").tasks.single().parentId)
+        answer("""{"operations":[{"op":"add","key":"n","title":"Orphan","parentKey":"no-such-task-or-key"}]}""")
+        assertEquals("old", planner.revise(project, existing[0], existing, "s", emptyList()).added.single().parentId)
     }
 
     @Test fun aForcedRerunInvalidatesDeliveredWorkWithoutAFieldChange() {

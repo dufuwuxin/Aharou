@@ -11,7 +11,7 @@
 
 ## 0. 工具集合与事实来源
 
-- 内置工具的唯一注册点是 `app/src/main/java/com/aharou/di/AgentModule.kt:453-489`，共 **38 个**：`readFile` `sendFile` `sendToChat` `viewImage` `writeFile` `editFile` `generateImage` `Bash` `Shizuku` `terminal` `list` `search` `loadSkill` `loadRule` `knowledge_search` `askUserQuestion` `manageMcp` `tool_search` `websearch` `webfetch` `planMode` `todo` `memory` `task` `messageParent` `browser` `config` `vscreen` `a11y` `open_app` `check_dependencies` `sessions` `project_tasks` `device` `personal_context` `petAvatar` `diagnostics` `git_blame`。
+- 内置工具的唯一注册点是 `app/src/main/java/com/aharou/di/AgentModule.kt:471-509`，共 **39 个**：`readFile` `sendFile` `sendToChat` `viewImage` `writeFile` `editFile` `generateImage` `Bash` `Shizuku` `terminal` `list` `search` `loadSkill` `loadRule` `knowledge_search` `askUserQuestion` `manageMcp` `tool_search` `websearch` `webfetch` `planMode` `todo` `memory` `task` `messageParent` `observe` `browser` `config` `vscreen` `a11y` `open_app` `check_dependencies` `sessions` `project_tasks` `device` `personal_context` `petAvatar` `diagnostics` `git_blame`。
 - MCP 工具在连接时动态注册（`feature/agent/domain/mcp/McpManager.kt:266`，卸载见 `:272` / `:354`）。
 - 每轮注入：工具集经成员允许清单、`ToolInjectionGate` 的 every_round/keyword/off 策略过滤，并应用兼容的描述与 schema 说明覆盖；不能把注册工具总数当作每轮实际可见数量。MCP 的延迟加载仍由原有检索链路（`tool_search`）处理。
 - `config`（`di/AgentModule.kt:475`，实现 `feature/agent/domain/tool/config/ConfigTool.kt`）是一层**通用配置接口**：agent 能改什么，取决于 `ConfigRegistry` 里注册了哪些字段，注册入口集中在 `AIEditorApp.kt:409-434`（24 个 `Config*Fields`）。下文写“config `path`”即指这条路径。
@@ -139,7 +139,7 @@
 | 用户能做什么 | 界面入口（file:line） | Agent 有对应工具吗 | 工具名与入口（file:line） | 差距说明 |
 |---|---|---|---|---|
 | 创建项目和批量任务草稿 | 项目页两字段创建，保存项目及草稿到同一快照 | 无 | 无项目写入工具 | 用户主导；普通会话不提供新建入口 |
-| 在执行中的任务下分出研究分支或追加子任务 | 项目页「添加任务」只填描述，由规划器挂载 | 有（仅项目成员） | `project_tasks` `action=branch/add`（`feature/agent/domain/tool/session/ProjectTaskTool.kt`，注册 `di/AgentModule.kt`） | 只能写当前运行任务及其子孙，每项目成员新增上限 20、深 4 层；不能建项目、改别的任务或长按补充 |
+| 在执行中的任务下分出研究分支或追加子任务 | 项目页「添加任务」只填描述，由规划器挂载 | 有（仅项目成员） | `project_tasks` `action=branch/add/outline`（outline 只读）（`feature/agent/domain/tool/session/ProjectTaskTool.kt`，注册 `di/AgentModule.kt`） | 只能写当前运行任务及其子孙，每项目成员新增上限 20、深 4 层；不能建项目、改别的任务或长按补充 |
 | 切换会话 | `MainActivity.kt:838`（`selectSession`） | 无 | `sessions` 只有 list/search/read | **缺口** |
 | 重命名会话 | `ChatDrawer.kt:436`、`:508` → `MainActivity.kt:840` | 无 | 未找到 | **缺口** |
 | 删除会话 | `ChatDrawer.kt:450`、`:471` → `MainActivity.kt:839` | 无 | 未找到 | **缺口** |
