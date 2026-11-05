@@ -45,7 +45,7 @@ internal object TaskToolSpec {
         "department" to ToolParameter(
             name = "department",
             type = ParameterType.STRING,
-            description = "子代理部门（create 可选）：取系统提示词「可用子代理」部门索引里的部门名，如 engineering / security / testing / design / product / project-management / specialized / game-development / unity / unreal / godot / roblox / xr / explore。与 agentQuery 配合在该部门内选角",
+            description = "子代理部门（create 可选）：取系统提示词「可用子代理」部门索引里的部门名，如 engineering / security / testing / design / product / explore。与 agentQuery 配合在该部门内选角",
             required = false
         ),
         "agentQuery" to ToolParameter(

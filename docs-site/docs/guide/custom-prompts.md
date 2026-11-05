@@ -78,7 +78,7 @@ Aharou 的系统提示词可以自己改。默认提示词随 App 内置、升�
 
 ### 按需片段也能单条开关和改
 
-配置 → 规则页的「运行时规则」列出按场景读取的内容，并显示触发依据：`plan-mode` / `auto-mode`（切模式时的提醒）、`subagent-base`（子代理基线）、`memory-discipline`、`stuck-nudge`、`workspace-android` / `workspace-flutter` / `workspace-node`（识别到工程类型时注入的规约）。
+配置 → 规则页的「运行时规则」列出按场景读取的内容，并显示触发依据：`plan-mode` / `auto-mode`（切模式时的提醒）、`subagent-base`（子代理基线）、`memory-discipline`、`stuck-nudge`、`workspace-android` / `workspace-rust` / `workspace-python`（识别到工程类型时注入的规约，同一工作区命中多种类型会依次全部注入）。
 
 - 右侧开关同样是存在即关闭，标记落在 `.disabled/<文件名>`（如 `.disabled/plan-mode.md`）；
 - 点行会在底栏里改正文，保存写到 `prompts.custom/agent/<同名>`（有工作区写项目层，否则写全局层）；
@@ -176,8 +176,8 @@ Aharou 的系统提示词可以自己改。默认提示词随 App 内置、升�
 | `agent/commit-generator.md` | Git 页「AI 生成」提交信息用的提示词 |
 | `agent/init.md` | `/init` 命令的指令正文（分析代码库并生成/改进 `AGENTS.md`），可在对话输入框用 `/init` 触发 |
 | `agent/workspace-android.md` | Android 工程规约（工作区识别为 Gradle 工程时自动注入） |
-| `agent/workspace-flutter.md` | Flutter 工程规约（识别到 `pubspec.yaml` 时注入） |
-| `agent/workspace-node.md` | Node / 前端工程规约（识别到 `package.json` 时注入） |
+| `agent/workspace-rust.md` | Rust 工程规约（根目录或一级子目录有 `Cargo.toml` 时注入） |
+| `agent/workspace-python.md` | Python 工程规约（根目录有 `pyproject.toml` / `requirements.txt` / `setup.py` 时注入） |
 
 ## 恢复默认
 
