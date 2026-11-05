@@ -1,31 +1,43 @@
 package com.aharou.feature.agent.domain.task
 
 /**
- * Horizontal mind-map layout in logical dp floats; the UI never allocates a full-tree sized surface.
- * Gap defaults mirror the UI Spacing tokens (lg = 16, 2 × xxl = 64); the UI passes the token values explicitly.
+ * Horizontal mind-map layout in logical dp floats. Every node is a "dot + one-line title" header row; an unfolded
+ * node grows downward to its outline height and pushes the rest of its column (with whole subtrees) down.
+ * The UI never allocates a full-tree sized surface. Gap defaults mirror the UI Spacing tokens (sm = 8,
+ * 2 × xxl = 64, lg = 16); the UI passes the token values explicitly.
  */
 object ProjectTaskMapLayout {
-    const val NODE_MIN_WIDTH = 136f
-    const val NODE_MAX_WIDTH = 232f
-    /** Fits two title lines plus one status line. */
-    const val NODE_HEIGHT = 72f
-    /** At this zoom a node is still a 48dp touch target. */
+    /** Header row height; × [MIN_ZOOM] it is still a 48dp touch target. */
+    const val NODE_HEIGHT = 64f
     const val MIN_ZOOM = 48f / NODE_HEIGHT
-    /** labelMedium font size; the UI passes the real (font-scaled) value. */
-    const val DEFAULT_GLYPH = 12f
-    const val SIBLING_GAP = 16f
+    const val NODE_MIN_WIDTH = 120f
+    const val NODE_MAX_WIDTH = 280f
+    /** Minimum width of an unfolded node so its outline lines stay readable. */
+    const val PANEL_WIDTH = 300f
+    /** labelLarge font size; the UI passes the real (font-scaled) value. */
+    const val DEFAULT_GLYPH = 14f
+    const val SIBLING_GAP = 8f
     const val LEVEL_GAP = 64f
     const val MARGIN = 16f
-    /** Padding, status bar and rounding slack a node adds around its title text. */
-    private const val NODE_CHROME = 32f
+    /** Status dot centre measured from the node's left edge (half of the 32dp dot column). */
+    const val DOT_INSET = 16f
+    /** Logical radius of a task's status dot; branches end on its left edge so hollow dots stay clean. */
+    const val DOT_RADIUS = 5f
+    /** Fork point right of the node's widest part, where branches to children and dependants fan out. */
+    const val FORK_GAP = 16f
+    /** Dot column, gaps, count badge, arrow and end padding around the title text. */
+    private const val HEADER_CHROME = 96f
     private const val NARROW_GLYPH_EM = 0.55f
-    private const val WRAP_SLACK = 1.1f
     private const val WIDE_GLYPH_START = 0x2E80
     private const val MIN_BEND = 24f
     private const val LOOP_BULGE = 32f
 
-    data class Node(val id: String, val x: Float, val y: Float, val width: Float, val height: Float = NODE_HEIGHT,
-        val root: Boolean = false)
+    data class Node(val id: String, val x: Float, val y: Float, val width: Float, val height: Float,
+        val headerWidth: Float, val root: Boolean = false) {
+        val dotX: Float get() = x + DOT_INSET
+        val dotY: Float get() = y + NODE_HEIGHT / 2f
+        val forkX: Float get() = x + width + FORK_GAP
+    }
     data class Edge(val from: String, val to: String, val dependency: Boolean = false)
     /** Cubic Bézier (start, two control points, end); its convex hull bounds the drawn curve. */
     data class Curve(val x0: Float, val y0: Float, val x1: Float, val y1: Float,
@@ -40,50 +52,56 @@ object ProjectTaskMapLayout {
         fun visible(left: Float, top: Float, right: Float, bottom: Float): List<Node> = nodes.filter {
             it.x + it.width >= left && it.x <= right && it.y + it.height >= top && it.y <= bottom
         }
-        /** Forward edges leave the source's right edge and enter the target's left edge with horizontal tangents;
-         *  same-column or backward dependencies enter the target's right edge, bulging outside both nodes. */
+        /** Starts at the source's fork point and ends on the target's status dot (its left edge), arriving horizontally.
+         *  Same-column or backward dependencies end at the target's fork point, bulging right of both nodes. */
         fun curve(edge: Edge): Curve? {
             val from = byId[edge.from] ?: return null
             val to = byId[edge.to] ?: return null
-            val startX = from.x + from.width
-            val startY = from.y + from.height / 2f
-            val endY = to.y + to.height / 2f
-            if (to.x >= startX) {
-                val bend = maxOf(MIN_BEND, (to.x - startX) / 2f)
-                return Curve(startX, startY, startX + bend, startY, to.x - bend, endY, to.x, endY)
+            val sx = from.forkX
+            val sy = from.dotY
+            val ey = to.dotY
+            val dotEdge = to.dotX - DOT_RADIUS
+            if (dotEdge > sx) {
+                val bend = maxOf(MIN_BEND, (dotEdge - sx) / 2f)
+                return Curve(sx, sy, sx + bend, sy, dotEdge - bend, ey, dotEdge, ey)
             }
-            val endX = to.x + to.width
-            val bulge = maxOf(startX, endX) + LOOP_BULGE
-            return Curve(startX, startY, bulge, startY, bulge, endY, endX, endY)
+            val ex = to.forkX
+            val bulge = maxOf(sx, ex) + LOOP_BULGE
+            return Curve(sx, sy, bulge, sy, bulge, ey, ex, ey)
         }
     }
 
     fun rootId(projectId: String) = "project:$projectId"
 
-    /** Width that fits [title] in at most two lines: wide (CJK) glyphs count as one em, others as about half. */
-    fun nodeWidth(title: String, glyph: Float = DEFAULT_GLYPH): Float {
+    /** Text width in ems: wide (CJK) glyphs count as one em, others as about half. */
+    fun ems(text: String): Float {
         var ems = 0f
-        for (ch in title) ems += if (ch.code >= WIDE_GLYPH_START) 1f else NARROW_GLYPH_EM
-        val oneLine = ems * glyph + NODE_CHROME
-        val fitted = if (oneLine <= NODE_MAX_WIDTH) oneLine else ems * glyph / 2f * WRAP_SLACK + NODE_CHROME
-        return fitted.coerceIn(NODE_MIN_WIDTH, NODE_MAX_WIDTH)
+        for (ch in text) ems += if (ch.code >= WIDE_GLYPH_START) 1f else NARROW_GLYPH_EM
+        return ems
     }
 
-    /** [expandedId] reserves at least [expandedWidth] × [expandedHeight] for one oversized node. */
-    fun build(projectId: String, tasks: List<ProjectTask>, expandedId: String? = null,
-        expandedWidth: Float = 0f, expandedHeight: Float = 0f, rootTitle: String = "",
-        glyph: Float = DEFAULT_GLYPH, rootGlyph: Float = glyph, siblingGap: Float = SIBLING_GAP,
-        levelGap: Float = LEVEL_GAP, margin: Float = MARGIN): Layout {
+    /** Header row width for a one-line [title]; longer titles are ellipsized by the UI. */
+    fun headerWidth(title: String, glyph: Float = DEFAULT_GLYPH): Float =
+        (ems(title) * glyph + HEADER_CHROME).coerceIn(NODE_MIN_WIDTH, NODE_MAX_WIDTH)
+
+    /**
+     * [heights] maps unfolded node ids to their full height (measured or estimated). Those nodes are at least
+     * [panelWidth] wide; their header stays on top, aligned with the centre of their children when there is room.
+     */
+    fun build(projectId: String, tasks: List<ProjectTask>, heights: Map<String, Float> = emptyMap(),
+        rootTitle: String = "", glyph: Float = DEFAULT_GLYPH, rootGlyph: Float = glyph,
+        panelWidth: Float = PANEL_WIDTH, siblingGap: Float = SIBLING_GAP, levelGap: Float = LEVEL_GAP,
+        margin: Float = MARGIN): Layout {
         val root = rootId(projectId)
         val rows = ProjectTaskGraph.tree(tasks)
         val ids = tasks.map { it.id }.toSet()
         val children = rows.map { it.task }.groupBy { if (it.parentId in ids) it.parentId else root }
-        val widths = HashMap<String, Float>(rows.size + 1)
-        widths[root] = nodeWidth(rootTitle, rootGlyph)
-        rows.forEach { widths[it.task.id] = nodeWidth(it.task.title, glyph) }
-        if (expandedId != null && expandedId in widths) widths[expandedId] = maxOf(widths.getValue(expandedId), expandedWidth)
-        fun width(id: String) = widths.getValue(id)
-        fun height(id: String) = if (id == expandedId) maxOf(NODE_HEIGHT, expandedHeight) else NODE_HEIGHT
+        val headers = HashMap<String, Float>(rows.size + 1)
+        headers[root] = headerWidth(rootTitle, rootGlyph)
+        rows.forEach { headers[it.task.id] = headerWidth(it.task.title, glyph) }
+        fun unfolded(id: String) = id != root && heights[id] != null
+        fun width(id: String) = if (unfolded(id)) maxOf(headers.getValue(id), panelWidth) else headers.getValue(id)
+        fun height(id: String) = if (unfolded(id)) maxOf(NODE_HEIGHT, heights.getValue(id)) else NODE_HEIGHT
         fun span(branches: List<ProjectTask>, subtree: Map<String, Float>) =
             branches.sumOf { subtree.getValue(it.id).toDouble() }.toFloat() + maxOf(0, branches.size - 1) * siblingGap
         val subtree = HashMap<String, Float>(rows.size + 1)
@@ -101,15 +119,19 @@ object ProjectTaskMapLayout {
         val all = listOf(root to 0) + rows.map { it.task.id to it.depth + 1 }
         for ((id, depth) in all) {
             val top = tops.getValue(id)
-            nodes += Node(id, xs.getValue(depth), top + (subtree.getValue(id) - height(id)) / 2f, width(id), height(id), id == root)
             val branches = children[id].orEmpty()
-            var next = top + (subtree.getValue(id) - span(branches, subtree)) / 2f
+            val total = span(branches, subtree)
+            val h = height(id)
+            // Both the node box and the children block stay inside [top, top + subtree], so blocks never overlap.
+            val y = if (total > h) minOf(top + total / 2f - NODE_HEIGHT / 2f, top + total - h) else top
+            nodes += Node(id, xs.getValue(depth), y, width(id), h, headers.getValue(id), id == root)
+            var next = if (total > h) top else maxOf(top, top + NODE_HEIGHT / 2f - total / 2f)
             for (child in branches) { tops[child.id] = next; next += subtree.getValue(child.id) + siblingGap }
         }
         val edges = rows.flatMap { row ->
             listOf(Edge(row.task.parentId?.takeIf { it in ids } ?: root, row.task.id)) +
                 row.task.dependencyIds.filter { it in ids }.map { Edge(it, row.task.id, true) }
         }
-        return Layout(nodes, edges, nodes.maxOf { it.x + it.width } + margin, nodes.maxOf { it.y + it.height } + margin)
+        return Layout(nodes, edges, nodes.maxOf { it.forkX } + margin, nodes.maxOf { it.y + it.height } + margin)
     }
 }

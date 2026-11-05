@@ -3741,7 +3741,7 @@
     <string name="project_task_unassigned">未分配</string>
     <string name="project_task_block_reason">执行提示：%1$s</string>
     <string name="project_task_map_node">任务：%1$s；父任务：%2$s；依赖：%3$s；负责人：%4$s；状态：%5$s</string>
-    <string name="project_task_dependency_legend">实线为父子任务，虚线为前置依赖（圆点一端等待另一端完成）。长按节点可补充内容或添加子任务。</string>
+    <string name="project_task_dependency_legend">实心灰点已验收，带芯圆圈待验收，空心圆圈未开始，高亮圆点执行中，红点受阻；虚线为前置依赖。点按展开，长按补充或添加子任务。</string>
     <string name="team_flow_organization_legend">灰色虚线仅为管理员组织关系；有色箭头为真实执行、送审与驳回。</string>
     <string name="project_task_wait_dependencies">等待前置任务按当前需求验收</string>
     <string name="project_task_stopped">用户已停止，尚未完成交付</string>
@@ -3815,5 +3815,21 @@
     <string name="project_supplement_item">· %1$s</string>
     <string name="project_planning">AI 正在拆分任务…</string>
     <string name="project_rule_fallback">AI 拆分不可用，已按规则拆分</string>
-    <string name="project_map_node_meta">%1$s · %2$s · %3$d 人</string>
+    <string name="project_outline_requirement">需求</string>
+    <string name="project_outline_supplement">补充</string>
+    <string name="project_outline_constraint">注意事项</string>
+    <string name="project_outline_acceptance">验收</string>
+    <string name="project_outline_background">背景</string>
+    <string name="project_outline_owner">负责人</string>
+    <string name="project_outline_member">成员</string>
+    <string name="project_outline_dependency">依赖</string>
+    <string name="project_outline_result">结果</string>
+    <string name="project_outline_more">还有 %1$d 条</string>
+    <string name="project_outline_fold">收起</string>
+    <string name="project_outline_process">执行过程</string>
+    <string name="project_outline_empty">暂无内容</string>
+    <string name="project_map_search">查找任务或内容</string>
+    <string name="project_map_search_clear">清空查找</string>
+    <string name="project_map_search_count">命中 %1$d 个任务，%2$d 处</string>
+    <string name="chat_status_project_tasks">正在处理项目任务</string>
 </resources>

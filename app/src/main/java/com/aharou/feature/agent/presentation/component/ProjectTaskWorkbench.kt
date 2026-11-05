@@ -112,7 +112,7 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
         }
         SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().testTag("project_view_mode")) {
             listOf("tree" to R.string.project_task_tree, "map" to R.string.project_task_map).forEachIndexed { index, (mode, label) ->
-                SegmentedButton(selected = viewMode == mode, onClick = { viewMode = mode },
+                SegmentedButton(selected = viewMode == mode, onClick = { if (viewMode != mode) expandedId = null; viewMode = mode },
                     shape = SegmentedButtonDefaults.itemShape(index, 2), modifier = Modifier.heightIn(min = 48.dp).testTag("project_mode_$mode")) { Text(stringResource(label)) }
             }
         }
@@ -120,8 +120,9 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
         approvals()
         BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
             val processHeight = (maxHeight * 0.9f).coerceIn(240.dp, 640.dp)
-            if (viewMode == "map") ProjectTaskMap(projectId, project?.title.orEmpty(), tasks, expandedId, toggle,
-                onDismiss = { expandedId = null }, onSupplement = onSupplement, onAddChild = onAddChild,
+            if (viewMode == "map") ProjectTaskMap(projectId, project?.title.orEmpty(), tasks, processId = expandedId,
+                onOpenProcess = { id -> expandedId = id; viewModel.select(id) }, onDismissProcess = { expandedId = null },
+                onSupplement = onSupplement, onAddChild = onAddChild,
                 modifier = Modifier.fillMaxSize().testTag("project_map_body"), process = process)
             else LazyColumn(Modifier.fillMaxSize().testTag("project_tree_body"), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
                 item(key = "project-root") {
