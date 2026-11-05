@@ -183,7 +183,7 @@ class ProjectTaskRepository @Inject constructor(@ApplicationContext context: Con
 
     /**
      * Records [text] on the task first, so it survives a failed model call, then saves the planner's starting points.
-     * Returns true when the planner fell back to appending the supplement to the task requirement.
+     * Returns true when the planner fell back to rules, which rerun the task with the recorded supplement.
      */
     suspend fun supplement(taskId: String, text: String, workspace: String): Boolean = withContext(Dispatchers.IO) {
         val supplement = text.trim()
@@ -202,17 +202,23 @@ class ProjectTaskRepository @Inject constructor(@ApplicationContext context: Con
         revision.ruleFallback
     }
 
-    /** Each edit or rerun is its own save on the latest version, so dependency invalidation runs exactly as for a user edit. */
+    /**
+     * Every edit, rerun and add is staged on the result of the previous one (so dependency invalidation runs exactly as for
+     * a user edit) and the batch is written once: if any change fails validation nothing of the revision is saved.
+     */
     @Synchronized
     private fun applyRevisionLocked(workspace: String, projectId: String, revision: ProjectRevision) {
+        val start = snapshot(workspace)
+        var current = start
         for (id in revision.touched) {
-            val latest = snapshot(workspace).tasks.firstOrNull { it.id == id && it.projectId == projectId } ?: continue
-            transactLocked(workspace) { listOf(revision.change(latest)) }
+            val latest = current.tasks.firstOrNull { it.id == id && it.projectId == projectId } ?: continue
+            current = stage(current, revision.change(latest)).first
         }
-        if (revision.added.isNotEmpty()) transactLocked(workspace) { snapshot ->
-            val order = nextOrder(snapshot)
-            revision.added.mapIndexed { index, task -> ProjectTaskChange(task.copy(order = order + index)) }
-        }
+        val order = nextOrder(current)
+        revision.added.forEachIndexed { index, task -> current = stage(current, ProjectTaskChange(task.copy(order = order + index))).first }
+        if (current === start) return
+        persist(workspace, current)
+        mutable.value = mutable.value + (workspace to current)
     }
 
     private fun nextOrder(snapshot: ProjectTaskSnapshot): Long =

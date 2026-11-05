@@ -24,18 +24,16 @@ data class ProjectPlanResult(val tasks: List<ProjectTask>, val ruleFallback: Boo
  */
 data class ProjectRevision(
     val edits: Map<String, String> = emptyMap(),
-    val appended: Map<String, String> = emptyMap(),
     val reruns: Set<String> = emptySet(),
     val added: List<ProjectTask> = emptyList(),
     val ruleFallback: Boolean = false
 ) {
     /** Existing tasks this revision edits or reruns, in a stable order. */
-    val touched: List<String> get() = (edits.keys + appended.keys + reruns).distinct()
+    val touched: List<String> get() = (edits.keys + reruns).distinct()
 
     /** The change for [latest], read at commit time so a concurrent edit is never saved over with an old version. */
     fun change(latest: ProjectTask): ProjectTaskChange {
-        val requirement = edits[latest.id] ?: appended[latest.id]?.let { latest.requirement + "\n\n" + it } ?: latest.requirement
-        return ProjectTaskChange(latest.copy(requirement = requirement), force = latest.id in reruns)
+        return ProjectTaskChange(latest.copy(requirement = edits[latest.id] ?: latest.requirement), force = latest.id in reruns)
     }
 }
 
@@ -85,7 +83,10 @@ class ProjectPlanner @Inject constructor(
         return attached.filter { ProjectTaskGraph.depth(it, scope + attached) <= ProjectTaskGraph.MAX_TREE_DEPTH }
     }
 
-    /** Without a usable model answer the supplement is appended to [anchor]'s requirement, which reruns it and its dependents. */
+    /**
+     * Without a usable model answer [anchor] is rerun as is: the supplement already sits in its supplements and reaches the
+     * member prompt from there, so copying it into the requirement would show the same words twice.
+     */
     suspend fun revise(project: ProjectPlan, anchor: ProjectTask, projectTasks: List<ProjectTask>, text: String, members: List<String>): ProjectRevision {
         val branch = ProjectTaskGraph.subtree(anchor.id, projectTasks).take(MAX_CONTEXT_TASKS)
         val input = buildString {
@@ -103,7 +104,7 @@ class ProjectPlanner @Inject constructor(
             append("\n\nUser supplement:\n").append(text)
         }
         return completeJson(REVISE_PROMPT_FILE, input)?.let { mapRevision(it, project, anchor, branch, projectTasks, members) }
-            ?: ProjectRevision(appended = mapOf(anchor.id to text), ruleFallback = true)
+            ?: ProjectRevision(reruns = setOf(anchor.id), ruleFallback = true)
     }
 
     /** Null means the answer is unusable and the caller falls back to rules. */

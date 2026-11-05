@@ -97,6 +97,36 @@ class ProjectTaskViewModelTest {
         viewModel.stopProject("p"); runCurrent()
     }
 
+    private val projectTask = com.aharou.feature.agent.domain.task.ProjectTask(id = "t", workspace = "/first", title = "t", requirement = "t", projectId = "p")
+
+    @Test fun workArrivingWhileTheFlowRunsGetsOneMorePassWhenItEnds() = runTest(dispatcher) {
+        var finish = kotlinx.coroutines.CompletableDeferred<Unit>()
+        coEvery { workflow.run("p", "/first") } coAnswers { finish.await() }
+        coEvery { repository.load("/first") } returns ProjectTaskSnapshot(tasks = listOf(projectTask.copy(version = 1)),
+            projects = listOf(ProjectPlan(id = "p", workspace = "/first", title = "p", requirements = "r")))
+        viewModel.workspace("/first"); runCurrent()
+        viewModel.startProject("p"); runCurrent()
+        viewModel.supplement(projectTask, "late"); runCurrent()
+        coVerify(exactly = 1) { workflow.run("p", "/first") }
+        val first = finish
+        finish = kotlinx.coroutines.CompletableDeferred()
+        first.complete(Unit); runCurrent()
+        coVerify(exactly = 2) { workflow.run("p", "/first") }
+        org.junit.Assert.assertTrue("p" in viewModel.state.value.activeProjectIds)
+        viewModel.stopProject("p"); runCurrent()
+    }
+
+    @Test fun aSingleTaskRunDoesNotQueueTheWholeProjectFlow() = runTest(dispatcher) {
+        coEvery { workflow.run("p", "/first", "t") } coAnswers { kotlinx.coroutines.awaitCancellation() }
+        viewModel.workspace("/first"); runCurrent()
+        viewModel.runProjectTask(projectTask); runCurrent()
+        viewModel.supplement(projectTask, "note"); runCurrent()
+        coVerify(exactly = 1) { repository.supplement("t", "note", "/first") }
+        coVerify(exactly = 0) { workflow.run("p", "/first", null) }
+        org.junit.Assert.assertTrue(viewModel.state.value.activeProjectIds.isEmpty())
+        viewModel.cancelExecution("t"); runCurrent()
+    }
+
     @Test fun aSupplementIsSavedThenContinuesAnIdleProjectButNotARunningOne() = runTest(dispatcher) {
         val finish = kotlinx.coroutines.CompletableDeferred<Unit>()
         coEvery { workflow.run("p", "/first") } coAnswers { finish.await() }

@@ -7,9 +7,11 @@ import com.aharou.feature.agent.domain.task.ProjectPlan
 import com.aharou.feature.agent.domain.task.ProjectTask
 import com.aharou.feature.agent.domain.task.ProjectTaskChange
 import com.aharou.feature.agent.domain.task.ProjectTaskGraph
+import com.aharou.feature.agent.domain.task.ProjectTaskMemberRun
 import com.aharou.feature.agent.domain.task.ProjectTaskStatus
 import com.aharou.feature.agent.domain.tool.ToolResult
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -23,7 +25,8 @@ import org.junit.Test
 class ProjectTaskToolTest {
     private fun task(id: String, parent: String? = null, status: ProjectTaskStatus = ProjectTaskStatus.READY,
         sessions: List<String> = emptyList(), by: String? = null) = ProjectTask(id = id, workspace = "w", projectId = "p",
-        title = id, requirement = id, parentId = parent, status = status, processSessionIds = sessions, createdBySessionId = by,
+        title = id, requirement = id, parentId = parent, status = status, processSessionIds = sessions,
+        processMembers = sessions.associateWith { ProjectTaskMemberRun("", 1, 1) }, createdBySessionId = by,
         version = 1, order = 1, createdAt = 1)
     private val running = task("current", status = ProjectTaskStatus.RUNNING, sessions = listOf("member"))
     private fun request(action: String, parent: String? = null) = MemberTaskRequest(action, "Look into cache", "find the cache owner", parent)
@@ -39,6 +42,60 @@ class ProjectTaskToolTest {
         val grandchild = task("grandchild", "child")
         val tasks = listOf(running, task("child", "current"), grandchild)
         assertEquals("grandchild", ProjectTaskTool.memberChanges(tasks, "member", request("add", "grandchild")).single().task.parentId)
+    }
+
+    @Test fun aSupersededOrFinishedMemberSessionIsRejected() {
+        val rerun = running.copy(requirementsVersion = 2, processSessionIds = listOf("old", "member"), processMembers = mapOf(
+            "old" to ProjectTaskMemberRun("", 1, 1, "SUPERSEDED"), "member" to ProjectTaskMemberRun("", 1, 2)))
+        assertEquals(ProjectTaskTool.NOT_IN_TASK, rejected(listOf(rerun), "old", request("add")))
+        assertEquals(1, ProjectTaskTool.memberChanges(listOf(rerun), "member", request("add")).size)
+        assertEquals(ProjectTaskTool.NOT_IN_TASK, rejected(listOf(running.copy(requirementsVersion = 2)), "member", request("add")))
+        val finished = running.copy(processMembers = mapOf("member" to ProjectTaskMemberRun("", 1, 1, "SUCCEEDED")))
+        assertEquals(ProjectTaskTool.NOT_IN_TASK, rejected(listOf(finished), "member", request("add")))
+        assertEquals(ProjectTaskTool.NOT_IN_TASK, try { ProjectTaskTool.outline(listOf(finished), "member", ""); "" }
+            catch (e: ProjectTaskToolException) { e.code })
+    }
+
+    @Test fun outlineListsTasksLineByLineFiltersByQueryAndTruncates() {
+        val child = task("child", "current").copy(title = "Cache layer", requirement = "Find the cache owner. Keep offline mode.",
+            dependencyIds = listOf("current"))
+        val tasks = listOf(running.copy(title = "Main", owner = "builder"), child)
+        val full = ProjectTaskTool.outline(tasks, "member", "")
+        val text = full.getValue("outline").jsonPrimitive.content
+        assertTrue(text.contains("[RUNNING] Main (id=current, current)"))
+        assertTrue(text.contains("  - OWNER: builder"))
+        assertTrue(text.contains("  [READY] Cache layer (id=child)"))
+        assertTrue(text.contains("    - REQUIREMENT: Keep offline mode."))
+        assertTrue(text.contains("    - DEPENDENCY: Main"))
+        assertEquals(2, full.getValue("tasks").jsonPrimitive.content.toInt())
+        val found = ProjectTaskTool.outline(tasks, "member", "OFFLINE")
+        val foundText = found.getValue("outline").jsonPrimitive.content
+        assertFalse(foundText.contains("Main"))
+        assertTrue(foundText.contains("REQUIREMENT: Keep offline mode."))
+        assertFalse(foundText.contains("Find the cache owner"))
+        assertEquals("OFFLINE", found.getValue("query").jsonPrimitive.content)
+        val many = listOf(running) + (1..80).map { task("t$it", "current").copy(requirement = "x".repeat(400)) }
+        val cut = ProjectTaskTool.outline(many, "member", "")
+        val shown = cut.getValue("tasks").jsonPrimitive.content.toInt()
+        val remaining = cut.getValue("remaining").jsonPrimitive.content.toInt()
+        assertEquals(81, shown + remaining)
+        assertTrue(remaining > 0)
+        val cutText = cut.getValue("outline").jsonPrimitive.content
+        assertTrue(cutText.length <= ProjectTaskTool.OUTLINE_TOTAL_MAX + 80)
+        assertTrue(cutText.contains("$remaining more tasks not shown"))
+        assertFalse(cutText.contains("x".repeat(ProjectTaskTool.OUTLINE_LINE_MAX + 1)))
+    }
+
+    @Test fun outlineThroughTheToolReadsWithoutWriting() = runBlocking {
+        val repository = mockk<ProjectTaskRepository>()
+        val store = ProjectTaskSnapshot(version = 1, tasks = listOf(running), projects = listOf(ProjectPlan(id = "p", workspace = "w", title = "p", requirements = "r")))
+        every { repository.snapshots } returns MutableStateFlow(mapOf("w" to store))
+        coEvery { repository.load("w") } returns store
+        val result = ProjectTaskTool(repository).executeWithContext(mapOf("action" to JsonPrimitive("outline")),
+            AgentContext(null, null, "w", null, sessionId = "member"))
+        assertTrue((result as ToolResult.Success).data.jsonObject.getValue("outline").jsonPrimitive.content.contains("(id=current, current)"))
+        coVerify(exactly = 0) { repository.transact(any(), any()) }
+        coVerify(exactly = 0) { repository.save(any()) }
     }
 
     @Test fun memberAddedTasksAndTreeDepthAreCapped() {
