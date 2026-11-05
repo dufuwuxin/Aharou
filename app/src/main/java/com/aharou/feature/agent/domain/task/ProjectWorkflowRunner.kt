@@ -59,8 +59,13 @@ class ProjectWorkflowRunner @Inject constructor(
                     else ProjectWorkflowPlan.nextWithin(projectTasks, onlyTaskId) ?: break
                 val participants = ProjectWorkflowPlan.participants(next)
                 val reused = ProjectWorkflowPlan.reusableRuns(next)
-                active = repository.save(next.copy(status = ProjectTaskStatus.RUNNING, executionReason = "",
-                    processRequirementsVersion = null, processParticipants = participants))
+                // Marked under the store lock; a supplement or branch committed since the pick sends the loop back to pick again.
+                active = repository.transact(workspace) { store ->
+                    val latest = store.tasks.first { it.id == next.id }
+                    if (latest.requirementsVersion != next.requirementsVersion || ProjectWorkflowPlan.participants(latest) != participants) emptyList()
+                    else listOf(ProjectTaskChange(latest.copy(status = ProjectTaskStatus.RUNNING, executionReason = "",
+                        processRequirementsVersion = null, processParticipants = participants)))
+                }.singleOrNull() ?: continue
                 val outputs = mutableListOf<String>()
                 try {
                     // Serial execution shares the existing global capacity and never drops duplicate roles.
@@ -146,11 +151,13 @@ class ProjectWorkflowRunner @Inject constructor(
                     } catch (stopFailure: Exception) { failure.addSuppressed(stopFailure) }
                 }
                 active?.let { task ->
-                    val latest = repository.load(workspace).tasks.first { it.id == task.id }
-                    val records = latest.processMembers.toMutableMap()
-                    child?.let { id -> records[id]?.let { records[id] = it.copy(outcome = reason, reason = failure.message.orEmpty()) } }
-                    repository.save(latest.copy(status = if (reason == "UPSTREAM_CHANGED") ProjectTaskStatus.READY else ProjectTaskStatus.BLOCKED,
-                        processRequirementsVersion = null, processMembers = records, executionReason = reason))
+                    repository.transact(workspace) { store ->
+                        val latest = store.tasks.first { it.id == task.id }
+                        val records = latest.processMembers.toMutableMap()
+                        child?.let { id -> records[id]?.let { records[id] = it.copy(outcome = reason, reason = failure.message.orEmpty()) } }
+                        listOf(ProjectTaskChange(latest.copy(status = if (reason == "UPSTREAM_CHANGED") ProjectTaskStatus.READY else ProjectTaskStatus.BLOCKED,
+                            processRequirementsVersion = null, processMembers = records, executionReason = reason)))
+                    }
                 }
             }
             throw failure

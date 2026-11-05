@@ -138,6 +138,26 @@ class ProjectTaskViewModelTest {
         viewModel.stopProject("p"); viewModel.cancelExecution("t"); runCurrent()
     }
 
+    @Test fun theExtraPassAfterAFlowIsSkippedWhileASingleTaskRuns() = runTest(dispatcher) {
+        val finish = kotlinx.coroutines.CompletableDeferred<Unit>()
+        coEvery { workflow.run("p", "/first") } coAnswers { finish.await() }
+        coEvery { workflow.run("p", "/first", "t") } coAnswers { kotlinx.coroutines.awaitCancellation() }
+        viewModel.workspace("/first"); runCurrent()
+        viewModel.startProject("p"); runCurrent()
+        viewModel.supplement(projectTask, "late"); runCurrent()
+        // The pending check after the flow is held open so a single-task run can start inside that window.
+        val pending = kotlinx.coroutines.CompletableDeferred<ProjectTaskSnapshot>()
+        coEvery { repository.load("/first") } coAnswers { pending.await() }
+        finish.complete(Unit); runCurrent()
+        viewModel.runProjectTask(projectTask); runCurrent()
+        org.junit.Assert.assertTrue("t" in viewModel.state.value.activeTaskIds)
+        pending.complete(ProjectTaskSnapshot(tasks = listOf(projectTask.copy(version = 1)),
+            projects = listOf(ProjectPlan(id = "p", workspace = "/first", title = "p", requirements = "r")))); runCurrent()
+        coVerify(exactly = 1) { workflow.run("p", "/first", null) }
+        org.junit.Assert.assertTrue(viewModel.state.value.activeProjectIds.isEmpty())
+        viewModel.cancelExecution("t"); runCurrent()
+    }
+
     @Test fun aSupplementIsSavedThenContinuesAnIdleProjectButNotARunningOne() = runTest(dispatcher) {
         val finish = kotlinx.coroutines.CompletableDeferred<Unit>()
         coEvery { workflow.run("p", "/first") } coAnswers { finish.await() }
