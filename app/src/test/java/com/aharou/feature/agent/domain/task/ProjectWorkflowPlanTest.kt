@@ -72,7 +72,8 @@ class ProjectWorkflowPlanTest {
         assertTrue(old.processMembers.isEmpty())
         assertNull(old.processParticipants)
         val recorded = old.copy(processMembers = mapOf("s" to ProjectTaskMemberRun("builder", 1, 1, "TIMEOUT", "limit")))
-        assertEquals(recorded, Json.decodeFromString(ProjectTask.serializer(), Json.encodeToString(ProjectTask.serializer(), recorded)))
+        val repositoryJson = Json { encodeDefaults = true }
+        assertEquals(recorded, repositoryJson.decodeFromString(ProjectTask.serializer(), repositoryJson.encodeToString(ProjectTask.serializer(), recorded)))
     }
 
     @Test fun laterParticipantsReceiveEarlierResults() {
