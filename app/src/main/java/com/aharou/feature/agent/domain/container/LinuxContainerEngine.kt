@@ -802,7 +802,7 @@ class LinuxContainerEngine @Inject constructor(
         argv.add("exec \"\$0\" \"\$@\"")
         argv.add(program)
         argv.addAll(programArgs)
-        return ProotInvocation(argv, buildContainerEnv(profile) + profile.env + extraEnv)
+        return ProotInvocation(argv, buildContainerEnv(profile, projectPath) + profile.env + extraEnv)
     }
 
     /**
@@ -822,7 +822,7 @@ class LinuxContainerEngine @Inject constructor(
         argv.add(defaultShellFor(profile))
         argv.add("-c")
         argv.add(command)
-        return ProotInvocation(argv, buildContainerEnv(profile) + profile.env)
+        return ProotInvocation(argv, buildContainerEnv(profile, projectPath) + profile.env)
     }
 
     /**
@@ -880,6 +880,7 @@ class LinuxContainerEngine @Inject constructor(
 
         // profile 的额外绑定与参数：内置与导入容器默认也在此注入（见 ContainerProfile.DEFAULT_PROOT_ARGS），
         // 与用户手动添加同一条路径，保证参数落在 argv 末尾。
+        ContainerLogMount.appendDefaultBinding(argv, context.filesDir, profile, warn = { FileLogger.w(TAG, it) })
         for (b in profile.extraBindings) {
             // 非法绑定必须在进 argv 之前挡掉：proot 会因它启动失败、整个会话起不来，
             // 而用户看不出是哪条挂载闯的祸（存量配置里可能留着历史版本的越界路径）。
@@ -897,7 +898,7 @@ class LinuxContainerEngine @Inject constructor(
     }
 
     /** 容器内进程的标准环境变量（proot loader / 动态库 / PATH / HOME 等）。 */
-    private fun buildContainerEnv(profile: ContainerProfile): Map<String, String> {
+    private fun buildContainerEnv(profile: ContainerProfile, projectPath: String?): Map<String, String> {
         // 每个容器用自己 rootfs 下的 /tmp：镜像自带该目录，但重置/删除别的容器不该影响本容器，
         // 且 proot 要求 PROOT_TMP_DIR 已存在，故启动前确保建好（同 -b 源路径的处理）。
         val tmpDir = containerInstaller.prootTmpDirFor(profile).apply { mkdirs() }
@@ -945,7 +946,7 @@ class LinuxContainerEngine @Inject constructor(
             "TZ" to containerTimeZone(profile)
             // 全局 HTTP 代理：开启时注入 HTTP_PROXY/HTTPS_PROXY/ALL_PROXY/NO_PROXY，
             // 容器内 curl/git/npm/pip 等一律走代理；关闭或配置不完整时为空 map 不影响直连。
-        ) + com.aharou.core.net.AppProxy.proxyEnv(context) + envVarRepository.asMap() // asMap 只含已启用的变量：停用的保留在设置里但不注入
+        ) + ContainerLogMount.environment(profile, projectPath) + com.aharou.core.net.AppProxy.proxyEnv(context) + envVarRepository.asMap() // asMap 只含已启用的变量：停用的保留在设置里但不注入
     }
 
     /**

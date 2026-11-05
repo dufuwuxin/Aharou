@@ -1,5 +1,6 @@
 package com.aharou.feature.agent.presentation.component
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -23,29 +24,65 @@ import com.aharou.feature.agent.presentation.ProjectTaskViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onOpenTask: (String) -> Unit, onBack: () -> Unit) {
+fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onBack: () -> Unit,
+    conversation: @Composable (ProjectTask, String) -> Unit, approvals: @Composable () -> Unit = {}) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val project = state.projects.firstOrNull { it.id == projectId }
     val tasks = state.tasks.filter { it.projectId == projectId }
     var viewMode by rememberSaveable(projectId) { mutableStateOf("tree") }
+    var expandedId by rememberSaveable(projectId) { mutableStateOf<String?>(null) }
     var collapsed by remember(projectId) { mutableStateOf(emptySet<String>()) }
     var editor by remember { mutableStateOf(false) }
+    var editingTask by remember { mutableStateOf<ProjectTask?>(null) }
+    var adding by remember { mutableStateOf(false) }
     var appending by remember { mutableStateOf(false) }
     var overview by remember { mutableStateOf(false) }
     var text by rememberSaveable(projectId) { mutableStateOf("") }
     var appendRequest by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(state.selectedId) { if (tasks.any { it.id == state.selectedId }) expandedId = state.selectedId }
     LaunchedEffect(state.appendSucceededRequest) {
         if (appendRequest != null && appendRequest == state.appendSucceededRequest) {
             appendRequest = null; appending = false; text = ""
         }
     }
-    Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)
+    BackHandler(enabled = expandedId != null) { expandedId = null }
+    val toggle: (String) -> Unit = { id ->
+        if (expandedId == id) expandedId = null else { expandedId = id; viewModel.select(id) }
+    }
+    val process: @Composable (ProjectTask) -> Unit = { task ->
+        ProjectTaskProcess(task, tasks, onEdit = { editingTask = task; editor = true }, onAccept = { viewModel.accept(task) }, conversation = conversation,
+            modifier = Modifier.fillMaxSize().padding(Spacing.sm))
+    }
+    Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing).imePadding()
         .padding(Spacing.md), verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
         Row(Modifier.fillMaxWidth()) {
             TextButton(onClick = onBack, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.project_back)) }
             TextButton(onClick = { overview = true }, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) {
                 Text(project?.title.orEmpty(), maxLines = 1, style = MaterialTheme.typography.titleMedium)
             }
+            Box {
+                TextButton(onClick = { adding = true }, enabled = !state.busy, modifier = Modifier.heightIn(min = 48.dp).testTag("project_add_content")) {
+                    Text(stringResource(R.string.project_add_content))
+                }
+                DropdownMenu(expanded = adding, onDismissRequest = { adding = false }) {
+                    DropdownMenuItem(text = { Column {
+                        Text(stringResource(R.string.project_append))
+                        Text(stringResource(R.string.project_append_hint), style = MaterialTheme.typography.bodySmall)
+                    } }, onClick = { adding = false; appending = true })
+                    DropdownMenuItem(text = { Column {
+                        Text(stringResource(R.string.project_task_add_one))
+                        Text(stringResource(R.string.project_task_add_one_hint), style = MaterialTheme.typography.bodySmall)
+                    } }, onClick = { adding = false; editingTask = null; editor = true })
+                }
+            }
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+            if (projectId in state.activeProjectIds) Button(onClick = { viewModel.stopProject(projectId) }, modifier = Modifier.testTag("project_flow_stop")) {
+                Text(stringResource(R.string.project_flow_stop))
+            } else Button(onClick = { viewModel.startProject(projectId) }, enabled = !state.loading && !state.busy && tasks.any { !ProjectWorkflowPlan.delivered(it) },
+                modifier = Modifier.testTag("project_flow_start")) { Text(stringResource(R.string.project_flow_start)) }
+            Text(stringResource(R.string.project_flow_progress, tasks.count { ProjectWorkflowPlan.delivered(it) }, tasks.size),
+                style = MaterialTheme.typography.labelSmall, modifier = Modifier.weight(1f).padding(top = Spacing.sm))
         }
         SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().testTag("project_view_mode")) {
             listOf("tree" to R.string.project_task_tree, "map" to R.string.project_task_map).forEachIndexed { index, (mode, label) ->
@@ -53,46 +90,58 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onO
                     shape = SegmentedButtonDefaults.itemShape(index, 2), modifier = Modifier.heightIn(min = 48.dp).testTag("project_mode_$mode")) { Text(stringResource(label)) }
             }
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-            TextButton(onClick = { appending = true }, enabled = !state.busy, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.project_append)) }
-            TextButton(onClick = { editor = true }, enabled = !state.busy, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.project_task_create)) }
-        }
-        state.error?.let { Text(stringResource(R.string.project_task_error, it), color = MaterialTheme.colorScheme.error) }
-        if (viewMode == "map") ProjectTaskMap(projectId, project?.title.orEmpty(), tasks, state.selectedId, onOpenTask,
-            Modifier.weight(1f).fillMaxWidth().testTag("project_map_body"))
-        else LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("project_tree_body"), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
-            item(key = "project-root") { Text(project?.title.orEmpty(), style = MaterialTheme.typography.titleMedium) }
-            items(ProjectTaskGraph.visibleTree(tasks, "", null, collapsed), key = { it.task.id }) { row ->
-                Row(Modifier.fillMaxWidth().padding(start = (row.depth.coerceAtMost(10) * 12).dp)) {
-                    Text("└─", modifier = Modifier.padding(top = Spacing.md))
-                    Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceContainer,
-                        modifier = Modifier.weight(1f).heightIn(min = 48.dp).clickable { onOpenTask(row.task.id) }) {
-                        Row(Modifier.padding(Spacing.sm)) {
-                            Column(Modifier.weight(1f)) {
-                                Text(row.task.title, style = MaterialTheme.typography.titleSmall)
-                                Text(projectTaskStatusLabel(row.task.status), style = MaterialTheme.typography.labelSmall)
-                            }
-                            if (tasks.any { it.parentId == row.task.id }) TextButton(onClick = {
-                                collapsed = if (row.task.id in collapsed) collapsed - row.task.id else collapsed + row.task.id
-                            }, modifier = Modifier.heightIn(min = 48.dp)) {
-                                Text(stringResource(if (row.task.id in collapsed) R.string.project_task_expand else R.string.project_task_collapse))
+        state.error?.let { Text(stringResource(R.string.project_task_error, projectTaskExecutionReasonLabel(it)), color = MaterialTheme.colorScheme.error) }
+        approvals()
+        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+            val processHeight = (maxHeight * 0.9f).coerceIn(240.dp, 640.dp)
+            if (viewMode == "map") ProjectTaskMap(projectId, project?.title.orEmpty(), tasks, expandedId, toggle,
+                Modifier.fillMaxSize().testTag("project_map_body"), process)
+            else LazyColumn(Modifier.fillMaxSize().testTag("project_tree_body"), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+                item(key = "project-root") { Text(stringResource(R.string.project_process_hint), style = MaterialTheme.typography.labelSmall) }
+                items(ProjectTaskGraph.visibleTree(tasks, "", null, collapsed), key = { it.task.id }) { row ->
+                    val expanded = expandedId == row.task.id
+                    Column(Modifier.fillMaxWidth()) {
+                        Row(Modifier.fillMaxWidth().padding(start = (row.depth.coerceAtMost(10) * 12).dp)) {
+                            Text("└─", modifier = Modifier.padding(top = Spacing.md))
+                            Surface(shape = MaterialTheme.shapes.medium,
+                                color = if (expanded) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainer,
+                                modifier = Modifier.weight(1f).heightIn(min = 48.dp).clickable { toggle(row.task.id) }.testTag("task_node_${row.task.id}")) {
+                                Row(Modifier.padding(Spacing.sm)) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(row.task.title, style = MaterialTheme.typography.titleSmall)
+                                        Text(projectTaskStatusLabel(row.task.status), style = MaterialTheme.typography.labelSmall)
+                                        Text(row.task.owner.ifBlank { stringResource(R.string.project_flow_default_member) }, style = MaterialTheme.typography.labelSmall)
+                                    }
+                                    Text(stringResource(if (expanded) R.string.project_process_collapse else R.string.project_process_expand), style = MaterialTheme.typography.labelSmall)
+                                    if (tasks.any { it.parentId == row.task.id }) TextButton(onClick = {
+                                        collapsed = if (row.task.id in collapsed) collapsed - row.task.id else collapsed + row.task.id
+                                    }, modifier = Modifier.heightIn(min = 48.dp)) {
+                                        Text(stringResource(if (row.task.id in collapsed) R.string.project_task_expand else R.string.project_task_collapse))
+                                    }
+                                }
                             }
                         }
+                        if (expanded) Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surface,
+                            modifier = Modifier.fillMaxWidth().height(processHeight)) { process(row.task) }
                     }
                 }
             }
         }
     }
-    if (editor) ProjectTaskEditor(null, state.workspace, tasks, viewModel::save, { editor = false }, projectId)
+    if (editor) ProjectTaskEditor(editingTask, state.workspace, tasks, viewModel::save, { editor = false }, projectId, state.availableMembers)
     if (overview && project != null) AlertDialog(onDismissRequest = { overview = false },
         title = { Text(project.title) }, text = { Text(project.requirements, modifier = Modifier.verticalScroll(rememberScrollState())) },
         confirmButton = { TextButton(onClick = { overview = false }) { Text(stringResource(R.string.project_close)) } })
     if (appending) AdaptiveModalBottomSheet(onDismissRequest = { if (!state.busy) appending = false },
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+        val count = remember(text, project) { ProjectPlanDraft.preview(project, text) }
         Column(Modifier.fillMaxWidth().imePadding().verticalScroll(rememberScrollState()).padding(Spacing.lg), verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
+            Text(stringResource(R.string.project_append), style = MaterialTheme.typography.titleLarge)
+            Text(stringResource(R.string.project_append_hint), style = MaterialTheme.typography.bodySmall)
             AppTextField(text, { text = it }, label = stringResource(R.string.project_requirements), minLines = 5, singleLine = false)
-            state.error?.let { Text(stringResource(R.string.project_task_error, it), color = MaterialTheme.colorScheme.error) }
-            Button(onClick = { val id = java.util.UUID.randomUUID().toString(); appendRequest = id; viewModel.appendRequirements(projectId, text, id) }, enabled = text.isNotBlank() && !state.busy,
+            Text(stringResource(R.string.project_flow_append_preview, count))
+            state.error?.let { Text(stringResource(R.string.project_task_error, projectTaskExecutionReasonLabel(it)), color = MaterialTheme.colorScheme.error) }
+            Button(onClick = { val id = java.util.UUID.randomUUID().toString(); appendRequest = id; viewModel.appendRequirements(projectId, text, id) }, enabled = count > 0 && !state.busy,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text(stringResource(R.string.project_append_generate)) }
         }
     }

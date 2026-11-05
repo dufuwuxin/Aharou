@@ -128,16 +128,6 @@ private fun FeishuTextField(label: String, value: String, onValueChange: (String
 }
 
 @Composable
-private fun FeishuHint(text: String) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.md)
-    )
-}
-
-@Composable
 private fun connectionLabel(state: ImChannelState): String = when (state) {
     is ImChannelState.Connected -> stringResource(R.string.settings_feishu_bot_status_connected, state.identity)
     is ImChannelState.Error -> stringResource(R.string.settings_feishu_bot_status_error, state.message)

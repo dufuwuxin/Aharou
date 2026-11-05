@@ -151,7 +151,10 @@ jobs:
       # 发版质量门禁：跑单元测试，失败即中止，避免发出回归包。
       # 只跑 ARM64 debug 变体：单测逻辑与 flavor 无关，跑全 flavor 6 变体是重复编译。
       - name: Run unit tests
-        run: ./gradlew :app:testArmsoloDebugUnitTest
+        run: |
+          python3 scripts/test_void_toolchain.py
+          python3 scripts/test_build_logging.py
+          ./gradlew :core-agent:test :app:testArmsoloDebugUnitTest
 
       # 只构建 ARM64 安装包：
       # --stacktrace：构建失败时输出完整调用栈，便于在 CI 定位 OOM/内存类根因。

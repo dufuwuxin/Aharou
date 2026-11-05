@@ -16,6 +16,15 @@ kotlin {
     }
 }
 
+tasks.withType<Test>().configureEach {
+    val runtimeClasspath = classpath
+    // PRoot 无法 self-attach；与 app 单测一样在 JVM 启动时安装 MockK agent。
+    jvmArgumentProviders += org.gradle.process.CommandLineArgumentProvider {
+        runtimeClasspath.files.firstOrNull { it.name.startsWith("byte-buddy-agent") && it.name.endsWith(".jar") }
+            ?.let { listOf("-javaagent:${it.absolutePath}") }.orEmpty()
+    }
+}
+
 // 本模块只放与运行平台无关的 agent 内核：数据模型、provider 适配、工具契约、提示词。
 // :app 与 :desktop 都依赖它。包名与 :app 保持完全一致，搬过来的代码无需改 import。
 dependencies {

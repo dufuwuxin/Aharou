@@ -108,7 +108,8 @@ object ProjectTaskGraph {
     fun revise(old: ProjectTask?, proposed: ProjectTask, version: Long): ProjectTask {
         require(old == null || (old.id == proposed.id && old.workspace == proposed.workspace && old.projectId == proposed.projectId))
         val changed = old != null && (old.requirement != proposed.requirement || old.background != proposed.background ||
-            old.acceptance != proposed.acceptance || old.constraints != proposed.constraints || old.dependencyIds != proposed.dependencyIds)
+            old.acceptance != proposed.acceptance || old.constraints != proposed.constraints || old.dependencyIds != proposed.dependencyIds ||
+            ProjectWorkflowPlan.participants(old) != ProjectWorkflowPlan.participants(proposed))
         return proposed.copy(version = version, createdAt = old?.createdAt ?: proposed.createdAt,
             order = old?.order ?: proposed.order,
             requirementsVersion = (old?.requirementsVersion ?: 1) + if (changed) 1 else 0,

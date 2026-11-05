@@ -121,6 +121,21 @@ class ProjectTaskRepository @Inject constructor(@ApplicationContext context: Con
         mutable.value = mutable.value + (workspace to next)
     }
 
+    suspend fun linkProjectExecution(projectId: String, workspace: String, sessionId: String) = withContext(Dispatchers.IO) {
+        linkProjectExecutionLocked(projectId, workspace, sessionId)
+    }
+
+    @Synchronized
+    private fun linkProjectExecutionLocked(projectId: String, workspace: String, sessionId: String) {
+        val current = snapshot(workspace)
+        require(current.projects.any { it.id == projectId }) { "PROJECT_NOT_FOUND" }
+        val next = current.copy(version = current.version + 1, projects = current.projects.map {
+            if (it.id == projectId) it.copy(flowSessionIds = (it.flowSessionIds + sessionId).distinct()) else it
+        })
+        persist(workspace, next)
+        mutable.value = mutable.value + (workspace to next)
+    }
+
     suspend fun requireExecutionReady(workspace: String, sessionId: String) {
         val tasks = try { load(workspace).tasks }
         catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }

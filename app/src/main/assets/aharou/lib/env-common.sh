@@ -11,6 +11,11 @@
 
 # 多镜像候选（按优先级排序，换源时自动探测跳过不可用；阿里云对服务器访问全量 403 放最后，探测会跳过）
 MIRRORS="mirrors.huaweicloud.com mirrors.tuna.tsinghua.edu.cn mirrors.ustc.edu.cn mirrors.cloud.tencent.com mirrors.aliyun.com"
+# Void 仓库只有部分站点提供（其余候选对 /voidlinux 返回 404 或极慢），单独列候选。
+VOID_MIRRORS="mirrors.tuna.tsinghua.edu.cn mirrors.bfsu.edu.cn mirror.nju.edu.cn"
+mirror_candidates() {
+    if [ "$PMGR" = xbps ]; then echo "$VOID_MIRRORS"; else echo "$MIRRORS"; fi
+}
 MIRROR=""
 # 基础工具（不参与自定义勾选，始终安装）：git/ripgrep 是 AI 工作流与版本管理基础，bash/curl 是通用依赖；
 # wget/jq/rsync/net-tools/netcat-openbsd/less/file 是排查与脚本里最常现装的几个，捎进基础包省得每次干活再装。
@@ -25,6 +30,7 @@ BASE_TOOL_BINS="bash:bash curl:curl wget:wget jq:jq rsync:rsync git:git ripgrep:
 # 按当前包管理器返回完整基础包清单（含发行版专有包名的那些）。
 base_pkgs() {
     case "$PMGR" in
+        xbps)    echo "bash curl wget jq rsync git ripgrep net-tools netcat less file bind-utils" ;;
         apt)     echo "$BASE_PKGS dnsutils" ;;
         dnf|yum) echo "$BASE_PKGS bind-utils" ;;
         # Arch/Manjaro：netcat 包叫 openbsd-netcat（无 netcat-openbsd），dig 所在的包叫 bind（无 bind-tools）
@@ -36,6 +42,7 @@ base_pkgs() {
 # 基础工具包名按发行版修正：检测缺失后按货名补装时用。
 tool_pkg() {
     case "$PMGR:$1" in
+        xbps:netcat-openbsd) echo netcat ;;
         pacman:netcat-openbsd) echo openbsd-netcat ;;
         *) echo "$1" ;;
     esac
@@ -66,7 +73,9 @@ C_RESET=$(printf '\033[0m')
 
 # ── 包管理器探测：菜单前执行一次，供安装/清单共用 ──
 detect_pmgr() {
-    if command -v apk >/dev/null 2>&1; then
+    if command -v xbps-install >/dev/null 2>&1; then
+        PMGR=xbps
+    elif command -v apk >/dev/null 2>&1; then
         PMGR=apk
     elif command -v apt-get >/dev/null 2>&1; then
         PMGR=apt
@@ -81,9 +90,29 @@ detect_pmgr() {
     fi
 }
 
+# ── Void 滚动发行：本地 xbps 比仓库旧时装任何包都会被拒（退出码 16）。按官方手册先单独更新 xbps，
+#    再升级已装包，最后装包；同一进程只做一次。退出码 17 表示目标已是最新/已安装。──
+XBPS_UPGRADED=
+xbps_upgrade_once() {
+    [ -n "$XBPS_UPGRADED" ] && return 0
+    xbps-install -Suy xbps; xbps_rc=$?
+    [ "$xbps_rc" = 0 ] || [ "$xbps_rc" = 17 ] || return "$xbps_rc"
+    xbps-install -uy; xbps_rc=$?
+    [ "$xbps_rc" = 0 ] || [ "$xbps_rc" = 17 ] || return "$xbps_rc"
+    XBPS_UPGRADED=1
+}
+
+xbps_add() {
+    xbps_upgrade_once || return $?
+    xbps-install -y "$@"; xbps_rc=$?
+    [ "$xbps_rc" = 17 ] || return "$xbps_rc"
+    for p in "$@"; do xbps-query "$p" >/dev/null 2>&1 || return 17; done
+}
+
 # ── 按包管理器安装一批包 ──
 pkg_add() {
     case "$PMGR" in
+        xbps) xbps_add "$@" ;;
         apk)
             apk_update
             timeout "$APK_TIMEOUT" apk add --no-cache "$@"
@@ -110,7 +139,7 @@ pkg_add() {
         yum) yum install -y "$@" ;;
         pacman) pacman -Sy --noconfirm --needed "$@" ;;
         *)
-            echo "未支持的包管理器（apk/apt-get/dnf/yum/pacman）" >&2
+            echo "未支持的包管理器（xbps/apk/apt-get/dnf/yum/pacman）" >&2
             return 1
             ;;
     esac
@@ -130,6 +159,12 @@ apt_java_headless() {
 # ── 运行时 → 当前包管理器下的包名映射（自定义安装清单与安装共用）──
 runtime_pkgs() {
     case "$PMGR:$1" in
+        xbps:node)   echo "nodejs" ;;
+        xbps:python) echo "python3 python3-pip python3-devel base-devel pkg-config" ;;
+        xbps:java)   echo "openjdk17" ;;
+        xbps:go)     echo "go" ;;
+        xbps:rust)   echo "rust cargo base-devel pkg-config" ;;
+        xbps:php)    echo "php" ;;
         apk:node)    echo "nodejs npm" ;;
         apk:python)  echo "python3 py3-pip" ;;
         apk:java)    echo "openjdk17-jdk" ;;
@@ -170,6 +205,7 @@ pkg_versions() {
         dnf) dnf list available --showduplicates "$pkg" 2>/dev/null | awk 'NR>2 {print $2}' | sort -Vu -r ;;
         yum) yum list available "$pkg" 2>/dev/null | awk 'NR>2 {print $2}' | sort -Vu -r ;;
         pacman) pacman -Si "$pkg" 2>/dev/null | sed -n 's/^Version *: //p' ;;
+        xbps) xbps-query -R -p pkgver "$pkg" 2>/dev/null | sed "s/^$pkg-//" ;;
     esac
 }
 
@@ -177,6 +213,12 @@ pkg_versions() {
 runtime_candidates() {
     case "$PMGR:$1" in
         # apk search 输出「包名-版本」，不能直接用；改为已知候选列表 + 精确存在性验证，输出纯包名
+        xbps:java)
+            for p in openjdk21 openjdk17; do
+                [ -n "$(pkg_versions "$p" | head -1)" ] && echo "$p"
+            done
+            ;;
+        xbps:rust) echo rust ;;
         apk:java)
             for p in openjdk25-jdk openjdk21-jdk openjdk17-jdk openjdk11-jdk openjdk8-jdk; do
                 [ -n "$(pkg_versions "$p" | head -1)" ] && echo "$p"
@@ -265,6 +307,7 @@ apk_update() {
 # ── 更新软件包索引（版本探测与安装的前置步骤）──
 pkg_update() {
     case "$PMGR" in
+        xbps) xbps-install -Sy ;;
         apk) apk_update ;;
         apt) apt-get update -y ;;
         dnf) dnf makecache -y ;;
@@ -394,6 +437,7 @@ show_plan() {
     else
         echo "  运行时: （未选择，仅装基础工具）"
     fi
+    [ "$PMGR" = xbps ] && echo "  系统: 先更新 xbps 并升级已装软件包（Void 为滚动发行，旧 xbps 会拒绝安装）"
     echo "══════════════════════════════════════"
     printf "  输入 y 开始安装，其它键返回菜单: "
     read ans
@@ -406,7 +450,7 @@ ask_mirror() {
     echo "选择镜像源："
     echo "    1) 自动探测（推荐）"
     n=2
-    for m in $MIRRORS; do
+    for m in $(mirror_candidates); do
         echo "    $n) $m"
         n=$((n + 1))
     done
@@ -422,7 +466,7 @@ ask_mirror() {
             return 0
             ;;
         *)
-            MIRROR=$(echo "$MIRRORS" | awk -v i="$((ans - 1))" '{print $i}')
+            MIRROR=$(mirror_candidates | awk -v i="$((ans - 1))" '{print $i}')
             [ -z "$MIRROR" ] && { echo "序号无效，使用自动探测。"; pick_mirror; }
             ;;
     esac
@@ -593,6 +637,10 @@ probe_mirror() {
             code=$(http_code "$url")
             case "$code" in 2[0-9][0-9]|3[0-9][0-9]) return 0 ;; *) return 1 ;; esac
             ;;
+        xbps)
+            code=$(http_code "https://$m/voidlinux/live/current/sha256sum.txt")
+            case "$code" in 2[0-9][0-9]) return 0 ;; *) return 1 ;; esac
+            ;;
         dnf|yum|pacman)
             code=$(http_code "https://$m/archlinux/core/os/x86_64/core.db")
             case "$code" in 2[0-9][0-9]|3[0-9][0-9]|4[0-9][0-9]) return 0 ;; *) return 1 ;; esac
@@ -602,19 +650,21 @@ probe_mirror() {
 
 # ── 从候选里选当前可用镜像（全部不可用则兑底第一个）──
 pick_mirror() {
-    for m in $MIRRORS; do
+    for m in $(mirror_candidates); do
         if probe_mirror "$m"; then
             MIRROR="$m"
             return 0
         fi
     done
-    MIRROR=$(echo "$MIRRORS" | awk '{print $1}')
+    MIRROR=$(mirror_candidates | awk '{print $1}')
 }
 
 # ── 镜像源：按包管理器换国内镜像源（多候选自动探测），失败自动恢复原配置（不阻塞后续安装）──
 setup_mirror() {
     [ -z "$MIRROR" ] && pick_mirror
-    if command -v apk >/dev/null 2>&1; then
+    if command -v xbps-install >/dev/null 2>&1; then
+        setup_xbps_mirror
+    elif command -v apk >/dev/null 2>&1; then
         setup_apk_mirror
     elif command -v apt-get >/dev/null 2>&1; then
         setup_apt_mirror
@@ -763,6 +813,79 @@ EOF
     rm -f "$backup.backup"
     return 0
 }
+
+# ── Void：把官方仓库地址换成所选镜像（签名校验不变），写进 xbps.d 覆盖目录；
+#    已自定义过的仓库文件不动，xbps-install -S 失败则恢复。──
+AICODE_XBPS_CONF_DIR=${AICODE_XBPS_CONF_DIR:-/etc/xbps.d}
+AICODE_XBPS_SHARE_DIR=${AICODE_XBPS_SHARE_DIR:-/usr/share/xbps.d}
+XBPS_OFFICIAL='https?://repo-default\.voidlinux\.org'
+
+restore_xbps_mirror() {
+    xbps_restore_rc=0
+    for f in "$xbps_txn/new/"*; do
+        [ -f "$f" ] || continue
+        rm -f "$AICODE_XBPS_CONF_DIR/${f##*/}" || xbps_restore_rc=1
+    done
+    for f in "$xbps_txn/saved/"*; do
+        [ -f "$f" ] || continue
+        mv "$f" "$AICODE_XBPS_CONF_DIR/${f##*/}" || xbps_restore_rc=1
+    done
+    return "$xbps_restore_rc"
+}
+
+setup_xbps_mirror() (
+    mkdir -p "$AICODE_XBPS_CONF_DIR" || return 1
+    xbps_txn=$(mktemp -d "$AICODE_XBPS_CONF_DIR/.aicode-mirror.XXXXXX") || return 1
+    mkdir "$xbps_txn/new" "$xbps_txn/saved" || return 1
+    xbps_changed=0
+    xbps_result=0
+    for src in "$AICODE_XBPS_SHARE_DIR"/*.conf; do
+        [ -f "$src" ] && grep -Eq "^repository=$XBPS_OFFICIAL/" "$src" || continue
+        name=${src##*/}
+        dst="$AICODE_XBPS_CONF_DIR/$name"
+        if [ -e "$dst" ]; then
+            if grep -qx '# aicode-managed-void-mirror' "$dst"; then
+                :
+            elif grep -Eq "^repository=$XBPS_OFFICIAL/" "$dst"; then
+                src="$dst"
+            else
+                continue
+            fi
+            cp -p "$dst" "$xbps_txn/saved/$name" || { xbps_result=1; break; }
+        else
+            : > "$xbps_txn/new/$name" || { xbps_result=1; break; }
+        fi
+        if ! { printf '%s\n' '# aicode-managed-void-mirror';
+            sed -E "s#^repository=$XBPS_OFFICIAL/#repository=https://$MIRROR/voidlinux/#" "$src";
+        } > "$xbps_txn/staged" || ! mv "$xbps_txn/staged" "$dst"; then
+            xbps_result=1
+            break
+        fi
+        xbps_changed=1
+    done
+    # XBPS 的仓库拉取错误可能仅写 ERROR 而仍返回零。
+    if [ "$xbps_result" = 0 ] && [ "$xbps_changed" = 1 ]; then
+        if ! xbps_out=$(xbps-install -S 2>&1) || printf '%s\n' "$xbps_out" | grep -q '^ERROR:'; then
+            xbps_result=1
+        fi
+    fi
+    if [ "$xbps_result" != 0 ]; then
+        if restore_xbps_mirror; then
+            echo "Void 换源失败，已恢复原仓库配置" >&2
+        else
+            echo "Void 换源与恢复均失败，备份保留在 $xbps_txn" >&2
+            return 1
+        fi
+    fi
+    rm -f "$xbps_txn/new/"* "$xbps_txn/saved/"* "$xbps_txn/staged"
+    rmdir "$xbps_txn/new" "$xbps_txn/saved" "$xbps_txn" || return 1
+    [ "$xbps_result" = 0 ] || return 1
+    if [ "$xbps_changed" = 1 ]; then
+        echo "Void 已切换到镜像 $MIRROR（仍校验官方签名）。"
+    else
+        echo "未找到可替换的 Void 官方仓库配置（可能已自定义），保持现状。"
+    fi
+)
 
 git_config() {
     # git 未安装（手动安装/退出路径）时跳过凭据配置

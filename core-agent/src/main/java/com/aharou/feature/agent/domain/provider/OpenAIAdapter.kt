@@ -71,8 +71,13 @@ class OpenAIAdapter @Inject constructor(
     // null 时请求体不带 temperature（Gson 跳过 null 字段），交由服务端默认。
     override var temperature: Float? = null
 
+    private val serviceTier: String?
+        get() = OpenAIServiceTier.value(resolveCustomHeaders(customHeaders, logSessionId, apiKey))
+    private val effectiveResponses: Boolean
+        get() = useResponseApi || serviceTier == "ultrafast"
+
     private fun extraHeaders(): Map<String, String> {
-        val base = resolveCustomHeaders(customHeaders, logSessionId, apiKey)
+        val base = OpenAIServiceTier.normalizeHeaders(resolveCustomHeaders(customHeaders, logSessionId, apiKey))
         if (!isCodexClient()) return base
         return base + codexHeaders()
     }
@@ -93,7 +98,7 @@ class OpenAIAdapter @Inject constructor(
      */
     private fun resolveApiUrl(): String {
         if (useFullUrl) return baseUrl
-        val path = if (useResponseApi) "v1/responses" else defaultProviderApiPath(ProviderType.OPENAI)
+        val path = if (effectiveResponses) "v1/responses" else defaultProviderApiPath(ProviderType.OPENAI)
         return joinUrl(baseUrl, path)
     }
 
@@ -103,7 +108,7 @@ class OpenAIAdapter @Inject constructor(
         tools: List<AgentTool>,
         reasoningEffort: String?
     ): AIResponse {
-        if (useResponseApi) return completeViaResponses(systemPrompt, messages, tools, reasoningEffort)
+        if (effectiveResponses) return completeViaResponses(systemPrompt, messages, tools, reasoningEffort)
 
         val openAIMessages = buildList {
             if (systemPrompt.isNotBlank()) {
@@ -128,6 +133,7 @@ class OpenAIAdapter @Inject constructor(
             messages = openAIMessages,
             temperature = temperature,
             reasoning_effort = normalizeReasoningEffort(reasoningEffort),
+            service_tier = serviceTier,
             tools = toolDefs,
             tool_choice = if (toolDefs != null) "auto" else null,
             stream = false,
@@ -257,6 +263,7 @@ class OpenAIAdapter @Inject constructor(
             request["tools"] = it
             request["tool_choice"] = "auto"
         }
+        serviceTier?.let { request["service_tier"] = it }
         if (stream) request["stream"] = true
         normalizeReasoningEffort(reasoningEffort)?.let { effort ->
             if (isDeepSeek) {
@@ -389,7 +396,7 @@ class OpenAIAdapter @Inject constructor(
     // 取消信号可能落在挂起的 emit 上；flow{} 里恢复后再次 emit（如 Retrying/KeySwitched）会触发
     // Flow 异常透明性违规（IllegalStateException），channel 的 send 不受该检查约束。
     ): Flow<AIStreamChunk> = channelFlow {
-        if (useResponseApi) {
+        if (effectiveResponses) {
             streamViaResponses(systemPrompt, messages, tools, reasoningEffort)
             return@channelFlow
         }
@@ -417,6 +424,7 @@ class OpenAIAdapter @Inject constructor(
             messages = openAIMessages,
             temperature = temperature,
             reasoning_effort = normalizeReasoningEffort(reasoningEffort),
+            service_tier = serviceTier,
             tools = toolDefs,
             tool_choice = if (toolDefs != null) "auto" else null,
             stream = true,

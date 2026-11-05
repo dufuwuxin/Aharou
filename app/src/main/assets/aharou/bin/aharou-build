@@ -1,0 +1,86 @@
+#!/bin/sh
+# Full tool output may contain secrets supplied by the project/tool itself.
+# This wrapper does not record argv/environment and cannot promise automatic redaction.
+usage() {
+    echo 'Usage: aharou-build android <task> | rust | python | logs' >&2
+    exit 2
+}
+action=${1:-}
+case "$action" in
+    android)
+        [ "$#" -eq 2 ] || usage
+        case "$2" in ''|-*|*[!a-zA-Z0-9_:.-]*) usage ;; esac
+        task=$2
+        ;;
+    rust|python|logs) [ "$#" -eq 1 ] || usage ;;
+    *) usage ;;
+esac
+
+run_build() {
+    case "$action" in
+        android)
+            # AI command shells are non-login shells and do not read profile.d.
+            if [ -f /etc/profile.d/aicode-android.sh ]; then
+                . /etc/profile.d/aicode-android.sh || return $?
+            fi
+            sh ./gradlew --console=plain "$task"
+            ;;
+        rust) cargo build ;;
+        python) python3 -m pip wheel --no-deps . -w dist ;;
+    esac
+}
+warn() { printf 'WARNING: %s\n' "$*" >&2; }
+# Hash both components rather than trusting a profile id as a filesystem path.
+container=$(printf '%s' "${AHAROU_CONTAINER_ID:-default}" | cksum | awk '{print $1}')
+workspace=$({ printf '%s\n' "${AHAROU_WORKSPACE_ID:-}"; pwd -P; } | cksum | awk '{print $1}')
+relative="$container/$workspace"
+primary="${AHAROU_LOG_DIR:-$HOME/log}/$relative"
+fallback="$HOME/.aharou/logs/build/$relative"
+
+show_log() {
+    tail -n 80 "${1%.done}"
+    printf 'exit_code=%s\nlog_path=%s\n' "$(cat "$1")" "${1%.done}"
+}
+
+if [ "$action" = logs ]; then
+    # Only completion markers participate; a concurrent unfinished build is invisible.
+    latest=$(ls -t "$primary"/*.done "$fallback"/*.done 2>/dev/null | head -n 1)
+    if [ -z "$latest" ]; then
+        echo 'No completed build log for this workspace.' >&2
+        exit 1
+    fi
+    show_log "$latest"
+    exit $?
+fi
+
+# mktemp is the write probe as well as the concurrency-safe filename allocator.
+# Private permissions matter: raw compiler output can include project secrets.
+umask 077
+log_file=
+if mkdir -p "$primary" 2>/dev/null; then
+    log_file=$(mktemp "$primary/$action.XXXXXX.log" 2>/dev/null) || log_file=
+fi
+if [ -z "$log_file" ]; then
+    warn 'Build log directory unavailable; trying HOME/.aharou/logs/build.'
+    if mkdir -p "$fallback" 2>/dev/null; then
+        log_file=$(mktemp "$fallback/$action.XXXXXX.log" 2>/dev/null) || log_file=
+    fi
+fi
+if [ -z "$log_file" ]; then
+    warn 'Build logging unavailable; running with native output and exit status.'
+    run_build
+    exit $?
+fi
+
+run_build > "$log_file" 2>&1
+build_exit=$?
+# Publish atomically only after the command has finished. Never replace another run.
+if printf '%s\n' "$build_exit" > "$log_file.done.tmp" &&
+    mv "$log_file.done.tmp" "$log_file.done"; then
+    show_log "$log_file.done"
+else
+    warn 'Could not publish completed build log; build exit status is preserved.'
+    tail -n 80 "$log_file"
+    printf 'exit_code=%s\nlog_path=%s\n' "$build_exit" "$log_file"
+fi
+exit "$build_exit"

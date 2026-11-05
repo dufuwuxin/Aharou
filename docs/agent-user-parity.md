@@ -2,6 +2,12 @@
 
 这张表把“用户在界面上能做的事”和“agent 有没有对应工具”逐条对齐，用来暴露缺口，不用来论证应该少给 agent 工具。**每次新增用户可见功能（设置页新分区、编辑器新操作）或增删工具时都要回来核一遍**，等新增工具后再把对应行的“无”划掉。
 
+## 本轮新增能力
+
+- OpenAI 速度档位：供应商选项中的默认/Fast/Ultrafast 与 `config providers.<id>.service_tier` 同步；复用自定义请求头保存，实际请求体也发送 `service_tier`，Ultrafast 走 Responses，不等同于思考强度。不自动替用户选择收费档位。
+- 项目完整树图/导图：节点内展开过程，负责人和成员逐个真实执行，同名角色有独立记录；修改参与者使本任务及下游交付失效。用户验收与成员交付仍区分。
+- 构建日志：`aharou-build android <task> / rust / python / logs` 与四个需用户保存才启用的工具模板共用现有执行授权；本地默认日志挂载、显式覆盖及私有回退，不自动收集第三方日志或保证脱敏。Void 的 Python/Rust 已在独立rootfs实跑，Android工具链及手机挂载仍不得宣称验证通过。
+
 ## 0. 工具集合与事实来源
 
 - 内置工具的唯一注册点是 `app/src/main/java/com/aharou/di/AgentModule.kt:453-489`，共 **37 个**：`readFile` `sendFile` `sendToChat` `viewImage` `writeFile` `editFile` `generateImage` `Bash` `Shizuku` `terminal` `list` `search` `loadSkill` `loadRule` `knowledge_search` `askUserQuestion` `manageMcp` `tool_search` `websearch` `webfetch` `planMode` `todo` `memory` `task` `messageParent` `browser` `config` `vscreen` `a11y` `open_app` `check_dependencies` `sessions` `device` `personal_context` `petAvatar` `diagnostics` `git_blame`。
@@ -291,6 +297,6 @@ Second-pass corrections: long-session creation routes to project creation; expli
 
 底栏为「项目 / 会话 / 配置 / 设置」，默认进入项目。创建只输入项目名称和需求正文，一次原子保存项目及全部任务草稿。编号、项目符号、换行/空行和缩进用于确定性拆分，单段文字按句拆分；这不是 AI 语义分析，不调用模型，不会自动开始执行。草稿可继续编辑，也可在项目内追加需求或添加任务。
 
-项目详情的「任务树 / 思维导图」分段控制切换同一组任务；层级树可展开收起，导图按父子分支向右布局并支持拖动、双指缩放及放大/缩小/复位，跨任务依赖保留虚线。点击任务进入独立可滚动详情，编辑、开始执行、停止和验收只在详情操作，次级协作字段可展开。
+项目详情的「任务树 / 思维导图」分段控制切换同一组任务；层级树可展开收起，导图按父子分支向右布局并支持拖动、双指缩放及放大/缩小/复位，跨任务依赖保留虚线。点击任务在树图节点内只读展开成员执行内容、工具输出、状态、负责人及前置关系，没有聊天输入框或节点开始按钮。项目外层统一开始/停止，实际派发成员子执行并按依赖流转；成员交付进入待验收，不自动视作用户已验收。追加内容进入后续流程，新增任务可选择成员与依赖。
 
-会话页仅保留聊天记录，不混放任务，也不提供普通聊天新建按钮。项目任务执行会话从任务详情打开；旧独立会话不删除。旧无项目归属的任务保留在项目首页的「未归属任务」，不会自动变成项目。
+会话页仅保留聊天记录，不混放任务，也不提供普通聊天新建按钮。项目任务执行记录在节点内只读查看；未归属旧任务仍保留详情入口，旧独立会话不删除。旧无项目归属的任务保留在项目首页的「未归属任务」，不会自动变成项目。

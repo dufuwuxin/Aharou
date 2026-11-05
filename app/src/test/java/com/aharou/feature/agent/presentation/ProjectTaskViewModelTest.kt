@@ -25,6 +25,7 @@ import org.junit.Test
 class ProjectTaskViewModelTest {
     private val dispatcher = StandardTestDispatcher()
     private val repository = mockk<ProjectTaskRepository>()
+    private val workflow = mockk<com.aharou.feature.agent.domain.task.ProjectWorkflowRunner>()
     private lateinit var viewModel: ProjectTaskViewModel
 
     @Before fun setUp() {
@@ -35,10 +36,24 @@ class ProjectTaskViewModelTest {
             ProjectPlan(workspace = thirdArg(), title = firstArg(), requirements = secondArg())
         }
         coEvery { repository.appendRequirements(any(), any(), any()) } returns Unit
-        viewModel = ProjectTaskViewModel(repository, mockk<SessionUseCase>(), mockk<AgentTurnRunner>())
+        coEvery { workflow.members() } returns listOf("member")
+        viewModel = ProjectTaskViewModel(repository, mockk<SessionUseCase>(), mockk<AgentTurnRunner>(), workflow)
     }
 
     @After fun tearDown() { Dispatchers.resetMain() }
+
+    @Test fun oneProjectStartIsIdempotentAndDoesNotFollowWorkspaceSwitch() = runTest(dispatcher) {
+        val finish = kotlinx.coroutines.CompletableDeferred<Unit>()
+        coEvery { workflow.run("p", "/first") } coAnswers { finish.await() }
+        viewModel.workspace("/first"); runCurrent()
+        viewModel.startProject("p"); viewModel.startProject("p")
+        viewModel.workspace("/second"); runCurrent()
+        org.junit.Assert.assertTrue("p" in viewModel.state.value.activeProjectIds)
+        coVerify(exactly = 1) { workflow.run("p", "/first") }
+        coVerify(exactly = 0) { workflow.run("p", "/second") }
+        viewModel.stopProject("p"); runCurrent()
+        org.junit.Assert.assertTrue(viewModel.state.value.activeProjectIds.isEmpty())
+    }
 
     @Test fun queuedProjectCreationKeepsTheSubmittingWorkspace() = runTest(dispatcher) {
         viewModel.workspace("/first")

@@ -333,6 +333,9 @@ class AIEditorApp : Application(), Configuration.Provider {
     @Inject
     lateinit var remoteSshConnection: com.aharou.feature.agent.domain.container.RemoteSshConnection
 
+    @Inject
+    lateinit var remoteBootstrapSync: com.aharou.feature.agent.domain.container.RemoteBootstrapSync
+
     /** 全局网络可用性监听：网络恢复/切换链路时驱动即时重连。 */
     @Inject
     lateinit var networkConnectivityObserver: com.aharou.core.net.NetworkConnectivityObserver
@@ -514,8 +517,7 @@ class AIEditorApp : Application(), Configuration.Provider {
             remoteSshConnection.superviseByExecutionMode(appScope, executionModeHolder.mode) {
                 runCatching { workspaceRepository.initialize() }
                     .onFailure { FileLogger.w(TAG, "SSH 重连后重新加载工作区失败", it) }
-                syncDocsToRemote()
-                releaseBuiltinAssetsToRemote()
+                remoteBootstrapSync.syncIfNeeded()
             }
         }
         // 当前激活 profile 的连接配置变化（编辑连接/编辑 profile/切 profile/切模式）即重连，改连接即时生效。
@@ -529,8 +531,7 @@ class AIEditorApp : Application(), Configuration.Provider {
                 runCatching {
                     remoteSshConnection.connect(config)
                     // 连接成功后同步内置文档到远程 ~/.aharou/docs/，供 AI 查阅。
-                    syncDocsToRemote()
-                    releaseBuiltinAssetsToRemote()
+                    remoteBootstrapSync.syncIfNeeded()
                 }.onFailure { FileLogger.e(TAG, "SSH 连接失败，将在首次命令时重试", it) }
             }
         }
@@ -637,53 +638,6 @@ class AIEditorApp : Application(), Configuration.Provider {
         get() = Configuration.Builder()
             .setWorkerFactory(workerFactory)
             .build()
-
-    /**
-     * 读取 assets/docs 下所有内置文档（含 guide/ advanced/ 等分类子目录），通过 SSH exec 同步到远程 ~/.aharou/docs/。
-     * 远程模式下 AI 查阅 ~/.aharou/docs/ 的设置说明文档时，需要这些文件存在于远程服务器。
-     * 连接成功与重连成功后调用，保证远程文档随 App 升级更新。失败仅记日志，不阻断流程。
-     */
-    private suspend fun syncDocsToRemote() {
-        runCatching {
-            val docs = linkedMapOf<String, String>()
-            collectAssetDocs("docs", "", docs)
-            remoteSshConnection.uploadDocs(docs)
-        }.onFailure { FileLogger.w(TAG, "同步内置文档到远程失败", it) }
-    }
-
-    /**
-     * 释放内置子代理定义（Explore）到远程 `~/.aharou/agents`。远程模式下全局 agents 以远端为准，
-     * 内置默认需在远端存在才能开箱即用；仅补齐缺失、不覆盖用户修改。
-     */
-    private suspend fun releaseBuiltinAssetsToRemote() {
-        remoteSshConnection.uploadBuiltinFiles("agents", collectAssetBytes("agents"))
-        remoteSshConnection.uploadBuiltinFiles("teams", collectAssetBytes("teams"))
-    }
-
-    /** 收集 assets 目录下的扁平文件（name → 字节）。目录项会被跳过。 */
-    private fun collectAssetBytes(assetDir: String): Map<String, ByteArray> {
-        val out = linkedMapOf<String, ByteArray>()
-        assets.list(assetDir)?.forEach { entry ->
-            runCatching { assets.open("$assetDir/$entry").use { out[entry] = it.readBytes() } }
-                .onFailure { FileLogger.w(TAG, "读取内置资源失败: $assetDir/$entry", it) }
-        }
-        return out
-    }
-
-    /** 递归收集 assets 文档，key 为相对 docs/ 的路径（如 guide/terminal.md）。 */
-    private fun collectAssetDocs(assetDir: String, relativePrefix: String, out: MutableMap<String, String>) {
-        val entries = assets.list(assetDir) ?: return
-        for (entry in entries) {
-            val assetPath = "$assetDir/$entry"
-            val relativePath = if (relativePrefix.isEmpty()) entry else "$relativePrefix/$entry"
-            try {
-                out[relativePath] = assets.open(assetPath).bufferedReader().use { it.readText() }
-            } catch (e: java.io.IOException) {
-                // 目录项：assets.open 对目录抛 IOException，递归处理
-                collectAssetDocs(assetPath, relativePath, out)
-            }
-        }
-    }
 
     /** 注册完整版 BouncyCastle 取代 Android 自带的裁剪版。
      *  sshj 0.38.0 用 X25519 做密钥交换，Android 自带的 BC provider 不含 X25519 算法，

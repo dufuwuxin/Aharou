@@ -4,6 +4,31 @@ package com.aharou.feature.agent.domain.tool.custom
 object PracticalToolTemplates {
     val all: List<CustomToolDefinition> = listOf(
         CustomToolDefinition(
+            name = "build_android", description = "Build one Android Gradle task without installing tools. Returns the last 80 lines, exit code and full log path. Raw logs may contain sensitive data; no automatic redaction.",
+            command = "aharou-build android {{task}}",
+            parameters = listOf(CustomToolParameter("task", description = "One Gradle task, e.g. :app:assembleArmsoloDebug", required = true)),
+            timeoutSeconds = 600, injectionMode = ToolInjectionMode.KEYWORD,
+            keywords = listOf("Android", "Gradle", "Kotlin", "APK")
+        ),
+        CustomToolDefinition(
+            name = "build_rust", description = "Run cargo build without installing tools. Returns the last 80 lines, exit code and full log path. Raw logs may contain sensitive data; no automatic redaction.",
+            command = "aharou-build rust",
+            timeoutSeconds = 600, injectionMode = ToolInjectionMode.KEYWORD,
+            keywords = listOf("Rust", "cargo")
+        ),
+        CustomToolDefinition(
+            name = "build_python", description = "Run python3 -m pip wheel --no-deps . -w dist without installing tools. Returns the last 80 lines, exit code and full log path. Raw logs may contain sensitive data; no automatic redaction.",
+            command = "aharou-build python",
+            timeoutSeconds = 600, injectionMode = ToolInjectionMode.KEYWORD,
+            keywords = listOf("Python", "wheel")
+        ),
+        CustomToolDefinition(
+            name = "build_logs", description = "Read the current workspace's latest completed build: last 80 lines, exit code and full log path. Raw logs may contain sensitive data; no automatic redaction.",
+            command = "aharou-build logs",
+            timeoutSeconds = 600, injectionMode = ToolInjectionMode.KEYWORD,
+            keywords = listOf("构建日志", "编译日志", "build log", "cargo log", "Gradle log")
+        ),
+        CustomToolDefinition(
             name = "git_status", description = "Show repository status without changing files.",
             command = "git -C {{path}} status --short --branch",
             parameters = listOf(path()), injectionMode = ToolInjectionMode.KEYWORD,

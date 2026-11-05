@@ -473,12 +473,6 @@ fun AppNavigation(
     // Activity-scoped shared owner: navigating tree/detail/chat must not cancel execution.
     val projectTaskViewModel: ProjectTaskViewModel = hiltViewModel()
     val projectTaskState by projectTaskViewModel.state.collectAsStateWithLifecycle()
-    LaunchedEffect(projectTaskViewModel) {
-        projectTaskViewModel.openSession.collect { sessionId ->
-            agentViewModel.selectSession(sessionId)
-            navController.navigate("chat") { launchSingleTop = true }
-        }
-    }
     val settingsViewModel: SettingsViewModel = hiltViewModel()
     val workspaceViewModel: WorkspaceViewModel = hiltViewModel()
 
@@ -966,8 +960,12 @@ fun AppNavigation(
             }
             composable("projects/{projectId}") { entry ->
                 ProjectTaskWorkbench(projectId = entry.arguments?.getString("projectId").orEmpty(), viewModel = projectTaskViewModel,
-                    onOpenTask = { id -> projectTaskViewModel.select(id); navController.navigate("tasks/$id") },
-                    onBack = { navController.popBackStack() })
+                    onBack = { navController.popBackStack() },
+                    conversation = { _, id -> androidx.compose.runtime.key(id) {
+                        com.aharou.feature.agent.presentation.component.ProjectTaskConversation(id, agentViewModel,
+                            onToolDetail = { msg -> com.aharou.feature.agent.presentation.component.ToolCallPreviewHolder.current = msg
+                                navController.navigate("toolDetail") }) } },
+                    approvals = { com.aharou.feature.agent.presentation.component.ProjectFlowApprovals(agentViewModel) })
             }
             composable("tasks/{taskId}") { entry ->
                 ProjectTaskDetailScreen(taskId = entry.arguments?.getString("taskId").orEmpty(), viewModel = projectTaskViewModel,

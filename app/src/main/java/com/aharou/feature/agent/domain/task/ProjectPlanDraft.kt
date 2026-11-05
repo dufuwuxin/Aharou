@@ -5,6 +5,9 @@ object ProjectPlanDraft {
     private val marker = Regex("^\\s*(?:[-*+•]|\\d+[.)、]|[（(]\\d+[）)])\\s*")
     private val sentence = Regex("(?<=[。！？.!?])(?=\\s|[^\\x00-\\x7F])")
 
+    fun preview(project: ProjectPlan?, text: String): Int =
+        if (project == null || project.title.isBlank() || text.isBlank()) 0 else build(project.copy(requirements = text)).size
+
     fun build(project: ProjectPlan): List<ProjectTask> {
         require(project.title.isNotBlank() && project.requirements.isNotBlank()) { "REQUIRED_FIELDS" }
         val lines = project.requirements.lines()

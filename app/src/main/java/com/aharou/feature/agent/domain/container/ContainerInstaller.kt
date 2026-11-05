@@ -97,59 +97,25 @@ class ContainerInstaller @Inject constructor(
             }
         }
 
-        @Volatile private var docsExtractedSession = false
+        private val builtinAssets = BuiltinAssetExtractor()
 
         /**
          * 从 assets 提取文档到 ~/.aharou/docs (内置使用指导)，支持 guide/ advanced/ 等分类子目录。
          *
-         * 提取前先整目录删除：文档按功能分类，版本间调整分类会改变文件路径，只覆盖不清理会让
-         * 上个版本的同名旧文件残留在别的路径下，AI 可能读到过期内容。
+         * 内容相同不重写；完整提取成功后清理不再内置的旧文档，避免旧分类路径残留。
          */
         fun extractDocs(context: Context) {
-            if (docsExtractedSession) return
-            val destDir = File(ContainerInstaller.migrateLegacyDir(context), "docs")
-            runCatching {
-                destDir.deleteRecursively()
-                destDir.mkdirs()
-                extractAssetsRecursive(context, "docs", destDir)
-                docsExtractedSession = true
-            }.onFailure {
-                FileLogger.w(TAG, "提取内置文档失败: ${it.message}", it)
-            }
+            extractBuiltinAssets(context, "docs")
         }
 
         /**
-         * 从 assets 提取内置提示词到 ~/.aharou/prompts/，每次启动全量覆盖，使 App 升级后提示词随之更新。
+         * 从 assets 提取内置提示词到 ~/.aharou/prompts/，仅替换内容变化的文件，使升级后的提示词及时更新。
          *
          * 用户自定义覆盖放在 ~/.aharou/prompts.custom/（同名即覆盖），本方法不触碰该目录，
          * 故用户重写的片段不会被升级覆盖。参见 [com.aharou.feature.agent.domain.prompt.SystemPromptProvider]。
          */
         fun extractPrompts(context: Context) {
-            val destDir = File(ContainerInstaller.migrateLegacyDir(context), "prompts")
-            destDir.mkdirs()
-            runCatching {
-                extractAssetsRecursive(context, "prompts", destDir)
-            }.onFailure {
-                FileLogger.w(TAG, "提取内置提示词失败: ${it.message}", it)
-            }
-        }
-
-        /** 递归复制 assets 下的目录到目标目录，支持子目录（如 prompts/agent/、docs/guide/）。 */
-        private fun extractAssetsRecursive(context: Context, assetDir: String, destDir: File) {
-            val entries = context.assets.list(assetDir) ?: return
-            destDir.mkdirs()
-            for (entry in entries) {
-                val assetPath = "$assetDir/$entry"
-                val destFile = File(destDir, entry)
-                try {
-                    context.assets.open(assetPath).use { input ->
-                        destFile.outputStream().use { output -> input.copyTo(output) }
-                    }
-                } catch (e: IOException) {
-                    // 目录项：assets.open 对目录抛 IOException，递归处理
-                    extractAssetsRecursive(context, assetPath, destFile)
-                }
-            }
+            extractBuiltinAssets(context, "prompts")
         }
 
         /**
@@ -157,21 +123,7 @@ class ContainerInstaller @Inject constructor(
          * 若文件已存在则不覆盖，以保留用户的修改与删除后的重建选择。
          */
         fun extractAgents(context: Context) {
-            val destDir = File(ContainerInstaller.migrateLegacyDir(context), "agents")
-            destDir.mkdirs()
-            runCatching {
-                val entries = context.assets.list("agents") ?: return@runCatching
-                for (entry in entries) {
-                    val destFile = File(destDir, entry)
-                    if (!destFile.exists()) {
-                        context.assets.open("agents/$entry").use { input ->
-                            destFile.outputStream().use { output -> input.copyTo(output) }
-                        }
-                    }
-                }
-            }.onFailure {
-                FileLogger.w(TAG, "提取内置子代理定义失败: ${it.message}", it)
-            }
+            extractBuiltinAssets(context, "agents")
         }
 
         /**
@@ -179,21 +131,12 @@ class ContainerInstaller @Inject constructor(
          * 若文件已存在则不覆盖，保留用户对预设的修改。
          */
         fun extractTeams(context: Context) {
-            val destDir = File(ContainerInstaller.migrateLegacyDir(context), "teams")
-            destDir.mkdirs()
-            runCatching {
-                val entries = context.assets.list("teams") ?: return@runCatching
-                for (entry in entries) {
-                    val destFile = File(destDir, entry)
-                    if (!destFile.exists()) {
-                        context.assets.open("teams/$entry").use { input ->
-                            destFile.outputStream().use { output -> input.copyTo(output) }
-                        }
-                    }
-                }
-            }.onFailure {
-                FileLogger.w(TAG, "提取内置团队预设失败: ${it.message}", it)
-            }
+            extractBuiltinAssets(context, "teams")
+        }
+
+        private fun extractBuiltinAssets(context: Context, directory: String) {
+            runCatching { builtinAssets.extract(context.assets, migrateLegacyDir(context), directory) }
+                .onFailure { FileLogger.w(TAG, "提取内置资源失败: $directory", it) }
         }
 
         /**

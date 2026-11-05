@@ -79,6 +79,73 @@ class OpenAIAdapterTest {
     private fun toolCall(id: String, name: String, arguments: String): OpenAIToolCall =
         OpenAIToolCall(id = id, function = OpenAIFunctionCall(name = name, arguments = arguments))
 
+    @Test
+    fun serviceTier_chatComplete_andStream_matchHeaderAndBody() = runTest {
+        for (tier in listOf(null, "fast", "priority", " FaSt ", "vendor-custom")) {
+            for (stream in listOf(false, true)) {
+                val api = api()
+                val request = slot<ChatCompletionRequest>()
+                val headers = slot<Map<String, String>>()
+                if (stream) {
+                    every { api.streamChatCompletion(any(), any(), capture(headers), capture(request)) } returns
+                        sseCall("data: [DONE]")
+                } else {
+                    coEvery { api.createChatCompletion(any(), any(), capture(headers), capture(request)) } returns response()
+                }
+                val adapter = adapter(api).apply {
+                    baseUrl = "https://relay.example/"
+                    customHeaders = tier?.let { mapOf("openai-service-tier" to it) }.orEmpty()
+                }
+                if (stream) adapter.completeStream("", emptyList(), reasoningEffort = "high").toList()
+                else adapter.complete("", emptyList(), reasoningEffort = "high")
+                val expected = when (tier) {
+                    null -> null
+                    "vendor-custom" -> "vendor-custom"
+                    else -> "fast"
+                }
+                assertEquals(if (tier == null) 0 else 1, headers.captured.keys.count { it.equals("OpenAI-Service-Tier", true) })
+                assertEquals(expected, request.captured.service_tier)
+                assertEquals(expected, headers.captured["OpenAI-Service-Tier"])
+                assertEquals("high", request.captured.reasoning_effort)
+                assertEquals(tier != null, com.google.gson.Gson().toJsonTree(request.captured).asJsonObject.has("service_tier"))
+            }
+        }
+    }
+
+    @Test
+    fun serviceTier_responsesComplete_andStream_matchHeaderBodyAndEndpoint() = runTest {
+        for (tier in listOf(null, "fast", "ultrafast")) {
+            for (stream in listOf(false, true)) {
+                val api = api()
+                val request = slot<Map<String, Any?>>()
+                val headers = slot<Map<String, String>>()
+                val url = slot<String>()
+                if (stream) {
+                    every { api.streamResponses(capture(url), any(), capture(headers), capture(request)) } returns
+                        sseCall("data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[]}}", "data: [DONE]")
+                } else {
+                    coEvery { api.createResponses(capture(url), any(), capture(headers), capture(request)) } returns
+                        com.google.gson.JsonObject().apply { addProperty("status", "completed") }
+                }
+                val adapter = adapter(api).apply {
+                    model = "gpt-6-astra"
+                    baseUrl = "https://relay.example/"
+                    // Ultrafast must select Responses even for old/config-created providers.
+                    useResponseApi = tier != "ultrafast"
+                    customHeaders = tier?.let { mapOf("OPENAI-SERVICE-TIER" to it) }.orEmpty()
+                }
+                if (stream) adapter.completeStream("", emptyList(), reasoningEffort = "high").toList()
+                else adapter.complete("", emptyList(), reasoningEffort = "high")
+                assertEquals("https://relay.example/v1/responses", url.captured)
+                assertEquals(tier, request.captured["service_tier"])
+                assertEquals(tier, headers.captured["OpenAI-Service-Tier"])
+                assertEquals(if (tier == null) 0 else 1, headers.captured.keys.count { it.equals("OpenAI-Service-Tier", true) })
+                assertEquals(tier != null, request.captured.containsKey("service_tier"))
+                assertEquals("high", (request.captured["reasoning"] as Map<*, *>)["effort"])
+            }
+        }
+    }
+
     // ── Chat Completions 非流式：请求构造 ──────────────────────────────
 
     @Test

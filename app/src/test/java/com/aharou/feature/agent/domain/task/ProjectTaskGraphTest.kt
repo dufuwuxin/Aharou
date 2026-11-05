@@ -33,6 +33,31 @@ class ProjectTaskGraphTest {
         assertEquals(ProjectTaskStatus.READY, changed.status)
         assertNotNull(ProjectTaskGraph.validate(listOf(changed.copy(status = ProjectTaskStatus.DONE))))
     }
+    @Test fun participantChangesRevokeAcceptanceAndInvalidateDependentDeliveries() {
+        for (state in listOf(ProjectTaskStatus.REVIEW, ProjectTaskStatus.DONE)) {
+            val old = task("a").copy(owner = "builder", status = state, acceptance = "checked",
+                evidenceRefs = listOf("result:1"), acceptedRequirementsVersion = 1,
+                processRequirementsVersion = 1, processParticipants = listOf("builder"))
+            val dependent = old.copy(id = "b", dependencyIds = listOf("a"))
+            val updated = ProjectTaskGraph.revise(old, old.copy(members = listOf("builder", "reviewer")), 2)
+            assertEquals(2L, updated.requirementsVersion)
+            assertNull(updated.acceptedRequirementsVersion)
+            assertEquals(ProjectTaskStatus.READY, updated.status)
+            assertFalse(ProjectWorkflowPlan.delivered(updated))
+            val tasks = ProjectTaskGraph.invalidateDependents(listOf(updated, dependent), updated.id, updated.version)
+            assertNull(ProjectTaskGraph.validate(tasks))
+            assertEquals("a", ProjectWorkflowPlan.next(tasks)?.id)
+            assertFalse(ProjectWorkflowPlan.delivered(tasks.first { it.id == "b" }))
+            assertNotNull(ProjectTaskGraph.validate(tasks.map { if (it.id == "a") it.copy(status = ProjectTaskStatus.DONE) else it }))
+        }
+    }
+
+    @Test fun participantWhitespaceDoesNotInvalidateDeliveryButRoleOrderDoes() {
+        val old = task("a").copy(owner = "builder", members = listOf("reviewer"))
+        assertEquals(1L, ProjectTaskGraph.revise(old, old.copy(owner = " builder ", members = listOf("reviewer", " ")), 2).requirementsVersion)
+        assertEquals(2L, ProjectTaskGraph.revise(old, old.copy(owner = "reviewer", members = listOf("builder")), 2).requirementsVersion)
+    }
+
     @Test fun treeOrderIsStableAndLongChainsAreIterative() {
         val tasks = (0..1000).map { task("n$it", if (it == 0) null else "n${it-1}").copy(order = it.toLong()) }
         assertNull(ProjectTaskGraph.validate(tasks))

@@ -52,6 +52,11 @@ class RemoteSshConnection @Inject constructor(
     @Volatile
     private var sshClient: SSHClient? = null
 
+    class BootstrapTarget internal constructor(internal val client: SSHClient, internal val home: String)
+    @Volatile private var bootstrap: BootstrapTarget? = null
+    fun bootstrapTarget(): BootstrapTarget? = bootstrap?.takeIf { isConnected() }
+    fun isCurrentBootstrap(target: BootstrapTarget): Boolean = bootstrap === target && isConnected()
+
     /**
      * 独立的 SFTP 通道：与 exec 各用一条 SSH transport。sshj 的 SFTP 有间歇性 Buffer 溢出
      * （hierynomus/sshj#461），共用 transport 时崩溃会一并拖垮 Bash/终端；分开后只影响文件通道，
@@ -157,6 +162,7 @@ class RemoteSshConnection @Inject constructor(
         if (isConnected() && this.config == config) return@withLock
         disconnectInternal()
         this.config = config
+        remoteHome = null
         _connectionState.value = ConnectionState.CONNECTING
         try {
             withContext(Dispatchers.IO) {
@@ -173,10 +179,11 @@ class RemoteSshConnection @Inject constructor(
                 // 注册 transport 断开监听：连接断开时即时推状态，不等 supervisor 轮询
                 client.transport.setDisconnectListener { reason, info ->
                     FileLogger.w(TAG, "SSH 连接断开: $reason, $info")
-                    _connectionState.value = ConnectionState.DISCONNECTED
+                    if (sshClient === client) _connectionState.value = ConnectionState.DISCONNECTED
                 }
                 FileLogger.i(TAG, "SSH 已连接 ${config.host}:${config.port} as ${config.username}")
             }
+            bootstrap = remoteHome?.let { BootstrapTarget(requireNotNull(sshClient), it) }
             _connectionState.value = ConnectionState.CONNECTED
             authFailureAt = 0L
             authFailureConfig = null
@@ -223,6 +230,7 @@ class RemoteSshConnection @Inject constructor(
     }
 
     private fun disconnectInternal() {
+        bootstrap = null
         closeSftpInternal()
         runCatching { sshClient?.disconnect() }
         sshClient = null
@@ -337,12 +345,14 @@ class RemoteSshConnection @Inject constructor(
      * 冲突取舍：本地文件较新（mtime 更新）时不覆盖，只回写远端更新或本地没有的——
      * 没做三方合并，但不静默丢远端内容。
      */
-    suspend fun pullSharedFiles(localRoot: java.io.File) {
-        val client = sshClient ?: return
-        val home = remoteHome ?: return
+    suspend fun pullSharedFiles(localRoot: java.io.File, target: BootstrapTarget? = bootstrapTarget()): Boolean {
+        val bound = target ?: return false
+        if (!isCurrentBootstrap(bound)) return false
+        val client = bound.client
+        val home = bound.home
         val remoteRoot = "${home.trimEnd('/')}/shared"
-        withContext(Dispatchers.IO) {
-            runCatching {
+        return withContext(Dispatchers.IO) {
+            try {
                 val s = client.startSession()
                 // 只取 <=1MB 的普通文件，与推送上限一致；文件名与修改时间用 tab 分隔。
                 // 注意 `-size -1M` 不能用：GNU find 的 -size 按块数且小数向上取整，
@@ -354,8 +364,11 @@ class RemoteSshConnection @Inject constructor(
                 )
                 val listing = cmd.inputStream.bufferedReader().readText()
                 cmd.join(); s.close()
+                check(cmd.exitStatus == 0) { "SHARED_LIST_FAILED" }
                 val sftp = sftp()
+                check(isCurrentBootstrap(bound)) { "SSH_CONNECTION_CHANGED" }
                 var pulled = 0
+                var failed = false
                 listing.lineSequence().forEach { line ->
                     val parts = line.split('\t', limit = 2)
                     if (parts.size != 2) return@forEach
@@ -366,6 +379,7 @@ class RemoteSshConnection @Inject constructor(
                     // 本地更新就不覆盖：用户的本地编辑不该被远端旧版本冲掉。
                     if (dest.isFile && dest.lastModified() >= remoteEpoch) return@forEach
                     runCatching {
+                        check(isCurrentBootstrap(bound)) { "SSH_CONNECTION_CHANGED" }
                         dest.parentFile?.mkdirs()
                         // RemoteFile 不是 InputStream，读法只能是 read(offset, buf, off, len)，
                         // 而这里只回拉 <=1MB 的小文件，直接整块读完再写盘。
@@ -381,13 +395,20 @@ class RemoteSshConnection @Inject constructor(
                             }
                             out.toByteArray()
                         }
+                        check(isCurrentBootstrap(bound)) { "SSH_CONNECTION_CHANGED" }
                         dest.writeBytes(bytes)
                         dest.setLastModified(remoteEpoch)
                         pulled++
-                    }.onFailure { FileLogger.w(TAG, "回拉共享区文件失败: $rel", it) }
+                    }.onFailure {
+                        if (it is kotlinx.coroutines.CancellationException) throw it
+                        failed = true
+                        FileLogger.w(TAG, "回拉共享区文件失败: $rel", it)
+                    }
                 }
                 if (pulled > 0) FileLogger.i(TAG, "已从远端回拉 $pulled 个共享区文件")
-            }.onFailure { FileLogger.w(TAG, "回拉远端共享区失败", it) }
+                !failed && isCurrentBootstrap(bound)
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (failure: Exception) { FileLogger.w(TAG, "回拉远端共享区失败", failure); false }
         }
     }
 
@@ -556,26 +577,28 @@ class RemoteSshConnection @Inject constructor(
      *
      * @param docs 相对 docs/ 的路径（可含子目录，如 guide/terminal.md）→ 文件内容。
      */
-    suspend fun uploadDocs(docs: Map<String, String>) {
+    suspend fun uploadDocs(docs: Map<String, ByteArray>, target: BootstrapTarget) {
         if (docs.isEmpty()) return
-        val client = sshClient ?: return
-        val home = remoteHome ?: return
-        val destDir = home.trimEnd('/') + "/.aharou/docs"
+        check(isCurrentBootstrap(target)) { "SSH_CONNECTION_CHANGED" }
+        val destDir = target.home.trimEnd('/') + "/.aharou/docs"
         withContext(Dispatchers.IO) {
             runCatching {
-                // 先建全部子目录并清掉旧 .md：版本间调整文档分类会改变路径，只覆盖不清理会让旧文件残留
+                // Complete all replacements before removing obsolete paths; a failed upload must keep old documents.
                 val subDirs = docs.keys.mapNotNull { key ->
                     key.substringBeforeLast('/', "").takeIf { it.isNotEmpty() }
                 }.distinct()
                 val mkdirArgs = (listOf(destDir) + subDirs.map { "$destDir/$it" }).joinToString(" ") { shellQuote(it) }
-                val prepSession = client.startSession()
-                prepSession.exec("mkdir -p $mkdirArgs; find ${shellQuote(destDir)} -type f -name '*.md' -delete").join()
-                prepSession.close()
+                bootstrapExec(target, "mkdir -p $mkdirArgs")
                 for ((name, content) in docs) {
-                    writeRemoteFile(client, "$destDir/$name", content)
+                    check(isCurrentBootstrap(target)) { "SSH_CONNECTION_CHANGED" }
+                    val dest = "$destDir/$name"
+                    val tmp = "$dest.aharou-tmp"
+                    bootstrapExec(target, "printf %s ${shellQuote(content.decodeToString())} > ${shellQuote(tmp)} && mv -f ${shellQuote(tmp)} ${shellQuote(dest)}")
                 }
+                val retained = docs.keys.filter { it.endsWith(".md") }.joinToString(" ") { "! -path ${shellQuote("$destDir/$it")}" }
+                bootstrapExec(target, "find ${shellQuote(destDir)} -type f -name '*.md' $retained -delete")
                 FileLogger.i(TAG, "已同步 ${docs.size} 个文档到远程 $destDir")
-            }.onFailure { FileLogger.w(TAG, "同步文档到远程失败", it) }
+            }.getOrThrow()
         }
     }
 
@@ -590,37 +613,31 @@ class RemoteSshConnection @Inject constructor(
         files: Map<String, ByteArray>,
         executable: Boolean = false,
         /** 相对 home 的容器目录，默认 `.aharou`；共享区传空串（落在 `~/shared`）。 */
-        rootDir: String = ".aharou"
+        rootDir: String = ".aharou",
+        target: BootstrapTarget
     ) {
         if (files.isEmpty()) return
-        val client = sshClient ?: return
-        val home = remoteHome ?: return
+        check(isCurrentBootstrap(target)) { "SSH_CONNECTION_CHANGED" }
         val root = rootDir.trim('/')
-        val destDir = home.trimEnd('/') + "/" + (if (root.isEmpty()) "" else "$root/") + destSubdir.trim('/')
+        val destDir = target.home.trimEnd('/') + "/" + (if (root.isEmpty()) "" else "$root/") + destSubdir.trim('/')
         withContext(Dispatchers.IO) {
             runCatching {
-                val mk = client.startSession()
-                mk.exec("mkdir -p ${shellQuote(destDir)}").join()
-                mk.close()
+                bootstrapExec(target, "mkdir -p ${shellQuote(destDir)}")
                 for ((name, bytes) in files) {
                     val dest = "$destDir/$name"
                     // name 可含子目录（如 skills/config-channel/SKILL.md）：先建父目录，
                     // 否则重定向会因目录不存在而失败。
                     val parent = dest.substringBeforeLast('/', "")
                     if (parent.isNotEmpty() && parent != destDir) {
-                        val md = client.startSession()
-                        md.exec("mkdir -p ${shellQuote(parent)}").join()
-                        md.close()
+                        bootstrapExec(target, "mkdir -p ${shellQuote(parent)}")
                     }
                     val b64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
-                    val chmod = if (executable) " chmod +x ${shellQuote(dest)};" else ""
-                    val session = client.startSession()
-                    // $b64 是 base64 无需转义；路径统一走 shellQuote，防路径含单引号时被截断/注入
-                    session.exec("if [ ! -e ${shellQuote(dest)} ]; then printf %s '$b64' | base64 -d > ${shellQuote(dest)};$chmod fi").join()
-                    session.close()
+                    val chmod = if (executable) " && chmod +x ${shellQuote(dest)}" else ""
+                    val temporary = "$dest.aharou-tmp"
+                    bootstrapExec(target, "if [ ! -e ${shellQuote(dest)} ]; then printf %s '$b64' | base64 -d > ${shellQuote(temporary)} && mv ${shellQuote(temporary)} ${shellQuote(dest)}$chmod; fi")
                 }
                 FileLogger.i(TAG, "已释放 ${files.size} 个内置文件到远程 $destDir")
-            }.onFailure { FileLogger.w(TAG, "释放内置文件到远程失败: $destSubdir", it) }
+            }.getOrThrow()
         }
     }
 
@@ -715,6 +732,17 @@ class RemoteSshConnection @Inject constructor(
                 }.onFailure { FileLogger.w(TAG, "撤销远程 git 凭据注入失败", it) }
             }
         }
+    }
+
+    private suspend fun bootstrapExec(target: BootstrapTarget, command: String) = kotlinx.coroutines.runInterruptible(Dispatchers.IO) {
+        check(isCurrentBootstrap(target)) { "SSH_CONNECTION_CHANGED" }
+        target.client.startSession().use { session ->
+            val result = session.exec(command)
+            result.outputStream.close()
+            result.join()
+            check(result.exitStatus == 0) { "REMOTE_ASSET_WRITE_FAILED" }
+        }
+        check(isCurrentBootstrap(target)) { "SSH_CONNECTION_CHANGED" }
     }
 
     /** exec + printf 写一个文本文件到远程，内容与路径都由 [shellQuote] 转义。 */

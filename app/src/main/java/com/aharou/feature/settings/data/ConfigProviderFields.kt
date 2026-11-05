@@ -1,6 +1,7 @@
 package com.aharou.feature.settings.data
 
 import android.content.Context
+import com.aharou.feature.agent.domain.provider.OpenAIServiceTier
 import com.aharou.core.config.ConfigCollection
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -91,7 +92,7 @@ class ConfigProviderFields @Inject constructor(
             "已配置的供应商列表。子字段：name / baseUrl / apiKey / defaultModel / selectedModel / " +
                 "panelScript / enabled / multiKeyEnabled / apiKeys / keyRotationStrategy / " +
                 "keyCooldownMinutes / keySwitchStatusCodes / proxyEnabled / proxyType / proxyHost / " +
-                "proxyPort / proxyUsername / proxyPassword / useFullUrl / useResponseApi / customHeaders / " +
+                "proxyPort / proxyUsername / proxyPassword / useFullUrl / useResponseApi / service_tier / customHeaders / " +
                 "sortOrder（只读）/ dashboardRefreshInterval / anthropicCacheBreakpoints / openaiChatCacheKey。"
 
         override fun childIds(): List<String> =
@@ -409,16 +410,41 @@ class ConfigProviderFields @Inject constructor(
                 bool(
                     field = "use_response_api",
                     name = "Response API",
-                    desc = "OpenAI 类型改用 Response API 端点。默认关闭。",
-                    read = { it.useResponseApi },
-                    write = { p, b -> p.copy(useResponseApi = b) },
+                    desc = "OpenAI 类型改用 Responses API 端点。默认关闭；Ultrafast 强制开启，关闭时同时清除 Ultrafast。",
+                    read = { it.useResponseApi || (it.type == ProviderType.OPENAI && OpenAIServiceTier.requiresResponses(it.customHeaders)) },
+                    write = { p, b -> p.copy(
+                        useResponseApi = b,
+                        customHeaders = if (!b && p.type == ProviderType.OPENAI && OpenAIServiceTier.requiresResponses(p.customHeaders))
+                            OpenAIServiceTier.select(p.customHeaders, null) else p.customHeaders,
+                    ) },
+                ),
+                enumField(
+                    field = "service_tier",
+                    name = "OpenAI 速度档位",
+                    desc = "default=清除档位；fast=快速；ultrafast=超快速并开启 Responses。显式选择可能增加费用，兼容中转须自行支持，不自动降级。仅 OpenAI 类型可设置；自定义值从 custom_headers 读取。",
+                    cases = listOf("default", "fast", "ultrafast"),
+                    read = { OpenAIServiceTier.value(it.customHeaders) ?: "default" },
+                    write = { p, s ->
+                        if (p.type != ProviderType.OPENAI) throw ConfigError.InvalidValue("service_tier 仅适用于 OpenAI 类型")
+                        if (s !in listOf("default", "fast", "ultrafast")) throw ConfigError.InvalidValue("service_tier 需要 default / fast / ultrafast")
+                        p.copy(
+                            customHeaders = OpenAIServiceTier.select(p.customHeaders, s.takeUnless { it == "default" }),
+                            useResponseApi = p.useResponseApi || s == "ultrafast",
+                        )
+                    },
                 ),
                 str(
                     field = "custom_headers",
                     name = "自定义请求头",
                     desc = "覆盖同名默认请求头，每行一个「名: 值」；值支持 {{SESSION_ID}} / {{API_KEY}} 占位符。留空表示不加。",
                     read = { it.customHeaders.entries.joinToString("\n") { (k, v) -> "$k: $v" } },
-                    write = { p, s -> p.copy(customHeaders = parsePairs(s)) },
+                    write = { p, s ->
+                        val headers = parsePairs(s)
+                        if (p.type == ProviderType.OPENAI) p.copy(
+                            customHeaders = OpenAIServiceTier.normalizeHeaders(headers),
+                            useResponseApi = p.useResponseApi || OpenAIServiceTier.requiresResponses(headers),
+                        ) else p.copy(customHeaders = headers)
+                    },
                 ),
                 ReadOnlyField(
                     path = "$basePath.$forId.sort_order",

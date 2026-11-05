@@ -62,11 +62,7 @@ class RemoteSshEngine @Inject constructor(
 
     private companion object {
         const val TAG = "RemoteSshEngine"
-        /** 共享区回拉间隔：0 表示每条远程命令都拉一次。
-         *
-         * 原本定 5 分钟，实测写完信立刻看手机是拿不到的（要等下一个窗口），
-         * 而共享区实际只有几十 KB（大文件不入镜像），每次拉一遍的开销可以忽略。 */
-        const val SHARED_PULL_INTERVAL_MS = 0L
+
     }
 
     init {
@@ -79,10 +75,6 @@ class RemoteSshEngine @Inject constructor(
     override val initProgress: StateFlow<ContainerInitState> = _initProgress.asStateFlow()
 
     private val connectMutex = Mutex()
-
-    /** 上次回拉共享区的时刻（毫秒）。 */
-    @Volatile
-    private var lastSharedPullAt = 0L
 
     /**
      * 上一次注入到远端的凭据指纹（主机 + 凭据 + 工作区）。切工作区容器不会断开 SSH，
@@ -112,9 +104,7 @@ class RemoteSshEngine @Inject constructor(
         val cfg = connectionResolver.configForProfile(profile.id)
             ?: throw IllegalStateException("容器 ${profile.name} 未配置可用的 SSH 连接")
         if (connection.isConnected() && connection.config == cfg) {
-            // 连接已就绪：这里就必须回拉——下面的「建连」分支只在首次连接时跑，
-            // 挂在这里之后会导致首次之后再也不回拉（实测各条命令都只刷首次那一次）。
-            maybePullShared()
+            if (!bootstrapSync.syncIfNeeded()) bootstrapSync.pullShared()
             // 凭据同步同理，而且更隐蔽：切工作区容器不会断开连接，只挂在建连分支上会让
             // 「自动注入」开关打开后远端一直停在旧配置（实测 debug 包重连两次都没有注入日志）。
             syncGitCredentialsIfEnabled()
@@ -126,9 +116,7 @@ class RemoteSshEngine @Inject constructor(
         }
         // 连上后把内置文档/子代理/团队铺到远端（同一目标只铺一次）：不铺的话远端 ~/.aharou 下
         // 只有 workspaces，AI 读不到文档、内置 Explore 子代理也不存在。
-        bootstrapSync.syncIfNeeded()
-        // 首连也回拉一次，把远端已改过的共享区文件带回来。
-        maybePullShared()
+        if (!bootstrapSync.syncIfNeeded()) bootstrapSync.pullShared()
         // git 凭据：用户开了「自动注入」才铺，否则不动服务器上的任何 git 配置。
         // 之前这条只在凭据页手动切换开关时才触发，按工作区连上（全局仍是本地）时不会同步，
         // 远程里 `git push` 就会认证失败。
@@ -137,14 +125,6 @@ class RemoteSshEngine @Inject constructor(
         projectPath?.takeIf { it.isNotBlank() }
             ?.let { connection.remoteWorkspaceFor(it) }
             ?.let { connection.updateWorkspaceSymlink(it) }
-    }
-
-    /** 距上次回拉超过 [SHARED_PULL_INTERVAL_MS] 就拉一次；跟着命令走，不额外轮询。 */
-    private suspend fun maybePullShared() {
-        val now = System.currentTimeMillis()
-        if (SHARED_PULL_INTERVAL_MS > 0 && now - lastSharedPullAt < SHARED_PULL_INTERVAL_MS) return
-        lastSharedPullAt = now
-        bootstrapSync.pullShared()
     }
 
     /** 用户为该服务器开了「自动注入」时，把 App 的 git 凭据铺到远端；关闭时什么都不做。 */

@@ -8,7 +8,8 @@ import org.junit.Test
 
 class PracticalToolTemplatesTest {
     @Test fun draftsAreKeywordOnlyAndHaveExecutableParameterContracts() {
-        assertEquals(setOf("git_status", "git_diff", "git_log", "find_files", "rtk_command"), PracticalToolTemplates.all.map { it.name }.toSet())
+        assertEquals(setOf("git_status", "git_diff", "git_log", "find_files", "rtk_command",
+            "build_android", "build_rust", "build_python", "build_logs"), PracticalToolTemplates.all.map { it.name }.toSet())
         PracticalToolTemplates.all.forEach { draft ->
             assertTrue(draft.isValidName)
             assertEquals(ToolInjectionMode.KEYWORD, draft.injectionMode)
@@ -28,10 +29,31 @@ class PracticalToolTemplatesTest {
             val command = CustomCommandTemplate.renderForExecution(draft.command, draft.parameters, draft.parameters.associate { it.name to payload })
             assertTrue(command is CustomCommandRender.Success)
             val rendered = (command as CustomCommandRender.Success).command
-            assertTrue(rendered.startsWith("sh -c "))
-            assertTrue(rendered.contains(" custom-tool "))
-            assertFalse(rendered.contains("custom-tool $payload"))
-            assertTrue(rendered.contains("'\"'\"'"))
+            if (CustomCommandTemplate.placeholders(draft.command).isNotEmpty()) {
+                assertTrue(rendered.startsWith("sh -c "))
+                assertTrue(rendered.contains(" custom-tool "))
+                assertFalse(rendered.contains("custom-tool $payload"))
+                assertTrue(rendered.contains("'\"'\"'"))
+            } else {
+                assertEquals(draft.command, rendered)
+                assertFalse(rendered.contains(payload))
+            }
+        }
+    }
+
+    @Test fun buildTemplatesUseFixedCommandsAndOneAndroidTaskParameter() {
+        val builds = PracticalToolTemplates.all.filter { it.name.startsWith("build_") }.associateBy { it.name }
+        mapOf("build_android" to "android {{task}}", "build_rust" to "rust",
+            "build_python" to "python", "build_logs" to "logs").forEach { (name, action) ->
+            val draft = builds.getValue(name)
+            assertEquals("aharou-build $action", draft.command)
+            assertEquals(600, draft.timeoutSeconds)
+            if (name == "build_android") {
+                assertEquals(listOf("task"), draft.parameters.map { it.name })
+                assertTrue(draft.parameters.single().required)
+            } else {
+                assertTrue(draft.parameters.isEmpty())
+            }
         }
     }
 

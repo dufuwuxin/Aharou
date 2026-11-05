@@ -17,7 +17,8 @@ import com.aharou.feature.agent.domain.task.ProjectTask
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProjectTaskEditor(task: ProjectTask?, workspace: String, tasks: List<ProjectTask>,
-    onSave: (ProjectTask) -> Unit, onDismiss: () -> Unit, projectId: String? = task?.projectId) {
+    onSave: (ProjectTask) -> Unit, onDismiss: () -> Unit, projectId: String? = task?.projectId,
+    availableMembers: List<String> = emptyList()) {
     val seed = remember(task?.id, workspace, projectId) { task ?: ProjectTask(workspace = workspace, projectId = projectId, title = "", requirement = "") }
     var title by remember(seed) { mutableStateOf(seed.title) }
     var requirement by remember(seed) { mutableStateOf(seed.requirement) }
@@ -33,6 +34,7 @@ fun ProjectTaskEditor(task: ProjectTask?, workspace: String, tasks: List<Project
     var parentId by remember(seed) { mutableStateOf(seed.parentId) }
     var details by remember { mutableStateOf(false) }
     var parentMenu by remember { mutableStateOf(false) }
+    var memberMenu by remember { mutableStateOf(false) }
     val descendants = remember(tasks, seed.id) {
         val children = tasks.groupBy { it.parentId }
         val seen = mutableSetOf(seed.id); val queue = java.util.ArrayDeque<String>(); queue.add(seed.id)
@@ -43,9 +45,19 @@ fun ProjectTaskEditor(task: ProjectTask?, workspace: String, tasks: List<Project
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(Modifier.fillMaxWidth().imePadding().verticalScroll(rememberScrollState()).padding(Spacing.lg),
             verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
-            Text(stringResource(if (task == null) R.string.project_task_create else R.string.project_task_edit), style = MaterialTheme.typography.titleLarge)
+            Text(stringResource(if (task == null) R.string.project_task_add_one else R.string.project_task_edit), style = MaterialTheme.typography.titleLarge)
+            if (task == null) Text(stringResource(R.string.project_task_add_one_hint), style = MaterialTheme.typography.bodySmall)
             AppTextField(title, { title = it }, label = stringResource(R.string.project_task_title), singleLine = true)
             AppTextField(requirement, { requirement = it }, label = stringResource(R.string.project_task_requirement), minLines = 3, singleLine = false)
+            Box {
+                OutlinedButton(onClick = { memberMenu = true }) {
+                    Text(stringResource(R.string.project_task_owner_value, owner.ifBlank { stringResource(R.string.project_flow_default_member) }))
+                }
+                DropdownMenu(expanded = memberMenu, onDismissRequest = { memberMenu = false }) {
+                    DropdownMenuItem(text = { Text(stringResource(R.string.project_flow_default_member)) }, onClick = { owner = ""; memberMenu = false })
+                    availableMembers.forEach { member -> DropdownMenuItem(text = { Text(member) }, onClick = { owner = member; memberMenu = false }) }
+                }
+            }
             if (details) AppTextField(background, { background = it }, label = stringResource(R.string.project_task_background), minLines = 2, singleLine = false)
             if (details) AppTextField(acceptance, { acceptance = it }, label = stringResource(R.string.project_task_acceptance), minLines = 2, singleLine = false)
             Box {
@@ -73,7 +85,6 @@ fun ProjectTaskEditor(task: ProjectTask?, workspace: String, tasks: List<Project
             }
             TextButton(onClick = { details = !details }, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.project_task_collaboration_evidence)) }
             if (details) {
-                AppTextField(owner, { owner = it }, label = stringResource(R.string.project_task_owner), singleLine = true)
                 AppTextField(members, { members = it }, label = stringResource(R.string.project_task_members))
                 AppTextField(constraints, { constraints = it }, label = stringResource(R.string.project_task_constraints))
                 AppTextField(brief, { brief = it }, label = stringResource(R.string.project_task_brief), minLines = 2, singleLine = false)

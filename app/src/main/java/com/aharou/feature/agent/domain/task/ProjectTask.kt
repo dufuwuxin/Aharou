@@ -6,6 +6,15 @@ import java.util.UUID
 @Serializable
 enum class ProjectTaskStatus { DRAFT, READY, RUNNING, REVIEW, DONE, BLOCKED }
 
+@Serializable
+data class ProjectTaskMemberRun(
+    val role: String,
+    val ordinal: Int,
+    val requirementsVersion: Long,
+    val outcome: String = "RUNNING",
+    val reason: String = ""
+)
+
 /** Task identity and requirements are independent of any execution conversation. */
 @Serializable
 data class ProjectTask(
@@ -31,5 +40,9 @@ data class ProjectTask(
     val requirementsVersion: Long = 1,
     val acceptedRequirementsVersion: Long? = null,
     val order: Long = System.currentTimeMillis(),
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    val processSessionIds: List<String> = emptyList(),
+    val processRequirementsVersion: Long? = null,
+    val processMembers: Map<String, ProjectTaskMemberRun> = emptyMap(),
+    val processParticipants: List<String>? = null
 )

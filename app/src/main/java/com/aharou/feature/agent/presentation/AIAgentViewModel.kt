@@ -855,7 +855,6 @@ class AIAgentViewModel @Inject constructor(
             (sid to (currentLimit + (currentLimit / 2).coerceIn(30, 90)))
     }
 
-    /** 容器初始化实时进度（解压/部署/装包），AI 页底部气泡展示。 */
     val containerInit: StateFlow<ContainerInitState> = containerEngine.initProgress
 
     private val _currentWorkspace = MutableStateFlow<String>("")
@@ -1032,7 +1031,6 @@ class AIAgentViewModel @Inject constructor(
     }
 
 
-    /** 当前会话完整信息（根会话与子会话通用；null 表示尚未解析出会话）。 */
     val currentSessionState: StateFlow<ChatSession?> = _currentSessionId
         .flatMapLatest { id ->
             if (id == null) flowOf(null)
@@ -1240,6 +1238,11 @@ class AIAgentViewModel @Inject constructor(
         }
     }
 
+    fun processMessages(id: String, limit: Int) = agentMessageDao.getProcessMessagesBySessionPaged(id, limit)
+        .map { messagePersistenceUseCase.restoreAll(it).map { entity -> entity.toUIMessage() } }.flowOn(Dispatchers.Default)
+    fun processText(id: String) = _streamingTexts.map { it[id] }
+    fun processReasoning(id: String) = _streamingReasonings.map { it[id] }
+    fun processTools(id: String) = _runningTools.map { it[id].orEmpty().values.toList() }
     private val _streamingTexts = MutableStateFlow<Map<String, String?>>(emptyMap())
     val streamingText: StateFlow<String?> = _currentSessionId
         .flatMapLatest { id ->
@@ -1383,7 +1386,6 @@ class AIAgentViewModel @Inject constructor(
         }
     }
 
-    /** 任务收尾：释放唤醒锁；仅当既无后台终端任务、用户也没手动开保活时才停前台服务。 */
     private fun releaseKeepalive() {
         wakeLockRenewJob?.cancel().also { wakeLockRenewJob = null }
         if (wakeLock.isHeld) {
@@ -1831,12 +1833,6 @@ class AIAgentViewModel @Inject constructor(
         deliverSystemEvent(sessionId, item)
     }
 
-    /**
-     * 会话绑定的工作区路径；会话不存在或没绑定时回退全局当前工作区。
-     *
-     * 让「文件落哪个工作区」跟会话走，而不是跟界面上选中的工作区走——否则切工作区后
-     * 老会话的工具调用会写到新工作区里去。
-     */
     private suspend fun workspaceOf(sessionId: String): String =
         sessionUseCase.getSessionById(sessionId)?.workspacePath?.takeIf { it.isNotBlank() }
             ?: _currentWorkspace.value
@@ -1850,6 +1846,10 @@ class AIAgentViewModel @Inject constructor(
      * Main.immediate，内联执行、不多一次调度），通知仍在同一轮事件循环内送达。
      */
     private fun deliverSystemEvent(sessionId: String, item: PendingNotification) {
+        if (com.aharou.feature.agent.domain.task.ProjectFlowSessions.owns(sessionId)) {
+            viewModelScope.launch { messagePersistenceUseCase.persist(sessionId, MessageRole.ASSISTANT, AgentNotificationFormatter.buildMessage(listOf(item))) }
+            return
+        }
         agentNotificationCenter.enqueue(sessionId, item)
         // 先切回主线程再 flush：共享区信箱那条投递跑在 IO 上，若在后台线程直接 peek，两次相邻投递会各自
         // peek 到同一批通知（前者还没 ack）而重复送达；从主线程进 flush 才能把「拦门→peek→ack」串成一段。

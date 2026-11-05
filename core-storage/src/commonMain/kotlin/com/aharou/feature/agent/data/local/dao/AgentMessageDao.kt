@@ -22,6 +22,9 @@ interface AgentMessageDao {
     @Query("SELECT * FROM (SELECT * FROM agent_messages WHERE sessionId = :sessionId ORDER BY timestamp DESC LIMIT :limit) ORDER BY timestamp ASC")
     fun getMessagesBySessionPaged(sessionId: String, limit: Int): Flow<List<AgentMessageEntity>>
 
+    @Query("SELECT * FROM (SELECT * FROM agent_messages WHERE sessionId = :sessionId AND id NOT IN (SELECT id FROM (SELECT id, role FROM agent_messages WHERE sessionId = :sessionId ORDER BY timestamp ASC, id ASC LIMIT 1) WHERE role = 'USER') ORDER BY timestamp DESC, id DESC LIMIT :limit) ORDER BY timestamp ASC, id ASC")
+    fun getProcessMessagesBySessionPaged(sessionId: String, limit: Int): Flow<List<AgentMessageEntity>>
+
     /** 一次性读取（非 Flow），用于跨请求重建上下文历史。 */
     @Query("SELECT * FROM agent_messages WHERE sessionId = :sessionId ORDER BY timestamp ASC")
     suspend fun getMessagesBySessionOnce(sessionId: String): List<AgentMessageEntity>

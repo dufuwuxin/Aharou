@@ -12,11 +12,9 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -30,36 +28,44 @@ data class ProjectTaskUiState(
     val indexedSessionWorkspaces: Set<String> = emptySet(),
     val failedSessionWorkspaces: Set<String> = emptySet(),
     val appendSucceededRequest: String? = null,
-    val activeTaskIds: Set<String> = emptySet()
+    val activeTaskIds: Set<String> = emptySet(),
+    val activeProjectIds: Set<String> = emptySet(),
+    val availableMembers: List<String> = emptyList()
 )
 
 @HiltViewModel
 class ProjectTaskViewModel @Inject constructor(
     private val repository: ProjectTaskRepository,
     private val sessions: SessionUseCase,
-    private val runner: AgentTurnRunner
+    private val runner: AgentTurnRunner,
+    private val projectWorkflow: com.aharou.feature.agent.domain.task.ProjectWorkflowRunner
 ) : ViewModel() {
     private val mutable = MutableStateFlow(ProjectTaskUiState())
     val state = mutable.asStateFlow()
-    private val navigation = MutableSharedFlow<String>(extraBufferCapacity = 1)
-    val openSession = navigation.asSharedFlow()
     private val executing = mutableSetOf<String>()
     private val executionJobs = mutableMapOf<String, kotlinx.coroutines.Job>()
     private var busyOwner: Any? = null
+    private val projectJobs = mutableMapOf<String, kotlinx.coroutines.Job>()
 
     init {
+        viewModelScope.launch {
+            try { val members = projectWorkflow.members(); mutable.update { it.copy(availableMembers = members) } }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { }
+        }
         viewModelScope.launch { repository.snapshots.collect { stores ->
             val workspace = mutable.value.workspace
             val snapshot = stores[workspace]
             mutable.update { it.copy(tasks = snapshot?.tasks ?: it.tasks, projects = snapshot?.projects ?: it.projects,
-                projectSessionIds = stores.values.flatMap { store -> store.tasks.flatMap { task -> task.sessionIds } }.toSet(),
+                projectSessionIds = stores.values.flatMap { store -> store.projects.flatMap { it.flowSessionIds } + store.tasks.flatMap { task -> task.sessionIds + task.processSessionIds } }.toSet(),
                 indexedSessionWorkspaces = stores.keys) }
         } }
     }
 
     fun workspace(path: String) {
         if (path == mutable.value.workspace && !mutable.value.loading) return
-        mutable.value = ProjectTaskUiState(workspace = path, activeTaskIds = executionJobs.keys.toSet(), projectSessionIds = mutable.value.projectSessionIds,
+        mutable.value = ProjectTaskUiState(workspace = path, activeTaskIds = executionJobs.keys.toSet(), activeProjectIds = projectJobs.keys.toSet(),
+            availableMembers = mutable.value.availableMembers, projectSessionIds = mutable.value.projectSessionIds,
             indexedSessionWorkspaces = mutable.value.indexedSessionWorkspaces, failedSessionWorkspaces = mutable.value.failedSessionWorkspaces)
         viewModelScope.launch {
             if (path.isBlank()) { mutable.update { it.copy(loading = false) }; return@launch }
@@ -99,7 +105,7 @@ class ProjectTaskViewModel @Inject constructor(
                 }
             }
             mutable.update { it.copy(projectSessionIds = repository.snapshots.value.values.flatMap { store ->
-                store.tasks.flatMap { task -> task.sessionIds }
+                store.projects.flatMap { it.flowSessionIds } + store.tasks.flatMap { task -> task.sessionIds + task.processSessionIds }
             }.toSet()) }
         }
     }
@@ -111,10 +117,29 @@ class ProjectTaskViewModel @Inject constructor(
         if (mutable.value.workspace == saved.workspace) mutable.update { it.copy(selectedId = saved.id) }
     }
 
+    fun startProject(projectId: String) {
+        val workspace = mutable.value.workspace
+        if (mutable.value.loading || mutable.value.busy || workspace.isBlank() || projectJobs[projectId]?.isActive == true) return
+        val job = viewModelScope.launch(start = kotlinx.coroutines.CoroutineStart.LAZY) {
+            try { projectWorkflow.run(projectId, workspace) }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Exception) { error(failure.message ?: "PROJECT_FLOW_FAILED", workspace) }
+            finally {
+                projectJobs.remove(projectId)
+                mutable.update { it.copy(activeProjectIds = projectJobs.keys.toSet()) }
+            }
+        }
+        projectJobs[projectId] = job
+        mutable.update { it.copy(activeProjectIds = projectJobs.keys.toSet(), error = null) }
+        job.start()
+    }
+    fun stopProject(projectId: String) { projectJobs[projectId]?.cancel() }
+
     fun cancelExecution(taskId: String) { executionJobs[taskId]?.cancel() }
 
     fun accept(task: ProjectTask) {
-        if (task.status != ProjectTaskStatus.REVIEW) return
+        if (task.status != ProjectTaskStatus.REVIEW ||
+            (task.processSessionIds.isNotEmpty() && !com.aharou.feature.agent.domain.task.ProjectWorkflowPlan.delivered(task))) return
         save(task.copy(status = ProjectTaskStatus.DONE, acceptedRequirementsVersion = task.requirementsVersion))
     }
 
@@ -141,7 +166,6 @@ class ProjectTaskViewModel @Inject constructor(
             val linked = repository.save(current.copy(sessionIds = current.sessionIds + session.id,
                 executionRequirementsVersions = current.executionRequirementsVersions + (session.id to current.requirementsVersion),
                 executionReason = "", status = if (start) ProjectTaskStatus.RUNNING else current.status))
-            if (mutable.value.workspace == task.workspace) navigation.emit(session.id)
             if (!start) return@operation
             if (busyOwner === setupOwner) releaseSetup() // Long execution must not freeze task editing or other workspaces.
             val completed = runExecution(session.id, linked.requirement, linked.workspace)

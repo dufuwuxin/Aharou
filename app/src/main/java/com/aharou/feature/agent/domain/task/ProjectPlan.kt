@@ -10,5 +10,6 @@ data class ProjectPlan(
     val workspace: String,
     val title: String,
     val requirements: String,
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    val flowSessionIds: List<String> = emptyList()
 )

@@ -10,7 +10,7 @@ ARM_TOOLS_PROXY_URL="https://gh-proxy.com/$ARM_TOOLS_URL"
 # ── 探测 JDK 的 JAVA_HOME：优先 17（AGP / 教程基线），其次 21；发行版路径各异，逐个候选 + 从 java 反推 ──
 java_home_dir() {
     for v in 17 21; do
-        for d in /usr/lib/jvm/java-$v-openjdk-* /usr/lib/jvm/java-$v-* /usr/lib/jvm/openjdk-$v* /usr/lib/jvm/java-1.$v.0-*; do
+        for d in /usr/lib/jvm/java-$v-openjdk-* /usr/lib/jvm/java-$v-* /usr/lib/jvm/openjdk-$v* /usr/lib/jvm/openjdk$v /usr/lib/jvm/java-1.$v.0-*; do
             [ -x "$d/bin/java" ] && { echo "$d"; return 0; }
         done
     done
@@ -29,6 +29,23 @@ apt_jdk_pkg() {
         fi
     done
     echo "openjdk-17-jdk-headless"
+}
+
+# Android 场景按实际发行版选择 JDK；不把 apt 包名传给其它包管理器。
+android_jdk_pkg() {
+    case "$PMGR" in
+        apt) apt_jdk_pkg ;;
+        xbps)
+            for p in openjdk17 openjdk21; do
+                [ -n "$(pkg_versions "$p" | head -1)" ] && { echo "$p"; return 0; }
+            done
+            return 1
+            ;;
+        apk) echo openjdk17-jdk ;;
+        dnf|yum) echo java-17-openjdk-devel ;;
+        pacman) echo jdk17-openjdk ;;
+        *) return 1 ;;
+    esac
 }
 
 # ── 安装 Android SDK：cmdline-tools + sdkmanager 组件。
@@ -72,13 +89,13 @@ install_android_sdk() {
 }
 
 # ── aarch64 替换 Android SDK 里的原生二进制（Google 的 aapt2/adb 等是 x86_64，ARM64 上跑不了）。
-#    x86_64 容器跳过（官方二进制可直用）。下载失败仅告警，不阻塞后续。──
+#    x86_64 容器跳过（官方二进制可直用）。下载、复制或执行校验失败必须返回失败。──
 install_android_tools_arm64() {
     [ "$(uname -m)" = "aarch64" ] || return 0
     sdk="$HOME/android/sdk"
-    [ -d "$sdk/build-tools" ] || return 0
+    [ -d "$sdk/build-tools" ] || return 1
     zip="$HOME/.aicode-cache/android-sdk-tools-static-aarch64.zip"
-    mkdir -p "$HOME/.aicode-cache"
+    mkdir -p "$HOME/.aicode-cache" || return 1
     if [ ! -f "$zip" ]; then
         echo "下载 ARM64 原生二进制（aapt2 / adb 等）..."
         curl -fL -o "$zip" "$ARM_TOOLS_PROXY_URL" || curl -fL -o "$zip" "$ARM_TOOLS_URL" || {
@@ -88,40 +105,59 @@ install_android_tools_arm64() {
     fi
     tmp="$HOME/.aicode-cache/armtools35"
     rm -rf "$tmp"
-    mkdir -p "$tmp"
+    mkdir -p "$tmp" || return 1
     unzip -q -o "$zip" -d "$tmp" || return 1
+    [ -f "$tmp/build-tools/aapt2" ] && [ -f "$tmp/platform-tools/adb" ] || {
+        echo "${C_RED}ARM64 工具归档缺少 aapt2/adb。${C_RESET}"
+        return 1
+    }
+    arm_buildtools_found=0
     for d in "$sdk"/build-tools/*/; do
         [ -d "$d" ] || continue
-        cp -pf "$tmp"/build-tools/* "$d" 2>/dev/null
+        arm_buildtools_found=1
+        cp -pf "$tmp"/build-tools/* "$d" 2>/dev/null || return 1
+        chmod +x "$d"/* 2>/dev/null || return 1
+        "$d/aapt2" version >/dev/null 2>&1 || {
+            echo "${C_RED}ARM64 aapt2 执行校验失败。${C_RESET}"
+            return 1
+        }
     done
-    [ -d "$sdk/platform-tools" ] && cp -pf "$tmp"/platform-tools/* "$sdk/platform-tools/" 2>/dev/null
-    chmod +x "$sdk"/build-tools/*/* "$sdk"/platform-tools/* 2>/dev/null
-    echo "已替换 ARM64 原生二进制。"
+    [ "$arm_buildtools_found" -eq 1 ] || return 1
+    [ -d "$sdk/platform-tools" ] || return 1
+    cp -pf "$tmp"/platform-tools/* "$sdk/platform-tools/" 2>/dev/null || return 1
+    chmod +x "$sdk"/platform-tools/* 2>/dev/null || return 1
+    "$sdk/platform-tools/adb" version >/dev/null 2>&1 || {
+        echo "${C_RED}ARM64 adb 执行校验失败。${C_RESET}"
+        return 1
+    }
+    echo "已替换并校验 ARM64 原生二进制。"
     return 0
 }
 
 # ── 写 Android 环境变量到容器登录 shell，并配置 Gradle 的 aapt2 覆盖（全局，不污染项目）──
 write_android_profile() {
     sdk="$HOME/android/sdk"
-    jh=$(java_home_dir)
-    mkdir -p /etc/profile.d
+    jh=$(java_home_dir) || return 1
+    mkdir -p /etc/profile.d || return 1
     {
         echo "# Aharou: Android / Kotlin 开发环境（由环境安装工具写入）"
         [ -n "$jh" ] && echo "export JAVA_HOME=\"$jh\""
         echo "export ANDROID_HOME=\"$sdk\""
         echo "export ANDROID_SDK_ROOT=\"$sdk\""
         echo "export PATH=\"$sdk/cmdline-tools/latest/bin:$sdk/platform-tools:\$PATH\""
-    } > /etc/profile.d/aicode-android.sh
+    } > /etc/profile.d/aicode-android.sh || return 1
     if [ -x "$sdk/build-tools/35.0.0/aapt2" ]; then
-        mkdir -p "$HOME/.gradle"
+        mkdir -p "$HOME/.gradle" || return 1
         gp="$HOME/.gradle/gradle.properties"
         if [ -f "$gp" ]; then
-            grep -v "aapt2FromMavenOverride" "$gp" > "$gp.tmp" 2>/dev/null || true
+            grep -v "aapt2FromMavenOverride" "$gp" > "$gp.tmp" 2>/dev/null
+            grep_status=$?
+            [ "$grep_status" -le 1 ] || return 1
         else
-            : > "$gp.tmp"
+            : > "$gp.tmp" || return 1
         fi
-        echo "android.aapt2FromMavenOverride=$sdk/build-tools/35.0.0/aapt2" >> "$gp.tmp"
-        mv "$gp.tmp" "$gp"
+        echo "android.aapt2FromMavenOverride=$sdk/build-tools/35.0.0/aapt2" >> "$gp.tmp" || return 1
+        mv "$gp.tmp" "$gp" || return 1
     fi
     # 当前会话立即可用
     [ -n "$jh" ] && export JAVA_HOME="$jh"
