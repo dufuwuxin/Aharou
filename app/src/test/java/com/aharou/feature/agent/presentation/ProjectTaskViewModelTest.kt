@@ -65,6 +65,17 @@ class ProjectTaskViewModelTest {
         coVerify(exactly = 0) { repository.createProject(any(), any(), "/second") }
     }
 
+    @Test fun runningOneProjectTaskUsesTheProjectFlowForThatTaskOnly() = runTest(dispatcher) {
+        val finish = kotlinx.coroutines.CompletableDeferred<Unit>()
+        coEvery { workflow.run("p", "/first", "t") } coAnswers { finish.await() }
+        val task = com.aharou.feature.agent.domain.task.ProjectTask(id = "t", workspace = "/first", title = "t", requirement = "t", projectId = "p")
+        viewModel.runProjectTask(task); viewModel.runProjectTask(task); runCurrent()
+        org.junit.Assert.assertTrue("t" in viewModel.state.value.activeTaskIds)
+        coVerify(exactly = 1) { workflow.run("p", "/first", "t") }
+        viewModel.cancelExecution("t"); runCurrent()
+        org.junit.Assert.assertTrue(viewModel.state.value.activeTaskIds.isEmpty())
+    }
+
     @Test fun queuedRequirementsKeepTheSubmittingWorkspace() = runTest(dispatcher) {
         viewModel.workspace("/first")
         runCurrent()

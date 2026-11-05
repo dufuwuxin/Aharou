@@ -80,7 +80,7 @@ jobs:
 
       # 校验 versionCode 单调递增：versionCode = git commit count，rebase/squash 改写历史
       # 可能让 commit count 变小，导致新版本 versionCode < 旧版本、升级判定失效。
-      # 取按提交时间倒序最近的非当前 tag，算其 commit count，要求当前 HEAD 不小于上个 Release。
+      # 取按提交时间倒序最近的非当前 v* 版本 tag（beta-latest 这类滚动标签会指向更新的提交，不能当上个 Release），算其 commit count，要求当前 HEAD 不小于上个 Release。
       # 允许相等：rc 转正式版时常在同一提交上打 tag，versionCode 相等是正常的。
       # 仅打 tag 触发时校验；workflow_dispatch（手动，无 tag）跳过。
       - name: Verify versionCode monotonic
@@ -88,7 +88,7 @@ jobs:
         run: |
           set -e
           cur_vc=$(git rev-list --count HEAD)
-          prev_tag=$(git tag --sort=-creatordate | grep -vE "^${GITHUB_REF_NAME}$" | head -1)
+          prev_tag=$(git tag --sort=-creatordate | grep -E "^v[0-9]+\.[0-9]+\.[0-9]+" | grep -vE "^${GITHUB_REF_NAME}$" | head -1)
           if [[ -z "$prev_tag" ]]; then
             echo "无历史 tag，跳过 versionCode 单调校验（首次发版）"
             echo "当前 versionCode(commit count) = $cur_vc"
@@ -228,7 +228,7 @@ jobs:
             prev_tag=$(git tag --sort=-creatordate | grep -E "^v[0-9]+\.[0-9]+\.[0-9]+$" | grep -vE "^${cur_tag}$" | head -1)
             echo "正式版：从上一个正式版 ${prev_tag:-无} 起算 changelog（含全部 RC 提交）"
           else
-            prev_tag=$(git tag --sort=-creatordate | grep -vE "^${cur_tag}$" | head -1)
+            prev_tag=$(git tag --sort=-creatordate | grep -E "^v[0-9]+\.[0-9]+\.[0-9]+" | grep -vE "^${cur_tag}$" | head -1)
             echo "预发布：从最近 tag ${prev_tag:-无} 起算 changelog"
           fi
           if [[ -z "$prev_tag" ]]; then

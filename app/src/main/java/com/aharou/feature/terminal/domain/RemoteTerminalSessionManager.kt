@@ -185,7 +185,9 @@ class RemoteTerminalSessionManager @Inject constructor(
             // 回显的 `[command exited: N]` 标记解析；notify 时 `exit $ec` 让 shell 自然结束触发 onFinished，
             // 非 notify 时 `exec /bin/sh` 保活供后续复用（与本地 TerminalSessionManager 的三件套一致）。
             val afterCommand = if (notify) "; exit \$ec" else "; exec /bin/sh"
-            val init = "$command; ec=\$?; echo \"[command exited: \$ec]\"$afterCommand"
+            // 大括号包住命令：末行是 heredoc 结束符、注释或 `&` 时标记不会被吞掉；shell 读完整条才执行，
+            // 标记也不会被读标准输入的命令当成输入读走（单纯换行会）。
+            val init = "{ $command\n}; ec=\$?; echo \"[command exited: \$ec]\"$afterCommand"
             termSession.write(init + "\n")
         }
         val tab = TerminalTab(

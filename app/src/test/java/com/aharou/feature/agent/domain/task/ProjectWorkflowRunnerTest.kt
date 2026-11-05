@@ -26,11 +26,13 @@ class ProjectWorkflowRunnerTest {
         title = id, requirement = id, dependencyIds = deps, version = 1, order = if (id == "a") 1 else 2, createdAt = 1)
 
     private fun fixture(accepted: Boolean, wait: Boolean = false, owner: String = "", members: List<String> = emptyList(),
-        rejectAt: Int? = null, waitAt: Int? = null, capacityWait: Boolean = false): Pair<ProjectWorkflowRunner, () -> ProjectTaskSnapshot> {
+        rejectAt: Int? = null, waitAt: Int? = null, capacityWait: Boolean = false, fullChecks: Int = 2,
+        seed: (ProjectTask) -> ProjectTask = { it }): Pair<ProjectWorkflowRunner, () -> ProjectTaskSnapshot> {
         val repository = mockk<ProjectTaskRepository>()
         val guard = Any()
         var snapshot = ProjectTaskSnapshot(version = 1, projects = listOf(ProjectPlan(id = "p", workspace = "w", title = "p", requirements = "a then b")),
-            tasks = listOf(task("a").copy(owner = owner, members = members), task("b", listOf("a"))))
+            tasks = listOf(seed(task("a").copy(owner = owner, members = members)), task("b", listOf("a"))))
+        val seeded = snapshot.tasks[0].processSessionIds.size
         coEvery { repository.load("w") } answers { synchronized(guard) { snapshot } }
         coEvery { repository.linkProjectExecution("p", "w", rootId) } returns Unit
         coEvery { repository.save(any()) } answers {
@@ -61,12 +63,15 @@ class ProjectWorkflowRunnerTest {
                 val index = if (id == "a") ++firstTaskCreates else 1
                 val sessionId = "member-$id" + if (index == 1) "" else "-$index"
                 if (id == "a") {
+                    val prompt = args.getValue("prompt").jsonPrimitive.content
+                    val ordinal = Regex("Participant: ([0-9]+) /").find(prompt)!!.groupValues[1].toInt()
                     val roles = (listOf(owner) + members).filter { it.isNotBlank() }.ifEmpty { listOf("") }
-                    assertEquals(roles[index - 1].takeIf { it.isNotBlank() }, args["agent"]?.jsonPrimitive?.content)
+                    assertEquals(roles[ordinal - 1].takeIf { it.isNotBlank() }, args["agent"]?.jsonPrimitive?.content)
+                    assertEquals(ordinal > 1, prompt.contains("[${ordinal - 1}: "))
                     if (index > 1) {
                         val previous = synchronized(guard) { snapshot.tasks[0] }
                         assertEquals(ProjectTaskStatus.RUNNING, previous.status)
-                        assertEquals(index - 1, previous.processSessionIds.size)
+                        assertEquals(seeded + index - 1, previous.processSessionIds.size)
                         assertTrue(previous.processMembers.values.all { it.outcome == "SUCCEEDED" })
                     }
                 }
@@ -76,7 +81,7 @@ class ProjectWorkflowRunnerTest {
         }
         val events = mockk<SubAgentEventBus>()
         var capacityChecks = 0
-        every { events.isFull } answers { capacityWait && capacityChecks++ < 2 }
+        every { events.isFull } answers { capacityWait && capacityChecks++ < fullChecks }
         every { events.terminalEvent(any()) } answers {
             val id = firstArg<String>()
             if (wait || created[id] == waitAt) null else SubAgentEvent(id, rootId, SubAgentEventType.COMPLETED,
@@ -170,5 +175,55 @@ class ProjectWorkflowRunnerTest {
         assertNull(snapshot().tasks[0].processRequirementsVersion)
         assertTrue(snapshot().tasks[1].processSessionIds.isEmpty())
         assertEquals(ProjectTaskStatus.DRAFT, snapshot().tasks[1].status)
+    }
+
+    @Test fun waitingForAFreeSlotDoesNotCountTowardTheMemberTimeout() = runBlocking {
+        val (runner, snapshot) = fixture(true, capacityWait = true, fullChecks = 6)
+        runner.memberTimeoutMs = 200
+        runner.run("p", "w")
+        assertTrue(snapshot().tasks.all { it.status == ProjectTaskStatus.REVIEW })
+    }
+
+    @Test fun aMemberRunningPastItsLimitIsStoppedAsTimeout() = runBlocking {
+        val (runner, snapshot) = fixture(true, wait = true)
+        runner.memberTimeoutMs = 200
+        try { runner.run("p", "w"); fail("must time out") } catch (_: kotlinx.coroutines.TimeoutCancellationException) { }
+        assertEquals("TIMEOUT", snapshot().tasks[0].executionReason)
+        assertEquals(setOf("member-a"), stopped)
+    }
+
+    @Test fun blockedRetryKeepsSucceededMembersAndRunsOnlyTheRest() = runBlocking {
+        val (runner, snapshot) = fixture(true, owner = "builder", members = listOf("reviewer"), seed = { it.copy(status = ProjectTaskStatus.BLOCKED,
+            processSessionIds = listOf("old-a"), processMembers = mapOf("old-a" to ProjectTaskMemberRun("builder", 1, 1, "SUCCEEDED"))) })
+        runner.run("p", "w")
+        val first = snapshot().tasks[0]
+        assertEquals(listOf("old-a", "member-a"), first.processSessionIds)
+        assertEquals(2, first.processMembers.getValue("member-a").ordinal)
+        assertEquals(ProjectTaskStatus.REVIEW, first.status)
+    }
+
+    @Test fun blockedRetryRerunsMembersWhoseRequirementsChanged() = runBlocking {
+        val (runner, snapshot) = fixture(true, owner = "builder", members = listOf("reviewer"), seed = { it.copy(status = ProjectTaskStatus.BLOCKED,
+            processSessionIds = listOf("old-a"), processMembers = mapOf("old-a" to ProjectTaskMemberRun("builder", 1, 0, "SUCCEEDED"))) })
+        runner.run("p", "w")
+        assertEquals(listOf("old-a", "member-a", "member-a-2"), snapshot().tasks[0].processSessionIds)
+    }
+
+    @Test fun rerunningDeliveredWorkFromTheDetailPageStartsEveryMemberAndStopsAtThatTask() = runBlocking {
+        val (runner, snapshot) = fixture(true, owner = "builder", seed = { it.copy(status = ProjectTaskStatus.REVIEW, processRequirementsVersion = 1,
+            processSessionIds = listOf("old-a"), processMembers = mapOf("old-a" to ProjectTaskMemberRun("builder", 1, 1, "SUCCEEDED"))) })
+        runner.run("p", "w", "a")
+        assertEquals(listOf("old-a", "member-a"), snapshot().tasks[0].processSessionIds)
+        assertEquals(ProjectTaskStatus.REVIEW, snapshot().tasks[0].status)
+        assertTrue(snapshot().tasks[1].processSessionIds.isEmpty())
+    }
+
+    @Test fun runningOneTaskRequiresItsPredecessorsToBeDelivered() = runBlocking {
+        val (runner, snapshot) = fixture(true)
+        try { runner.run("p", "w", "b"); fail("must require a delivered predecessor") } catch (expected: IllegalStateException) {
+            assertEquals("PROJECT_FLOW_BLOCKED", expected.message)
+        }
+        assertTrue(snapshot().tasks.all { it.processSessionIds.isEmpty() })
+        assertFalse(ProjectFlowSessions.owns(rootId))
     }
 }

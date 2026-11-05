@@ -65,6 +65,30 @@ class ProjectWorkflowPlanTest {
         assertEquals(recorded, Json.decodeFromString(ProjectTask.serializer(), Json.encodeToString(ProjectTask.serializer(), recorded)))
     }
 
+    @Test fun laterParticipantsReceiveEarlierResults() {
+        val a = task("a")
+        assertFalse(ProjectWorkflowPlan.prompt(a, listOf(a), "req").contains("Earlier participants"))
+        assertTrue(ProjectWorkflowPlan.prompt(a, listOf(a), "req", "reviewer", 2, listOf("[1: builder] done")).contains("[1: builder] done"))
+    }
+
+    @Test fun blockedRetryReusesOnlyTheUnbrokenLeadOfTheLatestAttempt() {
+        fun record(role: String, ordinal: Int, outcome: String, version: Long = 1) = ProjectTaskMemberRun(role, ordinal, version, outcome)
+        fun blocked(vararg runs: Pair<String, ProjectTaskMemberRun>) = task("a").copy(owner = "builder", members = listOf("reviewer"),
+            status = ProjectTaskStatus.BLOCKED, processSessionIds = runs.map { it.first }, processMembers = runs.toMap())
+        val builder = "m1" to record("builder", 1, "SUCCEEDED")
+        val reviewer = "m2" to record("reviewer", 2, "SUCCEEDED")
+        assertEquals(listOf("m1"), ProjectWorkflowPlan.reusableRuns(blocked(builder, "m2" to record("reviewer", 2, "FAILED"))))
+        assertEquals(listOf("m1", "m2"), ProjectWorkflowPlan.reusableRuns(blocked(builder, reviewer)))
+        // The older reviewer worked from the older builder output, so it must run again after a newer builder run.
+        assertEquals(listOf("m3"), ProjectWorkflowPlan.reusableRuns(blocked(builder, reviewer, "m3" to record("builder", 1, "SUCCEEDED"))))
+        assertEquals(listOf("m3"), ProjectWorkflowPlan.reusableRuns(blocked(builder, reviewer, "m3" to record("builder", 1, "SUCCEEDED"),
+            "m4" to record("reviewer", 2, "FAILED"))))
+        assertEquals(emptyList<String>(), ProjectWorkflowPlan.reusableRuns(blocked(builder, reviewer, "m3" to record("builder", 1, "FAILED"))))
+        assertEquals(emptyList<String>(), ProjectWorkflowPlan.reusableRuns(blocked("m1" to record("builder", 1, "SUCCEEDED", version = 0))))
+        assertEquals(emptyList<String>(), ProjectWorkflowPlan.reusableRuns(blocked("m1" to record("reviewer", 1, "SUCCEEDED"))))
+        assertEquals(emptyList<String>(), ProjectWorkflowPlan.reusableRuns(blocked(builder, reviewer).copy(status = ProjectTaskStatus.REVIEW)))
+    }
+
     @Test fun emptyAppendPreviewIsZeroAndDoesNotBuildInvalidDrafts() {
         val p = ProjectPlan(workspace = "w", title = "p", requirements = "old")
         assertEquals(0, ProjectPlanDraft.preview(p, ""))

@@ -38,7 +38,8 @@ fun ProjectTaskDetailScreen(taskId: String, viewModel: ProjectTaskViewModel, onB
             state.error?.let { Text(stringResource(R.string.project_task_error, it), color = MaterialTheme.colorScheme.error) }
             Button(onClick = { editing = true }, enabled = !state.busy, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.project_task_edit)) }
             Text(stringResource(R.string.project_task_execution_hint))
-            Button(onClick = { viewModel.execute(task, true, runExecution) }, enabled = !state.busy && task.id !in state.activeTaskIds,
+            Button(onClick = { if (task.projectId != null) viewModel.runProjectTask(task) else viewModel.execute(task, true, runExecution) },
+                enabled = !state.busy && task.id !in state.activeTaskIds && (task.projectId == null || task.projectId !in state.activeProjectIds),
                 modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.project_task_start)) }
             TextButton(onClick = { viewModel.execute(task, false, runExecution) }, enabled = !state.busy,
                 modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.project_task_new_execution)) }

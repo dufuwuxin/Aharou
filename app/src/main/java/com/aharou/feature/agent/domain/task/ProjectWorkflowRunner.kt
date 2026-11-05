@@ -34,11 +34,13 @@ class ProjectWorkflowRunner @Inject constructor(
     private val coordinator: ProjectTaskExecutionCoordinator
 ) {
     private val tasks: TaskTool get() = registry.get().getTool("task") as TaskTool
+    internal var memberTimeoutMs = 30L * 60L * 1000L
 
     suspend fun members(): List<String> = withContext(Dispatchers.IO) { definitions.listEnabled().map { it.definition.name } }
 
-    suspend fun run(projectId: String, workspace: String) = withContext(Dispatchers.IO) { coordinator.withWorkspace(workspace) {
+    suspend fun run(projectId: String, workspace: String, onlyTaskId: String? = null) = withContext(Dispatchers.IO) { coordinator.withWorkspace(workspace) {
         val project = repository.load(workspace).projects.first { it.id == projectId }
+        onlyTaskId?.let { id -> ProjectWorkflowPlan.runnable(repository.load(workspace).tasks.filter { it.projectId == projectId }, id) }
         val parent = turns.createSessionEntity(workspace).copy(title = project.title.take(SessionUseCase.TITLE_MAX))
         sessions.upsertSession(parent)
         repository.linkProjectExecution(projectId, workspace, parent.id)
@@ -52,8 +54,10 @@ class ProjectWorkflowRunner @Inject constructor(
                 val snapshot = repository.load(workspace)
                 val currentProject = snapshot.projects.first { it.id == projectId }
                 val projectTasks = snapshot.tasks.filter { it.projectId == projectId }
-                val next = ProjectWorkflowPlan.next(projectTasks) ?: break
+                val next = if (onlyTaskId == null) ProjectWorkflowPlan.next(projectTasks) ?: break
+                    else ProjectWorkflowPlan.runnable(projectTasks, onlyTaskId)
                 val participants = ProjectWorkflowPlan.participants(next)
+                val reused = ProjectWorkflowPlan.reusableRuns(next)
                 active = repository.save(next.copy(status = ProjectTaskStatus.RUNNING, executionReason = "",
                     processRequirementsVersion = null, processParticipants = participants))
                 val outputs = mutableListOf<String>()
@@ -61,33 +65,36 @@ class ProjectWorkflowRunner @Inject constructor(
                 for ((index, member) in participants.withIndex()) {
                     val before = repository.load(workspace).tasks.first { it.id == next.id }
                     check(before.requirementsVersion == next.requirementsVersion && ProjectWorkflowPlan.participants(before) == participants) { "UPSTREAM_CHANGED" }
-                    withTimeout(30L * 60L * 1000L) {
-                        while (child == null) {
-                            while (events.isFull) delay(100)
-                            val ready = repository.load(workspace).tasks.first { it.id == next.id }
-                            check(ready.requirementsVersion == next.requirementsVersion && ProjectWorkflowPlan.participants(ready) == participants) { "UPSTREAM_CHANGED" }
-                            // Cancellation must not strand a created child between creation and durable linking.
-                            withContext(NonCancellable) {
-                                val args = buildJsonObject {
-                                    put("action", "create"); put("description", next.title)
-                                    put("prompt", ProjectWorkflowPlan.prompt(next, projectTasks, currentProject.requirements, member, index + 1))
-                                    if (member.isNotBlank()) put("agent", member)
-                                }
-                                val result = tasks.executeWithContext(args, context)
-                                if (result is ToolResult.Error && result.code == "MAX_SUBAGENTS_REACHED") return@withContext
-                                check(result is ToolResult.Success) { (result as? ToolResult.Error)?.message ?: "PROJECT_MEMBER_START_FAILED" }
-                                val id = result.data.jsonObject["id"]?.jsonPrimitive?.contentOrNull ?: error("PROJECT_MEMBER_ID_MISSING")
-                                child = id
-                                val linked = repository.load(workspace).tasks.first { it.id == next.id }
-                                repository.save(linked.copy(processSessionIds = linked.processSessionIds + id,
-                                    processMembers = linked.processMembers + (id to ProjectTaskMemberRun(member, index + 1, next.requirementsVersion))))
+                    val reusedId = reused.getOrNull(index)
+                    if (reusedId != null) {
+                        outputs += memberOutput(index, member, reusedId)
+                        continue
+                    }
+                    while (child == null) {
+                        while (events.isFull) delay(100)
+                        val ready = repository.load(workspace).tasks.first { it.id == next.id }
+                        check(ready.requirementsVersion == next.requirementsVersion && ProjectWorkflowPlan.participants(ready) == participants) { "UPSTREAM_CHANGED" }
+                        // Cancellation must not strand a created child between creation and durable linking.
+                        withContext(NonCancellable) {
+                            val args = buildJsonObject {
+                                put("action", "create"); put("description", next.title)
+                                put("prompt", ProjectWorkflowPlan.prompt(next, projectTasks, currentProject.requirements, member, index + 1, outputs.toList()))
+                                if (member.isNotBlank()) put("agent", member)
                             }
-                            if (child == null) delay(100)
+                            val result = tasks.executeWithContext(args, context)
+                            if (result is ToolResult.Error && result.code == "MAX_SUBAGENTS_REACHED") return@withContext
+                            check(result is ToolResult.Success) { (result as? ToolResult.Error)?.message ?: "PROJECT_MEMBER_START_FAILED" }
+                            val id = result.data.jsonObject["id"]?.jsonPrimitive?.contentOrNull ?: error("PROJECT_MEMBER_ID_MISSING")
+                            child = id
+                            val linked = repository.load(workspace).tasks.first { it.id == next.id }
+                            repository.save(linked.copy(processSessionIds = linked.processSessionIds + id,
+                                processMembers = linked.processMembers + (id to ProjectTaskMemberRun(member, index + 1, next.requirementsVersion))))
                         }
-                        val id = requireNotNull(child)
-                        while (events.terminalEvent(id) == null) delay(100)
+                        if (child == null) delay(100)
                     }
                     val id = requireNotNull(child)
+                    // Waiting for a free member slot above is queueing, not execution time.
+                    withTimeout(memberTimeoutMs) { while (events.terminalEvent(id) == null) delay(100) }
                     val terminal = requireNotNull(events.terminalEvent(id))
                     val passed = terminal.type == SubAgentEventType.COMPLETED && terminal.accepted == true
                     val outcome = if (passed) "SUCCEEDED" else if (terminal.type == SubAgentEventType.STOPPED) "STOPPED" else "FAILED"
@@ -96,8 +103,7 @@ class ProjectWorkflowRunner @Inject constructor(
                         (id to latest.processMembers.getValue(id).copy(outcome = outcome, reason = terminal.detail))))
                     child = null
                     check(passed) { if (outcome == "STOPPED") "PROJECT_MEMBER_STOPPED" else "PROJECT_MEMBER_FAILED" }
-                    val output = messages.restoreAll(messages.getMessagesOnce(id)).lastOrNull { it.role == MessageRole.ASSISTANT.name }?.content.orEmpty()
-                    outputs += "[${index + 1}: ${member.ifBlank { "default member" }}]\n$output"
+                    outputs += memberOutput(index, member, id)
                 }
                 val latest = repository.load(workspace).tasks.first { it.id == next.id }
                 val stale = latest.requirementsVersion != next.requirementsVersion || ProjectWorkflowPlan.participants(latest) != participants
@@ -107,6 +113,7 @@ class ProjectWorkflowRunner @Inject constructor(
                     executionReason = if (stale) "UPSTREAM_CHANGED" else "SUCCEEDED"))
                 active = null
                 check(!stale) { "UPSTREAM_CHANGED" }
+                if (onlyTaskId != null) break
             }
         } catch (failure: Exception) {
             withContext(NonCancellable) {
@@ -133,4 +140,9 @@ class ProjectWorkflowRunner @Inject constructor(
             throw failure
         }
     } }
+
+    private suspend fun memberOutput(index: Int, member: String, sessionId: String): String {
+        val output = messages.restoreAll(messages.getMessagesOnce(sessionId)).lastOrNull { it.role == MessageRole.ASSISTANT.name }?.content.orEmpty()
+        return "[${index + 1}: ${member.ifBlank { "default member" }}]\n$output"
+    }
 }

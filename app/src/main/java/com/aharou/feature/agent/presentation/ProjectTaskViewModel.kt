@@ -135,6 +135,23 @@ class ProjectTaskViewModel @Inject constructor(
     }
     fun stopProject(projectId: String) { projectJobs[projectId]?.cancel() }
 
+    fun runProjectTask(task: ProjectTask) {
+        val projectId = task.projectId ?: return
+        if (projectJobs[projectId]?.isActive == true || !executing.add(task.id)) return
+        val job = viewModelScope.launch(start = kotlinx.coroutines.CoroutineStart.LAZY) {
+            try { projectWorkflow.run(projectId, task.workspace, task.id) }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Exception) { error(failure.message ?: "PROJECT_TASK_RUN_FAILED", task.workspace) }
+            finally {
+                executing.remove(task.id); executionJobs.remove(task.id)
+                mutable.update { it.copy(activeTaskIds = executionJobs.keys.toSet()) }
+            }
+        }
+        executionJobs[task.id] = job
+        mutable.update { it.copy(activeTaskIds = executionJobs.keys.toSet(), error = null) }
+        job.start()
+    }
+
     fun cancelExecution(taskId: String) { executionJobs[taskId]?.cancel() }
 
     fun accept(task: ProjectTask) {
