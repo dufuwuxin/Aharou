@@ -9,9 +9,13 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
 import com.aharou.R
 import com.aharou.core.theme.Spacing
 import com.aharou.feature.agent.domain.task.ProjectTask
+
+/** Newest user supplements shown read-only in the process header; the count line reports the total. */
+private const val SUPPLEMENTS_SHOWN = 3
 
 @Composable
 internal fun ProjectTaskProcess(task: ProjectTask, tasks: List<ProjectTask>, onEdit: () -> Unit, onAccept: () -> Unit,
@@ -25,6 +29,13 @@ internal fun ProjectTaskProcess(task: ProjectTask, tasks: List<ProjectTask>, onE
             Text(stringResource(R.string.project_task_owner_value, task.owner.ifBlank { stringResource(R.string.project_flow_default_member) }),
                 style = MaterialTheme.typography.labelMedium, modifier = Modifier.weight(1f))
             TextButton(onClick = onEdit) { Text(stringResource(R.string.project_task_edit)) }
+        }
+        if (task.supplements.isNotEmpty()) {
+            Text(stringResource(R.string.project_supplements_title, task.supplements.size), style = MaterialTheme.typography.labelMedium)
+            task.supplements.takeLast(SUPPLEMENTS_SHOWN).forEach { line ->
+                Text(stringResource(R.string.project_supplement_item, line), maxLines = 2, overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.bodySmall)
+            }
         }
         if (task.members.isNotEmpty()) Text(stringResource(R.string.project_task_collaboration_value, task.owner, task.members.joinToString("、")),
             style = MaterialTheme.typography.bodySmall)
