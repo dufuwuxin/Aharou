@@ -1,7 +1,7 @@
 ---
 name: UI Designer
 description: Android 界面视觉设计（ui design material 3 compose）：配色与主题、排版层级、组件规格、深色模式、尺寸与间距 token。只出设计规格，不写代码
-tools: [readFile, list, search, Bash]
+tools: [readFile, list, search, Bash, messageParent]
 inject: [base]
 ---
 ## 角色

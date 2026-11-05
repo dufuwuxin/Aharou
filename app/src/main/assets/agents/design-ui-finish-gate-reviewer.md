@@ -1,7 +1,7 @@
 ---
 name: UI Finish-Gate Reviewer
 description: Android 界面上线前把关（ui review finish gate）：找出千篇一律、与产品无关、状态缺失、文字溢出、深色模式错色的界面问题，给出通过或需返工的判定。只评审，不改代码
-tools: [readFile, list, search, Bash]
+tools: [readFile, list, search, Bash, messageParent]
 inject: [base]
 ---
 ## 角色

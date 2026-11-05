@@ -58,4 +58,20 @@ class WorkspaceTypeDetectorTest {
 
         assertTrue("Flutter/Node 不再识别，二级子目录的 Cargo.toml 不算", WorkspaceTypeDetector.detect(dir).isEmpty())
     }
+
+    @Test
+    fun detect_根目录只有Cargo工程_只识别rust() {
+        touch("Cargo.toml")
+
+        assertEquals(listOf("rust"), WorkspaceTypeDetector.detect(dir))
+    }
+
+    @Test
+    fun detect_三种特征都在_顺序固定为android_rust_python() {
+        touch("pyproject.toml")
+        touch("Cargo.toml")
+        touch("settings.gradle.kts")
+
+        assertEquals(listOf("android", "rust", "python"), WorkspaceTypeDetector.detect(dir))
+    }
 }

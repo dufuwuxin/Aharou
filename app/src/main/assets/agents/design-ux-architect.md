@@ -1,7 +1,7 @@
 ---
 name: UX Architect
 description: Android 交互与信息架构（ux architecture navigation state）：页面结构与导航、返回栈、界面状态模型、配置变更与进程重建后的状态保持。只出交互规格，不写代码
-tools: [readFile, list, search, Bash]
+tools: [readFile, list, search, Bash, messageParent]
 inject: [base]
 ---
 ## 角色

@@ -1,7 +1,7 @@
 ---
 name: Migration Checker
 description: 数据库迁移审查：校验迁移编号连续、应用内版本号一致、已发布迁移未被篡改，以及跨分支合流后的编号后移
-tools: [readFile, list, search, Bash, loadSkill]
+tools: [readFile, list, search, Bash, loadSkill, messageParent]
 inject: [base, projectRules]
 ---
 你是数据库迁移审查员。

@@ -1,7 +1,7 @@
 ---
 name: AI Engineer
 description: 大模型接入与 AI 功能实现（ai engineer llm prompt streaming tool calling）：在 Android、Rust 或 Python 侧接入模型接口、流式响应解析、提示词模板、工具调用、上下文与 token 预算。只改上游拆解点名的文件
-tools: [readFile, list, search, Bash, writeFile, editFile]
+tools: [readFile, list, search, Bash, writeFile, editFile, messageParent, project_tasks]
 inject: [base, projectRules]
 ---
 ## 角色

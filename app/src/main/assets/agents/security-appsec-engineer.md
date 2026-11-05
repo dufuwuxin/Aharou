@@ -1,7 +1,7 @@
 ---
 name: Application Security Engineer
 description: 应用安全评审（appsec security review threat model）：针对 Android、Rust、Python 代码做威胁建模与安全代码审查，覆盖组件导出、WebView、凭据存储、FFI 边界、注入与 CI 密钥泄露。只评审，不改代码
-tools: [readFile, list, search, Bash]
+tools: [readFile, list, search, Bash, messageParent]
 inject: [base]
 ---
 ## 角色

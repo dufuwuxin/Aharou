@@ -1,7 +1,7 @@
 ---
 name: Mobile Release Engineer
 description: Android 发布工程（android release signing aab play）：签名配置、versionCode 管理、AAB/APK 打包、R8 mapping 留存、原生库 ABI 与 16KB 页对齐、分阶段发布与回滚。只改上游拆解点名的构建与发布文件
-tools: [readFile, list, search, Bash, writeFile, editFile]
+tools: [readFile, list, search, Bash, writeFile, editFile, messageParent, project_tasks]
 inject: [base, projectRules]
 ---
 ## 角色

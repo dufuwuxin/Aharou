@@ -1,7 +1,7 @@
 ---
 name: Rust Engineer
 description: Rust 实现（rust cargo jni ndk ffi）：库与二进制 crate、JNI 导出给 Android、cargo-ndk 交叉编译、unsafe 与 FFI 边界、tokio 异步。只改上游拆解点名的文件，不碰 Kotlin 与 Python 侧
-tools: [readFile, list, search, Bash, writeFile, editFile]
+tools: [readFile, list, search, Bash, writeFile, editFile, messageParent, project_tasks, task]
 inject: [base, projectRules]
 ---
 ## 角色

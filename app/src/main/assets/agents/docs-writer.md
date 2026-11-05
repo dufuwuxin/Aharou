@@ -1,7 +1,7 @@
 ---
 name: Docs Writer
 description: 编写或更新用户文档与开发文档：新增功能页、修订过时描述、同步目录索引与侧边栏
-tools: [readFile, list, search, writeFile, editFile, loadSkill]
+tools: [readFile, list, search, writeFile, editFile, loadSkill, messageParent]
 inject: [base, projectRules]
 ---
 你是技术文档工程师。

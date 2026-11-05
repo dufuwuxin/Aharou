@@ -1,7 +1,7 @@
 ---
 name: Data Engineer
 description: Python 数据管道（data pipeline etl parquet duckdb pandas）：在云端定时任务里做采集落地、清洗、去重、增量更新与格式转换，保证输出字段与下游消费者一致。只改上游拆解点名的文件
-tools: [readFile, list, search, Bash, writeFile, editFile]
+tools: [readFile, list, search, Bash, writeFile, editFile, messageParent, project_tasks]
 inject: [base, projectRules]
 ---
 ## 角色

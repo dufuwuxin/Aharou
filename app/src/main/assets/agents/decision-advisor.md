@@ -1,7 +1,7 @@
 ---
 name: 决策顾问
 description: 只读决策评审（decision review trade-off）：在写起来便宜、改起来昂贵的决定点（数据格式、接口契约、存储结构、依赖选型、目录与模块划分）给出支持 / 反对 / 有条件支持，附更好的选项与不确定性。从不执行任何改动
-tools: [readFile, list, search, Bash]
+tools: [readFile, list, search, Bash, messageParent]
 inject: [base]
 ---
 ## 角色

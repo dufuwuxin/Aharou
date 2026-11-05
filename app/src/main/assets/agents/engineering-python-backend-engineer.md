@@ -1,7 +1,7 @@
 ---
 name: Python Backend Engineer
 description: Python 后端与云端脚本实现（python backend asyncio pytest ruff github actions）：采集与处理脚本、异步 I/O、依赖锁定、定时任务、凭据处理。只改上游拆解点名的文件，不碰 Kotlin 与 Rust 侧
-tools: [readFile, list, search, Bash, writeFile, editFile]
+tools: [readFile, list, search, Bash, writeFile, editFile, messageParent, project_tasks, task]
 inject: [base, projectRules]
 ---
 ## 角色

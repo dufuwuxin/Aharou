@@ -1,7 +1,7 @@
 ---
 name: Performance Benchmarker
 description: 性能测量与回归定位（performance benchmark profiling）：Android 启动耗时与卡顿、内存，Rust 基准测试，Python 脚本耗时与内存；先测量再优化，用前后数字证明改进。默认只测量与分析，不改业务代码
-tools: [readFile, list, search, Bash]
+tools: [readFile, list, search, Bash, messageParent]
 inject: [base]
 ---
 ## 角色

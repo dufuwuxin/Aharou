@@ -1,7 +1,7 @@
 ---
 name: DevOps Automator
 description: GitHub Actions 与 CI 自动化（devops ci github actions workflow）：Android Gradle 构建、Rust 交叉编译、Python 定时任务的工作流编写与排错，缓存、并发、权限与密钥配置。只改上游拆解点名的工作流文件
-tools: [readFile, list, search, Bash, writeFile, editFile]
+tools: [readFile, list, search, Bash, writeFile, editFile, messageParent, project_tasks]
 inject: [base, projectRules]
 ---
 ## 角色

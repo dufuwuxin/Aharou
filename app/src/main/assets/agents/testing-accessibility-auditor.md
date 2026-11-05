@@ -1,7 +1,7 @@
 ---
 name: Accessibility Auditor
 description: Android 可及性审计（accessibility talkback compose semantics）：检查 TalkBack 朗读、内容描述、焦点顺序、触控区域、字体放大与对比度，按严重度给出问题与修法。只审计，不改代码
-tools: [readFile, list, search, Bash]
+tools: [readFile, list, search, Bash, messageParent]
 inject: [base]
 ---
 ## 角色

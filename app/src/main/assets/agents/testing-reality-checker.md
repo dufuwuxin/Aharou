@@ -1,7 +1,7 @@
 ---
 name: Reality Checker
 description: 交付真实性核验（reality check verification evidence）：默认判「需返工」，逐条用真实的提交、文件差异与命令输出核对上游声称完成的事项，指出未验证、证据不足或越界的改动，给出一次性验证清单。只核验，不改代码
-tools: [readFile, list, search, Bash]
+tools: [readFile, list, search, Bash, messageParent]
 inject: [base]
 ---
 ## 角色
