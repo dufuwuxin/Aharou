@@ -75,7 +75,7 @@ AI 派发子代理时，在**非计划模式下会直接启动**，不再逐次�
 
 ## 自动派发与手动指定
 
-主会话 AI 的系统提示词里只带一份**部门索引**：每个部门一行，列出部门名、角色数量与几个代表角色（小部门基本全列，大部门只列前几个，例如 `engineering / 59 / AI Data Remediation Engineer、AI Engineer、API Platform Engineer`），不再把上百个角色的用途描述逐条塞进上下文。**AI 默认会自行判断是否拆分并派发子代理，不需要你显式要求**；选角走「部门 + 关键词」路由：
+主会话 AI 的系统提示词里只带一份**部门索引**：每个部门一行，列出部门名、角色数量与几个代表角色（小部门基本全列，大部门只列前几个，例如 `engineering / 10 / AI Engineer、Android Kotlin Engineer、Code Reviewer`），不再把每个角色的用途描述逐条塞进上下文。**AI 默认会自行判断是否拆分并派发子代理，不需要你显式要求**；选角走「部门 + 关键词」路由：
 
 - **自动匹配**：AI 先判断任务属于哪个部门，再给出 2~5 个描述任务功能或领域的关键词，由本地匹配器在该部门内按角色名称与用途描述打分，挑出最对口的角色，关键词**中英文都认**（中文会先按同义词表转成英文再匹配）；关键词一个都没打中时它不会随手拿一个角色凑数，而是拿到可用部门与建议关键词后重新选；
 - **查目录再点名**：索引里每个部门只列几个代表角色，所以 AI 不确定有哪些角色名时，会先查一次角色目录（列出该部门/该关键词下的角色名、一句用途与它的工具集，标出「只读」「不能执行命令」这类边界）再点名指定；
@@ -94,30 +94,34 @@ AI 派发子代理时，在**非计划模式下会直接启动**，不再逐次�
 - 仅开放代码与文件检索工具（`readFile`、`list`、`search`、`websearch`、`webfetch`、`loadSkill`），**不含写文件与执行命令的工具**，不触发授权弹窗；
 - 模型默认继承当前会话；想换更经济的模型，在 `explore.md` 里填 `provider` 与 `model`。
 
-**2. 研发角色库（136 个，英文）**
+**2. 研发角色库（16 个）**
 
-来自开源项目 [Agency Agents](https://github.com/msitarzewski/agency-agents)（MIT 许可，完整许可文本随包附于 `assets/licenses/agency-agents-MIT.txt`），覆盖软件研发的各类角色，按部门分布：
+角色名与原始提示词来自开源项目 [Agency Agents](https://github.com/msitarzewski/agency-agents)（MIT 许可，完整许可文本随包附于 `assets/licenses/agency-agents-MIT.txt`），只保留与 Android Kotlin、Rust、云端 Python 相关的角色。其中 12 个已改写为面向这三个语言栈的中文短卡，并限定了工具与注入：UI Designer、UX Architect、UI Finish-Gate Reviewer、AI Engineer、Data Engineer、DevOps Automator、Minimal Change Engineer、Mobile Release Engineer、Application Security Engineer、Accessibility Auditor、Performance Benchmarker、Reality Checker。其余 4 个保留英文原文：Code Reviewer、Software Architect、Product Manager、Trend Researcher；其中 Code Reviewer 与 Software Architect 没有写 `tools`，默认开放全部工具（含写文件与执行命令，仍遵守授权弹窗）。
 
-| 部门 | 数量 | 举例 |
+**3. 中文原生角色（7 个）**
+
+- 语言栈工程师：`Android Kotlin Engineer`、`Rust Engineer`、`Python Backend Engineer`，可读写文件，各自只改本侧文件；
+- `决策顾问`：在写起来便宜、改起来昂贵的决定点做只读评审，给出支持 / 反对 / 有条件支持；
+- 流程角色：`test-writer`（补单测）、`docs-writer`（文档编写与同步）、`migration-checker`（数据库迁移审查）。
+
+**部门分布**（按文件名首段归部门，共 24 个，含 Explore）：
+
+| 部门 | 数量 | 角色 |
 | --- | --- | --- |
-| engineering | 59 | 代码审查、后端架构、SRE、数据库优化、移动端构建、提示词工程 |
-| security | 12 | 应用安全、渗透测试、密钥与凭据、合规审计 |
-| testing | 9 | 测试自动化、API 测试、性能基准、可及性审计 |
-| specialized | 7 | 代码考古、MCP 构建、工作流架构 |
-| design | 6 | UI 设计、UX 研究、视觉收尾把关 |
-| product / project-management | 9 | 产品经理、需求综合、冲刺排序、Jira 流程 |
-| 游戏与 3D（game-development / unity / unreal / godot / roblox / blender / spatial-computing 等） | 27 | 关卡设计、着色器、多人联机、XR 交互 |
+| engineering | 10 | Android Kotlin Engineer、Rust Engineer、Python Backend Engineer、Software Architect、Code Reviewer、Minimal Change Engineer、Mobile Release Engineer、DevOps Automator、Data Engineer、AI Engineer |
+| testing | 4 | Reality Checker、Performance Benchmarker、Accessibility Auditor、Test Writer |
+| design | 3 | UI Designer、UX Architect、UI Finish-Gate Reviewer |
+| product | 2 | Product Manager、Trend Researcher |
+| security | 1 | Application Security Engineer |
+| explore | 1 | Explore |
+| general（兜底） | 3 | 决策顾问、Docs Writer、Migration Checker |
 
-AI 看到的是按部门汇总的索引，部门为 `engineering`、`security`、`testing`、`specialized`、`design`、`product`、`project-management`、`game-development`、`unity`、`unreal`、`godot`、`roblox`、`xr`、`explore`，以及兜底 `general`；每行只列部门名、角色数与一两个代表角色。
+AI 看到的是按部门汇总的索引，每行只列部门名、角色数与一两个代表角色。你自己添加的角色按文件名首段归部门，`specialized`、`project-management`、`game-development` 等前缀仍可识别。
 
-这些角色的提示词是英文，且默认开放全部工具（含写文件与执行命令，仍遵守授权弹窗）。
-
-**3. 中文特化（3 个）**
-
-针对本仓库流程写的窄角色：`test-writer`（补单测）、`docs-writer`（文档编写与同步）、`migration-checker`（数据库迁移审查）。它们在选角部门上分别归入 `testing` 与兜底 `general`。
+内置团队预设有「功能交付团队」（架构拆解 → Android Kotlin / Rust / Python 三侧并行实现 → 代码审查 → 集中验证）、「界面交付团队」（视觉与交互设计 → Android 界面实现 → 收尾把关与可及性验收）和「调研评审团队」。
 
 ::: tip 建议按需启用
-内置预设合计一百多个。主会话 AI 只看到按部门汇总的索引（体量与角色总数无关），但被点名的部门与关键词仍可能命中用不到的角色；用不到的推荐在「配置 → 团队」里禁用（禁用后不再参与选角与匹配，定义文件保留），能让选角更准。
+内置预设合计 24 个。主会话 AI 只看到按部门汇总的索引（体量与角色总数无关），但被点名的部门与关键词仍可能命中用不到的角色；用不到的推荐在「配置 → 团队」里禁用（禁用后不再参与选角与匹配，定义文件保留），能让选角更准。
 :::
 
 ## 自定义子代理
@@ -202,18 +206,18 @@ name: 功能交付团队
 description: 拆解 → 并行实现 → 审查
 stages:
   - title: 需求拆解
-    agent: Senior Project Manager
-    prompt: 把目标拆成 2~4 个可并行的子任务，标明文件范围与验收点
+    agent: Software Architect
+    prompt: 把目标按 Android Kotlin 与 Rust 两侧拆成改动清单，标明文件范围与验收点
   - title: 并行实现
     tasks:
-      - agent: Mobile App Builder
-        prompt: 实现界面部分
+      - agent: Android Kotlin Engineer
+        prompt: 实现 Kotlin 侧部分
         writePaths: [app/src/main/java/com/aharou/feature/ui]
-      - agent: API Platform Engineer
-        prompt: 实现数据与接口部分
+      - agent: Rust Engineer
+        prompt: 实现 Rust 侧部分
         interfaces:
-          - with: Mobile App Builder
-            about: HTTP 响应字段与错误码
+          - with: Android Kotlin Engineer
+            about: JNI 函数签名与错误码
   - title: 代码审查
     agent: Code Reviewer
     prompt: 审查上游改动，按严重度列出问题
