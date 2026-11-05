@@ -64,7 +64,7 @@ class ProjectTaskTool @Inject constructor(
         fun text(name: String) = (args[name] as? JsonPrimitive)?.contentOrNull?.trim().orEmpty()
         val action = text("action").lowercase()
         if (action !in setOf("branch", "add", "outline")) return ToolResult.Error("action must be branch, add or outline", "INVALID_ACTION")
-        if (action != "outline" && text("title").isBlank() || text("requirement").isBlank()) return ToolResult.Error("title and requirement are required", "MISSING_ARGS")
+        if (action != "outline" && (text("title").isBlank() || text("requirement").isBlank())) return ToolResult.Error("title and requirement are required", "MISSING_ARGS")
         val request = MemberTaskRequest(action, text("title"), text("requirement"), text("parent_id").ifBlank { null }, text("acceptance"))
         val sessionId = context.sessionId ?: return ToolResult.Error(NOT_IN_TASK_MESSAGE, NOT_IN_TASK)
         // The runner keeps the store of every running project loaded, so a member run is found without trusting arguments.
