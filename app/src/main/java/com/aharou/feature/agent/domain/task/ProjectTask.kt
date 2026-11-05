@@ -44,5 +44,12 @@ data class ProjectTask(
     val processSessionIds: List<String> = emptyList(),
     val processRequirementsVersion: Long? = null,
     val processMembers: Map<String, ProjectTaskMemberRun> = emptyMap(),
-    val processParticipants: List<String>? = null
+    val processParticipants: List<String>? = null,
+    /** User supplements in original wording, oldest first; recording one never invalidates work by itself. */
+    val supplements: List<String> = emptyList(),
+    /** Member session that added this task through project_tasks; null for user or planner tasks. */
+    val createdBySessionId: String? = null
 )
+
+/** One staged write in a repository transaction; [force] bumps the requirements version (rerun) even without a field change. */
+data class ProjectTaskChange(val task: ProjectTask, val force: Boolean = false)

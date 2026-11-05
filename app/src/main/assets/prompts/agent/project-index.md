@@ -28,7 +28,7 @@
 
 - `feature/agent/` — agent 内核：提示词、工具注册与权限、MCP、provider 适配、会话、调度、子代理、工作流（内部仍分 data / domain / presentation） — `docs/FILE_INDEX.md`
 - `feature/settings/` — 模型 provider 与全部设置页；OpenAI 速度档位走 `config providers.<id>.service_tier`（default/fast/ultrafast），与思考强度独立，Ultrafast 使用 Responses，选择前确认费用和服务支持 — `docs-site/docs/guide/providers.md`
-- `feature/agent/domain/task/` — 项目统一开始/停止；完整树图/导图节点内只读展示成员过程，负责人及成员逐个真实执行、重复角色分别记录，全员交付才待验收；成员变更作废本任务和下游旧交付；后续成员拿到前序结果，超时只计执行时间，受阻重跑复用已成功成员，详情页可单独运行一个任务 — `docs-site/docs/guide/chat.md`
+- `feature/agent/domain/task/` — 创建/追加/添加任务由 `ProjectPlanner` 调模型拆成任务树（提示词 `agent/project-plan.md`，最多 30 个、4 层，失败退回按行规则并在界面提示），长按补充按 `agent/project-revise.md` 只选改动起点、下游照依赖失效，操作成功且流程未运行就自动开始；成员在执行中可用 `project_tasks` 分出研究分支（当前任务改为依赖分支，Runner 停掉该成员记 SUPERSEDED 后先跑分支再重做）或追加子任务；项目统一开始/停止；完整树图/导图节点内只读展示成员过程，负责人及成员逐个真实执行、重复角色分别记录，全员交付才待验收；成员变更作废本任务和下游旧交付；后续成员拿到前序结果，超时只计执行时间，受阻重跑复用已成功成员，详情页可单独运行一个任务 — `docs-site/docs/guide/chat.md`
 - `feature/workspace/` — 工作区管理与 DocumentsProvider — `docs/FILE_INDEX.md`
 - `feature/terminal/` — 终端会话：PRoot 本地容器与 sshj 远程 — `docs/FILE_INDEX.md`
 - `feature/editor/` — sora-editor 编辑器与 LSP — `docs/FILE_INDEX.md`
