@@ -127,6 +127,17 @@ class ProjectTaskViewModelTest {
         viewModel.cancelExecution("t"); runCurrent()
     }
 
+    @Test fun aManualStartDuringASingleTaskRunStillQueuesTheProjectFlow() = runTest(dispatcher) {
+        coEvery { workflow.run("p", "/first", "t") } coAnswers { kotlinx.coroutines.awaitCancellation() }
+        coEvery { workflow.run("p", "/first") } coAnswers { kotlinx.coroutines.awaitCancellation() }
+        viewModel.workspace("/first"); runCurrent()
+        viewModel.runProjectTask(projectTask); runCurrent()
+        viewModel.startProject("p"); runCurrent()
+        coVerify(exactly = 1) { workflow.run("p", "/first", null) }
+        org.junit.Assert.assertTrue("p" in viewModel.state.value.activeProjectIds)
+        viewModel.stopProject("p"); viewModel.cancelExecution("t"); runCurrent()
+    }
+
     @Test fun aSupplementIsSavedThenContinuesAnIdleProjectButNotARunningOne() = runTest(dispatcher) {
         val finish = kotlinx.coroutines.CompletableDeferred<Unit>()
         coEvery { workflow.run("p", "/first") } coAnswers { finish.await() }

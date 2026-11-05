@@ -164,7 +164,7 @@ class ProjectTaskViewModel @Inject constructor(
      * that arrive just as the flow finishes; a failed or stopped flow does not take that pass.
      */
     private fun startProjectIn(projectId: String, workspace: String, continueAfterRun: Boolean = false) {
-        if (workspace.isBlank() || projectId in singleTaskProjects.values) return
+        if (workspace.isBlank() || (continueAfterRun && projectId in singleTaskProjects.values)) return
         if (projectJobs[projectId]?.isActive == true) { if (continueAfterRun) rerunAfterFlow += projectId; return }
         val job = viewModelScope.launch(start = kotlinx.coroutines.CoroutineStart.LAZY) {
             var completed = false

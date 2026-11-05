@@ -34,4 +34,9 @@ class ProjectTaskOutlineTest {
         assertEquals(emptyList<Hit>(), ProjectTaskOutline.find(tasks, "  "))
         assertEquals(listOf(Hit("a", null), Hit("b", Line(Kind.REQUIREMENT, "调用 login 接口"))), ProjectTaskOutline.find(tasks, "LOGIN"))
     }
+
+    @Test fun findDoesNotMatchDownstreamTasksThroughTheirDependencyLines() {
+        val tasks = listOf(task("a", title = "登录接口"), task("b", title = "登录页").copy(dependencyIds = listOf("a")))
+        assertEquals(listOf(Hit("a", null)), ProjectTaskOutline.find(tasks, "登录接口"))
+    }
 }

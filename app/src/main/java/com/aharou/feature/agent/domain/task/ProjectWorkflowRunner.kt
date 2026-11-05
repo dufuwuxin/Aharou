@@ -87,9 +87,11 @@ class ProjectWorkflowRunner @Inject constructor(
                                 check(result is ToolResult.Success) { (result as? ToolResult.Error)?.message ?: "PROJECT_MEMBER_START_FAILED" }
                                 val id = result.data.jsonObject["id"]?.jsonPrimitive?.contentOrNull ?: error("PROJECT_MEMBER_ID_MISSING")
                                 child = id
-                                val linked = repository.load(workspace).tasks.first { it.id == next.id }
-                                repository.save(linked.copy(processSessionIds = linked.processSessionIds + id,
-                                    processMembers = linked.processMembers + (id to ProjectTaskMemberRun(member, index + 1, next.requirementsVersion))))
+                                repository.transact(workspace) { store ->
+                                    val linked = store.tasks.first { it.id == next.id }
+                                    listOf(ProjectTaskChange(linked.copy(processSessionIds = linked.processSessionIds + id,
+                                        processMembers = linked.processMembers + (id to ProjectTaskMemberRun(member, index + 1, next.requirementsVersion)))))
+                                }
                             }
                             if (child == null) delay(100)
                         }
@@ -101,9 +103,11 @@ class ProjectWorkflowRunner @Inject constructor(
                         val terminal = requireNotNull(events.terminalEvent(id))
                         val passed = terminal.type == SubAgentEventType.COMPLETED && terminal.accepted == true
                         val outcome = if (passed) "SUCCEEDED" else if (terminal.type == SubAgentEventType.STOPPED) "STOPPED" else "FAILED"
-                        val latest = repository.load(workspace).tasks.first { it.id == next.id }
-                        repository.save(latest.copy(processMembers = latest.processMembers +
-                            (id to latest.processMembers.getValue(id).copy(outcome = outcome, reason = terminal.detail))))
+                        repository.transact(workspace) { store ->
+                            val latest = store.tasks.first { it.id == next.id }
+                            listOf(ProjectTaskChange(latest.copy(processMembers = latest.processMembers +
+                                (id to latest.processMembers.getValue(id).copy(outcome = outcome, reason = terminal.detail)))))
+                        }
                         child = null
                         check(passed) { if (outcome == "STOPPED") "PROJECT_MEMBER_STOPPED" else "PROJECT_MEMBER_FAILED" }
                         outputs += memberOutput(index, member, id)
@@ -176,11 +180,13 @@ class ProjectWorkflowRunner @Inject constructor(
             catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { } // A member that already ended needs no stop; its record is still superseded below.
         }
-        val latest = repository.load(workspace).tasks.first { it.id == taskId }
-        val records = latest.processMembers.toMutableMap()
-        child?.let { id -> records[id]?.let { records[id] = it.copy(outcome = "SUPERSEDED", reason = "UPSTREAM_CHANGED") } }
-        repository.save(latest.copy(status = ProjectTaskStatus.READY, processRequirementsVersion = null,
-            processMembers = records, executionReason = "UPSTREAM_CHANGED"))
+        repository.transact(workspace) { store ->
+            val latest = store.tasks.first { it.id == taskId }
+            val records = latest.processMembers.toMutableMap()
+            child?.let { id -> records[id]?.let { records[id] = it.copy(outcome = "SUPERSEDED", reason = "UPSTREAM_CHANGED") } }
+            listOf(ProjectTaskChange(latest.copy(status = ProjectTaskStatus.READY, processRequirementsVersion = null,
+                processMembers = records, executionReason = "UPSTREAM_CHANGED")))
+        }
     }
 
     private suspend fun memberOutput(index: Int, member: String, sessionId: String): String {
