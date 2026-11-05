@@ -18,14 +18,13 @@ import com.aharou.core.ui.AppTextField
 
 /**
  * One-line task description; the AI decides placement, dependencies and members.
- * [parentTitle] is set when opened from a node's long-press menu and is folded into the description as a hint.
+ * [parentTitle] is only displayed; the caller passes the chosen parent task to the planner.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProjectTaskAddSheet(parentTitle: String?, busy: Boolean, onSubmit: (String) -> Unit, onDismiss: () -> Unit) {
     var text by rememberSaveable { mutableStateOf("") }
     val description = text.trim()
-    val submitted = if (parentTitle == null) description else stringResource(R.string.project_add_task_child_description, parentTitle, description)
     AdaptiveModalBottomSheet(onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(Modifier.fillMaxWidth().imePadding().verticalScroll(rememberScrollState()).padding(Spacing.lg)
@@ -36,7 +35,7 @@ fun ProjectTaskAddSheet(parentTitle: String?, busy: Boolean, onSubmit: (String) 
                 overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelMedium)
             Text(stringResource(R.string.project_add_task_hint), style = MaterialTheme.typography.bodySmall)
             AppTextField(text, { text = it }, label = stringResource(R.string.project_add_task_label), minLines = 2, singleLine = false)
-            Button(onClick = { onSubmit(submitted) }, enabled = description.isNotEmpty() && !busy,
+            Button(onClick = { onSubmit(description) }, enabled = description.isNotEmpty() && !busy,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("project_add_task_submit")) {
                 Text(stringResource(R.string.project_add_task_submit))
             }

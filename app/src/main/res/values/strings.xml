@@ -3804,7 +3804,6 @@
     <string name="project_add_task_hint">只需一句描述。AI 会决定它挂在哪个任务下、依赖哪些任务、由哪位成员执行；流程未运行时会自动开始。</string>
     <string name="project_add_task_label">任务描述</string>
     <string name="project_add_task_under">放在「%1$s」之下</string>
-    <string name="project_add_task_child_description">作为任务「%1$s」的子任务：%2$s</string>
     <string name="project_add_task_submit">交给 AI 添加</string>
     <string name="project_node_supplement">补充内容</string>
     <string name="project_node_add_child">添加子任务</string>

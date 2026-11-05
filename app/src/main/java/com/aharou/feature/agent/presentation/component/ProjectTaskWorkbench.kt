@@ -177,7 +177,7 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
             onDismiss = { supplementId = null })
     }
     if (addOpen) ProjectTaskAddSheet(tasks.firstOrNull { it.id == addParentId }?.title, state.busy,
-        onSubmit = { viewModel.addTaskByDescription(projectId, it); addOpen = false; addParentId = null },
+        onSubmit = { viewModel.addTaskByDescription(projectId, it, addParentId); addOpen = false; addParentId = null },
         onDismiss = { addOpen = false; addParentId = null })
     if (overview && project != null) AlertDialog(onDismissRequest = { overview = false },
         title = { Text(project.title) }, text = { Text(project.requirements, modifier = Modifier.verticalScroll(rememberScrollState())) },
