@@ -1,6 +1,33 @@
 package com.aharou.feature.agent.domain.task
 
 object ProjectTaskGraph {
+    /** Tree levels allowed for planned and member-added tasks; a root task is level 0. */
+    const val MAX_TREE_DEPTH = 4
+
+    fun depth(task: ProjectTask, tasks: List<ProjectTask>): Int {
+        val byId = tasks.associateBy { it.id }
+        val seen = hashSetOf(task.id)
+        var depth = 0
+        var cursor = task.parentId?.let(byId::get)
+        while (cursor != null && seen.add(cursor.id)) { depth++; cursor = cursor.parentId?.let(byId::get) }
+        return depth
+    }
+
+    /** The task itself and every task under it by parentId. */
+    fun subtree(rootId: String, tasks: List<ProjectTask>): List<ProjectTask> {
+        val children = tasks.groupBy { it.parentId }
+        val result = mutableListOf<ProjectTask>()
+        val seen = hashSetOf<String>()
+        val queue = java.util.ArrayDeque<String>(); queue.add(rootId)
+        while (queue.isNotEmpty()) {
+            val id = queue.removeFirst()
+            if (!seen.add(id)) continue
+            tasks.firstOrNull { it.id == id }?.let { result += it }
+            children[id].orEmpty().forEach { queue.add(it.id) }
+        }
+        return result
+    }
+
     data class ContextTask(val task: ProjectTask? = null, val unavailable: Boolean = false)
     fun currentContextTask(sessionId: String?, workspace: String, ghost: Boolean, read: () -> List<ProjectTask>): ContextTask {
         if (ghost || sessionId == null || workspace.isBlank()) return ContextTask()
@@ -105,9 +132,9 @@ object ProjectTaskGraph {
         return result
     }
 
-    fun revise(old: ProjectTask?, proposed: ProjectTask, version: Long): ProjectTask {
+    fun revise(old: ProjectTask?, proposed: ProjectTask, version: Long, force: Boolean = false): ProjectTask {
         require(old == null || (old.id == proposed.id && old.workspace == proposed.workspace && old.projectId == proposed.projectId))
-        val changed = old != null && (old.requirement != proposed.requirement || old.background != proposed.background ||
+        val changed = old != null && (force || old.requirement != proposed.requirement || old.background != proposed.background ||
             old.acceptance != proposed.acceptance || old.constraints != proposed.constraints || old.dependencyIds != proposed.dependencyIds ||
             ProjectWorkflowPlan.participants(old) != ProjectWorkflowPlan.participants(proposed))
         return proposed.copy(version = version, createdAt = old?.createdAt ?: proposed.createdAt,

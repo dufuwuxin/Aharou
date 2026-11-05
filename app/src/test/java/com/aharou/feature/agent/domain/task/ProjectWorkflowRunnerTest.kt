@@ -26,8 +26,8 @@ class ProjectWorkflowRunnerTest {
         title = id, requirement = id, dependencyIds = deps, version = 1, order = if (id == "a") 1 else 2, createdAt = 1)
 
     private fun fixture(accepted: Boolean, wait: Boolean = false, owner: String = "", members: List<String> = emptyList(),
-        rejectAt: Int? = null, waitAt: Int? = null, capacityWait: Boolean = false, fullChecks: Int = 2,
-        seed: (ProjectTask) -> ProjectTask = { it }): Pair<ProjectWorkflowRunner, () -> ProjectTaskSnapshot> {
+        rejectAt: Int? = null, waitAt: Int? = null, capacityWait: Boolean = false, fullChecks: Int = 2, holdFirstMember: Boolean = false,
+        seed: (ProjectTask) -> ProjectTask = { it }): Triple<ProjectWorkflowRunner, () -> ProjectTaskSnapshot, ((ProjectTaskSnapshot) -> ProjectTaskSnapshot) -> Unit> {
         val repository = mockk<ProjectTaskRepository>()
         val guard = Any()
         var snapshot = ProjectTaskSnapshot(version = 1, projects = listOf(ProjectPlan(id = "p", workspace = "w", title = "p", requirements = "a then b")),
@@ -68,7 +68,7 @@ class ProjectWorkflowRunnerTest {
                     val roles = (listOf(owner) + members).filter { it.isNotBlank() }.ifEmpty { listOf("") }
                     assertEquals(roles[ordinal - 1].takeIf { it.isNotBlank() }, args["agent"]?.jsonPrimitive?.content)
                     assertEquals(ordinal > 1, prompt.contains("[${ordinal - 1}: "))
-                    if (index > 1) {
+                    if (index > 1 && !holdFirstMember) {
                         val previous = synchronized(guard) { snapshot.tasks[0] }
                         assertEquals(ProjectTaskStatus.RUNNING, previous.status)
                         assertEquals(seeded + index - 1, previous.processSessionIds.size)
@@ -84,7 +84,7 @@ class ProjectWorkflowRunnerTest {
         every { events.isFull } answers { capacityWait && capacityChecks++ < fullChecks }
         every { events.terminalEvent(any()) } answers {
             val id = firstArg<String>()
-            if (wait || created[id] == waitAt) null else SubAgentEvent(id, rootId, SubAgentEventType.COMPLETED,
+            if (wait || created[id] == waitAt || (holdFirstMember && id == "member-a")) null else SubAgentEvent(id, rootId, SubAgentEventType.COMPLETED,
                 accepted = accepted && created[id] != rejectAt)
         }
         val messages = mockk<MessagePersistenceUseCase>(relaxed = true)
@@ -93,7 +93,42 @@ class ProjectWorkflowRunnerTest {
         val registry = mockk<com.aharou.feature.agent.domain.tool.ToolRegistry>()
         every { registry.getTool("task") } returns tasks
         val runner = ProjectWorkflowRunner(repository, sessions, turns, javax.inject.Provider { registry }, events, mockk(), messages, ProjectTaskExecutionCoordinator())
-        return runner to { synchronized(guard) { snapshot } }
+        return Triple(runner, { synchronized(guard) { snapshot } }, { change -> synchronized(guard) { snapshot = change(snapshot) } })
+    }
+
+    /** What a branch (new dependency) or a supplement (new requirement) does to the running task through Repository.save. */
+    private fun ProjectTaskSnapshot.reviseA(change: (ProjectTask) -> ProjectTask): ProjectTaskSnapshot =
+        copy(tasks = tasks.map { if (it.id == "a") change(it).copy(requirementsVersion = it.requirementsVersion + 1, status = ProjectTaskStatus.READY) else it })
+
+    @Test fun aBranchSupersedesTheRunningMemberRunsTheBranchThenReturnsToTheTask() = runBlocking {
+        val (runner, snapshot, edit) = fixture(true, holdFirstMember = true)
+        val job = launch { runner.run("p", "w") }
+        withTimeout(3000) { while (snapshot().tasks[0].processSessionIds.isEmpty()) delay(5) }
+        edit { store -> store.reviseA { it.copy(dependencyIds = listOf("c")) }.let { revised ->
+            revised.copy(tasks = revised.tasks + task("c").copy(parentId = "a", order = 3, status = ProjectTaskStatus.READY)) } }
+        withTimeout(5000) { job.join() }
+        val tasks = snapshot().tasks.associateBy { it.id }
+        assertEquals(setOf("member-a"), stopped)
+        assertEquals("SUPERSEDED", tasks.getValue("a").processMembers.getValue("member-a").outcome)
+        assertEquals(listOf("member-c"), tasks.getValue("c").processSessionIds)
+        assertEquals(listOf("member-a", "member-a-2"), tasks.getValue("a").processSessionIds)
+        assertEquals(listOf("member-b"), tasks.getValue("b").processSessionIds)
+        assertTrue(tasks.values.all { it.status == ProjectTaskStatus.REVIEW })
+        assertEquals(2L, tasks.getValue("a").processRequirementsVersion)
+    }
+
+    @Test fun aSupplementDuringTheRunRerunsTheTaskInsteadOfEndingTheFlow() = runBlocking {
+        val (runner, snapshot, edit) = fixture(true, holdFirstMember = true)
+        val job = launch { runner.run("p", "w") }
+        withTimeout(3000) { while (snapshot().tasks[0].processSessionIds.isEmpty()) delay(5) }
+        edit { store -> store.reviseA { it.copy(requirement = "a with supplement", supplements = listOf("supplement")) } }
+        withTimeout(5000) { job.join() }
+        val first = snapshot().tasks[0]
+        assertEquals(listOf("member-a", "member-a-2"), first.processSessionIds)
+        assertEquals("SUPERSEDED", first.processMembers.getValue("member-a").outcome)
+        assertEquals("SUCCEEDED", first.processMembers.getValue("member-a-2").outcome)
+        assertEquals(ProjectTaskStatus.REVIEW, first.status)
+        assertEquals(listOf("member-b"), snapshot().tasks[1].processSessionIds)
     }
 
     @Test fun oneProjectFlowCreatesMemberRecordsNotIndependentRootChats() = runBlocking {

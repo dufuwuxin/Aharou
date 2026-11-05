@@ -14,13 +14,15 @@ object ProjectWorkflowPlan {
         require(ProjectTaskGraph.validate(tasks) == null) { "INVALID_TASK_GRAPH" }
         val pending = ProjectTaskGraph.tree(tasks).map { it.task }.filterNot(::delivered)
         if (pending.isEmpty()) return null
-        return pending.firstOrNull { task -> task.dependencyIds.all { id -> tasks.any { it.id == id && delivered(it) } } }
-            ?: error("PROJECT_FLOW_BLOCKED")
+        return pending.firstOrNull { dependenciesDelivered(it, tasks) } ?: error("PROJECT_FLOW_BLOCKED")
     }
+
+    fun dependenciesDelivered(task: ProjectTask, tasks: List<ProjectTask>): Boolean =
+        task.dependencyIds.all { id -> tasks.any { it.id == id && delivered(it) } }
 
     fun runnable(tasks: List<ProjectTask>, taskId: String): ProjectTask {
         val task = tasks.firstOrNull { it.id == taskId } ?: error("PROJECT_TASK_NOT_FOUND")
-        check(task.dependencyIds.all { id -> tasks.any { it.id == id && delivered(it) } }) { "PROJECT_FLOW_BLOCKED" }
+        check(dependenciesDelivered(task, tasks)) { "PROJECT_FLOW_BLOCKED" }
         return task
     }
 
@@ -48,6 +50,7 @@ object ProjectWorkflowPlan {
         append("Project requirements:\n").append(requirements)
         append("\n\nTask ID: ").append(task.id).append("\nTask: ").append(task.title)
         append("\nRequirement:\n").append(task.requirement)
+        if (task.supplements.isNotEmpty()) append("\nUser supplements (oldest first, they refine the requirement):\n").append(task.supplements.joinToString("\n"))
         append("\nBackground:\n").append(task.background)
         append("\nAssigned member: ").append(member.ifBlank { "default member" })
         append("\nParticipant: ").append(ordinal).append(" / ").append(participants(task).size)
@@ -62,5 +65,6 @@ object ProjectWorkflowPlan {
             append(previous.joinToString("\n\n"))
         }
         append("\n\nExecute only this task as a member of the project workflow. Return the result, evidence, and anything unresolved. Do not start a separate project flow or mark work accepted without evidence.")
+        append(" If part of this task needs separate research first, call project_tasks(action=\"branch\") and end this turn at once; the flow runs the branch and then reruns this task with its result. Use project_tasks(action=\"add\") for follow-up subtasks that run after this task.")
     }
 }

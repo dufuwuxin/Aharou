@@ -120,6 +120,7 @@ import com.aharou.feature.agent.domain.tool.mode.PlanModeTool
 import com.aharou.feature.agent.domain.tool.search.WebFetchTool
 import com.aharou.feature.agent.domain.tool.search.WebSearchTool
 import com.aharou.feature.agent.domain.tool.session.SessionTool
+import com.aharou.feature.agent.domain.tool.session.ProjectTaskTool
 import com.aharou.feature.browser.BrowserTool
 import com.aharou.feature.agent.domain.workflow.ContextCompactor
 import com.aharou.feature.agent.domain.workflow.GeneratedImagePersister
@@ -457,6 +458,7 @@ object AgentModule {
         openAppTool: OpenAppTool,
         dependencyCheckTool: DependencyCheckTool,
         sessionTool: SessionTool,
+        projectTaskTool: ProjectTaskTool,
         deviceTool: DeviceTool,
         personalContextTool: PersonalContextTool,
         petAvatarTool: PetAvatarTool,
@@ -499,6 +501,7 @@ object AgentModule {
             register("open_app", openAppTool)
             register("check_dependencies", dependencyCheckTool)
             register("sessions", sessionTool)
+            register("project_tasks", projectTaskTool)
             register("device", deviceTool)
             register("personal_context", personalContextTool)
             register("petAvatar", petAvatarTool)

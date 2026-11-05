@@ -30,7 +30,11 @@ data class ProjectTaskUiState(
     val appendSucceededRequest: String? = null,
     val activeTaskIds: Set<String> = emptySet(),
     val activeProjectIds: Set<String> = emptySet(),
-    val availableMembers: List<String> = emptyList()
+    val availableMembers: List<String> = emptyList(),
+    /** Projects whose tasks the planner is splitting or revising right now. */
+    val planningProjectIds: Set<String> = emptySet(),
+    /** Projects whose latest planning fell back to line rules because the model was unavailable or invalid. */
+    val ruleFallbackProjectIds: Set<String> = emptySet()
 )
 
 @HiltViewModel
@@ -66,7 +70,8 @@ class ProjectTaskViewModel @Inject constructor(
         if (path == mutable.value.workspace && !mutable.value.loading) return
         mutable.value = ProjectTaskUiState(workspace = path, activeTaskIds = executionJobs.keys.toSet(), activeProjectIds = projectJobs.keys.toSet(),
             availableMembers = mutable.value.availableMembers, projectSessionIds = mutable.value.projectSessionIds,
-            indexedSessionWorkspaces = mutable.value.indexedSessionWorkspaces, failedSessionWorkspaces = mutable.value.failedSessionWorkspaces)
+            indexedSessionWorkspaces = mutable.value.indexedSessionWorkspaces, failedSessionWorkspaces = mutable.value.failedSessionWorkspaces,
+            planningProjectIds = mutable.value.planningProjectIds, ruleFallbackProjectIds = mutable.value.ruleFallbackProjectIds)
         viewModelScope.launch {
             if (path.isBlank()) { mutable.update { it.copy(loading = false) }; return@launch }
             try {
@@ -81,14 +86,41 @@ class ProjectTaskViewModel @Inject constructor(
 
     fun selectProject(id: String?) { mutable.update { it.copy(selectedProjectId = id, selectedId = null) } }
 
-    fun createProject(name: String, requirements: String) = operation { workspace ->
-        val project = repository.createProject(name, requirements, workspace)
-        if (project.workspace == mutable.value.workspace) mutable.update { it.copy(selectedProjectId = project.id) }
+    fun createProject(name: String, requirements: String) {
+        val projectId = java.util.UUID.randomUUID().toString()
+        planning(projectId) { workspace ->
+            val outcome = repository.createProject(name, requirements, workspace, projectId)
+            if (outcome.project.workspace == mutable.value.workspace) mutable.update { it.copy(selectedProjectId = outcome.project.id) }
+            outcome.ruleFallback
+        }
     }
 
-    fun appendRequirements(projectId: String, text: String, requestId: String) = operation { workspace ->
-        repository.appendRequirements(projectId, text, workspace)
+    fun appendRequirements(projectId: String, text: String, requestId: String) = planning(projectId) { workspace ->
+        val outcome = repository.appendRequirements(projectId, text, workspace)
         if (mutable.value.workspace == workspace) mutable.update { it.copy(appendSucceededRequest = requestId) }
+        outcome.ruleFallback
+    }
+
+    /** Keeps the user's wording on the task, lets the planner choose what to redo, then continues the flow. */
+    fun supplement(task: ProjectTask, text: String) {
+        val projectId = task.projectId ?: return
+        planning(projectId) { workspace -> repository.supplement(task.id, text, workspace) }
+    }
+
+    /** The planner decides parent (or keeps [parentId] when given), dependencies and members for one description. */
+    fun addTaskByDescription(projectId: String, description: String, parentId: String? = null) = planning(projectId) { workspace ->
+        repository.addTaskByDescription(projectId, description, workspace, parentId).ruleFallback
+    }
+
+    /** [block] returns whether rules replaced the model. On success the flow starts once the setup lock is released. */
+    private fun planning(projectId: String, block: suspend (String) -> Boolean) = operation(onSuccess = { workspace ->
+        startProjectIn(projectId, workspace)
+    }) { workspace ->
+        mutable.update { it.copy(planningProjectIds = it.planningProjectIds + projectId) }
+        val fallback = try { block(workspace) } finally {
+            mutable.update { it.copy(planningProjectIds = it.planningProjectIds - projectId) }
+        }
+        mutable.update { it.copy(ruleFallbackProjectIds = if (fallback) it.ruleFallbackProjectIds + projectId else it.ruleFallbackProjectIds - projectId) }
     }
 
     /** Load only known workspace stores to exclude project executions from ordinary history. */
@@ -118,8 +150,13 @@ class ProjectTaskViewModel @Inject constructor(
     }
 
     fun startProject(projectId: String) {
-        val workspace = mutable.value.workspace
-        if (mutable.value.loading || mutable.value.busy || workspace.isBlank() || projectJobs[projectId]?.isActive == true) return
+        if (mutable.value.loading || mutable.value.busy) return
+        startProjectIn(projectId, mutable.value.workspace)
+    }
+
+    /** No busy check: automatic starts run right after their own setup lock is released and must not be dropped. */
+    private fun startProjectIn(projectId: String, workspace: String) {
+        if (workspace.isBlank() || projectJobs[projectId]?.isActive == true) return
         val job = viewModelScope.launch(start = kotlinx.coroutines.CoroutineStart.LAZY) {
             try { projectWorkflow.run(projectId, workspace) }
             catch (cancelled: CancellationException) { throw cancelled }
@@ -216,16 +253,18 @@ class ProjectTaskViewModel @Inject constructor(
         busyOwner = null
         mutable.update { it.copy(busy = false) }
     }
-    private fun operation(block: suspend (String) -> Unit) {
+    private fun operation(onSuccess: ((String) -> Unit)? = null, block: suspend (String) -> Unit) {
         if (mutable.value.loading || mutable.value.busy || mutable.value.workspace.isBlank()) return
         val workspace = mutable.value.workspace
         val owner = Any(); busyOwner = owner
         mutable.update { it.copy(busy = true, error = null) }
         viewModelScope.launch {
-            try { block(workspace) } catch (failure: Exception) {
+            var succeeded = false
+            try { block(workspace); succeeded = true } catch (failure: Exception) {
                 if (failure is CancellationException) throw failure
                 error(failure.message ?: "TASK_OPERATION_FAILED", workspace)
             } finally { if (busyOwner === owner) releaseSetup() }
+            if (succeeded) onSuccess?.invoke(workspace)
         }
     }
 }

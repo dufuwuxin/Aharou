@@ -2,14 +2,18 @@ package com.aharou.feature.agent.data.task
 
 import android.content.Context
 import android.util.AtomicFile
-import com.aharou.feature.agent.domain.task.ProjectTask
 import com.aharou.feature.agent.domain.task.ProjectPlan
-import com.aharou.feature.agent.domain.task.ProjectPlanDraft
+import com.aharou.feature.agent.domain.task.ProjectPlanner
+import com.aharou.feature.agent.domain.task.ProjectRevision
+import com.aharou.feature.agent.domain.task.ProjectTask
+import com.aharou.feature.agent.domain.task.ProjectTaskChange
 import com.aharou.feature.agent.domain.task.ProjectTaskGraph
+import com.aharou.feature.agent.domain.task.ProjectTaskStatus
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
 import java.security.MessageDigest
 import javax.inject.Inject
+import javax.inject.Provider
 import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -23,9 +27,15 @@ import kotlinx.serialization.json.Json
 data class ProjectTaskSnapshot(val formatVersion: Int = 1, val version: Long = 0, val tasks: List<ProjectTask> = emptyList(),
     val projects: List<ProjectPlan> = emptyList())
 
-/** Private AtomicFile, not Room: legacy goals and conversations are never migrated or deleted. */
+/** [ruleFallback]: the model was unavailable or its answer invalid, so line rules split the tasks. */
+data class ProjectPlanOutcome(val project: ProjectPlan, val ruleFallback: Boolean)
+
+/**
+ * Private AtomicFile, not Room: legacy goals and conversations are never migrated or deleted.
+ * The planner is a Provider because it reaches the agent workflow, whose tools read this repository.
+ */
 @Singleton
-class ProjectTaskRepository @Inject constructor(@ApplicationContext context: Context) {
+class ProjectTaskRepository @Inject constructor(@ApplicationContext context: Context, private val plannerProvider: Provider<ProjectPlanner>) {
     private val root = File(context.filesDir, "project-tasks")
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private val mutable = MutableStateFlow<Map<String, ProjectTaskSnapshot>>(emptyMap())
@@ -65,61 +75,148 @@ class ProjectTaskRepository @Inject constructor(@ApplicationContext context: Con
 
     suspend fun load(workspace: String): ProjectTaskSnapshot = withContext(Dispatchers.IO) { snapshot(workspace) }
 
-    suspend fun save(task: ProjectTask): ProjectTask = withContext(Dispatchers.IO) { saveLocked(task) }
+    suspend fun save(task: ProjectTask): ProjectTask = withContext(Dispatchers.IO) {
+        transactLocked(task.workspace) { listOf(ProjectTaskChange(task)) }.single()
+    }
+
+    /**
+     * Stages every change against one locked snapshot and commits them in a single AtomicFile write. [changes] runs under
+     * the store lock: it must not suspend or call a model, and a later change must not touch a task an earlier one invalidated.
+     */
+    suspend fun transact(workspace: String, changes: (ProjectTaskSnapshot) -> List<ProjectTaskChange>): List<ProjectTask> =
+        withContext(Dispatchers.IO) { transactLocked(workspace, changes) }
 
     @Synchronized
-    private fun saveLocked(proposed: ProjectTask): ProjectTask {
-        val current = snapshot(proposed.workspace) // A failed read prevents any write.
+    private fun transactLocked(workspace: String, build: (ProjectTaskSnapshot) -> List<ProjectTaskChange>): List<ProjectTask> {
+        var current = snapshot(workspace) // A failed read prevents any write.
+        val changes = build(current)
+        if (changes.isEmpty()) return emptyList()
+        val saved = changes.map { change ->
+            require(change.task.workspace == workspace) { "CROSS_WORKSPACE" }
+            val (next, updated) = stage(current, change)
+            current = next
+            updated
+        }
+        persist(workspace, current)
+        mutable.value = mutable.value + (workspace to current)
+        return saved
+    }
+
+    private fun stage(current: ProjectTaskSnapshot, change: ProjectTaskChange): Pair<ProjectTaskSnapshot, ProjectTask> {
+        val proposed = change.task
         val old = current.tasks.firstOrNull { it.id == proposed.id }
         check(old == null || old.version == proposed.version) { "STALE_TASK_VERSION" }
         require(proposed.projectId == null || current.projects.any { it.id == proposed.projectId }) { "PROJECT_NOT_FOUND" }
-        val updated = ProjectTaskGraph.revise(old, proposed, current.version + 1)
+        val updated = ProjectTaskGraph.revise(old, proposed, current.version + 1, change.force)
         val proposedTasks = current.tasks.filterNot { it.id == updated.id } + updated
         val invalidates = old != null && (old.requirementsVersion != updated.requirementsVersion ||
-            (old.status == com.aharou.feature.agent.domain.task.ProjectTaskStatus.DONE && updated.status != old.status))
+            (old.status == ProjectTaskStatus.DONE && updated.status != old.status))
         val tasks = if (invalidates) ProjectTaskGraph.invalidateDependents(proposedTasks, updated.id, updated.version) else proposedTasks
         require(ProjectTaskGraph.validate(tasks) == null) { ProjectTaskGraph.validate(tasks).orEmpty() }
-        val next = current.copy(version = tasks.maxOfOrNull { it.version } ?: updated.version, tasks = tasks)
-        persist(proposed.workspace, next)
-        mutable.value = mutable.value + (proposed.workspace to next)
-        return updated
+        return current.copy(version = tasks.maxOfOrNull { it.version } ?: updated.version, tasks = tasks) to updated
     }
-    suspend fun createProject(name: String, requirements: String, workspace: String): ProjectPlan = withContext(Dispatchers.IO) {
-        createProjectLocked(name, requirements, workspace)
+
+    /** The planner runs before any lock is taken; only the final commit is synchronized. */
+    suspend fun createProject(name: String, requirements: String, workspace: String,
+        projectId: String = java.util.UUID.randomUUID().toString()): ProjectPlanOutcome = withContext(Dispatchers.IO) {
+        val project = ProjectPlan(id = projectId, workspace = workspace, title = name.trim(), requirements = requirements)
+        require(project.title.isNotBlank() && requirements.isNotBlank()) { "REQUIRED_FIELDS" }
+        snapshot(workspace) // An unreadable store rejects the request before any model call.
+        val planner = plannerProvider.get()
+        val planned = planner.plan(project, requirements, emptyList(), planner.members())
+        createProjectLocked(project, planned.tasks)
+        ProjectPlanOutcome(project, planned.ruleFallback)
     }
 
     @Synchronized
-    private fun createProjectLocked(name: String, requirements: String, workspace: String): ProjectPlan {
+    private fun createProjectLocked(project: ProjectPlan, drafts: List<ProjectTask>) {
+        val workspace = project.workspace
         val current = snapshot(workspace)
-        val project = ProjectPlan(workspace = workspace, title = name.trim(), requirements = requirements)
-        val drafts = ProjectPlanDraft.build(project)
+        require(current.projects.none { it.id == project.id }) { "PROJECT_EXISTS" }
         val tasks = drafts.mapIndexed { index, task -> task.copy(version = current.version + index + 1) }
         val next = current.copy(version = current.version + tasks.size, projects = current.projects + project, tasks = current.tasks + tasks)
         require(ProjectTaskGraph.validate(next.tasks) == null) { "INVALID_TASK_GRAPH" }
-        persist(workspace, next) // Only one AtomicFile commit for project and every draft.
+        persist(workspace, next) // Only one AtomicFile commit for project and every planned task.
         mutable.value = mutable.value + (workspace to next)
-        return project
     }
 
-    suspend fun appendRequirements(projectId: String, text: String, workspace: String) = withContext(Dispatchers.IO) {
-        appendRequirementsLocked(projectId, text, workspace)
-    }
+    suspend fun appendRequirements(projectId: String, text: String, workspace: String): ProjectPlanOutcome =
+        planInto(projectId, text, workspace, extendRequirements = true)
+
+    /**
+     * One description becomes planned tasks; the planner picks parent, dependencies and members. Project requirements stay
+     * unchanged. A [parentId] fixes the parent of every new top-level task (depth limit still applies).
+     */
+    suspend fun addTaskByDescription(projectId: String, description: String, workspace: String, parentId: String? = null): ProjectPlanOutcome =
+        planInto(projectId, description, workspace, extendRequirements = false, parentId = parentId)
+
+    private suspend fun planInto(projectId: String, text: String, workspace: String, extendRequirements: Boolean,
+        parentId: String? = null): ProjectPlanOutcome =
+        withContext(Dispatchers.IO) {
+            require(text.isNotBlank()) { "REQUIRED_FIELDS" }
+            val current = snapshot(workspace)
+            val project = current.projects.firstOrNull { it.id == projectId } ?: error("PROJECT_NOT_FOUND")
+            val projectTasks = current.tasks.filter { it.projectId == projectId }
+            parentId?.let { id ->
+                val parent = projectTasks.firstOrNull { it.id == id } ?: error("PARENT_NOT_FOUND")
+                check(ProjectTaskGraph.depth(parent, projectTasks) + 1 <= ProjectTaskGraph.MAX_TREE_DEPTH) { "TASK_DEPTH_LIMIT" }
+            }
+            val planner = plannerProvider.get()
+            val planned = planner.plan(project, text, projectTasks, planner.members(), parentId)
+            ProjectPlanOutcome(appendTasksLocked(projectId, workspace, planned.tasks, text.takeIf { extendRequirements }), planned.ruleFallback)
+        }
 
     @Synchronized
-    private fun appendRequirementsLocked(projectId: String, text: String, workspace: String) {
-        require(text.isNotBlank()) { "REQUIRED_FIELDS" }
+    private fun appendTasksLocked(projectId: String, workspace: String, planned: List<ProjectTask>, appendText: String?): ProjectPlan {
         val current = snapshot(workspace)
         val project = current.projects.first { it.id == projectId }
-        val startOrder = maxOf(System.currentTimeMillis(), (current.tasks.maxOfOrNull { it.order } ?: 0L) + 1)
-        val tasks = ProjectPlanDraft.build(project.copy(requirements = text, createdAt = startOrder))
-            .mapIndexed { index, task -> task.copy(version = current.version + index + 1) }
-        val updated = project.copy(requirements = project.requirements + "\n\n" + text)
+        val startOrder = nextOrder(current)
+        val tasks = planned.mapIndexed { index, task -> task.copy(version = current.version + index + 1, order = startOrder + index) }
+        val updated = if (appendText == null) project else project.copy(requirements = project.requirements + "\n\n" + appendText)
         val next = current.copy(version = current.version + tasks.size,
             projects = current.projects.map { if (it.id == projectId) updated else it }, tasks = current.tasks + tasks)
         require(ProjectTaskGraph.validate(next.tasks) == null) { "INVALID_TASK_GRAPH" }
         persist(workspace, next)
         mutable.value = mutable.value + (workspace to next)
+        return updated
     }
+
+    /**
+     * Records [text] on the task first, so it survives a failed model call, then saves the planner's starting points.
+     * Returns true when the planner fell back to appending the supplement to the task requirement.
+     */
+    suspend fun supplement(taskId: String, text: String, workspace: String): Boolean = withContext(Dispatchers.IO) {
+        val supplement = text.trim()
+        require(supplement.isNotBlank()) { "REQUIRED_FIELDS" }
+        require(snapshot(workspace).tasks.firstOrNull { it.id == taskId }?.projectId != null) { "PROJECT_NOT_FOUND" }
+        val recorded = transactLocked(workspace) { snapshot ->
+            val task = snapshot.tasks.firstOrNull { it.id == taskId } ?: error("PROJECT_TASK_NOT_FOUND")
+            listOf(ProjectTaskChange(task.copy(supplements = task.supplements + supplement)))
+        }.single()
+        val projectId = requireNotNull(recorded.projectId)
+        val current = snapshot(workspace)
+        val planner = plannerProvider.get()
+        val revision = planner.revise(current.projects.first { it.id == projectId }, recorded,
+            current.tasks.filter { it.projectId == projectId }, supplement, planner.members())
+        applyRevisionLocked(workspace, projectId, revision)
+        revision.ruleFallback
+    }
+
+    /** Each edit or rerun is its own save on the latest version, so dependency invalidation runs exactly as for a user edit. */
+    @Synchronized
+    private fun applyRevisionLocked(workspace: String, projectId: String, revision: ProjectRevision) {
+        for (id in revision.touched) {
+            val latest = snapshot(workspace).tasks.firstOrNull { it.id == id && it.projectId == projectId } ?: continue
+            transactLocked(workspace) { listOf(revision.change(latest)) }
+        }
+        if (revision.added.isNotEmpty()) transactLocked(workspace) { snapshot ->
+            val order = nextOrder(snapshot)
+            revision.added.mapIndexed { index, task -> ProjectTaskChange(task.copy(order = order + index)) }
+        }
+    }
+
+    private fun nextOrder(snapshot: ProjectTaskSnapshot): Long =
+        maxOf(System.currentTimeMillis(), (snapshot.tasks.maxOfOrNull { it.order } ?: 0L) + 1)
 
     suspend fun linkProjectExecution(projectId: String, workspace: String, sessionId: String) = withContext(Dispatchers.IO) {
         linkProjectExecutionLocked(projectId, workspace, sessionId)

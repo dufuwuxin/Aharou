@@ -34,6 +34,16 @@ class ProjectWorkflowPlanTest {
         }
     }
 
+    @Test fun tasksSavedBeforeSupplementsExistDecodeWithEmptySupplements() {
+        val old = Json { ignoreUnknownKeys = true }.decodeFromString(ProjectTask.serializer(),
+            """{"id":"t","workspace":"w","title":"old","requirement":"old","status":"REVIEW","requirementsVersion":3,"legacyField":1}""")
+        assertTrue(old.supplements.isEmpty())
+        assertNull(old.createdBySessionId)
+        assertEquals(3L, old.requirementsVersion)
+        assertFalse(ProjectWorkflowPlan.prompt(old, listOf(old), "r").contains("User supplements"))
+        assertTrue(ProjectWorkflowPlan.prompt(old.copy(supplements = listOf("keep offline mode")), listOf(old), "r").contains("keep offline mode"))
+    }
+
     @Test fun oldTasksDecodeWithoutInventingAMemberRun() {
         val old = Json.decodeFromString(ProjectTask.serializer(), """{"workspace":"w","title":"old","requirement":"old"}""")
         assertTrue(old.processSessionIds.isEmpty())

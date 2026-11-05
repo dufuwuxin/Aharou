@@ -1,5 +1,6 @@
 package com.aharou.feature.agent.presentation
 
+import com.aharou.feature.agent.data.task.ProjectPlanOutcome
 import com.aharou.feature.agent.data.task.ProjectTaskRepository
 import com.aharou.feature.agent.data.task.ProjectTaskSnapshot
 import com.aharou.feature.agent.domain.runner.AgentTurnRunner
@@ -32,10 +33,13 @@ class ProjectTaskViewModelTest {
         Dispatchers.setMain(dispatcher)
         every { repository.snapshots } returns MutableStateFlow(emptyMap())
         coEvery { repository.load(any()) } returns ProjectTaskSnapshot()
-        coEvery { repository.createProject(any(), any(), any()) } answers {
-            ProjectPlan(workspace = thirdArg(), title = firstArg(), requirements = secondArg())
+        coEvery { repository.createProject(any(), any(), any(), any()) } answers {
+            ProjectPlanOutcome(ProjectPlan(id = arg(3), workspace = thirdArg(), title = firstArg(), requirements = secondArg()), ruleFallback = true)
         }
-        coEvery { repository.appendRequirements(any(), any(), any()) } returns Unit
+        coEvery { repository.appendRequirements(any(), any(), any()) } answers {
+            ProjectPlanOutcome(ProjectPlan(id = firstArg(), workspace = thirdArg(), title = "p", requirements = secondArg()), ruleFallback = false)
+        }
+        coEvery { repository.supplement(any(), any(), any()) } returns false
         coEvery { workflow.members() } returns listOf("member")
         viewModel = ProjectTaskViewModel(repository, mockk<SessionUseCase>(), mockk<AgentTurnRunner>(), workflow)
     }
@@ -61,8 +65,50 @@ class ProjectTaskViewModelTest {
         viewModel.createProject("project", "requirement")
         viewModel.workspace("/second")
         runCurrent()
-        coVerify(exactly = 1) { repository.createProject("project", "requirement", "/first") }
-        coVerify(exactly = 0) { repository.createProject(any(), any(), "/second") }
+        coVerify(exactly = 1) { repository.createProject("project", "requirement", "/first", any()) }
+        coVerify(exactly = 0) { repository.createProject(any(), any(), "/second", any()) }
+    }
+
+    @Test fun aPlannedProjectStartsItsFlowOnceSetupIsReleasedAndRecordsTheFallback() = runTest(dispatcher) {
+        val finish = kotlinx.coroutines.CompletableDeferred<Unit>()
+        coEvery { workflow.run(any(), "/first") } coAnswers { finish.await() }
+        viewModel.workspace("/first"); runCurrent()
+        viewModel.createProject("project", "requirement"); runCurrent()
+        val state = viewModel.state.value
+        val id = requireNotNull(state.selectedProjectId)
+        org.junit.Assert.assertFalse(state.busy)
+        org.junit.Assert.assertTrue(state.planningProjectIds.isEmpty())
+        org.junit.Assert.assertEquals(setOf(id), state.ruleFallbackProjectIds)
+        org.junit.Assert.assertEquals(setOf(id), state.activeProjectIds)
+        coVerify(exactly = 1) { workflow.run(id, "/first") }
+        viewModel.stopProject(id); runCurrent()
+    }
+
+    @Test fun addingASubtaskPassesTheChosenParentToThePlanner() = runTest(dispatcher) {
+        coEvery { repository.addTaskByDescription("p", "subtask", "/first", "parent") } answers {
+            ProjectPlanOutcome(ProjectPlan(id = "p", workspace = "/first", title = "p", requirements = "r"), ruleFallback = false)
+        }
+        coEvery { workflow.run("p", "/first") } coAnswers { kotlinx.coroutines.awaitCancellation() }
+        viewModel.workspace("/first"); runCurrent()
+        viewModel.addTaskByDescription("p", "subtask", parentId = "parent"); runCurrent()
+        coVerify(exactly = 1) { repository.addTaskByDescription("p", "subtask", "/first", "parent") }
+        org.junit.Assert.assertTrue("p" in viewModel.state.value.activeProjectIds)
+        org.junit.Assert.assertTrue(viewModel.state.value.ruleFallbackProjectIds.isEmpty())
+        viewModel.stopProject("p"); runCurrent()
+    }
+
+    @Test fun aSupplementIsSavedThenContinuesAnIdleProjectButNotARunningOne() = runTest(dispatcher) {
+        val finish = kotlinx.coroutines.CompletableDeferred<Unit>()
+        coEvery { workflow.run("p", "/first") } coAnswers { finish.await() }
+        val task = com.aharou.feature.agent.domain.task.ProjectTask(id = "t", workspace = "/first", title = "t", requirement = "t", projectId = "p")
+        viewModel.workspace("/first"); runCurrent()
+        viewModel.supplement(task, "also offline"); runCurrent()
+        coVerify(exactly = 1) { repository.supplement("t", "also offline", "/first") }
+        org.junit.Assert.assertTrue("p" in viewModel.state.value.activeProjectIds)
+        viewModel.supplement(task, "and dark mode"); runCurrent()
+        coVerify(exactly = 1) { repository.supplement("t", "and dark mode", "/first") }
+        coVerify(exactly = 1) { workflow.run("p", "/first") }
+        viewModel.stopProject("p"); runCurrent()
     }
 
     @Test fun runningOneProjectTaskUsesTheProjectFlowForThatTaskOnly() = runTest(dispatcher) {
