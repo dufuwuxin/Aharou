@@ -28,6 +28,7 @@ class ProjectWorkflowRunnerTest {
     private fun fixture(accepted: Boolean, wait: Boolean = false, owner: String = "", members: List<String> = emptyList(),
         rejectAt: Int? = null, waitAt: Int? = null, capacityWait: Boolean = false, fullChecks: Int = 2, holdFirstMember: Boolean = false,
         beforeCommit: ((ProjectTaskSnapshot) -> ProjectTaskSnapshot)? = null,
+        afterMemberEnds: ((ProjectTaskSnapshot) -> ProjectTaskSnapshot)? = null,
         seed: (ProjectTask) -> ProjectTask = { it }): Triple<ProjectWorkflowRunner, () -> ProjectTaskSnapshot, ((ProjectTaskSnapshot) -> ProjectTaskSnapshot) -> Unit> {
         val repository = mockk<ProjectTaskRepository>()
         val guard = Any()
@@ -36,9 +37,17 @@ class ProjectWorkflowRunnerTest {
         val seeded = snapshot.tasks[0].processSessionIds.size
         coEvery { repository.load("w") } answers { synchronized(guard) { snapshot } }
         coEvery { repository.linkProjectExecution("p", "w", rootId) } returns Unit
+        var memberEnded = false
+        var lateWrite = afterMemberEnds
+        // A write that lands between the runner's read and its write, once member-a has ended.
+        fun landLateWrite() { if (memberEnded) lateWrite?.let { change -> lateWrite = null; snapshot = change(snapshot) } }
         coEvery { repository.save(any()) } answers {
             val t = firstArg<ProjectTask>()
-            synchronized(guard) { snapshot = snapshot.copy(tasks = snapshot.tasks.map { if (it.id == t.id) t else it }) }
+            synchronized(guard) {
+                landLateWrite()
+                check(snapshot.tasks.firstOrNull { it.id == t.id }?.let { it.version == t.version } != false) { "STALE_TASK_VERSION" }
+                snapshot = snapshot.copy(tasks = snapshot.tasks.map { if (it.id == t.id) t else it })
+            }
             t
         }
         var hook = beforeCommit
@@ -46,6 +55,7 @@ class ProjectWorkflowRunnerTest {
             val build = secondArg<(ProjectTaskSnapshot) -> List<ProjectTaskChange>>()
             synchronized(guard) {
                 hook?.let { change -> hook = null; snapshot = change(snapshot) } // A write that lands just as the lock is taken.
+                landLateWrite()
                 val changes = build(snapshot)
                 snapshot = snapshot.copy(tasks = snapshot.tasks.map { t -> changes.firstOrNull { it.task.id == t.id }?.task ?: t })
                 changes.map { it.task }
@@ -95,8 +105,8 @@ class ProjectWorkflowRunnerTest {
         every { events.isFull } answers { capacityWait && capacityChecks++ < fullChecks }
         every { events.terminalEvent(any()) } answers {
             val id = firstArg<String>()
-            if (wait || created[id] == waitAt || (holdFirstMember && id == "member-a")) null else SubAgentEvent(id, rootId, SubAgentEventType.COMPLETED,
-                accepted = accepted && created[id] != rejectAt)
+            (if (wait || created[id] == waitAt || (holdFirstMember && id == "member-a")) null else SubAgentEvent(id, rootId, SubAgentEventType.COMPLETED,
+                accepted = accepted && created[id] != rejectAt)).also { if (it != null && id == "member-a") memberEnded = true }
         }
         val messages = mockk<MessagePersistenceUseCase>(relaxed = true)
         coEvery { messages.getMessagesOnce(any()) } returns emptyList()
@@ -138,6 +148,19 @@ class ProjectWorkflowRunnerTest {
         assertEquals(ProjectTaskStatus.REVIEW, first.status)
         assertEquals(2L, first.processRequirementsVersion)
         assertEquals(listOf("member-b"), snapshot().tasks[1].processSessionIds)
+    }
+
+    @Test fun aSupplementRecordedWhileAMemberRunsDoesNotFailTheMemberResultSave() = runBlocking {
+        val (runner, snapshot) = fixture(true, afterMemberEnds = { store ->
+            store.copy(tasks = store.tasks.map { if (it.id == "a") it.copy(supplements = listOf("late"), version = it.version + 1) else it }) })
+        runner.run("p", "w")
+        val first = snapshot().tasks[0]
+        assertEquals(listOf("late"), first.supplements)
+        assertEquals(listOf("member-a"), first.processSessionIds)
+        assertEquals("SUCCEEDED", first.processMembers.getValue("member-a").outcome)
+        assertEquals(ProjectTaskStatus.REVIEW, first.status)
+        assertEquals("SUCCEEDED", first.executionReason)
+        assertEquals(ProjectTaskStatus.REVIEW, snapshot().tasks[1].status)
     }
 
     @Test fun aBranchDuringASingleTaskRunRunsTheBranchAndThenTheTask() = runBlocking {
