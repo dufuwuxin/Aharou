@@ -9,6 +9,7 @@ import compose.icons.feathericons.Cpu
 import compose.icons.feathericons.Database
 import compose.icons.feathericons.Edit3
 import compose.icons.feathericons.FileText
+import compose.icons.feathericons.GitBranch
 import compose.icons.feathericons.Globe
 import compose.icons.feathericons.HelpCircle
 import compose.icons.feathericons.Image
@@ -34,6 +35,7 @@ internal fun toolIcon(toolName: String?): ImageVector = when (toolName?.lowercas
     "todo" -> FeatherIcons.Check
     "task" -> FeatherIcons.Cpu
     "memory" -> FeatherIcons.Database
+    "project_tasks" -> FeatherIcons.GitBranch
     else -> FeatherIcons.Tool
 }
 
@@ -62,5 +64,6 @@ internal fun toolRunningLabelRes(toolName: String?): Int = when (toolName?.lower
     "check_dependencies" -> R.string.chat_status_checking_dependencies
     "diagnostics" -> R.string.chat_status_checking_diagnostics
     "git_blame" -> R.string.chat_status_querying_blame
+    "project_tasks" -> R.string.chat_status_project_tasks
     else -> R.string.chat_status_calling_tool
 }

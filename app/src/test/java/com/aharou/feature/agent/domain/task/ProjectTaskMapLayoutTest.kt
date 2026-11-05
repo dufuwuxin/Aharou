@@ -8,10 +8,13 @@ class ProjectTaskMapLayoutTest {
         order: Long = 0) = ProjectTask(id = id, workspace = "w", title = title, requirement = id, parentId = parent,
         dependencyIds = deps, order = order)
 
+    private fun ProjectTaskMapLayout.Node.overlaps(other: ProjectTaskMapLayout.Node) =
+        x < other.x + other.width && other.x < x + width && y < other.y + other.height && other.y < y + height
+
     @Test fun parentIsAtChildBranchMidline() {
         val layout = ProjectTaskMapLayout.build("p", listOf(task("a"), task("b", order = 1)))
         val root = layout.nodes.first { it.id == "project:p" }
-        assertEquals((layout.nodes[1].y + layout.nodes[2].y) / 2f, root.y, 0.01f)
+        assertEquals((layout.nodes[1].dotY + layout.nodes[2].dotY) / 2f, root.dotY, 0.01f)
         assertEquals(2, layout.edges.size)
     }
 
@@ -34,16 +37,57 @@ class ProjectTaskMapLayoutTest {
         assertFalse(lowerOnly.any { it.id == nodes[0].id })
     }
 
-    @Test fun nodeWidthFollowsTitleWithinBounds() {
-        val short = ProjectTaskMapLayout.nodeWidth("A")
-        val medium = ProjectTaskMapLayout.nodeWidth("实现登录页面与接口联调")
-        val long = ProjectTaskMapLayout.nodeWidth("实现".repeat(80))
+    @Test fun headerWidthFollowsTitleWithinBounds() {
+        val short = ProjectTaskMapLayout.headerWidth("A")
+        val medium = ProjectTaskMapLayout.headerWidth("实现登录页面与接口联调")
+        val long = ProjectTaskMapLayout.headerWidth("实现".repeat(80))
         assertEquals(ProjectTaskMapLayout.NODE_MIN_WIDTH, short, 0.01f)
         assertTrue(medium > short)
         assertEquals(ProjectTaskMapLayout.NODE_MAX_WIDTH, long, 0.01f)
-        assertTrue(ProjectTaskMapLayout.nodeWidth("实现登录页面与接口联调", glyph = 16f) >= medium)
-        val layout = ProjectTaskMapLayout.build("p", listOf(task("a", "A"), task("b", "实现登录页面与接口联调", order = 1)))
-        assertTrue(layout.node("b")!!.width > layout.node("a")!!.width)
+        assertTrue(ProjectTaskMapLayout.headerWidth("实现登录页面与接口联调", glyph = 18.2f) >= medium)
+    }
+
+    @Test fun unfoldedNodePushesItsColumnSiblingsDown() {
+        val tasks = listOf(task("a"), task("b", order = 1), task("c", order = 2))
+        val folded = ProjectTaskMapLayout.build("p", tasks)
+        val unfolded = ProjectTaskMapLayout.build("p", tasks, heights = mapOf("a" to 400f))
+        val a = unfolded.node("a")!!
+        val b = unfolded.node("b")!!
+        assertEquals(400f, a.height, 0.01f)
+        assertTrue(a.width >= ProjectTaskMapLayout.PANEL_WIDTH)
+        assertTrue(b.y >= a.y + a.height + ProjectTaskMapLayout.SIBLING_GAP - 0.01f)
+        assertTrue(unfolded.node("c")!!.y - folded.node("c")!!.y >= 400f - ProjectTaskMapLayout.NODE_HEIGHT - 0.01f)
+        assertEquals(ProjectTaskMapLayout.NODE_HEIGHT, folded.node("a")!!.height, 0.01f)
+    }
+
+    @Test fun noTwoNodeBoxesIntersectWithMixedUnfoldedHeights() {
+        val tasks = listOf(task("a"), task("a1", parent = "a"), task("a2", parent = "a", order = 1),
+            task("b", order = 1), task("b1", parent = "b"), task("c", order = 2, deps = listOf("a1")),
+            task("c1", parent = "c"), task("c2", parent = "c", order = 1), task("c3", parent = "c", order = 2))
+        // Default and 1.3× font scale: unfolded heights grow, header widths widen with the glyph.
+        for ((glyph, scale) in listOf(14f to 1f, 18.2f to 1.3f)) {
+            val heights = mapOf("a" to 520f * scale, "a2" to 90f * scale, "b1" to 300f * scale, "c" to 70f * scale)
+            val layout = ProjectTaskMapLayout.build("p", tasks, heights = heights, rootTitle = "Root", glyph = glyph)
+            for (i in layout.nodes.indices) for (j in i + 1 until layout.nodes.size) {
+                assertFalse("${layout.nodes[i].id} overlaps ${layout.nodes[j].id} at $scale×",
+                    layout.nodes[i].overlaps(layout.nodes[j]))
+            }
+            assertTrue(layout.nodes.all { it.y >= 0f && it.x >= 0f && it.y + it.height <= layout.height })
+        }
+    }
+
+    @Test fun curvesStartAtTheForkDotAndEndOnTheChildDot() {
+        val layout = ProjectTaskMapLayout.build("p", listOf(task("a"), task("child", parent = "a")),
+            heights = mapOf("a" to 300f))
+        val a = layout.node("a")!!
+        val child = layout.node("child")!!
+        val curve = layout.curve(layout.edges.first { it.to == "child" })!!
+        assertEquals(a.forkX, curve.x0, 0.01f)
+        assertEquals(a.dotY, curve.y0, 0.01f)
+        assertEquals(child.dotX - ProjectTaskMapLayout.DOT_RADIUS, curve.x3, 0.01f)
+        assertEquals(child.dotY, curve.y3, 0.01f)
+        assertEquals(curve.y3, curve.y2, 0.01f)
+        assertTrue(curve.x0 > a.x + a.width && curve.x1 > curve.x0 && curve.x2 < curve.x3)
     }
 
     @Test fun childColumnStartsAfterTheWidestNodeOfTheParentColumn() {
@@ -54,27 +98,15 @@ class ProjectTaskMapLayoutTest {
         assertTrue(layout.node("c")!!.x >= a.x + a.width + ProjectTaskMapLayout.LEVEL_GAP - 0.01f)
     }
 
-    @Test fun forwardEdgeIsCubicWithHorizontalTangents() {
-        val layout = ProjectTaskMapLayout.build("p", listOf(task("a"), task("child", parent = "a")))
-        val a = layout.node("a")!!
-        val child = layout.node("child")!!
-        val curve = layout.curve(layout.edges.first { it.to == "child" })!!
-        assertEquals(a.x + a.width, curve.x0, 0.01f)
-        assertEquals(child.x, curve.x3, 0.01f)
-        assertEquals(curve.y0, curve.y1, 0.01f)
-        assertEquals(curve.y3, curve.y2, 0.01f)
-        assertTrue(curve.x1 > curve.x0 && curve.x2 < curve.x3)
-    }
-
     @Test fun sameColumnDependencyBulgesOutsideBothNodes() {
         val layout = ProjectTaskMapLayout.build("p", listOf(task("a"), task("b", deps = listOf("a"), order = 1)))
-        val edge = layout.edges.single { it.dependency }
-        val curve = layout.curve(edge)!!
+        val curve = layout.curve(layout.edges.single { it.dependency })!!
         val a = layout.node("a")!!
         val b = layout.node("b")!!
-        assertEquals(b.x + b.width, curve.x3, 0.01f)
+        assertEquals(b.forkX, curve.x3, 0.01f)
+        assertEquals(b.dotY, curve.y3, 0.01f)
         assertTrue(curve.x1 > a.x + a.width && curve.x2 > b.x + b.width)
-        assertTrue(curve.intersects(a.x, a.y, a.x + a.width, b.y + b.height))
+        assertTrue(curve.intersects(a.x, a.y, a.forkX, b.y + b.height))
         assertFalse(curve.intersects(-500f, -500f, -400f, -400f))
     }
 
