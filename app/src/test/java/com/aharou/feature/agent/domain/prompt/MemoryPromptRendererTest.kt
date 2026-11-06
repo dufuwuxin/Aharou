@@ -215,6 +215,39 @@ class MemoryPromptRendererTest {
         assertTrue(output.contains("SHORT-BODY"))
     }
 
+    @Test
+    fun inliningOneScopeKeepsSameNamedOtherScopeIndexed() {
+        for (inlineScope in MemoryScope.entries) {
+            val otherScope = MemoryScope.entries.first { it != inlineScope }
+            val identity = memory("same-name", inlineScope, "inline rule", MemoryType.IDENTITY)
+            val fact = memory("same-name", otherScope, "other scope fact")
+
+            val output = MemoryPromptRenderer.render(listOf(identity, fact))
+
+            assertTrue(output.contains("### same-name"))
+            assertTrue(output.contains("scope=${otherScope.name.lowercase()}"))
+            assertTrue(output.contains("- same-name: other scope fact"))
+        }
+    }
+
+    @Test
+    fun longBodyLabelDoesNotLeakAcrossSameNamedScopes() {
+        for (longScope in MemoryScope.entries) {
+            val otherScope = MemoryScope.entries.first { it != longScope }
+            val longIdentity = Memory(
+                "same-name", "long rule", longScope,
+                content = "A".repeat(1_000), type = MemoryType.IDENTITY
+            )
+            val fact = memory("same-name", otherScope, "short other scope fact")
+
+            val output = MemoryPromptRenderer.render(listOf(longIdentity, fact))
+            val lines = output.lines()
+
+            assertTrue(lines.single { it.startsWith("- same-name: long rule") }.contains("正文较长未内联"))
+            assertFalse(lines.single { it.startsWith("- same-name: short other scope fact") }.contains("正文较长未内联"))
+        }
+    }
+
     private fun memory(
         name: String,
         scope: MemoryScope = MemoryScope.GLOBAL,

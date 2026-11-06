@@ -55,14 +55,14 @@ internal object MemoryPromptRenderer {
         "（待确认：与另一台设备的同名记忆冲突、尚未裁决。本机这份仍在生效，裁决前按它执行；正文可用 memory(action=read) 取）"
 
     fun render(memories: List<Memory>): String {
-        // 超长条目的名字集合：只用来给索引行加「正文较长未内联」提示。
+        // 同名条目可分属不同作用域，内联筛选与长度标注均使用完整身份。
         val longBodies = memories.filter(::shouldInline)
             .filter { inlineBody(it).length > MAX_INLINE_ENTRY_CHARS }
-            .mapTo(HashSet()) { it.name.lowercase() }
+            .mapTo(HashSet()) { it.scope to it.name.lowercase() }
         val plan = planInline(memories)
         val inlineText = plan.blocks.joinToString("\n\n")
-        val inlinedNames = plan.inlined.mapTo(HashSet()) { it.name.lowercase() }
-        val rest = memories.filterNot { it.name.lowercase() in inlinedNames }
+        val inlinedKeys = plan.inlined.mapTo(HashSet()) { it.scope to it.name.lowercase() }
+        val rest = memories.filterNot { (it.scope to it.name.lowercase()) in inlinedKeys }
 
         return listOf(
             if (inlineText.isEmpty()) "" else "$INLINE_HEADER\n\n$inlineText",
@@ -219,7 +219,7 @@ internal object MemoryPromptRenderer {
         return if (line.length <= 60) line else line.take(60) + "…"
     }
 
-    private fun renderIndex(memories: List<Memory>, longBodies: Set<String>): String {
+    private fun renderIndex(memories: List<Memory>, longBodies: Set<Pair<MemoryScope, String>>): String {
         if (memories.isEmpty()) return ""
         val full = renderSelected(memories, longBodies)
         if (full.length <= MAX_INDEX_CHARS) return full
@@ -236,7 +236,7 @@ internal object MemoryPromptRenderer {
         return if (content.isEmpty()) OMISSION_NOTICE else "$content\n\n$OMISSION_NOTICE"
     }
 
-    private fun renderSelected(memories: List<Memory>, longBodies: Set<String>): String = buildString {
+    private fun renderSelected(memories: List<Memory>, longBodies: Set<Pair<MemoryScope, String>>): String = buildString {
         for (scope in MemoryScope.entries) {
             val scoped = memories.filter { it.scope == scope }
             if (scoped.isEmpty()) continue
@@ -256,8 +256,8 @@ internal object MemoryPromptRenderer {
     }
 
     /** 正文长度按掩码后的文本判断，与 [render] 内联时的口径一致，避免两处长度看法不同。 */
-    private fun longBodyLabel(memory: Memory, longBodies: Set<String>): String =
-        if (memory.name.lowercase() in longBodies) LONG_BODY_LABEL else ""
+    private fun longBodyLabel(memory: Memory, longBodies: Set<Pair<MemoryScope, String>>): String =
+        if ((memory.scope to memory.name.lowercase()) in longBodies) LONG_BODY_LABEL else ""
 
     /** 最近改动过的条目在索引里带时间标注：让「最近被纠正过什么」一眼可见，不必翻文件时间。 */
     private fun recencyLabel(memory: Memory): String {
