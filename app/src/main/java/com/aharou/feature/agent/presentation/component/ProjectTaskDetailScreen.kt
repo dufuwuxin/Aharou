@@ -28,6 +28,7 @@ fun ProjectTaskDetailScreen(taskId: String, viewModel: ProjectTaskViewModel, onB
     val task = state.tasks.firstOrNull { it.id == taskId }
     var editing by remember { mutableStateOf(false) }
     var secondary by rememberSaveable(taskId) { mutableStateOf(false) }
+    var adding by rememberSaveable(taskId) { mutableStateOf(false) }
     Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing).verticalScroll(rememberScrollState())
         .padding(Spacing.lg).testTag("project_task_detail"), verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
         TextButton(onClick = onBack, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.project_back)) }
@@ -35,6 +36,8 @@ fun ProjectTaskDetailScreen(taskId: String, viewModel: ProjectTaskViewModel, onB
             Text(task.title, style = MaterialTheme.typography.headlineSmall)
             Text(projectTaskStatusLabel(task.status))
             Text(task.requirement)
+            if (task.projectId != null) TextButton(onClick = { adding = true }, enabled = !state.busy,
+                modifier = Modifier.testTag("detail_add_child")) { Text(stringResource(R.string.project_node_add_child)) }
             state.error?.let { Text(stringResource(R.string.project_task_error, it), color = MaterialTheme.colorScheme.error) }
             Button(onClick = { editing = true }, enabled = !state.busy, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.project_task_edit)) }
             Text(stringResource(R.string.project_task_execution_hint))
@@ -61,5 +64,11 @@ fun ProjectTaskDetailScreen(taskId: String, viewModel: ProjectTaskViewModel, onB
                 modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.project_task_accept)) }
         } else Text(stringResource(R.string.project_task_empty))
     }
+    val projectId = task?.projectId
+    if (adding && task != null && projectId != null) ProjectTaskAddSheet(task.title, state.busy,
+        onSubmit = { description ->
+            viewModel.addTaskByDescription(projectId, description, parentId = task.id)
+            adding = false
+        }, onDismiss = { adding = false })
     if (editing && task != null) ProjectTaskEditor(task, task.workspace, state.tasks, viewModel::save, { editing = false }, task.projectId)
 }

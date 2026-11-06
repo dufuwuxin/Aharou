@@ -16,6 +16,8 @@ from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
 from typing import BinaryIO, Iterator
 
+REPORT_SCHEMA = 1
+ANALYZER_VERSION = "1.0.0"
 MAX_SAMPLE = 128 * 1024 * 1024
 MAX_SOURCE = 4 * 1024 * 1024
 MAX_DIRECTORY = 2 * 1024 * 1024
@@ -23,6 +25,11 @@ MAX_ENTRIES = 2048
 MAX_EXPANDED = 256 * 1024 * 1024
 MAX_FINDINGS = 500
 TOOLS = ("readelf", "objdump", "strings", "jadx", "apktool", "rizin", "radare2", "ghidra", "binwalk")
+TOOL_DOMAINS = {
+    "native": ("readelf", "objdump", "strings", "rizin", "radare2", "ghidra"),
+    "android": ("jadx", "apktool"),
+    "firmware": ("binwalk",),
+}
 SENSITIVE_NAMES = {".env", "credentials", "credentials.json", "tokens.json", "accounts.json",
                    "keystore.properties", "id_rsa", "id_ed25519", "shadow"}
 SENSITIVE_DIRS = {".ssh", ".aws", ".gnupg", ".config"}
@@ -251,6 +258,11 @@ def main(argv: list[str] | None = None) -> int:
         if args.mode == "tools":
             result = {"mode": "tools", "tools": {name: shutil.which(name) is not None for name in TOOLS},
                       "executed": False, "installed": False}
+            result["tool_matrix"] = {
+                domain: {name: {"status": "located_unverified" if result["tools"][name] else "missing",
+                                "version": None} for name in names}
+                for domain, names in TOOL_DOMAINS.items()
+            }
         elif args.mode == "inventory":
             result = inventory(args.root, args.sample)
         else:
@@ -263,6 +275,19 @@ def main(argv: list[str] | None = None) -> int:
         code = 2
     else:
         code = 0
+    ruleset = [(key, group, pattern.pattern, pattern.flags, hint)
+               for key, group, pattern, hint in COMPILED_RULES]
+    result["report_schema"] = REPORT_SCHEMA
+    result["analyzer"] = {
+        "name": "aharou-offline-audit", "version": ANALYZER_VERSION,
+        "ruleset_sha256": hashlib.sha256(json.dumps(
+            ruleset, ensure_ascii=True, separators=(",", ":")).encode("utf-8")).hexdigest(),
+    }
+    result["evidence"] = {
+        "kind": {"inventory": "static_metadata", "source": "static_heuristics",
+                 "tools": "tool_discovery"}[args.mode] if code == 0 else "not_assessed",
+        "dynamic_analysis_performed": False,
+    }
     print(json.dumps(result, ensure_ascii=True, sort_keys=True))
     return code
 

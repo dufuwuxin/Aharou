@@ -67,10 +67,7 @@ internal fun SettingsAharouRows(onOpen: (SettingsSection) -> Unit) {
             .padding(bottom = Spacing.xl),
         verticalArrangement = Arrangement.spacedBy(Spacing.sm)
     ) {
-        SettingsGroupHeader(text = stringResource(R.string.settings_category_aharou))
         SettingsGroup {
-            SettingsRow(icon = FeatherIcons.Users, title = stringResource(SettingsSection.AccountCenter.titleRes), onClick = { onOpen(SettingsSection.AccountCenter) })
-            SettingsDivider()
             SettingsRow(
                 icon = FeatherIcons.Smile,
                 title = stringResource(SettingsSection.Soul.titleRes),
@@ -150,6 +147,9 @@ internal fun SettingsAiGroupScreen(onOpen: (SettingsSection) -> Unit) {
                 onClick = { onOpen(SettingsSection.Skills) }
             )
             SettingsDivider()
+            SettingsRow(icon = FeatherIcons.Users, title = stringResource(SettingsSection.SubAgents.titleRes),
+                onClick = { onOpen(SettingsSection.SubAgents) })
+            SettingsDivider()
             SettingsRow(
                 icon = FeatherIcons.Users,
                 title = stringResource(SettingsSection.Teams.titleRes),
@@ -209,7 +209,6 @@ internal fun SettingsGeneralRows(
             .padding(bottom = Spacing.xl),
         verticalArrangement = Arrangement.spacedBy(Spacing.sm)
     ) {
-        SettingsGroupHeader(text = stringResource(R.string.settings_category_general))
         SettingsGroup {
             SettingsRow(
                 icon = FeatherIcons.Sliders,
@@ -268,7 +267,6 @@ internal fun SettingsPermissionsRows(onOpen: (SettingsSection) -> Unit) {
             .padding(bottom = Spacing.xl),
         verticalArrangement = Arrangement.spacedBy(Spacing.sm)
     ) {
-        SettingsGroupHeader(text = stringResource(R.string.settings_category_permissions))
         SettingsGroup {
             SettingsRow(
                 icon = FeatherIcons.Shield,
@@ -299,7 +297,6 @@ internal fun SettingsMoreRows(onOpen: (SettingsSection) -> Unit) {
             .padding(bottom = Spacing.xl),
         verticalArrangement = Arrangement.spacedBy(Spacing.sm)
     ) {
-        SettingsGroupHeader(text = stringResource(R.string.settings_category_more))
         SettingsGroup {
             SettingsRow(
                 icon = FeatherIcons.HardDrive,

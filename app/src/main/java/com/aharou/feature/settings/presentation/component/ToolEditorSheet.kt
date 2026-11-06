@@ -97,8 +97,10 @@ internal fun ToolEditorSheet(
         keywords: List<String>
     ) -> Unit,
     onSaveSettings: (name: String, description: String?, mode: ToolInjectionMode, keywords: List<String>, schemaJson: String?) -> Unit,
-    template: CustomToolDefinition? = null
+    template: CustomToolDefinition? = null,
+    onSelectTemplate: (String) -> Unit
 ) {
+    var choosingTemplate by remember { mutableStateOf(false) }
     val isNew = entry == null
     val isCustom = isNew || entry?.source == ToolSource.CUSTOM
 
@@ -107,7 +109,7 @@ internal fun ToolEditorSheet(
     var parametersText by remember(entry, template) { mutableStateOf(entry?.parametersJson ?: template?.let { Json.encodeToString(it.parameters) }.orEmpty()) }
     var command by remember(entry, template) { mutableStateOf(entry?.command ?: template?.command.orEmpty()) }
     var timeoutText by remember(entry, template) {
-        mutableStateOf((entry?.timeoutSeconds ?: CustomToolDefinition.DEFAULT_TIMEOUT_SECONDS).toString())
+        mutableStateOf((entry?.timeoutSeconds ?: template?.timeoutSeconds ?: CustomToolDefinition.DEFAULT_TIMEOUT_SECONDS).toString())
     }
     var mode by remember(entry, template) { mutableStateOf(entry?.injectionMode ?: template?.injectionMode ?: ToolInjectionMode.EVERY_ROUND) }
     var keywordsText by remember(entry, template) { mutableStateOf((entry?.keywords ?: template?.keywords).orEmpty().joinToString(", ")) }
@@ -161,6 +163,20 @@ internal fun ToolEditorSheet(
                 fontWeight = FontWeight.SemiBold
             )
 
+            if (isNew) {
+                TextButton(onClick = { choosingTemplate = !choosingTemplate }, enabled = !saving) {
+                    Text(stringResource(R.string.tools_templates_title))
+                }
+                if (choosingTemplate) {
+                    Text(stringResource(R.string.tools_templates_hint), style = MaterialTheme.typography.bodySmall)
+                    com.aharou.feature.agent.domain.tool.custom.PracticalToolTemplates.all.forEach { preset ->
+                        TextButton(onClick = {
+                            choosingTemplate = false
+                            onSelectTemplate(preset.name)
+                        }, enabled = !saving) { Text(preset.name) }
+                    }
+                }
+            }
             if (isCustom) {
                 AppTextField(
                     value = name,

@@ -1,0 +1,494 @@
+{
+  "version": 1,
+  "sources": [
+    "299b5a91724cfb7a5894eebec8c846203550ea10",
+    "4378a02e5adf1ac47e37e703ec0dcf5258f65315",
+    "90fd3386dac9e7d07656f9fb6b2b5e400effe919",
+    "c5c562730e57c537e3edd7df20760650657ab670",
+    "cd2e079704fd79b0af71c6acde7745732bf03acb",
+    "d55e894fddabde32c282c44ba67d383cddefee6f",
+    "d7f5efdd4da52d556a242f32b44f94f1bb7b9b20"
+  ],
+  "files": {
+    "agents/agentic-identity-trust.md": [
+      "55de131a5c790dfb84edd9855d8fd2911d4d676d07f7f6c8e90d36705e73427b"
+    ],
+    "agents/agents-orchestrator.md": [
+      "3f900ee286eba5a809388ecc22ad860c4a3ef9ed7ff25488e80eac18f3a0f317"
+    ],
+    "agents/automation-governance-architect.md": [
+      "8aab89104fec352f1f601ec5e6db11c9628d0b2072e6324484fd7e4c8462f55e"
+    ],
+    "agents/blender-addon-engineer.md": [
+      "f6bf42625647999d9ebc606c6e7c9c57a8c9a6d20c65a9e96918dbfbb063dcd9"
+    ],
+    "agents/data-consolidation-agent.md": [
+      "7e7de097ff27e3aa2732a9f1ab0bd7acaaef73dabf53fc7be6c90c8ab6afab11"
+    ],
+    "agents/decision-advisor.md": [
+      "2b3d6bc196996cb1e417bef8945cffde848b15c0cffb9581e02e19c0ccc844bb",
+      "cbf4da2b8039b279271b8b348bd5ae60bbc678f30691f39fec729ca5e1fe9d9d"
+    ],
+    "agents/design-persona-walkthrough.md": [
+      "8def8c73df7f79a61704e7353b85b915afa31c4a9fa1100fbb9220c50d6a1c55"
+    ],
+    "agents/design-ui-designer.md": [
+      "3130768958d3b3d38178aaec91cf789e01ecca4984c8674d4aaea446b6cba240",
+      "6db1a4bd670fea1ee6dcad45cc7371d33e2ca02f36c9a0bce0e53fa4ee199935",
+      "7ad4a5d92289669411c4f3a9daa4d317b435eb20d284557292c0d426b35eadb6"
+    ],
+    "agents/design-ui-finish-gate-reviewer.md": [
+      "5871494b3ae3d728f968f64cf947526b9e577ea2b4e28da07f25c36f01e08842",
+      "aae00b0d0d43718d13c6d54e031d2e0897a9bb3efa6c1a01b502a4882ada3bfc",
+      "cc2cc803782a791797b63530bfd46ee676148f05bc1db7c614c8860f9798bc86"
+    ],
+    "agents/design-ux-architect.md": [
+      "12207c6bd22a530f6193ace7e8c80eb16c080cbd0214409e4de6f46c2fe58561",
+      "151f7386682b77a6c1455374d427237a3d46eadfa1248964466b0412848f7117",
+      "2a0db1431c8594ec0225ae065199b1865cd87a4cc78de5d809853ecfd666648b"
+    ],
+    "agents/design-ux-researcher.md": [
+      "25f59c4333df2d0f1170ff7a1b11ea8415fd3d0ef80c3e0985209aeb4018680f"
+    ],
+    "agents/design-whimsy-injector.md": [
+      "d517c959118a25ce8514c086603d5990f70a901832af8ac29fece80d9e445ff0"
+    ],
+    "agents/docs-writer.md": [
+      "636092a071fb9b445ac5455d991933b32e9cd048322d2197aa95cff864eba19e",
+      "b2f9fe56b518f4b419eb0c2e8404128dfa230018fc19e26a29b11055b389814b"
+    ],
+    "agents/economy-designer.md": [
+      "a6767b808ef0c155d85f5569e9e53285c97dce4c9df25aa24a09a65246967998"
+    ],
+    "agents/engineering-ai-data-remediation-engineer.md": [
+      "5aa193052f15283493eeb9749bc346d09c02407f26760fe0d08f8bd9242ede79"
+    ],
+    "agents/engineering-ai-engineer.md": [
+      "59d54d67c4b0be630cc1015af7598230d4b35ed6828f9b7132688a1fcb09d590",
+      "c8546cc31143c8598f93588f87fbb75dc101ef9e36b67221497996ca194ff2e4",
+      "f25a69aad25acd35dd1d62e33d5a814f4a26b075d90f968b4d778452e53924d8"
+    ],
+    "agents/engineering-android-kotlin-engineer.md": [
+      "87972f753f8a94e8a763790ab25797c5e3a3cc01d66aa283ca9566692d20e4be",
+      "a3bc08a67dfa66983d9e56d8d7ae51de20ef01a5ca10c28a8702298f66e66f6b"
+    ],
+    "agents/engineering-api-platform-engineer.md": [
+      "278798c42d7a7cf4f42d3973795765403105ce60d518d647abfdaa522d862d8e"
+    ],
+    "agents/engineering-autonomous-optimization-architect.md": [
+      "6904f627eff4a2035ecc245b3ee65f326b484083a08c3e284ad4106bdc57d2d8"
+    ],
+    "agents/engineering-backend-architect.md": [
+      "18f237d054fa91f72a5dcda46a52ddcf7354ea3a3e39e0247629f4ea0f446917"
+    ],
+    "agents/engineering-cms-developer.md": [
+      "e072ac6e3d485483818880846b145c85b5224045a68c45dddc4e087940d57ba4"
+    ],
+    "agents/engineering-code-reviewer.md": [
+      "7509fcc3ea1dda46511b2801996305bf3d4a125576f9655ff0b63df25602f446"
+    ],
+    "agents/engineering-codebase-onboarding-engineer.md": [
+      "07aa548b45887c3ad768efad5fdbf6e57bea639df4f1b74c7e383142f454e2a1"
+    ],
+    "agents/engineering-data-engineer.md": [
+      "330017e7fe6943a5d580498ae8f3a1055e41c3da018deaf7fcb677f4195ff2f1",
+      "3e3f079bd62e086e539f0eaaad881af34c7e4643c54008bca8deeba5c5a845c2",
+      "d46e5ebdb81f5f3e7e0296fa8355583f13693e47cce0e1c8e834c6ff956e861a"
+    ],
+    "agents/engineering-data-visualization-engineer.md": [
+      "0f5b5391f82aa98ca489768d31024f7a5f840a8ee5fe968fe1499ed538948ce5"
+    ],
+    "agents/engineering-database-optimizer.md": [
+      "a58860b44590ed643ca02b6faf738b889c99bd889df78c695f519b5288ea018d"
+    ],
+    "agents/engineering-database-reliability-engineer.md": [
+      "a25e100eb5ada1b26a9b01ce82822c967dfabc09772bd4e3803dfc0a4382a247"
+    ],
+    "agents/engineering-desktop-app-engineer.md": [
+      "01b103bae349f127726e2a37a06502aad9be64793e72331c5ff01db9b8fffd55"
+    ],
+    "agents/engineering-developer-tooling-engineer.md": [
+      "948d44fddfa47e2363236de150f9dc948edd79599609a92af8bf6b72b5b9b609"
+    ],
+    "agents/engineering-devops-automator.md": [
+      "5d3c3d12c605a8c07fadfd109697249f98bc8e3d1901247c390641ef9fb013e8",
+      "95f95cf881b255a7585e13fad1febde38a55f85d5d187d9966b1c590cec72810",
+      "f1ce76597ad73fa9ad265688126ac9229deb524148e2eeec3b4520a2814130ec"
+    ],
+    "agents/engineering-drupal-performance.md": [
+      "544942f460b76e15c2cd6e9a820b4048e3344186db3a7123d99adfbdf6c41d09"
+    ],
+    "agents/engineering-drupal-shopping-cart.md": [
+      "cbd06e6d27363029dbbc6638297d47608c78d3b93b3e4a6ff52d16757199ee50"
+    ],
+    "agents/engineering-email-intelligence-engineer.md": [
+      "bef84b77b2ce3f2cbe29faa72ec0d58576bbcad390ee2c1bdcccaca38b4b125f"
+    ],
+    "agents/engineering-embedded-firmware-engineer.md": [
+      "8453982bc1ae4b5c43244fd1b702279b5a7a00ecf6d471b9a75a7a01433e5327"
+    ],
+    "agents/engineering-feishu-integration-developer.md": [
+      "836667ab301da70a2da5d6241c44f2134fe059f839b4efeac7f6ceece632b76a"
+    ],
+    "agents/engineering-filament-optimization-specialist.md": [
+      "428f6a6be2318a123678b2838600e33c5e193afecbe8f828fa97c779eaf85fbf"
+    ],
+    "agents/engineering-finops-engineer.md": [
+      "54134b5d3e3bf59db0de7a42b1246ea3a6ad771133d946670f4211e424c33aba"
+    ],
+    "agents/engineering-frontend-developer.md": [
+      "35961da50f408e00eb6189c87825ac5e62e6b1bf9de3dee198a95536c6d2619e"
+    ],
+    "agents/engineering-gaussdb-expert.md": [
+      "db3e2fbd178e4df20885c5d5f27b0a552061c7736374f9977807fc374ff99e07"
+    ],
+    "agents/engineering-git-workflow-master.md": [
+      "b2ab151fa5dc31035ba5f40f9b104f61cc8ef45dab8a8249ad15675141550d77"
+    ],
+    "agents/engineering-i18n-engineer.md": [
+      "913c72b65eca4af13d2edadf4b53acff63df91715c7c446a63cea75a9a14f007"
+    ],
+    "agents/engineering-identity-access-engineer.md": [
+      "f37ea9df4e87d468fe2e34e29fc78fc508e717ae69d5bf4187a09375e842eedf"
+    ],
+    "agents/engineering-incident-response-commander.md": [
+      "1df5c8f558f99a8d3e6455cf6a6badbd1e0c2b2cccb02682843ee7ca11a13929"
+    ],
+    "agents/engineering-iot-fleet-engineer.md": [
+      "90cfb3b713d0cd11e9529f6158ed72ac99fe1d945a838d9d740009a51e9d3421"
+    ],
+    "agents/engineering-it-service-manager.md": [
+      "26c23ef51726da346dcdf5b9eb004e7c03cfae4ad6a995ed46a26ec6cd5520e6"
+    ],
+    "agents/engineering-knowledge-graph-engineer.md": [
+      "4d6eff6c2dac6b2950cc66a2708f3ec29ef5bb776cfa209858e8dc1a4b9a76b3"
+    ],
+    "agents/engineering-llm-post-training-engineer.md": [
+      "aa697dc1c0eb402551b9f6764a89938c8787c9628760b74065d3e383299a980a"
+    ],
+    "agents/engineering-minimal-change-engineer.md": [
+      "02425c1cd6e15e9a81b644bb4af893a4340d229187d224fb6610a9da20d5fb7d",
+      "2769e7e0d2fea2b3905fa91ae1f9b6d72171d5fb77393a1fe74bcfce9c0404aa",
+      "9999cc74e7b3936af892ef2c2793d105bb92f6c47789aa23db6df92bf68b45e5"
+    ],
+    "agents/engineering-mobile-app-builder.md": [
+      "13c7d0cb86fd6780d425654fa62a7ba7eceb43c9b54ed4c9e07588a2085fbf3a"
+    ],
+    "agents/engineering-mobile-release-engineer.md": [
+      "352990b904def54cadbbae7f8b6221407a9d5b0c301ec033b4f26300536019fb",
+      "4992c0d23f7d9addee8fde8a5bc11212e1ad1704f42cb5b9886c51ea63b20240",
+      "9ec73eb4effdefa4858b444d29bbd66b57e717c1d4cab39f53adcb21c07ca9a4"
+    ],
+    "agents/engineering-multi-agent-systems-architect.md": [
+      "d93dd20fef67bf85a537ba0f869fad1a17d0e589f20899d1bbe1f095a7bcb91b"
+    ],
+    "agents/engineering-network-engineer.md": [
+      "d4c65a148af24cec08e14ab2bee3a0a3699cc966c8d170eea196f00df3e87d98"
+    ],
+    "agents/engineering-orgscript-engineer.md": [
+      "f8426369743ff0086e32cb9facfc3935488d99a1c2de92961917f9b27d401427"
+    ],
+    "agents/engineering-payments-billing-engineer.md": [
+      "b07c4e97ee1c23aec7fdacc79ffd39a0fcee73fef46700f82970be240dad9f5e"
+    ],
+    "agents/engineering-privacy-engineer.md": [
+      "0d00d2f0d3008a55000eb01f13adac54f40daf471d240a7c073477efe92376a6"
+    ],
+    "agents/engineering-prompt-engineer.md": [
+      "625b066e01fca23222b71331833f7851941a6ba800857481ead4ea2420d40081"
+    ],
+    "agents/engineering-python-backend-engineer.md": [
+      "3bd56c9c1c32c31b105285ef40b53f555b8a5bb40a3a282db6bd03032ab615b4",
+      "9c8d07b101f9d313dc40f0bf92a1b16a73dc8017983580dd9ae0ff05833859ea"
+    ],
+    "agents/engineering-rag-pipeline-engineer.md": [
+      "a87135cd8a852aeec3da7edf00d2a019cbe30ee9cd9394ea00bd62a4668ca8c7"
+    ],
+    "agents/engineering-rapid-prototyper.md": [
+      "327598e2cee41b78866720e20ee76d84e674b4a95ed92773b40c942153cba88a"
+    ],
+    "agents/engineering-realtime-collaboration-engineer.md": [
+      "08ab1a6a421a435fd5fffa9f03720566bd95fcda17c06eeff6e056d482e96a2a"
+    ],
+    "agents/engineering-rust-engineer.md": [
+      "0b50de3569c16f9b3b195d6b6aed16ec6f42344b1c99d08586ee24d5a1112b31",
+      "1dc9d8de2ed275500b51e6a21dcc30d8a6a99c0657a152f0231e4b532a22bcaa"
+    ],
+    "agents/engineering-rust-refactoring-specialist.md": [
+      "06ca53dbd12694560bf01feb94cbbd8c428e4abe6ac92c8a72eeb277ce179a78"
+    ],
+    "agents/engineering-search-relevance-engineer.md": [
+      "5562f37cbb561dce6dac47b1dd4e75cb7bde6c0c48045198db346ba7d6d790af"
+    ],
+    "agents/engineering-section-508-specialist.md": [
+      "d4fb7139c69e270fd626cfc1410b7412bd864d010903b459f9eb90c8359809f9"
+    ],
+    "agents/engineering-senior-developer.md": [
+      "63b8da6c12b95f54bbdbcd0666abeb9519a98b35395233e1b1d8e5c102c82599"
+    ],
+    "agents/engineering-software-architect.md": [
+      "b85121691776147bacde26673e68fbbacd6a7f0816d1ca8e203c264d25ce1d30"
+    ],
+    "agents/engineering-solidity-smart-contract-engineer.md": [
+      "9e6f96fb29cc71faf2638bce3a5aa06ff15b4c674ca4ec039e5e4515a7844839"
+    ],
+    "agents/engineering-sre.md": [
+      "85b305e495506913f50c7cb28de42444a85fbc4898cd3ad4e1dc9b358b4ab5e8"
+    ],
+    "agents/engineering-technical-writer.md": [
+      "70c8a29cddf7de486b41185693b4961af3fcccbc632b8df13ec43572859edc43"
+    ],
+    "agents/engineering-uswds-developer.md": [
+      "d3c46e2340d50a97cec536edd985abd2fe6b5f012c3c02e5e9187cd061b27ca7"
+    ],
+    "agents/engineering-video-streaming-engineer.md": [
+      "a07dca52d7882ac55af9128fffd66c8a753d4c44170da19abffc51710dea9a11"
+    ],
+    "agents/engineering-voice-ai-integration-engineer.md": [
+      "de80469db772d96f3d6d55d3e040360e3a19b45197b2dbd446cb3fcd5a4645f6"
+    ],
+    "agents/engineering-webassembly-engineer.md": [
+      "013afbdab6688dfd278815e0ded8f2ce38580de2ee7e3b09d5974ca2f72c0b44"
+    ],
+    "agents/engineering-wechat-mini-program-developer.md": [
+      "dcda22b2d93c1bbfb5d29a78bba031ad40552af54713d89c49ece2d70d08a02c"
+    ],
+    "agents/engineering-wordpress-performance.md": [
+      "58ed429ace903aac3a2c9e190ecae5b61966b7330e9e51ea66aa03eb4112854f"
+    ],
+    "agents/engineering-wordpress-shopping-cart.md": [
+      "a2ef45cebe1cf03175b16ef48a2a01acdd2b7e8eda289114f568ebe0f1ae4112"
+    ],
+    "agents/explore.md": [
+      "6f8adc577621c4d4618d1b9b6968ff55239ef94c56c31d5c7d9f193e79b45c47",
+      "8dbc47d7f6c9e97e02d35eb880bd9a7a020ee542a4cdfc6a5b3df3dc11011ad5"
+    ],
+    "agents/game-audio-engineer.md": [
+      "d7a2eebd8c20021e543222bc962cb5a111924c5438e9f771a6db42d74cd19232"
+    ],
+    "agents/game-designer.md": [
+      "203c4d7f0358a628ea21e3b9c16980f28003bd035b5cfd41a2daec04f6b84e5a"
+    ],
+    "agents/godot-gameplay-scripter.md": [
+      "0cce0fc75b3a7eeec7221f4a6ac0ff7876fb2468cdb8fab5931951c26f18d539"
+    ],
+    "agents/godot-multiplayer-engineer.md": [
+      "d72e7798c03e6fa27b3b38147857c10c50a9b1b86ce4c3865f473ea5c860f137"
+    ],
+    "agents/godot-shader-developer.md": [
+      "1362da1ba227aea6dadf5373455bdbb989f10f172731b47243cedc52db406415"
+    ],
+    "agents/identity-graph-operator.md": [
+      "f37b705283147e3b92b76d61a3a60bdfe67bad9d6e364d11565329b8a107b3b4"
+    ],
+    "agents/level-designer.md": [
+      "79c1d41b7dfc477f6f364ba8b6dec02dc0c081235fe8f8b61c8b062b5dc3b344"
+    ],
+    "agents/lsp-index-engineer.md": [
+      "3f720a81cdcdaa63136b6fd7817f198d95a517ca1dfcfaa9ec81a5469a1cff95"
+    ],
+    "agents/macos-spatial-metal-engineer.md": [
+      "b0bdd78da0cdbd1ee0055401ddaba4d7cb750e3107d219b6f12794c1a023e69f"
+    ],
+    "agents/migration-checker.md": [
+      "4dcde538c281bf3aec633e4a70dbd5dad145e74f2d0a50cd57f5184f53e9a0c3",
+      "bb0560351f258e9652b5a66f6845a92862f1083c7fae441d97ca03f091b4c632"
+    ],
+    "agents/narrative-designer.md": [
+      "7a5489c7b0502aa167030018137e3f349d2c32505c0ad7b9ec1de066a9a93f0d"
+    ],
+    "agents/product-behavioral-nudge-engine.md": [
+      "61f8a4a6a502ac0239c1a555d859051f0ecc83189f5f26048e2a448becf1c722"
+    ],
+    "agents/product-feedback-synthesizer.md": [
+      "9f7bc1474bf8bf95c0573c20df5e3d8ae70c3b9659ec5ea7958cc4692b958270"
+    ],
+    "agents/product-manager.md": [
+      "4a3fe4661e72e5173877bcba7c362392181774b20efc27ac1789171e98676c9d",
+      "d30ddcbf11237ca2ce06e4092035b2f0ec66650317939c03e28e0f242a4cff16"
+    ],
+    "agents/product-sprint-prioritizer.md": [
+      "da5233770ca85a3931b72d80b37dd09616a54fd24075c607667853acf65b000a"
+    ],
+    "agents/product-trend-researcher.md": [
+      "69c8e54a9413ba411195e8d5274ee3cd88fa8cda18486db70c0f19ce374550a2",
+      "bc88a9341fc414c8756d9c81b31927fe5afca26854186d65b24aa13790a4ae01"
+    ],
+    "agents/project-management-experiment-tracker.md": [
+      "8f1410bfa054c8ac2eee3084b9bfdb3adb1e8a2f3e015c2876d0ecf07136c22f"
+    ],
+    "agents/project-management-jira-workflow-steward.md": [
+      "e45c68423c1df0c20452916a5caafe7f41a97b56ca5af8872af966212ccbf389"
+    ],
+    "agents/project-management-project-shepherd.md": [
+      "0feb647366d78b61c1633b12e370ffb1dea52facb9d750ef6c952de1e996031c"
+    ],
+    "agents/project-manager-senior.md": [
+      "70fb27cab174c97375293311211d5563c5ac257fba274450d1ca9c05b540ef2d"
+    ],
+    "agents/roblox-avatar-creator.md": [
+      "6bdb5af6fe5c390da43f7bdcc4d73b6fbdef2a8b19bd6d30bf1fef6b4258f16a"
+    ],
+    "agents/roblox-experience-designer.md": [
+      "569f75a1b6448a30159d3ca7323eb590bc45e2355e3ee89a733d45a5d8986793"
+    ],
+    "agents/roblox-systems-scripter.md": [
+      "6d7e11b07aba99eecc45a8b031c5b8618f96f36699a5e1d3409d05323d7feab6"
+    ],
+    "agents/security-ai-generated-code-auditor.md": [
+      "ac2196a914bfb00dddfef93edb9eef1860f924f9582d814cd303ab45e4fc71bc"
+    ],
+    "agents/security-appsec-engineer.md": [
+      "3694fe9707296c9c7bddd750a9760c44da678b669f144fb36f67248dc5480793",
+      "93ccc481b34bbb099664f743067b8bebc3a8961d823e89c249f79ad0a9467e89",
+      "e2636c1c7748b813f73382c7614561fd09f017467744603f02d95766246ec4b3",
+      "f3ee22350c9e0e7289d2d4747e7c1a8fe196d70340feec7b176b13bacc3deb77"
+    ],
+    "agents/security-architect.md": [
+      "b1a68e9614f7adb43938f5bd9964f6e41250febc9a57f691eefcbab58d5b1df1"
+    ],
+    "agents/security-blockchain-security-auditor.md": [
+      "b35bcd083889ccea487535e30c66bde83f0d06527ae4dd12acec32b285c5ec66"
+    ],
+    "agents/security-cloud-security-architect.md": [
+      "d541b4041d47c512ef5223985aba682249ce2416244e147959641fc6d193aa71"
+    ],
+    "agents/security-compliance-auditor.md": [
+      "ebb550ceef8011be23fe5a6fab0a7b3f77c2433f4d6aa22617a7eb87db97274f"
+    ],
+    "agents/security-incident-responder.md": [
+      "a648cf5a0b40d8726ccb61ea48f1dee2797691f1b52395c59af91c7a5f511278"
+    ],
+    "agents/security-penetration-tester.md": [
+      "f52c2524309fb048250b412daa6a2ad0a906b5daff01f64f195052d024b9e1a0"
+    ],
+    "agents/security-secrets-credential-engineer.md": [
+      "5a52e4c1045d8805c74414cfb334bb80da429fd191b987bdd8889ee60ca7561b"
+    ],
+    "agents/security-senior-secops.md": [
+      "90b535077cff7253bf18355ec99d5205dbe09c9f3e93f5b85222183460f2b879"
+    ],
+    "agents/security-threat-detection-engineer.md": [
+      "83bfaabe485d51965ba6474de3eb6e00f67fd7f76e5b34ca1d3fb385a8fa3d97"
+    ],
+    "agents/security-threat-intelligence-analyst.md": [
+      "777b26397ae7aeb246259736327f9f76e435eee378a1435bed9d18699ec8d666"
+    ],
+    "agents/specialized-codebase-archaeologist.md": [
+      "c1b2c22711cb6e74dd834f831d6a8b3f10c93cd462722073b01acae9d0a40700"
+    ],
+    "agents/specialized-developer-advocate.md": [
+      "92617477989c99f57cda5d6d91ac5fea3a56db422a3f3825c4a438ad244079d3"
+    ],
+    "agents/specialized-document-generator.md": [
+      "cd2ca961e0f7baa18942aaaa315e333ea4315604bbb6a182d7daa31b76dfc3a3"
+    ],
+    "agents/specialized-mcp-builder.md": [
+      "3880031674ae2458552ad3c4da99c122469e85351ed57969db7f6f767befd7cb"
+    ],
+    "agents/specialized-model-qa.md": [
+      "835a26b93003cfb8819201001dad37267971f5702320abcf1720f697e00cf4bd"
+    ],
+    "agents/specialized-salesforce-architect.md": [
+      "756fd2dc09f76422dfecb8104e2334f8876f8b95cb6734f8f044c36c641b22e1"
+    ],
+    "agents/specialized-workflow-architect.md": [
+      "74d46f03dcdd769163ce73ea8ac025bae48ae2356792a7aff3619c92f802a8ef"
+    ],
+    "agents/technical-artist.md": [
+      "8a669de1fa3455c456092feefbf945d3b0ae18072b873d002d190b16ed1f678d"
+    ],
+    "agents/terminal-integration-specialist.md": [
+      "3082737f766821cf1c5372b9067ff67c873916de8c30b173478fe8bbc9a10087"
+    ],
+    "agents/test-writer.md": [
+      "4177d426e23257df37a63ed62dc445821b4d1a1c3df975ac6f01911b991ac416",
+      "f4c1a97344661f4945599e08318a2ea68b132592fdb20bbed43e0631c6f5c001"
+    ],
+    "agents/testing-accessibility-auditor.md": [
+      "01d1ef05c13ff303c9f27a30f567df5d0ab144092f15475eaab3a6f78538cca9",
+      "982a14c0d0a9b30834ecd6e04811e4f900baf7950e18c68cc97142354cc803e7",
+      "d3fb27a2dc3f4a6ce9f4e9d2e6e57cff06c8fdcffa6480467cbce0d2034fb796"
+    ],
+    "agents/testing-api-tester.md": [
+      "c89d7ae592523f4799426a8b09700ec4b9d99bf2fcae2d1b0dd2900d5f770127"
+    ],
+    "agents/testing-evidence-collector.md": [
+      "d7e95b64033230aa07c386546d24fca68e4f606c47be1a7698cafc09d4ef5b12"
+    ],
+    "agents/testing-performance-benchmarker.md": [
+      "24dbd3a55cf6ca36c5f8af4081e87859914131199d87b6f90d129643fcfba43e",
+      "276ea4288189f3aae85a67e26c8f3fdbb36eb02816800de67c6af40b7cf29738",
+      "e362e9692882f7d822ab476bd62e4a68912005fe8e3136f15e70c621e58289b3"
+    ],
+    "agents/testing-reality-checker.md": [
+      "2910839f08f5f5d2750da9e2723dd72e0083a86db0aef473e4c8fb552b8b6be8",
+      "2ecfb419f980e6f0689523e44daed652deb0a9d7b37ad22dcaac5e38faf8f829",
+      "6d32fcdb114233e13902ec6372d50293b120e85d490b5e81d372c29808f988a1"
+    ],
+    "agents/testing-test-automation-engineer.md": [
+      "479ba12efa5c19e87b60e3b154170c124ac38c46b95c342f0e3b62537113c0a7"
+    ],
+    "agents/testing-test-results-analyzer.md": [
+      "f080e1e8a5ddadc90dbcb845317afcf56e9889e0ed6568732605d37851cf21d8"
+    ],
+    "agents/testing-tool-evaluator.md": [
+      "98e9a2b4491ffa1979d45ca5e1ddb9233fe35b98cc44c66c9d8a0b258ee9a2f4"
+    ],
+    "agents/testing-workflow-optimizer.md": [
+      "021ba71e2455071983ce1a6044783bec224b025b864757ce76b2bd4d40c00211"
+    ],
+    "agents/unity-architect.md": [
+      "15502fbcd46fcd7559bcd85d15b512317ceed27ffb90fc54e79f3c32bf682c1a"
+    ],
+    "agents/unity-editor-tool-developer.md": [
+      "8b368fe6ee0a4c0c71d10324cd8de4378c7bdaae9bc871a5561199b4a802b5dc"
+    ],
+    "agents/unity-multiplayer-engineer.md": [
+      "61561d24650216ef1907979e1b25e2f77e33537ad2694e8264a1fcdeeeed3a89"
+    ],
+    "agents/unity-shader-graph-artist.md": [
+      "3e2033f179a95da207627d1d7521395d434ac76c30a3b20f08f90a05b7405c52"
+    ],
+    "agents/unreal-multiplayer-architect.md": [
+      "666a4d07a6cfaf9d7fb2278dd8eb9de832599d4bb6f65743f305eb6a6546c044"
+    ],
+    "agents/unreal-systems-engineer.md": [
+      "ca34c6be64ee4f60f926a823bee626ab92dced93042a730f99f6fe08c4b7636f"
+    ],
+    "agents/unreal-technical-artist.md": [
+      "54bdd46bc872ba21fbcf7e02492c9f5bef82a6d3a35ee3de757d3b678edd6b82"
+    ],
+    "agents/unreal-world-builder.md": [
+      "7d2bf21ac77089b99f1fa36f6102fa938c9014c3107e9dcb9069b896e2b4001e"
+    ],
+    "agents/visionos-spatial-engineer.md": [
+      "8d154bb42d6952056b0eb3fd0d030e6e22a638f11c16c04b59326973ee08b20d"
+    ],
+    "agents/xr-cockpit-interaction-specialist.md": [
+      "c8473bd555ad22da7d4978e94a3aec07ae9519b2080572b409639deb9a8e7110"
+    ],
+    "agents/xr-immersive-developer.md": [
+      "a9aa13187bfb774f3eb734ae9869ef249ec3290674f0bb3c1368b69bfa25a2b0"
+    ],
+    "agents/xr-interface-architect.md": [
+      "995b459992ab42162269a3bc607131371206742df9c55a4ef614e0171f34e92b"
+    ],
+    "agents/zk-steward.md": [
+      "01fdb11cc8df0ada78aa31007c1565a3d118d64e9e97ff86b8dd838782a44082"
+    ],
+    "teams/feature-delivery.md": [
+      "169b1fb6ad4152081cd182ab8d2db73373b609c2c8c7d7b9b8792e1447f2af1f",
+      "3d4bccf4235264aaffbf631d314b24bfa5ec907eca2447499ee34327c357733c",
+      "573cdb088851b0b3e94ba5d9984f849edfcd672bc7b92784d541b54e1a488afb"
+    ],
+    "teams/research-review.md": [
+      "6349bb40b63a6afee19bcf0f4147ef6db6184a8df45d1190ecded38c36df9875",
+      "de603db498edabfd5cbda35b4d2a605d4298aaef41aff296d2660c2d5814bf10"
+    ],
+    "teams/ui-delivery.md": [
+      "2bc5d1c8c87889259c1f94a88028e915142d76ea745f2b9eb0835b35c50fdb24",
+      "6d09ad631ca6dc01aab14e4dbf0f06decab5f337478fb4dfde826473bbdabe8b"
+    ]
+  }
+}

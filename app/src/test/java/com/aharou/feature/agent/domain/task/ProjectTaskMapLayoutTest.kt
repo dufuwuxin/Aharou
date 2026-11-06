@@ -24,6 +24,26 @@ class ProjectTaskMapLayoutTest {
         assertEquals(ProjectTaskMapLayout.NODE_HEIGHT, child.height, 0.01f)
     }
 
+    @Test fun fitZoomIncludesDeepAndWideContentsAndAllowsFurtherZoomOut() {
+        for ((width, height) in listOf(300000f to 800f, 800f to 300000f)) {
+            val fit = ProjectTaskMapLayout.fitZoom(393f, 700f, width, height)
+            assertTrue(fit.isFinite() && fit > 0f)
+            assertTrue(width * fit <= 393.01f && height * fit <= 700.01f)
+            val smaller = ProjectTaskMapLayout.clampZoom(fit / 2f, ProjectTaskMapLayout.minimumZoom(fit))
+            assertTrue(smaller > 0f && smaller < fit)
+        }
+        assertEquals(2f, ProjectTaskMapLayout.clampZoom(20f, 0.01f), 0f)
+    }
+
+    @Test fun invalidViewportAndGestureScalesStayPositiveAndFinite() {
+        for (bad in listOf(0f, -1f, Float.NaN, Float.POSITIVE_INFINITY)) {
+            val fit = ProjectTaskMapLayout.fitZoom(bad, 700f, 300000f, 800f)
+            assertTrue(fit.isFinite() && fit > 0f)
+            val zoom = ProjectTaskMapLayout.clampZoom(bad, ProjectTaskMapLayout.minimumZoom(fit))
+            assertTrue(zoom.isFinite() && zoom > 0f && zoom <= 2f)
+        }
+    }
+
     @Test fun parentIsAtChildBranchMidline() {
         val layout = ProjectTaskMapLayout.build("p", listOf(task("a"), task("b", order = 1)))
         val root = layout.nodes.first { it.id == "project:p" }
@@ -38,12 +58,12 @@ class ProjectTaskMapLayoutTest {
         assertEquals("project:p", ProjectTaskMapLayout.rootId("p"))
     }
 
-    @Test fun minimumZoomKeepsSiblingHitRectanglesSeparateAndTouchable() {
+    @Test fun overviewZoomKeepsSiblingRectanglesSeparateWithoutTouchSizeFloor() {
         val layout = ProjectTaskMapLayout.build("p", listOf(task("a"), task("b", order = 1)))
         val nodes = layout.nodes.filter { it.id in setOf("a", "b") }.sortedBy { it.y }
         val scale = ProjectTaskMapLayout.MIN_ZOOM
         val height = ProjectTaskMapLayout.NODE_HEIGHT * scale
-        assertTrue(height >= 48f)
+        assertTrue(height > 0f && height < 48f)
         assertTrue((nodes[1].y - nodes[0].y) * scale >= height)
         val lowerOnly = layout.visible(nodes[1].x, nodes[1].y + 1f, nodes[1].x + nodes[1].width,
             nodes[1].y + ProjectTaskMapLayout.NODE_HEIGHT)

@@ -1,6 +1,18 @@
 ---
 name: 界面交付团队
 description: 视觉与交互设计 → Android 界面实现 → 收尾把关与可及性验收，适合新页面或界面改版
+admins: [UX Architect]
+members:
+  - name: UI Designer
+    level: 1
+  - name: UX Architect
+    level: 1
+  - name: Android Kotlin Engineer
+    level: 2
+  - name: UI Finish-Gate Reviewer
+    level: 3
+  - name: Accessibility Auditor
+    level: 3
 stages:
   - title: 设计
     tasks:

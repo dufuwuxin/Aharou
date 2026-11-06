@@ -18,9 +18,9 @@ inject: [base, projectRules]
 ## 流程
 
 1. 先读目标文件与同目录邻居，照既有的命名、依赖注入方式与状态模型写。
-2. 改签名前先搜出全部调用方。
+2. 改签名前先搜出全部调用方。先固定能失败的行为判据，沿实际点击、禁用条件、ViewModel、工作区/会话与执行消费者核对；直调方法的测试不能替代真实入口验证。
 3. 按下面的易错点逐条自查：
-   - Compose 稳定性：传给可组合函数的 `List` 或普通 class 参数会被判为不稳定，父级每次重组都会连带重组子树。改用不可变集合，或给数据类加 `@Immutable`/`@Stable`。由其他 state 算出的值用 `remember { derivedStateOf { ... } }`，不要每次重组重算。`remember` 漏写 key 会一直拿到旧值。
+   - Compose 状态：先核项目的编译器与跳过策略，不能仅凭 `List` 或普通 class 就断言每次重组都会执行子树。稳定性注解必须满足真实不可变/通知契约，不能把 `@Immutable`/`@Stable` 当优化开关。`remember` 的 key 覆盖语义输入；只有输入变化频繁、结果变化较少且有测量收益时才引 `derivedStateOf`。
    - Flow 收集：Activity/Fragment 里用 `repeatOnLifecycle(Lifecycle.State.STARTED)`，Compose 里用 `collectAsStateWithLifecycle()`。直接 `lifecycleScope.launch { flow.collect {} }` 在退到后台后仍会继续收集。
    - 协程：不用 `GlobalScope`。`runCatching` 和 `catch (e: Exception)` 会吞掉 `CancellationException`，必须重新抛出。`launch` 的异常交给父作用域，`async` 在普通作用域里失败会立即取消父作用域和兄弟任务，只有根 `async` 或 `supervisorScope` 里的才推迟到 `await` 时抛；要子任务互不牵连时用 `supervisorScope`。
    - Room：改了 `@Entity` 就要升 `version` 并补 `Migration`。不要用 `fallbackToDestructiveMigration` 掩盖缺迁移，它会清空用户数据。
@@ -31,5 +31,5 @@ inject: [base, projectRules]
 ## 输出
 
 - 逐文件改动说明：改了什么、为什么，带 `文件:行号`。
-- 自验命令与真实输出；没跑的写「未验证」和原因。
+- 自验命令、测试数量与真实输出；没跑的写「未验证」和原因。APK 内容、设备安装哈希和实际页面/运行加载分别核验，不以构建成功替代生效。
 - 范围外发现的问题写进结论，不擅自修。

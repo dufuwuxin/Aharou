@@ -98,6 +98,9 @@ jobs:
           python3 scripts/test_void_toolchain.py
           python3 scripts/test_build_logging.py
           python3 scripts/test_builtin_system.py
+          python3 scripts/check_builtin_seed_history.py
+          python3 scripts/test_builtin_seed_history.py
+          python3 scripts/test_security_audit.py
 
       # 基线只许缩：--sync-baseline 一条命令就能把棘轮抬起来，不做 diff 比对时 CI 会照常通过。
       # 只对「数值上涨 / 新增登记」报错，收紧与删除放行。

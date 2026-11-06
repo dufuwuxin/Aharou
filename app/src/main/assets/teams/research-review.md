@@ -1,6 +1,16 @@
 ---
 name: 调研评审团队
 description: 并行调研 → 交叉评审 → 结论汇总，适合技术选型与方案预研
+admins: [Explore]
+members:
+  - name: Explore
+    level: 1
+  - name: Trend Researcher
+    level: 1
+  - name: Reality Checker
+    level: 2
+  - name: Docs Writer
+    level: 3
 stages:
   - title: 并行调研
     tasks:

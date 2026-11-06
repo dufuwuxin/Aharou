@@ -32,7 +32,6 @@ import com.aharou.feature.agent.domain.mcp.McpServerStatus
 import com.aharou.feature.agent.domain.tool.ToolPermissionPolicy
 import com.aharou.feature.settings.presentation.ToolCategory
 import com.aharou.feature.settings.presentation.ToolsViewModel
-import com.aharou.feature.agent.domain.tool.custom.PracticalToolTemplates
 import compose.icons.FeatherIcons
 import compose.icons.feathericons.FileText
 import compose.icons.feathericons.Globe
@@ -281,15 +280,6 @@ internal fun ToolsSection(
                         )
                     }
                 }
-                androidx.compose.runtime.key("practical-templates") {
-                    Column(modifier = Modifier.padding(horizontal = Spacing.lg), verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-                        Text(stringResource(R.string.tools_templates_title), style = MaterialTheme.typography.labelLarge)
-                        Text(stringResource(R.string.tools_templates_hint), style = MaterialTheme.typography.bodySmall)
-                        PracticalToolTemplates.all.forEach { template ->
-                            TextButton(onClick = { viewModel.startTemplate(template.name) }) { Text(template.name) }
-                        }
-                    }
-                }
                 TOOL_GROUP_ORDER.forEach { source ->
                     val entries = state.entries.filter { it.source == source }.sortedBy { it.name.lowercase() }
                     if (entries.isEmpty()) return@forEach
@@ -334,7 +324,8 @@ internal fun ToolsSection(
             onSaveSettings = { name, description, mode, keywords, schemaJson ->
                 viewModel.saveToolSettings(name, description, mode, keywords, schemaJson)
             },
-            template = editor.template
+            template = editor.template,
+            onSelectTemplate = viewModel::startTemplate
         )
     }
 }

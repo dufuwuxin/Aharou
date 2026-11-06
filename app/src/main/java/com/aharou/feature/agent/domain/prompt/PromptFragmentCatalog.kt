@@ -544,6 +544,7 @@ class PromptFragmentCatalog @Inject constructor(
         val AUX_NAMES = listOf(
             "agent/plan-mode.md",
             "agent/auto-mode.md",
+            "agent/allow-mode.md",
             "agent/subagent-base.md",
             "agent/memory-discipline.md",
             "agent/stuck-nudge.md",

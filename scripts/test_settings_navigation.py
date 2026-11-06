@@ -51,11 +51,81 @@ class SettingsNavigationTest(unittest.TestCase):
         cls.installer = source(LSP / "LanguageServerInstaller.kt")
         cls.catalog = source(LSP / "LspServerCatalog.kt")
 
-    def test_account_and_all_four_im_pages_have_clickable_entries(self):
-        account = function(self.groups, "SettingsAharouRows")
+    def test_role_management_has_its_own_entry_and_returns_to_config(self):
         config = function(self.groups, "SettingsAiGroupScreen")
-        for name, rows in (("AccountCenter", account), *((name, config) for name in
-                          ("TelegramBot", "WeixinBot", "FeishuBot", "QqBot"))):
+        self.assertIn("onOpen(SettingsSection.SubAgents)", config)
+        self.assertIn("SettingsSection.SubAgents -> (configHome ?: SettingsSection.AiGroup)", self.screen)
+        for name in ("SubAgents", "SubAgentDetail"):
+            actions = self.screen[self.screen.index("actions = {"):]
+            self.assertIn(f"SettingsSection.{name} ->", actions)
+        self.assertIn("viewModel.deleteSubAgent(target.name, target.scope)", self.screen)
+        self.assertIn("editingSubAgent = entry", self.screen)
+
+    def test_bottom_roots_hide_titles_and_back_but_keep_child_navigation(self):
+        self.assertIn("current == SettingsSection.Menu || current == configHome", self.screen)
+        self.assertIn("if (!isRoot && (!expanded || parentSection != null))", self.screen)
+        self.assertIn("if (!isRoot) TopAppBar(", self.screen)
+        self.assertNotIn("settings_category_", self.groups)
+        sessions = source(SRC / "feature/agent/presentation/component/SessionListScreen.kt")
+        projects = source(SRC / "feature/agent/presentation/component/ProjectListScreen.kt")
+        self.assertNotIn("R.string.session_list_title", sessions)
+        self.assertNotIn("Text(stringResource(R.string.project_home)", projects)
+        self.assertIn("onNewSession", sessions)
+        self.assertIn('testTag("create_project")', projects)
+
+    def test_injection_details_are_conditional_and_switches_preserve_state(self):
+        prompt = source(SETTINGS / "PromptEditorScreen.kt")
+        fields = source(SETTINGS / "PromptInjectionFields.kt")
+        self.assertIn("keywords = keywords.map", prompt)
+        self.assertIn("if (keywordsEnabled)", fields)
+        self.assertIn("if (membersEnabled)", fields)
+        self.assertIn("keywords.forEachIndexed", fields)
+        self.assertIn("singleLine = true", fields)
+        self.assertIn("keywords.filterIndexed", fields)
+        self.assertIn('onKeywordsChange(keywords + "")', fields)
+        self.assertNotIn("keywordsRaw", prompt)
+        for callback in ("onKeywordsEnabledChange", "onMembersEnabledChange"):
+            self.assertIn(f"onCheckedChange = {callback}", fields)
+
+    def test_task_continuation_preserves_structured_parent_at_any_depth(self):
+        workbench = source(SRC / "feature/agent/presentation/component/ProjectTaskWorkbench.kt")
+        detail = source(SRC / "feature/agent/presentation/component/ProjectTaskDetailScreen.kt")
+        self.assertNotIn("onAddChild = {}", workbench)
+        self.assertIn("onAddChild = { task ->", workbench)
+        self.assertIn("viewModel.addTaskByDescription(projectId, description, parentId = addingParentId)", workbench)
+        self.assertIn("viewModel.addTaskByDescription(projectId, description, parentId = task.id)", detail)
+        self.assertIn('testTag("task_add_child_${row.task.id}")', workbench)
+
+    def test_map_fit_and_zoom_are_not_limited_by_touch_target_size(self):
+        layout = source(SRC / "feature/agent/domain/task/ProjectTaskMapLayout.kt")
+        task_map = source(SRC / "feature/agent/presentation/component/ProjectTaskMap.kt")
+        self.assertNotIn("48f / NODE_HEIGHT", layout)
+        self.assertIn("fun fitZoom(", layout)
+        self.assertIn("fun minimumZoom(", layout)
+        self.assertIn("fun clampZoom(", layout)
+        self.assertIn("target.isFinite()", layout)
+        self.assertIn('testTag("map_fit")', task_map)
+        self.assertIn("ProjectTaskMapLayout.fitZoom(", task_map)
+        self.assertIn("ProjectTaskMapLayout.clampZoom(", task_map)
+        self.assertIn("(r - RING_DP * density / 2f).coerceAtLeast(0f)", task_map)
+
+    def test_personal_center_is_removed_without_removing_shared_identity(self):
+        account = function(self.groups, "SettingsAharouRows")
+        self.assertNotIn("AccountCenter", self.screen + self.groups)
+        self.assertFalse((SRC / "feature/account/presentation/AccountScreen.kt").exists())
+        self.assertFalse((SRC / "feature/account/presentation/UserIdentityCard.kt").exists())
+        for name in ("Soul", "ConfigAudit"):
+            with self.subTest(section=name):
+                self.assertIn(f"onOpen(SettingsSection.{name})", account)
+                self.assertRegex(self.screen, rf"SettingsSection\.{name}\s*->")
+        self.assertIn("UserIdentityStore.observe(context)", source(SRC / "feature/agent/presentation/component/SoulChatHeader.kt"))
+        self.assertIn("UserIdentityStore.setName", source(SRC / "core/config/ConfigBuiltins.kt"))
+        self.assertTrue((SRC / "core/identity/UserIdentityStore.kt").is_file())
+
+    def test_all_four_im_pages_have_clickable_entries(self):
+        config = function(self.groups, "SettingsAiGroupScreen")
+        for name in ("TelegramBot", "WeixinBot", "FeishuBot", "QqBot"):
+            rows = config
             with self.subTest(section=name):
                 self.assertRegex(rows, rf"onClick\s*=\s*\{{\s*onOpen\(SettingsSection\.{name}\)")
                 self.assertRegex(self.screen, rf"SettingsSection\.{name}\s*->")

@@ -41,7 +41,6 @@ fun ProjectListScreen(viewModel: ProjectTaskViewModel, createRequested: Boolean,
     }
     Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top))
         .padding(Spacing.lg), verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
-        Text(stringResource(R.string.project_home), style = MaterialTheme.typography.headlineSmall)
         Button(onClick = { creating = true }, enabled = !state.loading && !state.busy && state.workspace.isNotBlank(),
             modifier = Modifier.heightIn(min = 48.dp).testTag("create_project")) { Text(stringResource(R.string.project_create)) }
         state.error?.let { Text(stringResource(R.string.project_task_error, it), color = MaterialTheme.colorScheme.error) }

@@ -65,6 +65,7 @@ internal fun SubAgentTeamsSection(
     expertCount: Int = 0,
     /** 打开成员管理页（创建/编辑/删除成员）。 */
     onOpenExperts: () -> Unit = {},
+    onOpenRoleCard: (String) -> Unit = {},
     viewModel: TeamSettingsViewModel = hiltViewModel()
 ) {
     val teams by viewModel.teams.collectAsStateWithLifecycle()
@@ -150,7 +151,11 @@ internal fun SubAgentTeamsSection(
                 viewModel.resetSaveState()
                 editorTarget = EditorTarget(entry)
             },
-            onDismiss = { detail = null }
+            onDismiss = { detail = null },
+            onOpenRoleCard = { name ->
+                detail = null
+                onOpenRoleCard(name)
+            }
         )
     }
 
@@ -265,7 +270,8 @@ private fun TeamRow(entry: AgentTeamEntry) {
 private fun TeamDetailSheet(
     entry: AgentTeamEntry,
     onEdit: () -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onOpenRoleCard: (String) -> Unit
 ) {
     val team = entry.team
     AdaptiveModalBottomSheet(
@@ -297,11 +303,9 @@ private fun TeamDetailSheet(
 
             if (team.admins.isNotEmpty()) {
                 SettingsGroupHeader(text = stringResource(R.string.team_detail_admins))
-                Text(
-                    text = team.admins.joinToString("、"),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
+                team.admins.forEach { name ->
+                    TextButton(onClick = { onOpenRoleCard(name) }) { Text(name) }
+                }
             }
 
             if (team.members.isNotEmpty()) {
@@ -309,11 +313,10 @@ private fun TeamDetailSheet(
                 team.levels.forEach { level ->
                     val names = team.members.filter { it.level == level }.map { it.name }
                     if (names.isEmpty()) return@forEach
-                    Text(
-                        text = teamRoleLabel(level) + "：" + names.joinToString("、"),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
+                    Text(teamRoleLabel(level), style = MaterialTheme.typography.labelLarge)
+                    names.forEach { name ->
+                        TextButton(onClick = { onOpenRoleCard(name) }) { Text(name) }
+                    }
                 }
             }
 

@@ -191,10 +191,14 @@ fun ProjectTaskMap(projectId: String, projectTitle: String, tasks: List<ProjectT
             else stringResource(R.string.project_task_dependency_legend),
             style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant, maxLines = 2,
             overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag("map_hint"))
-        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth().clipToBounds().testTag("map_viewport").pointerInput(projectId) {
+        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth().clipToBounds().testTag("map_viewport").pointerInput(projectId, layout.width, layout.height) {
             detectTransformGestures { centroid, pan, scale, _ ->
                 onDrag()
-                val next = (zoom * scale).coerceIn(ProjectTaskMapLayout.MIN_ZOOM, MAX_ZOOM)
+                if (!scale.isFinite() || scale <= 0f || !pan.x.isFinite() || !pan.y.isFinite() ||
+                    !centroid.x.isFinite() || !centroid.y.isFinite()) return@detectTransformGestures
+                val minimum = ProjectTaskMapLayout.minimumZoom(ProjectTaskMapLayout.fitZoom(
+                    size.width / density, size.height / density, layout.width, layout.height, MAX_ZOOM))
+                val next = ProjectTaskMapLayout.clampZoom(zoom * scale, minimum, MAX_ZOOM)
                 val ratio = next / zoom
                 panX = centroid.x / density - (centroid.x / density - panX) * ratio + pan.x / density
                 panY = centroid.y / density - (centroid.y / density - panY) * ratio + pan.y / density
@@ -204,7 +208,9 @@ fun ProjectTaskMap(projectId: String, projectTitle: String, tasks: List<ProjectT
             val viewW = maxWidth.value
             val viewH = maxHeight.value
             fun zoomAtCenter(target: Float) {
-                val next = target.coerceIn(ProjectTaskMapLayout.MIN_ZOOM, MAX_ZOOM)
+                val minimum = ProjectTaskMapLayout.minimumZoom(ProjectTaskMapLayout.fitZoom(
+                    viewW, viewH, layout.width, layout.height, MAX_ZOOM))
+                val next = ProjectTaskMapLayout.clampZoom(target, minimum, MAX_ZOOM)
                 val ratio = next / zoom
                 panX = viewW / 2f - (viewW / 2f - panX) * ratio
                 panY = viewH / 2f - (viewH / 2f - panY) * ratio
@@ -284,7 +290,7 @@ fun ProjectTaskMap(projectId: String, projectTitle: String, tasks: List<ProjectT
                     if (style.glow) drawCircle(style.color, RUN_GLOW * zoom * density, c, alpha = GLOW_ALPHA * alpha)
                     if (style.filled) drawCircle(style.color, r, c, alpha = alpha)
                     else {
-                        drawCircle(style.color, r - RING_DP * density / 2f, c, alpha = alpha, style = Stroke(RING_DP * density))
+                        drawCircle(style.color, (r - RING_DP * density / 2f).coerceAtLeast(0f), c, alpha = alpha, style = Stroke(RING_DP * density))
                         if (style.inner) drawCircle(style.color, r * INNER_DOT, c, alpha = alpha)
                     }
                 }
@@ -324,6 +330,12 @@ fun ProjectTaskMap(projectId: String, projectTitle: String, tasks: List<ProjectT
                 Row(horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
                     TextButton(onClick = { zoomAtCenter(zoom * ZOOM_STEP) }, modifier = Modifier.heightIn(min = 48.dp).testTag("map_zoom_in")) { Text(stringResource(R.string.project_map_zoom_in)) }
                     TextButton(onClick = { zoomAtCenter(zoom / ZOOM_STEP) }, modifier = Modifier.heightIn(min = 48.dp).testTag("map_zoom_out")) { Text(stringResource(R.string.project_map_zoom_out)) }
+                    TextButton(onClick = {
+                        zoom = ProjectTaskMapLayout.fitZoom(viewW - Spacing.lg.value * 2,
+                            viewH - Spacing.lg.value * 2, layout.width, layout.height, MAX_ZOOM)
+                        panX = (viewW - layout.width * zoom) / 2f
+                        panY = (viewH - layout.height * zoom) / 2f
+                    }, modifier = Modifier.heightIn(min = 48.dp).testTag("map_fit")) { Text(stringResource(R.string.project_map_fit)) }
                     TextButton(onClick = { zoom = DEFAULT_ZOOM; reset++ }, modifier = Modifier.heightIn(min = 48.dp).testTag("map_reset")) { Text(stringResource(R.string.project_map_reset)) }
                 }
             }
@@ -345,6 +357,7 @@ fun ProjectTaskMap(projectId: String, projectTitle: String, tasks: List<ProjectT
                 Box(Modifier.size(Spacing.sm).background(projectTaskStatusColor(selected.status), CircleShape))
                 Text(selected.title, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.weight(1f))
+                TextButton(onClick = { onAddChild(selected) }) { Text(stringResource(R.string.project_node_add_child)) }
                 Text(projectTaskStatusLabel(selected.status), style = MaterialTheme.typography.labelMedium)
             }
             Box(Modifier.weight(1f).fillMaxWidth()) { process(selected) }
@@ -353,7 +366,7 @@ fun ProjectTaskMap(projectId: String, projectTitle: String, tasks: List<ProjectT
 }
 
 /** Header row: room for the canvas-drawn status dot, one-line title, line-count badge and unfold arrow.
- *  The row is the full [ProjectTaskMapLayout.NODE_HEIGHT] tall, so the touch target stays ≥ 48dp at minimum zoom. */
+ *  Zoomed-out nodes are overview targets; zoom in for detailed interaction. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ProjectTaskMapHeader(title: String, status: String, lineCount: Int, unfolded: Boolean, emphasised: Boolean,

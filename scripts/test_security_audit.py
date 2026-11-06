@@ -274,6 +274,73 @@ BOOT_COMPLETED
             self.assertFalse(tools["installed"])
         self.assertEqual(path.read_bytes(), b"import os\nos.system('never execute this')\n")
 
+    def test_report_identity_and_evidence_kind(self):
+        path = self.sample(b"ordinary UTF-8 text")
+        for mode, kind in (("inventory", "static_metadata"),
+                           ("source", "static_heuristics"), ("tools", "tool_discovery")):
+            with self.subTest(mode=mode):
+                code, result = self.cli(mode, None if mode == "tools" else path)
+                self.assertEqual(code, 0)
+                self.assertEqual(result["report_schema"], 1)
+                self.assertEqual(result["analyzer"]["name"], "aharou-offline-audit")
+                self.assertRegex(result["analyzer"]["version"], r"^\d+\.\d+\.\d+$")
+                self.assertRegex(result["analyzer"]["ruleset_sha256"], r"^[a-f0-9]{64}$")
+                self.assertEqual(result["evidence"], {
+                    "kind": kind, "dynamic_analysis_performed": False})
+
+    def test_failed_report_is_versioned_and_not_assessed(self):
+        for mode in ("inventory", "source"):
+            with self.subTest(mode=mode):
+                code, result = self.cli(mode, self.root / "private-marker-missing")
+                self.assertEqual(code, 2)
+                self.assertEqual(result["report_schema"], 1)
+                self.assertEqual(result["analyzer"]["name"], "aharou-offline-audit")
+                self.assertEqual(result["evidence"], {
+                    "kind": "not_assessed", "dynamic_analysis_performed": False})
+                self.assertNotIn(str(self.root), json.dumps(result))
+
+    def test_ruleset_fingerprint_tracks_executed_patterns(self):
+        path = self.sample(b"ordinary text")
+        _, before = self.cli("source", path)
+        _, repeat = self.cli("source", path)
+        self.assertEqual(before["analyzer"], repeat["analyzer"])
+        with patch.object(AUDIT, "COMPILED_RULES", AUDIT.COMPILED_RULES[:-1]):
+            _, changed = self.cli("source", path)
+        self.assertNotEqual(before["analyzer"]["ruleset_sha256"],
+                            changed["analyzer"]["ruleset_sha256"])
+        self.assertEqual(before["sha256"], changed["sha256"])
+
+    def test_tool_matrix_distinguishes_discovery_from_execution(self):
+        with patch.object(AUDIT.shutil, "which", side_effect=lambda name:
+                          "/private-marker/bin/" + name if name == "jadx" else None), \
+                patch.object(subprocess, "Popen", side_effect=AssertionError("execution")):
+            code, result = self.cli("tools")
+        self.assertEqual(code, 0)
+        self.assertEqual(set(result["tool_matrix"]), {"native", "android", "firmware"})
+        self.assertEqual(result["tool_matrix"]["android"]["jadx"], {
+            "status": "located_unverified", "version": None})
+        self.assertEqual(result["tool_matrix"]["android"]["apktool"], {
+            "status": "missing", "version": None})
+        covered = {name for domain in result["tool_matrix"].values() for name in domain}
+        self.assertEqual(covered, set(AUDIT.TOOLS))
+        for domain in result["tool_matrix"].values():
+            for name, entry in domain.items():
+                self.assertEqual(result["tools"][name], entry["status"] == "located_unverified")
+        self.assertNotIn("private-marker", json.dumps(result))
+        self.assertFalse(result["executed"])
+        self.assertFalse(result["installed"])
+
+    def test_argument_errors_keep_argparse_contract(self):
+        for args in ([], ["source", "sample.py"], ["unsupported"]):
+            with self.subTest(args=args):
+                output, errors = io.StringIO(), io.StringIO()
+                with contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
+                    with self.assertRaises(SystemExit) as raised:
+                        AUDIT.main(args)
+                self.assertEqual(raised.exception.code, 2)
+                self.assertEqual(output.getvalue(), "")
+                self.assertIn("error:", errors.getvalue())
+
     def test_errors_do_not_echo_paths_or_contents(self):
         code, result = self.cli("inventory", self.root / "private-marker-not-present")
         self.assertEqual(code, 2)

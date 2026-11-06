@@ -55,7 +55,7 @@ MANIFESTS = [
     os.path.join(ROOT, "data/container-images.json"),
 ]
 ABIS = ("arm64",)
-DISTROS = ("alpine", "ubuntu", "debian", "arch", "manjaro")
+DISTROS = ("alpine", "ubuntu", "debian", "arch", "manjaro", "void")
 CNB_OWNER = os.environ.get("CNB_OWNER") or "huxiangli"
 CNB_REPO = os.environ.get("CNB_REPO") or "aharou-releases"
 CNB_TAG = os.environ.get("CNB_TAG") or "container-images"
@@ -76,6 +76,7 @@ DISCOVERY_BASES = {
         "https://mirrors.huaweicloud.com/ubuntu-cdimage",
     ],
     "debian": ["https://doi-janky.infosiftr.net"],
+    "void": ["https://repo-default.voidlinux.org"],
 }
 
 # Arch/Manjaro 是滚动发行版，官方只出 aarch64 的 rootfs，且没有稳定版本号：
@@ -239,6 +240,8 @@ def path_for(entry: dict, version: str) -> str:
     if d == "debian":
         return ("job/tianon/job/debuerreotype/job/{abi}/lastSuccessfulBuild/artifact/"
                 f"{suite_of(entry)}/rootfs.tar.xz")
+    if d == "void":
+        return f"live/current/void-{{abi}}-ROOTFS-{version}.tar.xz"
     # arch/manjaro 精简包名固定（不带版本），版本变化只体现在清单 version 与哈希上。
     if d in ("arch", "manjaro"):
         return f"{d}-lite-{{abi}}.tar.gz"
@@ -295,6 +298,18 @@ def discover(entry: dict, base: str) -> dict:
                      f"/lastSuccessfulBuild/artifact/{suite}/rootfs.tar.xz" for abi in ABIS}
         return {"version": debian_version_str(ver, suite), "urls": urls,
                 "extra": f"build #{meta.get('number')}"}
+
+    if d == "void":
+        # 精确匹配 glibc ROOTFS，不能把 musl、ISO 或板卡 PLATFORMFS 当通用 rootfs。
+        pat = re.compile(rf"^void-{re.escape(arm_name)}-ROOTFS-(\d{{8}})\.tar\.xz$")
+        versions = sorted({m.group(1) for name in dir_entries(f"{base}/live/current/")
+                           if (m := pat.fullmatch(name))})
+        if not versions:
+            raise RuntimeError("Void 官方目录里没有 aarch64 glibc ROOTFS")
+        ver = versions[-1]
+        urls = {abi: f"{base}/" + path_for(entry, ver).replace("{abi}", entry["abiNames"][abi])
+                for abi in ABIS}
+        return {"version": ver, "urls": urls, "extra": "Void aarch64 glibc ROOTFS"}
 
     if d == "arch":
         # 滚动版无版本号：HEAD 拿 Last-Modified 当版本（日期），变了说明官方 rootfs 更新。
@@ -491,6 +506,16 @@ def fetch_checksums(entry: dict, info: dict) -> dict:
             txt = http_text(f"{base}/job/tianon/job/debuerreotype/job/{entry['abiNames'][abi]}"
                             f"/lastSuccessfulBuild/artifact/{suite}/rootfs.tar.xz.sha256")
             out[abi] = txt.split()[0].lower()
+        return out
+    if d == "void":
+        text = http_text(f"{base}/live/current/sha256sum.txt")
+        for abi in ABIS:
+            filename = f"void-{entry['abiNames'][abi]}-ROOTFS-{ver}.tar.xz"
+            matches = re.findall(rf"^SHA256 \({re.escape(filename)}\) = ([0-9a-fA-F]{{64}})$",
+                                 text, re.MULTILINE)
+            if len(matches) != 1:
+                raise RuntimeError(f"Void SHA256 缺失、格式错误或重复：{filename}")
+            out[abi] = matches[0].lower()
         return out
     raise RuntimeError(f"未知发行版：{d}")
 
@@ -700,7 +725,7 @@ def parse_args():
     mode = p.add_mutually_exclusive_group()
     mode.add_argument("--apply", action="store_true",
                    help="真下载 + 校验 + 上传 cnb + 改写清单（需要 CNB_TOKEN）")
-    p.add_argument("--distro", choices=DISTROS, help="只处理某一类发行版；缺省三类都查")
+    p.add_argument("--distro", choices=DISTROS, help="只处理某一类发行版；缺省全部检查")
     mode.add_argument("--prune-unsupported-abis", action="store_true",
                    help="仅离线移除清单中不支持的架构，不下载或上传")
     return p.parse_args()
@@ -713,8 +738,19 @@ def main() -> int:
         return 1
     if args.prune_unsupported_abis:
         return 0 if save_manifests(data) else 1
-    images = data.get("images") or []
-    targets = [e for e in images if not args.distro or e.get("distro") == args.distro]
+    images = data.setdefault("images", [])
+    candidates = list(images)
+    if not any(e.get("distro") == "void" for e in images):
+        # 种子只在内存中参与发现；只有校验、上传成功才写入可下载清单。
+        candidates.append({
+            "id": "void-glibc", "name": "Void Linux (glibc)", "distro": "void",
+            "description": "Void Linux aarch64 glibc 官方 ROOTFS，独立 XBPS 开发环境",
+            "version": "0", "sizeBytes": 0,
+            "path": "live/current/void-{abi}-ROOTFS-0.tar.xz",
+            "paths": {"aharou": "void-glibc-{abi}.tar.xz"},
+            "abiNames": {"arm64": "aarch64"},
+        })
+    targets = [e for e in candidates if not args.distro or e.get("distro") == args.distro]
     mode = "apply" if args.apply else "dry-run"
     print(f"模式：{mode}｜清单 {len(images)} 条，本次检查 {len(targets)} 条"
           + (f"（仅 {args.distro}）" if args.distro else ""))
@@ -839,6 +875,15 @@ def main() -> int:
         return 1
 
     applied, failed = apply_changes(changes)
+    for change in applied:
+        entry = change["entry"]
+        if entry not in images:
+            images.append(entry)
+        if entry["distro"] == "void":
+            sources = data["sources"]
+            sources["official"]["distros"]["void"] = DISCOVERY_BASES["void"][0]
+            sources["aharou"]["distros"]["void"] = (
+                f"https://cnb.cool/{CNB_OWNER}/{CNB_REPO}/-/releases/download/{CNB_TAG}")
     write_backfills(hash_backfills)
     touched = [c["entry"]["id"] for c in applied] + [e["id"] for e, _ in hash_backfills]
     if touched and not save_manifests(data):
@@ -848,6 +893,7 @@ def main() -> int:
         if eol_changes:
             print(f"其中含 {len(eol_changes)} 条 EOL 标注变更。")
         print("清单： " + " / ".join(os.path.relpath(p, ROOT) for p in MANIFESTS))
+    failed.extend(f"{eid}（{error}）" for eid, error in failures)
     if failed:
         print(f"\n完成但有失败：成功 {len(applied)} 条，失败 {len(failed)} 条 → {'；'.join(failed)}")
         return 1
@@ -960,12 +1006,21 @@ def apply_changes(changes: list) -> tuple:
         if entry["distro"] != "debian":
             try:
                 hashes = {abi: h for abi, h in fetch_checksums(entry, info).items() if h}
-            except Exception as e:  # noqa: BLE001 — 官方没给校验文件不该阻塞上传，但要打出来
+            except Exception as e:  # noqa: BLE001 — 单项失败不影响其它发行版
+                if entry["distro"] == "void":
+                    print(f"  [失败] Void 官方 SHA256 不可用：{e}")
+                    failed.append(f"{eid}（官方 SHA256 不可用）")
+                    continue
                 print(f"  [警告] 取官方 SHA256 失败：{e}（本次不做校验）")
+        if entry["distro"] == "void" and not all(
+                re.fullmatch(r"[0-9a-f]{64}", hashes.get(abi, "")) for abi in ABIS):
+            failed.append(f"{eid}（官方 SHA256 不完整）")
+            continue
         info["hashes"] = hashes
 
         names = {abi: asset_name(entry, abi) for abi in ABIS}
-        if all(assets.get(names[abi]) == info["sizes"][abi] for abi in ABIS):
+        if entry["distro"] != "void" and all(
+                assets.get(names[abi]) == info["sizes"][abi] for abi in ABIS):
             print("  cnb 上两个 ABI 的同名资产都在且体积一致，跳过下载与上传")
             applied.append(c)
             continue
@@ -976,7 +1031,7 @@ def apply_changes(changes: list) -> tuple:
             for abi in ABIS:
                 name = names[abi]
                 dest = os.path.join(tmpdir, name)
-                if assets.get(name) == info["sizes"][abi]:
+                if entry["distro"] != "void" and assets.get(name) == info["sizes"][abi]:
                     print(f"  [已存在] {name}（体积一致，跳过）")
                     continue
                 print(f"  下载 {name}（{info['sizes'][abi] / 1048576:.1f}MB）...")

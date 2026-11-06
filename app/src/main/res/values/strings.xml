@@ -1543,13 +1543,13 @@
     <string name="scheduled_tasks_template_topic_hint">会替换指令里的 {{topic}}；留空则用示例主题</string>
 
     <!-- Subagent Settings -->
-    <string name="settings_subagents">专家成员</string>
+    <string name="settings_subagents">角色管理</string>
     <string name="subagent_max_running">并发上限</string>
     <string name="subagent_max_running_hint">同时运行的成员数量上限，范围 %1$d~%2$d。名额整个应用共享，不按会话分组。</string>
     <string name="settings_teams">团队</string>
-    <string name="settings_team_experts">专家成员</string>
-    <string name="settings_team_experts_desc">团队成员就是这些专家：一个团队由若干专家按阶段串起来，派活时团队名点到哪个专家就由谁上</string>
-    <string name="settings_team_experts_manage">管理专家成员</string>
+    <string name="settings_team_experts">角色卡</string>
+    <string name="settings_team_experts_desc">先定义角色卡的职责、提示词和工具；加入团队后才成为该团队的成员或管理员</string>
+    <string name="settings_team_experts_manage">管理角色卡</string>
 
     <!-- Tools Settings -->
     <string name="settings_tools">工具</string>
@@ -1585,7 +1585,8 @@
     <string name="team_detail_file">团队文件</string>
     <string name="team_run_hint">在对话里说「用%1$s做…」即可；AI 也可以直接调用 task 工具，action 用 team_run、team 填这个团队名。</string>
     <string name="team_new">创建团队</string>
-    <string name="team_create_member">创建成员</string>
+    <string name="team_create_member">创建角色卡</string>
+    <string name="team_role_card_missing">找不到角色卡「%1$s」，请检查团队引用或重新选择角色卡</string>
     <string name="team_level_label">%1$d 级成员组</string>
     <string name="team_stage_index_label">第%1$d阶段</string>
     <string name="team_editor_add_members">选择成员</string>
@@ -1604,7 +1605,7 @@
     <string name="team_editor_description">团队简介</string>
     <string name="team_editor_members">成员名单</string>
     <string name="team_editor_members_hint">只在这里的成员会进主代理视野；没入团的成员主代理看不到</string>
-    <string name="team_editor_members_empty">还没有成员，先去「创建成员」建一个</string>
+    <string name="team_editor_members_empty">还没有可选角色卡，先去「创建角色卡」定义一个</string>
     <string name="team_editor_admins">团队管理员（唯一）</string>
     <string name="team_editor_admins_hint">从团队成员中选择一位管理员；连线表示工作流，不表示权限继承。</string>
     <string name="team_editor_admin_add_hint">或直接输入管理员名（成员列表为空时也可用）</string>
@@ -1660,11 +1661,11 @@
     <string name="subagent_tools_allow">仅允许：%1$s</string>
     <string name="subagent_tools_deny">禁用：%1$s</string>
     <string name="subagent_inject_none">不注入任何额外提示词</string>
-    <string name="subagent_add">新建成员</string>
+    <string name="subagent_add">创建角色卡</string>
     <string name="subagent_edit">编辑成员</string>
     <string name="subagent_enable">启用该成员</string>
     <string name="subagent_enable_hint">关闭后 AI 不再能派发它，已在运行的子会话不受影响</string>
-    <string name="subagent_editor_new">新建成员</string>
+    <string name="subagent_editor_new">创建角色卡</string>
     <string name="subagent_editor_edit">编辑成员</string>
     <string name="subagent_editor_basic">基本信息</string>
     <string name="subagent_editor_description">用途描述</string>
@@ -3086,16 +3087,7 @@
     <string name="dependency_check_network_failed">网络不可用，未能获取最新版本</string>
     <string name="dependency_check_all_up_to_date">所有依赖均为最新版本</string>
     <string name="dependency_check_unparsed">%1$d 行无法解析</string>
-    <string name="account_entry_title">个人中心</string>
     <string name="chat_user_default_name">我</string>
-    <string name="account_identity_title">我的身份</string>
-    <string name="account_avatar">头像</string>
-    <string name="account_avatar_hint">选个 emoji，或从相册挑张图</string>
-    <string name="account_avatar_gallery">从相册选择</string>
-    <string name="account_name_label">显示名</string>
-    <string name="account_name_placeholder">聊天里显示的名字</string>
-    <string name="account_avatar_error_unreadable">这张图读不出来，换一张试试</string>
-    <string name="account_avatar_error_too_large">图片太大了，换张小一点的</string>
     <string name="settings_telegram_bot">Telegram 机器人</string>
     <string name="im_attachment_only_hint">（对方发来附件，没有文字说明）</string>
     <string name="im_pairing_prompt">这个聊天还没有和 Aharou 配对。配对码：%1$s\n在 App 的「设置 → %2$s」里通过。10 分钟内有效。</string>
@@ -3514,12 +3506,13 @@
     <string name="skills_bound_members">绑定成员</string>
     <string name="skills_bound_members_hint">打开开关即可绑定，可同时选择多个成员；每次更改自动保存。点击成员名称可配置关键词注入。</string>
     <string name="skills_binding_failed">绑定更改未保存，请重试；原有绑定保持不变。</string>
-    <string name="skills_bound_members_empty">尚无可选成员，请先在「专家成员」页创建成员。</string>
+    <string name="skills_bound_members_empty">尚无可选角色卡，请先在「角色卡」页创建。</string>
     <string name="skills_keyword_inject_guide">关键词注入仍由成员配置；绑定技能不会自动启用已停用的成员或技能。</string>
 
     <string name="rules_runtime_title">运行时规则</string>
-    <string name="rules_runtime_trigger_plan">进入 PLAN 模式时注入</string>
-    <string name="rules_runtime_trigger_auto">进入 AUTO 模式时注入</string>
+    <string name="rules_runtime_trigger_plan">绑定 PLAN：模式变化后由执行器自动附加正文，无需 AI 读取</string>
+    <string name="rules_runtime_trigger_auto">绑定 AUTO：模式变化后由执行器自动附加正文，无需 AI 读取</string>
+    <string name="rules_runtime_trigger_allow">绑定 ALLOW：模式变化后由执行器自动附加正文，无需 AI 读取</string>
     <string name="rules_runtime_trigger_subagent">创建子会话时注入子代理基线</string>
     <string name="rules_runtime_trigger_memory">构建记忆上下文时注入，受注入开关控制</string>
     <string name="rules_runtime_trigger_stuck">检测到重复操作或执行卡住时注入提醒</string>
@@ -3540,7 +3533,7 @@
     <string name="prompts_injection_default">默认注入</string>
     <string name="prompts_injection_default_hint">每轮注入；成员继承主规则时同样生效</string>
     <string name="prompts_injection_keywords">关键词注入</string>
-    <string name="prompts_injection_keywords_hint">启用后，当前请求命中任一关键词时注入；用逗号或换行分隔</string>
+    <string name="prompts_injection_keywords_hint">启用后，当前请求命中任一关键词时注入；每个输入框填写一个关键词，关闭保留内容</string>
     <string name="prompts_injection_members">成员注入</string>
     <string name="prompts_injection_members_hint">启用后，向选中的成员注入此片段；关闭不会清除选择</string>
     <string name="tools_add_type">选择工具类型</string>
@@ -3850,4 +3843,8 @@
     <string name="memory_review_proposals_name">整理提议审核</string>
     <string name="memory_review_proposals_description">默认开启：合并与摘要改写仅生成可检视提议，批准具体稿后写入。关闭后恢复原自动写入路径，不关闭整理任务。</string>
     <string name="chat_context_request_metadata">请求版本 %1$s · 时间戳 %2$s\n系统 %3$s / 工具定义 %4$s / 历史与消息开销 %5$s / 图片估算 %6$s token（非模型账单）</string>
+    <string name="prompts_injection_keyword">关键词 %1$d</string>
+    <string name="project_map_fit">适配全图</string>
+    <string name="container_recommendation_title">开发容器怎么选</string>
+    <string name="container_recommendation_body">Alpine 保留为离线默认与备用。综合开发优先 Debian / Ubuntu；Arch / Manjaro 适合接受滚动更新的用户；Void 请选择 aarch64 glibc，在线条目须同步发布成功后才出现。各镜像使用独立容器，不混用 libc。</string>
 </resources>

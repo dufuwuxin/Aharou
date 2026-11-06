@@ -24,6 +24,38 @@ class AgentTeamParserTest {
         File(tempFolder.root, name).apply { writeText(content) }
 
     @Test
+    fun parse_builtinTeamsExposeRoleCardsAndMeetExecutionContract() {
+        val root = File("src/main/assets/teams").takeIf { it.isDirectory }
+            ?: File("app/src/main/assets/teams")
+        val expected = mapOf(
+            "feature-delivery" to ("Software Architect" to listOf(
+                "Software Architect", "Android Kotlin Engineer", "Rust Engineer",
+                "Python Backend Engineer", "Code Reviewer", "Reality Checker"
+            )),
+            "research-review" to ("Explore" to listOf(
+                "Explore", "Trend Researcher", "Reality Checker", "Docs Writer"
+            )),
+            "ui-delivery" to ("UX Architect" to listOf(
+                "UI Designer", "UX Architect", "Android Kotlin Engineer",
+                "UI Finish-Gate Reviewer", "Accessibility Auditor"
+            ))
+        )
+        for ((name, roster) in expected) {
+            val team = requireNotNull(parseFile(File(root, "$name.md")))
+            assertEquals(name, listOf(roster.first), team.admins)
+            assertEquals(name, roster.second, team.members.map { it.name })
+            assertTrue(name, team.members.all { it.level > 0 })
+            assertTrue(name, team.stages.flatMap { it.tasks }.mapNotNull { it.agent }
+                .all { it in roster.second })
+            assertNull(name, TeamFlowGraph.validate(team))
+            assertEquals("ONE_ADMIN_REQUIRED", TeamFlowGraph.validate(team.copy(admins = emptyList())))
+            assertEquals("ONE_ADMIN_REQUIRED", TeamFlowGraph.validate(team.copy(admins = roster.second.take(2))))
+            assertEquals("ADMIN_NOT_MEMBER", TeamFlowGraph.validate(team.copy(members =
+                team.members.filterNot { it.name == roster.first })))
+        }
+    }
+
+    @Test
     fun parse_singleAndParallelStages() {
         val file = write(
             "delivery.md",

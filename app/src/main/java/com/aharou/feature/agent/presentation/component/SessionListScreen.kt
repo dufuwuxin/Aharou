@@ -95,7 +95,7 @@ fun SessionListScreen(
                 .windowInsetsPadding(WindowInsets.systemBars.only(WindowInsetsSides.Top)),
             verticalArrangement = Arrangement.spacedBy(Spacing.xs)
         ) {
-            // 顶栏：标题 + 当前工作区名（新建会话按钮已移到右下角悬浮）。
+            // 当前工作区名；新建会话按钮保留在右下角。
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -104,12 +104,6 @@ fun SessionListScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column {
-                    Text(
-                        text = stringResource(com.aharou.R.string.session_list_title),
-                        style = MaterialTheme.typography.headlineSmall,
-                        color = MaterialTheme.colorScheme.onBackground,
-                        fontWeight = FontWeight.SemiBold
-                    )
                     if (workspaceName.isNotBlank()) {
                         Text(
                             text = workspaceName,

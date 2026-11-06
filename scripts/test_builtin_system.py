@@ -106,6 +106,29 @@ def skill_metadata(text: str) -> tuple[dict[str, str], str]:
 
 
 class BuiltinSystemTest(unittest.TestCase):
+    def test_builtin_teams_have_complete_rosters_and_one_admin(self):
+        admins = {
+            "feature-delivery": "Software Architect",
+            "research-review": "Explore",
+            "ui-delivery": "UX Architect",
+        }
+        for entry, (_, named_agents) in TEAMS.items():
+            with self.subTest(team=entry):
+                header, _ = split_frontmatter((ASSETS / "teams" / f"{entry}.md").read_text(encoding="utf-8"))
+                fields = top_fields(header)
+                self.assertEqual(fields.get("admins"), f"[{admins[entry]}]")
+                roster = re.search(r"(?m)^members:\n((?:[ \t].*(?:\n|$))+)", header)
+                self.assertIsNotNone(roster, "missing top-level member roster")
+                names = re.findall(r"(?m)^  - name: (.+)$", roster.group(1))
+                expected = set(named_agents)
+                if entry == "research-review":
+                    expected.add("Trend Researcher")
+                self.assertEqual(set(names), expected)
+                self.assertEqual(len(names), len(expected))
+                self.assertIn(admins[entry], names)
+                self.assertTrue(expected.issubset(set(AGENTS.values())))
+                self.assertEqual(len(re.findall(r"(?m)^    level: [1-9][0-9]*$", roster.group(1))), len(names))
+
     def test_six_skill_entrypoints_have_valid_unique_metadata(self):
         names = []
         for entry in SKILLS:

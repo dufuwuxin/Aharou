@@ -220,6 +220,7 @@ internal fun ContainerImageDownloadSection(
                 }
             }
         }
+        ContainerRecommendations()
         SettingsGroupHeader(text = stringResource(R.string.container_download_image))
         if (visibleCatalog.isEmpty()) {
             SettingsGroup {

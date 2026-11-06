@@ -66,6 +66,8 @@
 
 ## 4. 模型与供应商配置
 
+个人中心页面及设置路由已移除；聊天身份存储与 `ConfigBuiltins.kt` 的身份配置字段保留，不清除用户已有昵称和头像。
+
 | 用户能做什么 | 界面入口（file:line） | Agent 有对应工具吗 | 工具名与入口（file:line） | 差距说明 |
 |---|---|---|---|---|
 | 新增供应商 | `component/SettingsScreen.kt:745-752`（顶栏 +） | 有 | `config` `action=add path=providers`（`domain/tool/config/ConfigTool.kt:349`；集合 `feature/settings/data/ConfigProviderFields.kt:86`、`:446`） | 无；api_key 类字段是 SENSITIVE，需弹确认 |
@@ -243,7 +245,7 @@
 
 虚拟屏仅使用指定显示屏的唤醒接口；新版安卓优先使用 InputManagerGlobal，按文字定位后仍注入该屏的原生点击；明确执行失败和投递后超时不自动重放。截图附带原帧序号、帧龄和显示状态，不把缓存文件新建等同应用响应。导图手机首层按视口限制标题宽度，仍保留平移、缩放和大于等于 48dp 的最小触控行高。
 
-配置 → 工具的脚本工具列表与 `config script_tools` 集合共用 `ScriptToolManager`，支持增改、启停和删除，启用的版本动态注册为工具；执行复用 Bash 真实命令权限与当前会话执行器。提示词编辑器的默认、关键词、成员注入写入片段元数据，Agent 可通过文件工具编辑同一份定义。运行时规则的编辑入口移至规则页，不更改原有覆盖路径。
+配置 → 工具的脚本工具列表与 `config script_tools` 集合共用 `ScriptToolManager`，支持增改、启停和删除，启用的版本动态注册为工具；执行复用 Bash 真实命令权限与当前会话执行器。提示词编辑器的默认、关键词、成员注入写入片段元数据，Agent 可通过文件工具编辑同一份定义。运行时规则的编辑入口移至规则页，不更改原有覆盖路径。PLAN/AUTO/ALLOW 提醒由执行器按会话模式自动附加，不依赖 AI 调用 loadRule；ALLOW 正文与其他模式一样可查看、编辑和控制注入。
 
 片段注入策略也可通过 `config` 的 `prompt_fragments` 集合读写：每个两位编号下提供 `default_injection`、`keywords_enabled`、`members_enabled`、`keywords` 和 `members`。关键词与成员名每行一项，修改列表不会自动打开开关。
 
@@ -253,8 +255,12 @@
 - 自定义工具与覆盖项仍是文件资产：全局 `~/.aharou/tools/`、项目 `.aharou/tools/`；在每轮工具构建前刷新。应用启动通过 `ConfigAgentControlFields` 注册工具覆盖集合，`tool.overrides.<name>.schema_json` 读写使用 store 快照和 registry 原始 schema 校验；空字符串重置 schema 覆盖，保留注入策略。
 - 内置与 MCP 编辑器区分原始 schema 与当前 schema，支持重置；只允许兼容的 `description`、`title`、`examples`、`$comment` 元数据覆盖。保存和运行都校验，原始结构变化后不兼容的覆盖回退为原始 schema；实际模型请求使用校验后的工具定义。参数名、类型、required、enum 等结构不能靠覆盖改写，要变更执行能力应自建工具。
 - 每轮工具集先做成员允许清单，再做 every_round/keyword/off 注入过滤和描述、schema 说明覆盖；该过滤不是执行权限撤销，包装器必须保留流式接口及全部执行授权方法。
-- `git_status`、`git_diff`、`git_log`、`find_files`、`rtk_command` 是可编辑的自定义工具模板：用户选中后只填入新建表单，保存才注册。默认带有效关键词并使用关键词模式，不默认全注入或安装依赖；RTK 缺失保留原生命令错误，不静默替换执行。
+- `git_status`、`git_diff`、`git_log`、`find_files`、`rtk_command` 是可编辑的自定义工具模板：模板只在新建自定义工具表单展开选择，不常驻工具列表；用户选中后只填入新建表单，保存才注册。默认带有效关键词并使用关键词模式，不默认全注入或安装依赖；RTK 缺失保留原生命令错误，不静默替换执行。
 - 智能托管的设置和状态按会话隔离；界面设置与 `config get/set steward.sessions.<id>.enabled|max_loops|unlimited` 接入同一控制器。全局旧托管路径由显式会话路径取代，避免修改其他会话。
+
+## 角色卡与升级部署
+
+团队中的成员和管理员是对角色卡的引用，团队详情的名称可打开相应角色卡并返回原入口；独立创建入口统一称「创建角色卡」，不重命名稳定的 frontmatter name 或工具参数。内置角色/团队升级按历史内容 SHA-256 识别未编辑的预设，用户修改保留；退役内置原文移至 builtin-archive，禁用状态不重置。源码、APK 内容、安装哈希与实际加载分别验收，不能用文件数量代替运行证据。
 
 ## 团队运行通信与指令边界
 
@@ -317,3 +323,10 @@ Second-pass corrections: long-session creation routes to project creation; expli
 | 逆向工具发现 | 按技能说明检查本地环境 | 仅 PATH 存在性，不安装或执行 readelf/jadx/apktool/rizin 等工具；不改变已有授权策略 |
 
 术语按原始意图去重，不隐瞒凭据提取、绕过控制等真实请求。网络探测、暴力破解、持久化攻击不属于此工具包。来源适配按输入记录 DSH MIT/宿主依赖、VCP CC BY-NC-SA 不复制到 GPLv3、Windows skill 平台不适用且 license 未知不复制；具体上游版本未独立核验。实现无新增依赖、无第三方代码复制。
+
+## 角色管理与提示词编辑入口
+
+- 底栏配置提供独立「角色管理」入口，复用已有角色卡读写、编辑删除和团队引用，不新增存储契约；团队中的角色入口打开同一列表。
+- 提示词注入关键词逐项添加、修改和移除；关闭关键词或成员条件只隐藏详情，保存仍保留既有值。Agent 继续使用既有提示词配置读写能力。
+- 底栏会话、项目、配置、设置根页不再重复标题与返回箭头，子页面导航和原有操作保留。
+- 项目任务树展开节点、导图执行过程和任务详情可指定当前节点继续分化，父级标识经既有 ViewModel 传给规划器；不改变执行权限、依赖校验或验收。导图支持适配全图及继续缩小。

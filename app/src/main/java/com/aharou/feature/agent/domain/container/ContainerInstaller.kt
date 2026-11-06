@@ -121,7 +121,7 @@ class ContainerInstaller @Inject constructor(
 
         /**
          * 从 assets 提取内置子代理定义（如 Explore）到 ~/.aharou/agents/。
-         * 若文件已存在则不覆盖，以保留用户的修改与删除后的重建选择。
+         * 仅内容指纹确认的旧内置可升级；保留用户修改，退役内置移入 builtin-archive 可恢复归档。
          */
         fun extractAgents(context: Context) {
             extractBuiltinAssets(context, "agents")
@@ -129,7 +129,7 @@ class ContainerInstaller @Inject constructor(
 
         /**
          * 从 assets 提取内置团队预设到 ~/.aharou/teams/。
-         * 若文件已存在则不覆盖，保留用户对预设的修改。
+         * 仅内容指纹确认的旧预设可升级或归档，不修改用户预设和禁用配置。
          */
         fun extractTeams(context: Context) {
             extractBuiltinAssets(context, "teams")

@@ -7,9 +7,22 @@ package com.aharou.feature.agent.domain.task
  * 2 × xxl = 64, lg = 16); the UI passes the token values explicitly.
  */
 object ProjectTaskMapLayout {
-    /** Header row height; × [MIN_ZOOM] it is still a 48dp touch target. */
+    /** Logical header height; zooming out trades detail for an overview. */
     const val NODE_HEIGHT = 64f
-    const val MIN_ZOOM = 48f / NODE_HEIGHT
+    const val MIN_ZOOM = 0.01f
+
+    fun fitZoom(viewWidth: Float, viewHeight: Float, width: Float, height: Float, maxZoom: Float = 2f): Float {
+        if (listOf(viewWidth, viewHeight, width, height).any { !it.isFinite() || it <= 0f }) return 1f
+        return minOf(viewWidth / width, viewHeight / height, maxZoom).coerceAtLeast(java.lang.Float.MIN_NORMAL)
+    }
+
+    fun minimumZoom(fit: Float): Float =
+        if (fit.isFinite() && fit > 0f) minOf(MIN_ZOOM, fit / 8f).coerceAtLeast(java.lang.Float.MIN_NORMAL) else MIN_ZOOM
+
+    fun clampZoom(target: Float, minimum: Float, maximum: Float = 2f): Float {
+        val lower = if (minimum.isFinite() && minimum > 0f) minimum.coerceAtMost(maximum) else MIN_ZOOM
+        return if (target.isFinite()) target.coerceIn(lower, maximum) else lower
+    }
     const val NODE_MIN_WIDTH = 120f
     const val NODE_MAX_WIDTH = 280f
     /** Minimum width of an unfolded node so its outline lines stay readable. */

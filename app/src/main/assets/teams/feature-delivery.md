@@ -1,6 +1,20 @@
 ---
 name: 功能交付团队
 description: 架构拆解 → 按语言栈并行实现（Android Kotlin / Rust / Python）→ 代码审查 → 集中验证，适合中小型功能开发
+admins: [Software Architect]
+members:
+  - name: Software Architect
+    level: 1
+  - name: Android Kotlin Engineer
+    level: 2
+  - name: Rust Engineer
+    level: 2
+  - name: Python Backend Engineer
+    level: 2
+  - name: Code Reviewer
+    level: 3
+  - name: Reality Checker
+    level: 4
 stages:
   - title: 需求拆解
     agent: Software Architect

@@ -32,7 +32,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.aharou.R
 import com.aharou.core.theme.Spacing
-import com.aharou.core.ui.AppSwitch
 import com.aharou.core.ui.AppTextField
 import com.aharou.feature.agent.domain.prompt.PromptFragment
 import com.aharou.feature.agent.domain.prompt.PromptFragmentInjection
@@ -81,7 +80,7 @@ internal fun PromptEditorScreen(
     var defaultInjection by rememberSaveable { mutableStateOf(initialInjection.defaultInjection) }
     var keywordsEnabled by rememberSaveable { mutableStateOf(initialInjection.keywordsEnabled) }
     var membersEnabled by rememberSaveable { mutableStateOf(initialInjection.membersEnabled) }
-    var keywordsRaw by rememberSaveable { mutableStateOf(initialInjection.keywords.joinToString(", ")) }
+    var keywords by rememberSaveable { mutableStateOf(initialInjection.keywords.toList()) }
     var selectedMembers by rememberSaveable { mutableStateOf(initialInjection.members.toList()) }
     val memberNames = (members + initialInjection.members).distinct().sorted()
 
@@ -124,7 +123,7 @@ internal fun PromptEditorScreen(
                                 initialInjectParts,
                                 PromptFragmentInjection(
                                     defaultInjection = defaultInjection,
-                                    keywords = keywordsRaw.split(',', '，', '\n').map { it.trim() }.filter { it.isNotEmpty() }.distinct(),
+                                    keywords = keywords.map { it.trim() }.filter { it.isNotEmpty() }.distinct(),
                                     members = selectedMembers.toSet(),
                                     keywordsEnabled = keywordsEnabled,
                                     membersEnabled = membersEnabled
@@ -227,60 +226,14 @@ internal fun PromptEditorScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.sm)
             )
-            SettingsGroup {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.lg, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(stringResource(R.string.prompts_injection_default), style = MaterialTheme.typography.bodyLarge)
-                        Text(
-                            stringResource(R.string.prompts_injection_default_hint),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    AppSwitch(checked = defaultInjection, onCheckedChange = { defaultInjection = it })
-                }
-                SettingsDivider()
-                SettingsRow(
-                    title = stringResource(R.string.prompts_injection_keywords),
-                    subtitle = stringResource(R.string.prompts_injection_keywords_hint),
-                    trailing = { AppSwitch(checked = keywordsEnabled, onCheckedChange = { keywordsEnabled = it }) }
-                )
-                AppTextField(
-                    value = keywordsRaw,
-                    onValueChange = { keywordsRaw = it },
-                    label = stringResource(R.string.prompts_injection_keywords),
-                    enabled = keywordsEnabled,
-                    singleLine = false,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.lg, vertical = Spacing.xs)
-                )
-            }
-            SettingsGroupHeader(text = stringResource(R.string.prompts_injection_members))
-            SettingsGroup {
-                SettingsRow(
-                    title = stringResource(R.string.prompts_injection_members),
-                    subtitle = stringResource(R.string.prompts_injection_members_hint),
-                    trailing = { AppSwitch(checked = membersEnabled, onCheckedChange = { membersEnabled = it }) }
-                )
-                memberNames.forEach { name ->
-                    SettingsDivider()
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.lg, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(name, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
-                        AppSwitch(
-                            checked = name in selectedMembers,
-                            enabled = membersEnabled,
-                            onCheckedChange = { checked ->
-                                selectedMembers = if (checked) selectedMembers + name else selectedMembers - name
-                            }
-                        )
-                    }
-                }
-            }
+            PromptInjectionFields(
+                defaultInjection = defaultInjection, onDefaultInjectionChange = { defaultInjection = it },
+                keywordsEnabled = keywordsEnabled, onKeywordsEnabledChange = { keywordsEnabled = it },
+                keywords = keywords, onKeywordsChange = { keywords = it },
+                membersEnabled = membersEnabled, onMembersEnabledChange = { membersEnabled = it },
+                memberNames = memberNames, selectedMembers = selectedMembers,
+                onMembersChange = { selectedMembers = it }
+            )
         }
     }
 }

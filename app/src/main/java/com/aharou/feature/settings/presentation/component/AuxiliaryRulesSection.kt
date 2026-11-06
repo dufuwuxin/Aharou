@@ -67,6 +67,7 @@ private fun auxiliaryRuleTrigger(name: String): String = stringResource(
     when (name.substringAfterLast('/').removeSuffix(".md")) {
         "plan-mode" -> R.string.rules_runtime_trigger_plan
         "auto-mode" -> R.string.rules_runtime_trigger_auto
+        "allow-mode" -> R.string.rules_runtime_trigger_allow
         "subagent-base" -> R.string.rules_runtime_trigger_subagent
         "memory-discipline" -> R.string.rules_runtime_trigger_memory
         "stuck-nudge" -> R.string.rules_runtime_trigger_stuck

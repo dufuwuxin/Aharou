@@ -1449,7 +1449,7 @@ class StatefulAgentWorkflow @Inject constructor(
             .replace(LEADING_COMMENT, "")
             .trim()
             .let { "【模式提醒】$it" }
-        AgentMode.ALLOW -> "【模式提醒】当前为 ALLOW（完全放行）模式：所有工具调用直接执行，不弹确认、也不做安全拦截（含删除系统目录、敏感点按）。安全网不在，破坏性操作自行格外小心。"
+        AgentMode.ALLOW -> promptProvider.resolvePrompt("agent/allow-mode.md").replace(LEADING_COMMENT, "").trim().let { "【模式提醒】$it" }
         AgentMode.BUILD -> null
     }
 
@@ -1474,8 +1474,8 @@ class StatefulAgentWorkflow @Inject constructor(
             .replace(LEADING_COMMENT, "")
             .trim()
         AgentMode.BUILD -> "\n\n【模式切换】计划已获用户批准，你已切换到 BUILD（构建）模式，可以开始执行计划。"
-        AgentMode.AUTO -> "\n\n【模式切换】计划已获用户批准，你已恢复到 AUTO（自动批准）模式，可以开始执行计划（工具调用将自动放行）。"
-        AgentMode.ALLOW -> "\n\n【模式切换】计划已获用户批准，你已切换到 ALLOW（完全放行）模式，可以开始执行计划（工具调用直接执行，无确认也无安全拦截）。"
+        AgentMode.AUTO -> "\n\n【模式切换】计划已获用户批准，恢复 AUTO。" + buildModeReminder(mode).orEmpty()
+        AgentMode.ALLOW -> "\n\n【模式切换】计划已获用户批准，恢复 ALLOW。" + buildModeReminder(mode).orEmpty()
     }
 
     /** 用户在外部（界面）手动切换模式时拼进工具结果的提示；与 AI 自切的 [buildModeSwitchNotice] 区分，避免误称「计划已获批准」。 */
@@ -1484,8 +1484,8 @@ class StatefulAgentWorkflow @Inject constructor(
             .replace(LEADING_COMMENT, "")
             .trim()
         AgentMode.BUILD -> "\n\n【模式切换】用户已将模式切换为 BUILD（构建）模式，可以正常执行写操作。"
-        AgentMode.AUTO -> "\n\n【模式切换】用户已将模式切换为 AUTO（自动批准）模式。"
-        AgentMode.ALLOW -> "\n\n【模式切换】用户已将模式切换为 ALLOW（完全放行）模式：工具调用一律直接执行，不再弹确认、不再做安全拦截。"
+        AgentMode.AUTO -> "\n\n【模式切换】用户已切换为 AUTO。" + buildModeReminder(mode).orEmpty()
+        AgentMode.ALLOW -> "\n\n【模式切换】用户已切换为 ALLOW。" + buildModeReminder(mode).orEmpty()
     }
 
     /**

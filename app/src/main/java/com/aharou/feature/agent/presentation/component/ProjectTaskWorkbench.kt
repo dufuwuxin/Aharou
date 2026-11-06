@@ -39,6 +39,8 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
     var expandedId by rememberSaveable(projectId) { mutableStateOf<String?>(null) }
     var collapsed by remember(projectId) { mutableStateOf(emptySet<String>()) }
     var overview by remember { mutableStateOf(false) }
+    var adding by rememberSaveable(projectId) { mutableStateOf(false) }
+    var addingParentId by rememberSaveable(projectId) { mutableStateOf<String?>(null) }
     val planning = projectId in state.planningProjectIds
     val ruleFallback = projectId in state.ruleFallbackProjectIds
     LaunchedEffect(state.selectedId) { if (tasks.any { it.id == state.selectedId }) expandedId = state.selectedId }
@@ -82,11 +84,13 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
         }
         state.error?.let { Text(stringResource(R.string.project_task_error, projectTaskExecutionReasonLabel(it)), color = MaterialTheme.colorScheme.error) }
         approvals()
+        TextButton(onClick = { addingParentId = null; adding = true }, enabled = !state.busy,
+            modifier = Modifier.testTag("project_add_task")) { Text(stringResource(R.string.project_add_task)) }
         BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
             val processHeight = (maxHeight * 0.9f).coerceIn(240.dp, 640.dp)
             if (viewMode == "map") ProjectTaskMap(projectId, project?.title.orEmpty(), tasks, processId = expandedId,
                 onOpenProcess = { id -> expandedId = id; viewModel.select(id) }, onDismissProcess = { expandedId = null },
-                onSupplement = {}, onAddChild = {}, onContentDrag = onContentDrag,
+                onSupplement = {}, onAddChild = { task -> addingParentId = task?.id; adding = true }, onContentDrag = onContentDrag,
                 onOpenRoot = { toggle(rootId) }, rootConversation = rootConversation,
                 modifier = Modifier.fillMaxSize().testTag("project_map_body"), process = process)
             else LazyColumn(Modifier.fillMaxSize().testTag("project_tree_body"), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
@@ -132,13 +136,24 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
                                 }
                             }
                         }
-                        if (expanded) Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surface,
-                            modifier = Modifier.fillMaxWidth().height(processHeight)) { process(row.task) }
+                        if (expanded) {
+                            TextButton(onClick = { addingParentId = row.task.id; adding = true }, enabled = !state.busy,
+                                modifier = Modifier.testTag("task_add_child_${row.task.id}")) {
+                                Text(stringResource(R.string.project_node_add_child))
+                            }
+                            Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surface,
+                                modifier = Modifier.fillMaxWidth().height(processHeight)) { process(row.task) }
+                        }
                     }
                 }
             }
         }
     }
+    if (adding) ProjectTaskAddSheet(parentTitle = tasks.firstOrNull { it.id == addingParentId }?.title,
+        busy = state.busy, onSubmit = { description ->
+            viewModel.addTaskByDescription(projectId, description, parentId = addingParentId)
+            adding = false
+        }, onDismiss = { adding = false })
     if (overview && project != null) AlertDialog(onDismissRequest = { overview = false },
         title = { Text(project.title) }, text = { Text(project.requirements, modifier = Modifier.verticalScroll(rememberScrollState())) },
         confirmButton = { TextButton(onClick = { overview = false }) { Text(stringResource(R.string.project_close)) } })

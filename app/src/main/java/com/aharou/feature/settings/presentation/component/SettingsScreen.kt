@@ -51,6 +51,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -131,7 +132,6 @@ enum class SettingsSection(@param:StringRes val titleRes: Int) {
     General(R.string.settings_general),
     Theme(R.string.settings_theme_title),
     Providers(R.string.settings_providers),
-    AccountCenter(R.string.account_entry_title),
     ProviderEditor(R.string.settings_provider_editor),
     DefaultModels(R.string.settings_default_models),
     Connectors(R.string.settings_connectors),
@@ -362,6 +362,7 @@ fun SettingsScreen(
         arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream"), pickerUnavailable,
     ) { viewModel.importSkillsFromZip(it, skillImportScope) }
     var selectedSubAgent by remember { mutableStateOf<SubAgentUiEntry?>(null) }
+    var subAgentDetailReturn by rememberSaveable { mutableStateOf(SettingsSection.SubAgents) }
     var subAgentToDelete by remember { mutableStateOf<SubAgentUiEntry?>(null) }
     // 子代理编辑目标：null 表示新建一个；编辑现有定义时指向被编辑的条目。
     var editingSubAgent by remember { mutableStateOf<SubAgentUiEntry?>(null) }
@@ -395,7 +396,6 @@ fun SettingsScreen(
         SettingsSection.Soul,
         SettingsSection.ConfigAudit -> (configHome ?: SettingsSection.Menu)
         SettingsSection.Memory -> (configHome ?: SettingsSection.AiGroup)
-        SettingsSection.AccountCenter -> (configHome ?: SettingsSection.Menu)
         SettingsSection.Providers, SettingsSection.DefaultModels -> (configHome ?: SettingsSection.Menu)
         SettingsSection.TelegramBot, SettingsSection.WeixinBot, SettingsSection.FeishuBot, SettingsSection.QqBot -> (configHome ?: SettingsSection.AiGroup)
         SettingsSection.Connectors -> connectorsReturnSection
@@ -421,9 +421,8 @@ fun SettingsScreen(
         SettingsSection.SkillDetail, SettingsSection.SkillMarket -> SettingsSection.Skills
         SettingsSection.SkillMarketDetail -> SettingsSection.SkillMarket
         SettingsSection.SkillEditor -> skillEditorReturn
-        SettingsSection.SubAgentDetail -> SettingsSection.SubAgents
-        // 角色改称「专家成员」并收进团队页：子代理页只能从团队页进去，不再是并行菜单项。
-        SettingsSection.SubAgents -> SettingsSection.Teams
+        SettingsSection.SubAgentDetail -> subAgentDetailReturn
+        SettingsSection.SubAgents -> (configHome ?: SettingsSection.AiGroup)
         SettingsSection.SubAgentEditor -> subAgentEditorReturn
         SettingsSection.PromptDetail -> SettingsSection.Prompts
         SettingsSection.PromptEditor -> promptEditorReturn
@@ -543,21 +542,6 @@ fun SettingsScreen(
                     .fillMaxHeight()
                     .background(settingsPageBackground())
             ) {
-                TopAppBar(
-                    title = { Text(stringResource(R.string.settings_title)) },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = settingsPageBackground(),
-                        titleContentColor = MaterialTheme.colorScheme.onBackground
-                    ),
-                    navigationIcon = {
-                        IconButton(onClick = onNavigateBack) {
-                            Icon(
-                                FeatherIcons.ArrowLeft,
-                                contentDescription = stringResource(R.string.common_back)
-                            )
-                        }
-                    }
-                )
                 menuBody()
             }
             VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -685,10 +669,11 @@ fun SettingsScreen(
             // 它的构造即触发一次全盘统计，不能提到 SettingsScreen 顶层（那样每次进设置页都会扫盘）。
             val storageViewModel: com.aharou.feature.settings.presentation.StorageViewModel? =
                 if (current == SettingsSection.Storage) androidx.hilt.navigation.compose.hiltViewModel() else null
+            val isRoot = current == SettingsSection.Menu || current == configHome
             Scaffold(
         containerColor = settingsPageBackground(),
         topBar = {
-            TopAppBar(
+            if (!isRoot) TopAppBar(
                 title = {
                     Text(
                         text = if (current == SettingsSection.SkillDetail) {
@@ -709,7 +694,7 @@ fun SettingsScreen(
                 ),
                 navigationIcon = {
                     // 大屏一级分区页不给返回箭头：左栏菜单随时可切，退出设置的入口在左栏顶部。
-                    if (!expanded || parentSection != null) {
+                    if (!isRoot && (!expanded || parentSection != null)) {
                         IconButton(onClick = {
                             val parent = parentSection
                             if (parent != null) section = parent else onNavigateBack()
@@ -951,7 +936,6 @@ fun SettingsScreen(
                     contextTrimRounds = contextTrimRounds,
                     onSetContextTrimRounds = { viewModel.setContextTrimRounds(it) }
                 )
-                SettingsSection.AccountCenter -> com.aharou.feature.account.presentation.AccountCenterScreen()
                 SettingsSection.Providers -> ProvidersSection(
                     providers = providers,
                     onEdit = {
@@ -1080,12 +1064,24 @@ fun SettingsScreen(
                     projectName = currentProjectName,
                     entries = subAgents,                    onDelete = { subAgentToDelete = it },
                     onOpenDetail = {
+                        subAgentDetailReturn = SettingsSection.SubAgents
                         selectedSubAgent = it
                         section = SettingsSection.SubAgentDetail
                     },
                     onOpenTeams = { section = SettingsSection.Teams }
                 )
-                SettingsSection.Teams -> SubAgentTeamsSection(expertCount = subAgents.size, onOpenExperts = { section = SettingsSection.SubAgentEditor; editingSubAgent = null; subAgentEditorReturn = SettingsSection.Teams })
+                SettingsSection.Teams -> SubAgentTeamsSection(expertCount = subAgents.size,
+                    onOpenExperts = { section = SettingsSection.SubAgents },
+                    onOpenRoleCard = { name ->
+                        val card = subAgents.firstOrNull { it.name.equals(name, ignoreCase = true) }
+                        if (card != null) {
+                            subAgentDetailReturn = SettingsSection.Teams
+                            selectedSubAgent = card
+                            section = SettingsSection.SubAgentDetail
+                        } else {
+                            android.widget.Toast.makeText(context, context.getString(R.string.team_role_card_missing, name), android.widget.Toast.LENGTH_LONG).show()
+                        }
+                    })
                 SettingsSection.ScheduledTasks -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = Spacing.lg)) {
                     ScheduledTasksSection()
                 }

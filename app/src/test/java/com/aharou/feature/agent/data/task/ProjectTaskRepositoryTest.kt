@@ -60,6 +60,23 @@ class ProjectTaskRepositoryTest {
         return repository.load("/w").tasks.filter { it.projectId == created.project.id }.sortedBy { it.order }
     }
 
+    @Test fun childTasksCanBeAddedThroughThirdAndFourthLevelsAndSurviveReload() = runBlocking {
+        val store = repository()
+        var parent = project(store, "first level").single()
+        val projectId = requireNotNull(parent.projectId)
+        for (depth in 1..3) {
+            val before = store.load("/w").tasks.map { it.id }.toSet()
+            store.addTaskByDescription(projectId, "level ${depth + 1}", "/w", parentId = parent.id)
+            val reloaded = repository().load("/w").tasks
+            val child = reloaded.single { it.id !in before }
+            assertEquals(parent.id, child.parentId)
+            assertEquals(depth, ProjectTaskGraph.depth(child, reloaded))
+            assertNull(ProjectTaskGraph.validate(reloaded))
+            parent = child
+        }
+        assertEquals(4, repository().load("/w").tasks.size)
+    }
+
     @Test fun branchCommitsTheNewTaskAndTheDependencyInOneValidatedWrite() = runBlocking {
         val store = repository()
         val task = project(store, "only task").single()

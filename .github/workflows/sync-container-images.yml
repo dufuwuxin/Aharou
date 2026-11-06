@@ -30,6 +30,9 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Test image sync without network or uploads
+        run: python3 scripts/test_container_image_sync.py
+
       # 先跑一次 dry-run 把差异打进日志：真出问题时能一眼看出「本该同步什么」。
       - name: Detect upstream updates (dry run)
         run: python3 scripts/sync-container-images.py

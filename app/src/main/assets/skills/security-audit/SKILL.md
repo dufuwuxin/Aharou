@@ -41,7 +41,9 @@ python3 app/src/main/assets/skills/security-audit/scripts/audit.py tools
 
 - `inventory`：完整 SHA-256、字节数；ELF/PE/DEX 头字段；ZIP 中央目录统计、危险路径/链接/高压缩比提示；APK 仅以清单与 DEX 条目识别候选。**不解压、不解析二进制 AndroidManifest、不校验签名、不反编译、不递归嵌套包**。
 - `source`：单个 UTF-8 文件的行号和规则组，不回显源码/值/路径；支持 SQL、XSS、CSRF、SSRF、命令、路径、XML、PII、权限、自启动线索。它不做跨文件数据流、认证证明或依赖漏洞匹配。
-- `tools`：仅检查 PATH 中 readelf/objdump/strings/jadx/apktool/rizin/radare2/ghidra/binwalk 是否存在；存在不代表可运行、兼容或安全。不会调用它们，后续人工分析另按原有授权流程。
+- `tools`：仅检查 PATH 中 readelf/objdump/strings/jadx/apktool/rizin/radare2/ghidra/binwalk 是否存在；保留原布尔字段，并给出原生二进制、Android、固件三域矩阵。`located_unverified` 仅表示找到入口，`missing` 表示未找到；版本未探测时为 `null`。不会调用它们，存在不代表可运行、兼容或安全，后续人工分析另按原有授权流程。
+
+CLI 的成功和已处理错误 JSON 均带报告格式版本、分析器版本及实际编译规则的指纹；规则指纹不是整个脚本的完整性证明。证据类型区分元数据、源码启发式、工具发现和未评估，动态分析一律标为未执行。报告归档仍需记录真实时间与脚本哈希；只有另有授权运行记录才能描述动态行为。
 
 ## Checklist
 
@@ -61,4 +63,4 @@ python3 app/src/main/assets/skills/security-audit/scripts/audit.py tools
 
 ### 来源与许可
 
-此工具包是本项目原创实现，无新增依赖，不复制第三方代码。按本次适配输入记录：DSH 为 MIT、依赖宿主能力，不能盲装；VCP 为 CC BY-NC-SA，不复制到 GPLv3 代码；Windows 专用 skill 不适配 Android、许可证未知，不复制。已核对三个仓库公开说明，未复制实现；Windows 项目未确认独立许可证，故不导入其代码。来源链接及适配边界见 `references/checklist.md`。
+此工具包是本项目原创实现，无新增依赖，不复制第三方代码。按本次适配输入记录：DSH 为 MIT、依赖宿主能力，不能盲装；VCP 为 CC BY-NC-SA，不复制到 GPLv3 代码；Windows 专用 skill 不适配 Android、许可证未知，不复制。已核对三个仓库公开说明，未复制实现；Windows 项目未确认独立许可证，故不导入其代码。来源链接及适配边界见 `references/checklist.md`。另借鉴 Zkali 的分域工具发现与静态/动态证据分离，采用原创报告实现；不导入其工具执行器、常驻内核、自动服务或代理轮换。

@@ -100,6 +100,20 @@ class ProjectTaskViewModelTest {
         viewModel.stopProject("p"); runCurrent()
     }
 
+    @Test fun continuingDeeperParentsKeepsTheirIdsAndSubmittingWorkspace() = runTest(dispatcher) {
+        coEvery { repository.addTaskByDescription("p", any(), "/first", any()) } answers {
+            ProjectPlanOutcome(ProjectPlan(id = "p", workspace = "/first", title = "p", requirements = "r"), ruleFallback = false)
+        }
+        coEvery { workflow.run("p", "/first") } coAnswers { kotlinx.coroutines.awaitCancellation() }
+        viewModel.workspace("/first"); runCurrent()
+        for (parent in listOf("level-3", "level-4", "level-8")) {
+            viewModel.addTaskByDescription("p", "continue-$parent", parentId = parent)
+            runCurrent()
+            coVerify(exactly = 1) { repository.addTaskByDescription("p", "continue-$parent", "/first", parent) }
+        }
+        viewModel.stopProject("p"); runCurrent()
+    }
+
     private val projectTask = com.aharou.feature.agent.domain.task.ProjectTask(id = "t", workspace = "/first", title = "t", requirement = "t", projectId = "p")
 
     @Test fun workArrivingWhileTheFlowRunsGetsOneMorePassWhenItEnds() = runTest(dispatcher) {

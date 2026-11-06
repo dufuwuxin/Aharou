@@ -49,11 +49,6 @@ internal fun ToolManagementSection(
     LaunchedEffect(selected) { if (selected == 2) customViewModel.refresh() }
     var createScript by rememberSaveable { mutableStateOf(false) }
     Column(Modifier.fillMaxSize()) {
-        if (selected == 0) {
-            TextButton(onClick = onReload, enabled = !reloading, modifier = Modifier.padding(horizontal = Spacing.lg)) {
-                Text(stringResource(R.string.settings_reconnect))
-            }
-        }
         SegmentedTabs(
             selected = selected,
             labels = listOf(stringResource(R.string.settings_mcp), stringResource(R.string.script_tools_title), stringResource(R.string.tools_group_custom), stringResource(R.string.settings_scheduled_tasks), stringResource(R.string.settings_permissions)),
@@ -62,11 +57,16 @@ internal fun ToolManagementSection(
         )
         Box(Modifier.weight(1f)) {
             if (selected == 0) {
+                Column {
+                    TextButton(onClick = onReload, enabled = !reloading, modifier = Modifier.padding(horizontal = Spacing.lg)) {
+                        Text(stringResource(R.string.settings_reconnect))
+                    }
                 McpSection(
                     entries = entries, statuses = statuses, reloading = reloading, onReload = onReload,
                     onToggle = onToggle, onDelete = onDelete, onEdit = onEdit,
                     onBrowseDirectory = onBrowseDirectory, onImportJson = onImportJson, onExportJson = onExportJson
                 )
+                }
             } else {
                 Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
                     when (selected) {

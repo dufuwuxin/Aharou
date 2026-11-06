@@ -21,6 +21,8 @@ import com.aharou.feature.agent.domain.session.SessionUseCase
 import com.aharou.feature.agent.domain.subagent.AgentDefinition
 import com.aharou.feature.localmodel.runtime.LocalLlmEngine
 import com.aharou.feature.agent.domain.tool.AgentTool
+import com.aharou.feature.agent.domain.tool.mode.PlanApprovalManager
+import com.aharou.feature.agent.domain.tool.mode.PlanApprovalChoice
 import com.aharou.feature.agent.domain.tool.ToolCall
 import com.aharou.feature.agent.domain.tool.ToolOutputStore
 import com.aharou.feature.agent.domain.tool.ToolParameter
@@ -93,6 +95,8 @@ class StatefulAgentWorkflowTest {
     private val response = AIResponse("final text", listOf(toolCall), reasoning = "final reasoning",
         signature = "signature", thinkingBlocksJson = "[blocks]", inputTokens = 100, outputTokens = 20,
         cachedInputTokens = 40, images = listOf(image))
+    private val eventInjector = mockk<com.aharou.feature.agent.domain.notification.AgentEventInjector>()
+    private val approvals = mockk<PlanApprovalManager>()
     private val workflow = spyk(StatefulAgentWorkflow(
         toolRegistry = registry,
         aiProviderRepository = providers,
@@ -103,7 +107,7 @@ class StatefulAgentWorkflowTest {
         permissionManager = mockk(),
         policyEngine = policyEngine,
         contextCompactor = compactor,
-        planApprovalManager = mockk(),
+        planApprovalManager = approvals,
         toolOutputStore = outputStore,
         modelMetadataService = metadata,
         compactionModelSettingsRepository = compactionSettings,
@@ -119,7 +123,7 @@ class StatefulAgentWorkflowTest {
         failoverCoordinator = failoverCoordinator,
         workspaceModelChain = workspaceModels,
         agentNotificationCenter = notifications,
-        eventInjector = mockk(),
+        eventInjector = eventInjector,
         memoryCurator = mockk(),
         fileAccess = mockk(),
         // 回执是旁路记录，这些用例不断言它，relaxed mock 兜住全部写入路径。
@@ -156,6 +160,105 @@ class StatefulAgentWorkflowTest {
         coEvery { failoverCoordinator.overrideConfig(any()) } returns null
         coEvery { failoverCoordinator.next(any(), any()) } returns null
         every { failoverCoordinator.isActive(any()) } returns false
+    }
+
+    @Test
+    fun modeRulesUseTheirOwnBoundAssetForAllSwitchPaths() {
+        every { prompts.resolvePrompt("agent/auto-mode.md") } returns "<!-- comment -->AUTO_BOUND_BODY"
+        every { prompts.resolvePrompt("agent/allow-mode.md") } returns "<!-- comment -->ALLOW_BOUND_BODY"
+        for (methodName in listOf("buildModeReminder", "buildModeSwitchNotice", "buildExternalModeSwitchNotice")) {
+            val method = StatefulAgentWorkflow::class.java.getDeclaredMethod(methodName, AgentMode::class.java).apply { isAccessible = true }
+            for ((mode, expected, other) in listOf(
+                Triple(AgentMode.AUTO, "AUTO_BOUND_BODY", "ALLOW_BOUND_BODY"),
+                Triple(AgentMode.ALLOW, "ALLOW_BOUND_BODY", "AUTO_BOUND_BODY")
+            )) {
+                val notice = method.invoke(workflow, mode) as String
+                assertTrue("$methodName must inject $mode body", notice.contains(expected))
+                assertFalse("$methodName must not inject another mode", notice.contains(other))
+                assertFalse(notice.contains("<!--"))
+            }
+        }
+    }
+
+    @Test
+    fun modeReminderIsAutomaticOnFirstRequestAndEachModeChangeOnly() {
+        every { prompts.resolvePrompt("agent/auto-mode.md") } returns "AUTO_BOUND_BODY"
+        every { prompts.resolvePrompt("agent/allow-mode.md") } returns "ALLOW_BOUND_BODY"
+        val method = StatefulAgentWorkflow::class.java.getDeclaredMethod(
+            "takeModeReminderIfChanged", String::class.java, AgentMode::class.java
+        ).apply { isAccessible = true }
+        assertTrue((method.invoke(workflow, "bound-session", AgentMode.AUTO) as String).contains("AUTO_BOUND_BODY"))
+        assertNull(method.invoke(workflow, "bound-session", AgentMode.AUTO))
+        assertTrue((method.invoke(workflow, "bound-session", AgentMode.ALLOW) as String).contains("ALLOW_BOUND_BODY"))
+        assertNull(method.invoke(workflow, "bound-session", AgentMode.ALLOW))
+        assertTrue((method.invoke(workflow, "bound-session", AgentMode.AUTO) as String).contains("AUTO_BOUND_BODY"))
+    }
+
+    @Test
+    fun realRequestIncludesOnlyEnabledBoundModeBody() = runTest {
+        for ((mode, body) in listOf(AgentMode.AUTO to "AUTO_BOUND_BODY", AgentMode.ALLOW to "ALLOW_BOUND_BODY", AgentMode.BUILD to "", AgentMode.ALLOW to "")) {
+            prepare(flow { emit(AIStreamChunk.Final(AIResponse("done"))) })
+            every { prompts.resolvePrompt("agent/auto-mode.md") } returns if (mode == AgentMode.AUTO) body else "AUTO_BOUND_BODY"
+            every { prompts.resolvePrompt("agent/allow-mode.md") } returns if (mode == AgentMode.ALLOW) body else "ALLOW_BOUND_BODY"
+            val requests = mutableListOf<List<AgentMessage>>()
+            val builtContext = slot<AgentContext>()
+            every { prompts.build(capture(builtContext), any()) } returns "system"
+            every { provider.completeStream(any(), capture(requests), any(), any()) } returns flow { emit(AIStreamChunk.Final(AIResponse("done"))) }
+            val events = mutableListOf<AgentEvent>()
+            workflow.executeEvents("request", context.copy(mode = mode), emptyList()).collect {
+                events.add(it)
+                if (it is AgentEvent.AssistantText) it.persisted?.complete(Unit)
+            }
+            assertTrue(events.none { it is AgentEvent.Failed })
+            assertEquals(mode, builtContext.captured.mode)
+            val content = requests.single().filterIsInstance<AgentMessage.UserMessage>().last().content
+            if (body.isNotEmpty()) assertTrue(content.contains(body))
+            else assertFalse(content.contains("ALLOW_BOUND_BODY"))
+        }
+    }
+
+    @Test
+    fun realModeChangeNotificationIncludesBoundBodyInToolResult() = runTest {
+        var ready = false
+        val tool = object : AgentTool() {
+            override val name = "mode-fixture"
+            override val description = "isolated mode fixture"
+            override val parameters: Map<String, ToolParameter> = emptyMap()
+            override suspend fun executeWithContext(args: Map<String, JsonElement>, context: AgentContext): ToolResult {
+                ready = true
+                return ToolResult.Success(JsonPrimitive("ok"))
+            }
+        }
+        val turn = runToolBatchTurn(tool, listOf(ToolCall("mode-change", tool.name, emptyMap())), configure = {
+            every { prompts.resolvePrompt("agent/allow-mode.md") } returns "ALLOW_BOUND_BODY"
+            every { eventInjector.inject(any(), any()) } answers { firstArg() }
+            every { notifications.peek(any()) } answers {
+                if (ready) listOf(com.aharou.feature.agent.domain.notification.PendingNotification(
+                    kind = com.aharou.feature.agent.domain.notification.AgentNotificationKind.MODE_CHANGE,
+                    sourceId = "fixture", title = "mode", outcome = com.aharou.feature.agent.domain.notification.NotificationOutcome.COMPLETED,
+                    newMode = AgentMode.ALLOW, seq = 1)) else emptyList()
+            }
+            every { notifications.ack(any(), any()) } answers { ready = false }
+        })
+        assertTrue(turn.finished.single().result.contains("ALLOW_BOUND_BODY"))
+        assertTrue(turn.secondRoundMessages.filterIsInstance<AgentMessage.ToolResultMessage>().single().result.contains("ALLOW_BOUND_BODY"))
+    }
+
+    @Test
+    fun approvedPlanExitRestoresAllowBodyThroughRealToolBatch() = runTest {
+        val tool = object : AgentTool() {
+            override val name = "planMode"
+            override val description = "isolated plan fixture"
+            override val parameters: Map<String, ToolParameter> = emptyMap()
+            override suspend fun executeWithContext(args: Map<String, JsonElement>, context: AgentContext): ToolResult = ToolResult.Success(JsonPrimitive("ok"))
+        }
+        val turn = runToolBatchTurn(tool, listOf(ToolCall("exit-plan", tool.name, mapOf("action" to JsonPrimitive("exit")))),
+            runContext = context.copy(mode = AgentMode.PLAN, modeBeforePlan = AgentMode.ALLOW), configure = {
+                every { prompts.resolvePrompt("agent/allow-mode.md") } returns "ALLOW_BOUND_BODY"
+                coEvery { approvals.awaitApproval(any(), any()) } returns PlanApprovalChoice.APPROVE
+            })
+        assertTrue(turn.finished.single().result.contains("ALLOW_BOUND_BODY"))
+        assertFalse(turn.finished.single().isError)
     }
 
     private fun prepare(chunks: Flow<AIStreamChunk>) {
@@ -770,7 +873,7 @@ class StatefulAgentWorkflowTest {
      * 跑一轮「LLM 返回一批工具调用 → 执行 → 再问一次 LLM」的真实循环。
      * 首轮响应带 [calls]，次轮收尾成普通文本；返回的工具完成事件与第二轮请求消息可供断言。
      */
-    private suspend fun runToolBatchTurn(tool: AgentTool, calls: List<ToolCall>): ToolBatchTurn {
+    private suspend fun runToolBatchTurn(tool: AgentTool, calls: List<ToolCall>, runContext: AgentContext = context, configure: () -> Unit = {}): ToolBatchTurn {
         val sentMessages = mutableListOf<List<AgentMessage>>()
         var round = 0
         prepare(flow {})
@@ -783,8 +886,9 @@ class StatefulAgentWorkflowTest {
             val response = if (round++ == 0) AIResponse("", calls) else AIResponse("done")
             flow { emit(AIStreamChunk.Final(response)) }
         }
+        configure()
         val finished = mutableListOf<AgentEvent.ToolCallFinished>()
-        workflow.executeEvents("request", context, listOf(tool)).collect { event ->
+        workflow.executeEvents("request", runContext, listOf(tool)).collect { event ->
             when (event) {
                 is AgentEvent.AssistantText -> event.persisted?.complete(Unit)
                 is AgentEvent.ToolCallFinished -> {

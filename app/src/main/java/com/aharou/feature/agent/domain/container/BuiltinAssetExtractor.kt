@@ -33,11 +33,11 @@ internal class BuiltinAssetExtractor {
         if (directory == "docs" && root.isDirectory && key in extractedDocs) return 0
         val files = collectBuiltinAssets(assets, directory)
         if (directory == "docs" || directory == "prompts") check(files.isNotEmpty()) { "Missing builtin assets: $directory" }
+        if (directory == "agents" || directory == "teams") return BuiltinSeedHistory(configDir, directory).extract(assets, files)
         check(root.isDirectory || root.mkdirs()) { "Cannot create builtin asset directory" }
         var written = 0
         for ((name, bytes) in files) {
             val target = resolve(root, name)
-            if ((directory == "agents" || directory == "teams") && target.exists()) continue
             if (target.isFile && target.readBytes().contentEquals(bytes)) continue
             check(target.parentFile?.let { it.isDirectory || it.mkdirs() } == true) { "Cannot create builtin asset parent" }
             val temporary = File.createTempFile(".aharou-asset-", ".tmp", target.parentFile)
