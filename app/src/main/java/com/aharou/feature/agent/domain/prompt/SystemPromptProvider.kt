@@ -919,18 +919,9 @@ class SystemPromptProvider @Inject constructor(
         workspace: String,
         date: String,
         rules: String? = null
-    ): String {
-        var out = text
-        out = out.replace(SKILLS_VAR, skills.orEmpty())
-        out = MemoryPromptRenderer.expandOnce(out, MEMORY_VAR, memories)
-        out = out.replace(SUBAGENTS_VAR, subAgents.orEmpty())
-        out = out.replace(PROJECT_RULES_VAR, projectRules.orEmpty())
-        out = out.replace(WORKSPACE_VAR, workspace)
-        out = out.replace(DATE_VAR, date)
-        // 仅当调用方传了规则清单才展开；未传时保留占位符原样（与其它未出现的占位符一致）。
-        if (rules != null) out = out.replace(RULES_VAR, rules)
-        return out
-    }
+    ): String = PromptVariableExpander.expand(
+        text, skills, memories, subAgents, projectRules, workspace, date, rules
+    )
 
     private fun currentDate(): String =
         java.time.ZonedDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd"))

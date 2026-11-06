@@ -97,6 +97,7 @@ jobs:
           python3 -m unittest discover -s scripts -p test_arm64_assets.py
           python3 scripts/test_void_toolchain.py
           python3 scripts/test_build_logging.py
+          python3 scripts/test_builtin_system.py
 
       # 基线只许缩：--sync-baseline 一条命令就能把棘轮抬起来，不做 diff 比对时 CI 会照常通过。
       # 只对「数值上涨 / 新增登记」报错，收紧与删除放行。
