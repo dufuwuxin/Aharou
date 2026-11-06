@@ -312,7 +312,7 @@ def discover(entry: dict, base: str) -> dict:
         assets = {a.get("name"): a for a in (rel.get("assets") or []) if a.get("name")}
         asset = assets.get("Manjaro-ARM-aarch64-latest.tar.gz")
         if not asset:
-            raise RuntimeError(f"Manjaro latest release 里没有 Manjaro-ARM-aarch64-latest.tar.gz")
+            raise RuntimeError("Manjaro latest release 里没有 Manjaro-ARM-aarch64-latest.tar.gz")
         ver = str(rel.get("tag_name") or "").strip()
         if not re.match(r"^\d{8}$", ver):
             raise RuntimeError(f"Manjaro release tag 格式异常：{ver!r}")

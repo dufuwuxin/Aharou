@@ -26,7 +26,7 @@ class ContainerStdioConnectionProvider(
     private val programArgs: List<String> = emptyList(),
     private val projectPath: String? = null,
     private val extraEnv: Map<String, String> = emptyMap(),
-    private val runtimeProfile: ContainerProfile = ContainerProfile.BUILTIN_ALPINE
+    private val runtimeProfile: ContainerProfile? = null
 ) : StreamConnectionProvider {
 
     private companion object {

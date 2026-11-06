@@ -258,6 +258,7 @@ internal fun MemorySection(viewModel: SettingsViewModel = hiltViewModel()) {
                 onClick = { showProfile = true }
             )
         }
+        com.aharou.feature.agent.presentation.component.MemoryProposalEntry()
         SettingsGroup {
             SettingsRow(
                 icon = FeatherIcons.Star,

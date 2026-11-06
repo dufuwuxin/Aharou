@@ -919,7 +919,7 @@ EOF
 # ── 场景框架 ──
 # 每个开发环境一个脚本，放在 lib/scenarios/ 下，定义 scenario_name_<id> 与 install_scenario_<id>；
 # SCENARIO_IDS 决定菜单顺序。android / flutter 较重，逻辑在各自文件里（共用 lib/android-sdk.sh）。
-SCENARIO_IDS="common python node android flutter java go rust php base"
+SCENARIO_IDS="common python node android flutter java go rust php base security_audit"
 
 # 载入共享工具与各场景脚本（android-sdk.sh 供 android / flutter 场景共用）
 [ -f "$AICODE_LIB_DIR/android-sdk.sh" ] && . "$AICODE_LIB_DIR/android-sdk.sh"

@@ -116,6 +116,7 @@ class ContainerInstaller @Inject constructor(
          */
         fun extractPrompts(context: Context) {
             extractBuiltinAssets(context, "prompts")
+            extractBuiltinAssets(context, "skills")
         }
 
         /**

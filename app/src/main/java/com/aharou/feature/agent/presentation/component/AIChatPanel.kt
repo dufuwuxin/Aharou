@@ -1,5 +1,4 @@
 package com.aharou.feature.agent.presentation.component
-
 import android.content.ClipData
 import android.net.Uri
 import android.widget.Toast
@@ -39,7 +38,6 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -122,13 +120,14 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-
-
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AIChatPanel(
     viewModel: AIAgentViewModel,
+    bodyOverride: (@Composable (() -> Unit) -> Unit)? = null,
+    floatingComposer: Boolean = false,
+    composerSessionId: String? = null,
+    projectChatContext: String = "",
     onNavigateToTerminal: () -> Unit = {},
     onNavigateToGit: () -> Unit = {},
     onNavigateToBrowser: () -> Unit = {},
@@ -158,7 +157,6 @@ fun AIChatPanel(
     val messagesState by viewModel.messagesState.collectAsStateWithLifecycle()
     val messages = messagesState.messages
     val ghostMode by viewModel.currentSessionGhostMode.collectAsStateWithLifecycle()
-
     // [Aharou] Aharou Computer：点工具行掀开"电脑"详情面板
     val computerOpenTarget by ToolComputerSignal.target.collectAsStateWithLifecycle()
     var computerSheetMessageId by remember { mutableStateOf<String?>(null) }
@@ -177,7 +175,6 @@ fun AIChatPanel(
             onDismiss = { computerSheetMessageId = null },
         )
     }
-
     // [Aharou] 配置通道：写入前的用户确认弹窗（120 秒窗口）
     val pendingConfigChange by com.aharou.core.config.confirm.ConfigConfirmationGate.pending
         .collectAsStateWithLifecycle()
@@ -188,9 +185,7 @@ fun AIChatPanel(
             onReject = { com.aharou.core.config.confirm.ConfigConfirmationGate.userReject() },
         )
     }
-
     val pendingScroll by viewModel.pendingScrollMessage.collectAsStateWithLifecycle()
-
     val currentSessionId by viewModel.currentSessionId.collectAsStateWithLifecycle()
     // 顶栏中轴展示的会话标题：取当前会话在会话列表里的标题，未命中（新会话未命名）则不显示。
     val allSessions by viewModel.sessions.collectAsStateWithLifecycle()
@@ -258,7 +253,6 @@ fun AIChatPanel(
     val projectRoot by viewModel.currentSessionWorkspace.collectAsStateWithLifecycle()
     val currentMode by viewModel.currentSessionMode.collectAsStateWithLifecycle()
     val slashCommands by viewModel.slashCommands.collectAsStateWithLifecycle()
-
     // 输入草稿只认 ViewModel 这一份：本地 remember 活不过切页，双份必然对不上。
     val inputText by viewModel.inputDraft.collectAsStateWithLifecycle()
     val fileMentionState by viewModel.fileMentionState.collectAsStateWithLifecycle()
@@ -346,7 +340,6 @@ fun AIChatPanel(
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val keyboardController = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
-
     val isBusy = agentState is AgentUIState.Loading || agentState is AgentUIState.Streaming
     // 拆块 + 工具分组：超长助手消息展开成多条有界 item（单条滚动轴、外观连续），
     // 连续的工具调用折成一个「N 次工具调用」分组；chatItems 的顺序即 LazyColumn item 顺序。
@@ -414,13 +407,11 @@ fun AIChatPanel(
     val activeModelMetadata = activeProvider?.let { modelMetadata[modelMetadataKey(it.id, activeModel)] }
     val canUploadFiles = projectRoot.isNotBlank()
     val canUploadImages = projectRoot.isNotBlank()
-
     // 未建会话时点击附件入口：先触发 newSession（协程内异步建好会话），同时记录意图；
     // LaunchedEffect 监听 projectRoot，一旦 workspace 就绪立刻自动 launch 对应 picker。
     // 这比直接「launch → 等」更安全：picker 弹出前一定保证 projectRoot 非空，避免
     // handlePickedAttachments 读到空 workspace 而直接 toast 退回。
     val reasoningEffort by viewModel.currentSessionReasoningEffort.collectAsStateWithLifecycle()
-
     val providerDashboards by (settingsViewModel?.providerDashboards?.collectAsStateWithLifecycle() ?: remember { mutableStateOf(emptyMap()) })
     val currentDashboardState = activeProvider?.let { providerDashboards[it.id] } ?: ProviderDashboardState.Idle
 
@@ -954,8 +945,8 @@ fun AIChatPanel(
 
     // 只在「跟随中且内容可能还在动」时逐帧校准。原来是无条件 while(true)，followBottom
     // 为 false 也只 continue、帧回调照旧注册，等于让主线程全程每帧醒一次（空闲也在耗电）。
-    LaunchedEffect(listState, messagesReady) {
-        if (!messagesReady) return@LaunchedEffect
+    LaunchedEffect(listState, messagesReady, bodyOverride != null) {
+        if (!messagesReady || bodyOverride != null) return@LaunchedEffect
         snapshotFlow { followBottom && (busyState.value || listState.isScrollInProgress) }
             .collectLatest { active ->
                 if (active) {
@@ -979,8 +970,8 @@ fun AIChatPanel(
     // 条数经 rememberUpdatedState 间接读：messages 是组合期捕获的普通 List，直接读 .size 的
     // snapshotFlow 只会记住 effect 启动那一刻的条数，之后条数变化永远不触发校准。
     val latestMessageCount = rememberUpdatedState(messages.size)
-    LaunchedEffect(listState, messagesReady) {
-        if (!messagesReady) return@LaunchedEffect
+    LaunchedEffect(listState, messagesReady, bodyOverride != null) {
+        if (!messagesReady || bodyOverride != null) return@LaunchedEffect
         snapshotFlow {
             Triple(streamingText?.length, streamingReasoning?.length, latestMessageCount.value)
         }.collect { calibrateToAnchor() }
@@ -988,14 +979,16 @@ fun AIChatPanel(
 
     // 要发送的文本显式传入：语音回调里先写草稿再发，而草稿经 StateFlow 回灌到组合要等下一帧，
     // 此处再读 inputText 会拿到写之前的旧值，把刚识别出的语音弄丢。
+    val composer = rememberProjectComposer(floatingComposer, sessionReady && composerSessionId != null &&
+        currentSessionId == composerSessionId, currentSessionId)
     val sendMessage: (String) -> Unit = { rawText ->
         // 粘贴标记在这里还原成原文：模型与落库历史看到的都是完整内容，输入框只显示标记。
         val text = viewModel.expandPastes(rawText).trim()
-        if (text.isNotEmpty() || pendingAttachments.isNotEmpty()) {
+        if (composer.canSend && (text.isNotEmpty() || pendingAttachments.isNotEmpty())) {
             val attachments = pendingAttachments
             val modelSupportsVision = activeModelMetadata?.supportsVision == true
             val promptAttachments = if (modelSupportsVision) attachments.filterNot { it.isImage } else attachments
-            val modelRequest = appendAttachmentsToRequest(context, text, promptAttachments)
+            val modelRequest = appendAttachmentsToRequest(context, text, promptAttachments) + projectChatContext
             val images = if (modelSupportsVision) attachments.toAgentImages() else emptyList()
             // 统一走队列：AI 忙时入队（等本轮结束后自动发送下一条），空闲时直接发送。
             // 斜杠命令在 ViewModel 内（agent workflow 之前）分流执行，无需在此区分。
@@ -1006,6 +999,7 @@ fun AIChatPanel(
                 selectedCode = selectedCode,
                 projectRoot = projectRoot,
                 inputImages = images,
+                targetSessionId = composerSessionId,
                 inputAttachments = attachments.toAgentAttachments()
             )
             viewModel.clearInputDraft()
@@ -1022,8 +1016,8 @@ fun AIChatPanel(
     // 空闲时与普通发送等价。只在纯文字、无附件时出现，所以这里不拼附件。
     val forceInsertMessage: (String) -> Unit = { rawText ->
         val text = viewModel.expandPastes(rawText).trim()
-        if (text.isNotEmpty()) {
-            viewModel.forceInsertAgentRequest(request = text, projectRoot = projectRoot)
+        if (composer.canSend && text.isNotEmpty()) {
+            viewModel.forceInsertAgentRequest(request = text, projectRoot = projectRoot, targetSessionId = composerSessionId)
             viewModel.clearInputDraft()
             followBottom = true
             scope.launch {
@@ -1034,8 +1028,8 @@ fun AIChatPanel(
     }
 
     // 切换会话 / 打开搜索命中：优先定位到目标消息，否则贴底并恢复跟随。
-    LaunchedEffect(currentSessionId, messagesReady, pendingScroll, chatItems) {
-        if (!messagesReady) return@LaunchedEffect
+    LaunchedEffect(currentSessionId, messagesReady, pendingScroll, chatItems, bodyOverride != null) {
+        if (!messagesReady || bodyOverride != null) return@LaunchedEffect
         val pending = pendingScroll
         if (pending != null && pending.first == currentSessionId) {
             // 不能只按 message.id 找：超长正文被拆成 `${id}#chunk$idx` 多条 item。
@@ -1084,8 +1078,8 @@ fun AIChatPanel(
     // 信号里必须带上分页上限：消息按条数分页，一轮长过程折叠后整页补载可能一个可见项都不增加，
     // index 不再变化；只监听 index 会卡在这里，要用户上下晃动才能再触发一页。
     val latestMessagesState = rememberUpdatedState(messagesState)
-    LaunchedEffect(listState, messagesReady) {
-        if (!messagesReady) return@LaunchedEffect
+    LaunchedEffect(listState, messagesReady, bodyOverride != null) {
+        if (!messagesReady || bodyOverride != null) return@LaunchedEffect
         snapshotFlow {
             val ms = latestMessagesState.value
             Triple(
@@ -1263,7 +1257,9 @@ fun AIChatPanel(
             GhostModeIndicator(isGhost = ghostMode, onToggle = viewModel::setGhostMode)
             if (ghostMode) GhostModeBanner()
             Box(modifier = Modifier.weight(1f)) {
-                if (!messagesReady) {
+                if (bodyOverride != null) {
+                    Box(Modifier.fillMaxSize().padding(bottom = with(LocalDensity.current) { floatingLayerHeightPx.toDp() })) { bodyOverride(composer::collapse) }
+                } else if (!messagesReady) {
                     // 远程模式连接未就绪时显示连接状态占位，避免空白或旧工作区记录闪烁
                     if (isRemote && connectionState != null && connectionState != com.aharou.feature.agent.domain.container.ConnectionState.CONNECTED) {
                         RemoteConnectingPlaceholder(state = connectionState)
@@ -1501,7 +1497,9 @@ fun AIChatPanel(
                 inputs = dashboardInputs,
                 onInputChange = { id, text -> dashboardInputs = dashboardInputs + (id to text) }
             ) {
+                FloatingProjectComposer(composer, inputText) { inputFocus ->
                 ChatInputBar(
+                    focusRequester = inputFocus,
                     value = inputText,
                     onValueChange = viewModel::updateInputDraft,
                     onSend = { text -> sendMessage(text) },
@@ -1587,6 +1585,7 @@ fun AIChatPanel(
                         .fillMaxWidth()
                         .onboardingTarget(OnboardingStep.SEND_MESSAGE)
                 )
+            }
             }
             } // 悬浮层结束
 

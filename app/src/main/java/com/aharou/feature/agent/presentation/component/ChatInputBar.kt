@@ -1,5 +1,4 @@
 package com.aharou.feature.agent.presentation.component
-
 import android.content.ClipData
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
@@ -132,7 +131,6 @@ import compose.icons.feathericons.Square
 import compose.icons.feathericons.Zap
 import compose.icons.feathericons.Shield
 import kotlinx.coroutines.launch
-
 /** 输入框区域蒙版高度：盖住圆角容器，滚动内容滑入时被渐变遮罩；随键盘（IME）上移。 */
 private val INPUT_BAR_MASK_HEIGHT = 110.dp
 
@@ -215,7 +213,8 @@ internal fun ChatInputBar(
     modelChainWorkspace: String = "",
     onSelectModelInOnboarding: (() -> Unit)? = null,
     onModelSheetDismiss: (() -> Unit)? = null,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    focusRequester: FocusRequester? = null
 ) {
     val hasContent = value.isNotBlank() || pendingAttachments.isNotEmpty()
     val canSend = hasContent
@@ -489,6 +488,7 @@ internal fun ChatInputBar(
                         },
                         modifier = Modifier
                             .weight(1f)
+                            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
                             .heightIn(min = INPUT_FIELD_MIN_HEIGHT, max = INPUT_FIELD_MAX_HEIGHT)
                             .onSizeChanged { inputFieldWidthPx = it.width },
                         placeholder = {

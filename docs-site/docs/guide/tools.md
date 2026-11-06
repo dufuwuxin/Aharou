@@ -169,6 +169,24 @@ Android 参数是一个任务名，必须按实际项目修改；项目的构建
 | 更新后 schema 说明没有应用 | 原始参数结构可能已变化；对照新的原始 schema 重新编辑，不要复制旧的参数结构 |
 | RTK 模板提示找不到命令 | 当前执行环境未安装 RTK；模板不自动安装，也不自动切换命令 |
 
+## 离线逆向与安全审计
+
+### 安装离线分析环境
+
+在 App 容器终端运行 `aicode`，进入「环境安装」，选择「授权离线逆向分析」。确认清单后，只补装缺少的 `readelf`、`objdump`、`strings`、`file`、Java 和 Python 3；`jadx`、`apktool` 分别询问，默认跳过。工具已可用时不会重复安装，不默认安装 Ghidra，也不更换容器镜像。
+
+该场景使用当前容器的 apk、apt、dnf、yum、pacman 或 xbps 软件源，按当前架构查询包后再安装，适用于 ARM64。安装过程需要访问软件源；「离线」指后续对已授权样本的分析，不代表安装无需联网。仓库、架构缺包或查询失败会明确显示「不可用」并返回失败，不会悄悄添加第三方软件源或下载反编译器压缩包；安装命令成功但所需工具仍找不到，也不会报告就绪。未选择的可选工具会保留「不可用（未安装）」状态。
+
+安装场景只配置工具，不读取、解压或执行用户样本；自动探测也只查找命令，不启动分析工具。SSH 主机须在其自身环境准备这些命令，本地容器装好不代表远程主机可用。
+
+### 使用内置审计技能
+
+可让 agent 加载内置 `security-audit` 技能，对你明确授权的本地文件做静态检视。它提供文件 SHA-256、ELF/PE/DEX 头字段、ZIP/APK 候选的目录统计，以及 SQL、XSS、CSRF、SSRF、命令、路径、XML、隐私、权限和自启动等源码复核线索。不会联网扫描、执行样本、解压归档、读取凭据，也不会安装反编译器或改变现有工具权限。
+
+本地初始化会将配套资源放到 `~/.aharou/builtin-skills/security-audit/`，脚本为 `scripts/audit.py`；先确认文件已出现再按技能命令运行。SSH 工作区在加载内置技能前，将配套文件同步到工作区绑定主机的 home 下 `.aharou/builtin-skills/`，不写入自定义技能目录；连接变化或同步失败会返回明确错误，不会假装已部署或扫描。工具发现只检查可用命令，不执行它们。APK 候选不是签名验证或清单解码，正则命中不是已证实漏洞，零命中也不是安全证明；超限、截断与未覆盖内容都会单列。
+
+安全术语按真实分析意图合并，不用换名来绕过授权。上游适配只记录边界：DSH 的 MIT/宿主依赖不代表可以盲装；VCP 的 CC BY-NC-SA 代码不复制进 GPLv3 项目；Windows 专用且许可证未知的 skill 不导入 Android。DSH 与 VCP 的公开许可证已核对；Windows 项目的独立许可未确认。没有复制上游代码，本工具包为原创实现。
+
 ## 相关文档
 
 - 工具授权与「始终允许」：[工具授权](/guide/permissions)
@@ -176,3 +194,10 @@ Android 参数是一个任务名，必须按实际项目修改；项目的构建
 - 提示词层面的定制：[自定义提示词](/guide/custom-prompts)
 
 脚本工具继续使用原有脚本定义与配置通道；自定义命令工具使用本页的参数表与命令模板，两者互不覆盖。
+
+
+## Session observability
+
+`sessions` adds `action=tool_calls` for redacted persisted tool receipts in a session belonging to the current workspace. Supply `session_id` (defaults to the current session), optional exact `tool`, `status` (`SUCCESS`, `ERROR`, `PARTIAL`), inclusive epoch-millisecond `after` / `before`, `limit` (up to 200) and nonnegative `offset`. Results include `nextOffset`; `null` means the final page. Newest-first offset pagination is live, so concurrent new calls may shift pages. Receipts are retained for the existing 30-day window; they are not a complete permanent audit history. Denied calls have an empty status and remain visible without a status filter. Full output and build-authorization bodies are not returned by this action.
+
+`action=context` returns the latest in-process final workflow request composition for the current session only, after stored-tool folding and privacy masking, subject to the same workspace ownership check as session reading. An explicit ID for another session is rejected even within the same workspace. It returns counts and fixed section identifiers, never prompt headings or injected bodies. Estimated tokens are a local character heuristic, not provider usage. Workspace boundaries remain enforced for both actions.

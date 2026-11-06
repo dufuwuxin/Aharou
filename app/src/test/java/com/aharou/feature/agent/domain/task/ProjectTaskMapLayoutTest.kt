@@ -11,6 +11,19 @@ class ProjectTaskMapLayoutTest {
     private fun ProjectTaskMapLayout.Node.overlaps(other: ProjectTaskMapLayout.Node) =
         x < other.x + other.width && other.x < x + width && y < other.y + other.height && other.y < y + height
 
+    @Test fun firstLevelFitsPhoneAtReadableZoom() {
+        val viewport = 393f
+        val gap = ProjectTaskMapLayout.LEVEL_GAP
+        val headerLimit = (viewport - ProjectTaskMapLayout.MARGIN * 2 - gap) / 2
+        val layout = ProjectTaskMapLayout.build("p", listOf(task("a", "Review requirements")),
+            rootTitle = "verify-project-tree-1105", maxHeaderWidth = headerLimit)
+        val root = layout.node("project:p")!!
+        val child = layout.node("a")!!
+        assertTrue(root.width <= headerLimit)
+        assertTrue(child.x + child.headerWidth <= viewport - ProjectTaskMapLayout.MARGIN + 0.01f)
+        assertEquals(ProjectTaskMapLayout.NODE_HEIGHT, child.height, 0.01f)
+    }
+
     @Test fun parentIsAtChildBranchMidline() {
         val layout = ProjectTaskMapLayout.build("p", listOf(task("a"), task("b", order = 1)))
         val root = layout.nodes.first { it.id == "project:p" }

@@ -31,7 +31,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
-from PIL import Image, ImageDraw
+from PIL import Image
 
 WHITE_MIN = 240
 DEFAULT_MAX_SIZE = 512

@@ -54,9 +54,6 @@ public final class VdMain {
 
     private static final String PKG = "com.android.shell";
 
-    /** 帧拷贝的最小间隔：画面在动时没必要每帧都拷，省内存带宽。 */
-    private static final long FRAME_COPY_MIN_INTERVAL_MS = 100L;
-
     /** WindowManager.DISPLAY_IME_POLICY_HIDE：这块屏上永不显示输入法，也不回落到主屏。 */
     private static final int DISPLAY_IME_POLICY_HIDE = 2;
 
@@ -112,6 +109,7 @@ public final class VdMain {
                 return;
             }
             int id = vd.getDisplay().getDisplayId();
+            wakeDisplay(id);
             // 不设的话，没有系统装饰的虚拟屏会把输入法「回落」到主屏：AI 一点影子屏里的输入框，
             // 用户主屏就弹出键盘、正在打的字被打断。HIDE 让这块屏上的输入框永远不拉起键盘。
             String imePolicy = setImePolicyHidden(id);
@@ -132,21 +130,30 @@ public final class VdMain {
             byte[] latest = new byte[w * h * 4];
             boolean latestValid = false;
             long lastCopyAt = 0L;
+            long frameSequence = 0L;
             while (!new File(stopFile).exists()) {
                 Image img = reader.acquireLatestImage();
                 if (img != null) {
-                    long now = System.currentTimeMillis();
-                    if (now - lastCopyAt >= FRAME_COPY_MIN_INTERVAL_MS) {
+                    try {
                         copyToCompact(img, w, h, latest);
                         latestValid = true;
-                        lastCopyAt = now;
+                        lastCopyAt = SystemClock.uptimeMillis();
+                        frameSequence++;
+                    } finally {
+                        img.close();
                     }
-                    img.close();
                 }
                 if (shotReq != null && shotOut != null && new File(shotReq).exists()) {
                     if (latestValid) {
+                        int state = vd.getDisplay().getState();
+                        String displayState = state == android.view.Display.STATE_ON ? "ON"
+                                : state == android.view.Display.STATE_OFF ? "OFF" : Integer.toString(state);
+                        String frame = "frame=" + frameSequence + " ageMs="
+                                + (SystemClock.uptimeMillis() - lastCopyAt) + " display="
+                                + displayState;
+                        Files.write(new File(shotOut + ".meta").toPath(), frame.getBytes(StandardCharsets.UTF_8));
                         writePng(latest, w, h, shotOut);
-                        System.out.println("VD_SHOT " + shotOut);
+                        System.out.println("VD_SHOT " + shotOut + " " + frame);
                     } else {
                         System.out.println("VD_SHOT_FAILED no-frame");
                     }
@@ -197,6 +204,7 @@ public final class VdMain {
                 String body = new String(Files.readAllBytes(f.toPath()), StandardCharsets.UTF_8);
                 reply = "OK\n" + execute(body, displayId);
             } catch (Throwable t) {
+                while (t instanceof java.lang.reflect.InvocationTargetException && t.getCause() != null) t = t.getCause();
                 reply = "ERR\n" + t;
             }
             f.delete();
@@ -215,9 +223,10 @@ public final class VdMain {
     private static String execute(String body, int displayId) throws Exception {
         String[] lines = body.split("\n", -1);
         String action = lines[0].trim();
+        if (!"ping".equals(action)) wakeDisplay(displayId);
         switch (action) {
             case "ping":
-                return uiAutomation != null ? "uiautomation" : "inject-only " + uiAutomationError;
+                return uiAutomation != null ? "uiautomation protocol=2" : "inject-only protocol=2 " + uiAutomationError;
             case "tap": {
                 int x = Integer.parseInt(lines[1].trim());
                 int y = Integer.parseInt(lines[2].trim());
@@ -296,19 +305,38 @@ public final class VdMain {
         if (!ok) throw new IllegalStateException("inject rejected");
     }
 
+    private static void wakeDisplay(int displayId) {
+        if (displayId <= 0) return;
+        try {
+            Class<?> sm = Class.forName("android.os.ServiceManager");
+            Object binder = sm.getMethod("getService", String.class).invoke(null, "power");
+            Class<?> stub = Class.forName("android.os.IPowerManager$Stub");
+            Object power = stub.getMethod("asInterface", android.os.IBinder.class).invoke(null, binder);
+            try {
+                power.getClass().getMethod("wakeUpWithDisplayId", long.class, int.class,
+                        String.class, String.class, int.class)
+                        .invoke(power, SystemClock.uptimeMillis(), 2, "aharou:virtual-display", PKG, displayId);
+            } catch (NoSuchMethodException ignored) {
+                // 老系统没有定向唤醒接口时仍保留原生输入，绝不改为唤醒主屏。
+            }
+            power.getClass().getMethod("userActivity", int.class, long.class, int.class, int.class)
+                    .invoke(power, displayId, SystemClock.uptimeMillis(), 0, 0);
+        } catch (Throwable t) {
+            System.out.println("VD_WAKE_UNAVAILABLE " + t.getClass().getSimpleName());
+        }
+    }
+
     private static Object inputManagerInstance;
 
     private static Object inputManager() throws Exception {
         if (inputManagerInstance != null) return inputManagerInstance;
-        Class<?> cls = Class.forName("android.hardware.input.InputManager");
-        Method getInstance;
+        Class<?> cls;
         try {
-            getInstance = cls.getDeclaredMethod("getInstance");
-        } catch (NoSuchMethodException e) {
-            // Android 14+ 把单例挪到了 InputManagerGlobal。
             cls = Class.forName("android.hardware.input.InputManagerGlobal");
-            getInstance = cls.getDeclaredMethod("getInstance");
+        } catch (ClassNotFoundException e) {
+            cls = Class.forName("android.hardware.input.InputManager");
         }
+        Method getInstance = cls.getDeclaredMethod("getInstance");
         getInstance.setAccessible(true);
         inputManagerInstance = getInstance.invoke(null);
         return inputManagerInstance;
@@ -385,6 +413,11 @@ public final class VdMain {
     private static List<AccessibilityNodeInfo> rootsOn(int displayId) throws Exception {
         if (uiAutomation == null) throw new IllegalStateException("uiautomation unavailable: " + uiAutomationError);
         android.app.UiAutomation uia = (android.app.UiAutomation) uiAutomation;
+        try {
+            uia.getClass().getMethod("clearCache").invoke(uia);
+        } catch (NoSuchMethodException ignored) {
+            // 旧版没有清缓存入口，下面仍会刷新读取到的根节点。
+        }
         // 让服务把交互窗口也报上来（默认只给活动窗口），否则虚拟屏上的窗口可能拿不到。
         android.accessibilityservice.AccessibilityServiceInfo info = uia.getServiceInfo();
         if (info != null && (info.flags & android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS) == 0) {
@@ -401,14 +434,14 @@ public final class VdMain {
         for (AccessibilityWindowInfo win : windows) {
             if (win.isActive()) {
                 AccessibilityNodeInfo root = win.getRoot();
-                if (root != null) roots.add(root);
+                if (root != null && root.refresh()) roots.add(root);
                 return roots;
             }
         }
         // 没有活动窗口时（刚启动或切后台）才退回全量，至少不至于读不到任何东西。
         for (AccessibilityWindowInfo win : windows) {
             AccessibilityNodeInfo root = win.getRoot();
-            if (root != null) roots.add(root);
+            if (root != null && root.refresh()) roots.add(root);
         }
         return roots;
     }

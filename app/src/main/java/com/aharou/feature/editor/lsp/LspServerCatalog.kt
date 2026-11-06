@@ -71,7 +71,15 @@ object LspServerCatalog {
         args = listOf("--stdio")
     )
 
-    val ALL: List<Entry> = listOf(LUA, PYTHON, TYPESCRIPT, SHELL, YAML, VUE)
+    /** Rust：使用容器已有 rustup 的 rust-analyzer 组件，不额外安装工具链。 */
+    val RUST = Entry(
+        extension = LanguageExtension.RUST,
+        languageId = "rust",
+        fileExtensions = listOf("rs"),
+        program = "rust-analyzer"
+    )
+
+    val ALL: List<Entry> = listOf(LUA, PYTHON, TYPESCRIPT, SHELL, YAML, VUE, RUST)
 
     init {
         // 条目的 program 与枚举的 command 必须一致：前者拼进容器启动命令，后者用于探活与安装，

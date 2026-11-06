@@ -91,14 +91,15 @@ object ProjectTaskMapLayout {
     fun build(projectId: String, tasks: List<ProjectTask>, heights: Map<String, Float> = emptyMap(),
         rootTitle: String = "", glyph: Float = DEFAULT_GLYPH, rootGlyph: Float = glyph,
         panelWidth: Float = PANEL_WIDTH, siblingGap: Float = SIBLING_GAP, levelGap: Float = LEVEL_GAP,
-        margin: Float = MARGIN): Layout {
+        margin: Float = MARGIN, maxHeaderWidth: Float = NODE_MAX_WIDTH): Layout {
         val root = rootId(projectId)
         val rows = ProjectTaskGraph.tree(tasks)
         val ids = tasks.map { it.id }.toSet()
         val children = rows.map { it.task }.groupBy { if (it.parentId in ids) it.parentId else root }
         val headers = HashMap<String, Float>(rows.size + 1)
-        headers[root] = headerWidth(rootTitle, rootGlyph)
-        rows.forEach { headers[it.task.id] = headerWidth(it.task.title, glyph) }
+        val headerLimit = maxHeaderWidth.coerceIn(NODE_MIN_WIDTH, NODE_MAX_WIDTH)
+        headers[root] = headerWidth(rootTitle, rootGlyph).coerceAtMost(headerLimit)
+        rows.forEach { headers[it.task.id] = headerWidth(it.task.title, glyph).coerceAtMost(headerLimit) }
         fun unfolded(id: String) = id != root && heights[id] != null
         fun width(id: String) = if (unfolded(id)) maxOf(headers.getValue(id), panelWidth) else headers.getValue(id)
         fun height(id: String) = if (unfolded(id)) maxOf(NODE_HEIGHT, heights.getValue(id)) else NODE_HEIGHT

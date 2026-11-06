@@ -36,7 +36,7 @@ touch /data/local/tmp/aharou-vd.shot   # 触发一次出图 → /sdcard/out.png�
 
 - 输出路径要落在 **App 可读**的位置（二进制不能经 Shizuku 的文本通道回来）；写文件先落 `.tmp` 再改名，避免读到半截。
 - 屏上还没有内容时打印 `VD_SHOT_FAILED no-frame`，不写文件。
-- 帧拷贝节流 100ms（画面在动时不必每帧都拷）。
+- 每个取得的最新帧都拷贝后再关闭，避免在节流窗口内丢掉界面最终帧后长期返回旧画面。截图旁的 `.meta` 记录帧序号、单调时钟帧龄和显示状态；文件新建不等于画面刷新。
 
 ## 已实测内容
 
@@ -56,11 +56,12 @@ App 启动 runner 时传 8 个参数：`宽 高 dpi "截图输出" 截图请求 
 - **命令**：App 往控制目录写 `cmd-<序号>.txt`（首行动作），runner 执行后写 `res-<序号>.txt`
   （首行 `OK` / `ERR`）。动作：`ping` / `tap x y` / `swipe x1 y1 x2 y2 ms` / `key 键码` /
   `settext append|replace 文字` / `dump`。
-- **点按与按键**：runner 自己反射调 `InputManager.injectInputEvent` 注入到这块屏，不再每一下都拉 `input` 进程。
+- **点按与按键**：runner 自己反射注入到这块屏，不再每一下都拉 `input` 进程。新版安卓存在 `InputManagerGlobal` 时优先使用；旧版才回退 `InputManager`，不能仅因旧类上还存在 `getInstance` 方法就调用它（shell 没有应用上下文）。
 - **读控件与写字**：runner 以 shell 身份连 UiAutomation（`uiautomator` 同款，带
   `FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES`），不需要用户开无障碍服务。日志 `VD_CTL ok` 表示连上，
   `VD_CTL no-uiautomation ...` 表示只有注入能力。写字走 `ACTION_SET_TEXT`，不经输入法、不经剪贴板。
-- 任一能力不可用时，App 退回旧路径（`input -d` / 剪贴板粘贴）。
+- 命令未投递时，App 才退回旧路径（`input -d` / 剪贴板粘贴），并检查退出状态。明确执行错误或已投递后的超时不自动重放。
+- Android 提供 `IPowerManager.wakeUpWithDisplayId` 时，启动和动作只唤醒该虚拟屏；缺接口时不调用全局 `wakeUp`。后端仍尝试更新该屏的 `userActivity`，不改主屏设置。
 
 重新打包：`sh tools/aharou-vd/build.sh`（会同步到 `app/src/main/assets/vd/`）。
 

@@ -224,7 +224,7 @@ class VdTool @Inject constructor(
     /** 确保影子屏在跑，必要时先打开目标 App（component 为包名或“包名/Activity”）。 */
     override suspend fun prepare(component: String?): String? {
         return try {
-            if (vdController.refresh() == null) vdController.start()
+            vdController.start()
             if (!component.isNullOrBlank()) vdController.launch(component)
             null
         } catch (e: CancellationException) {
@@ -525,13 +525,17 @@ class VdTool @Inject constructor(
         try {
             val shot = encodeScreenshot(bitmap, withGrid)
             val (pkg, activity) = shadowForeground(info.displayId)
+            val frame = runCatching {
+                java.io.File(file.absolutePath + ".meta").takeIf { it.isFile && it.length() < 256 }
+                    ?.readText()?.takeIf { it.startsWith("frame=") }
+            }.getOrNull()
             val caption = ScreenActionSemantics.caption(
                 packageName = pkg,
                 activity = activity,
                 width = shot.inputWidth.takeIf { it > 0 } ?: info.width,
                 height = shot.inputHeight.takeIf { it > 0 } ?: info.height,
                 keyboardShown = shadowKeyboardShown(),
-            )
+            ) + frame?.let { " · $it" }.orEmpty()
             return ScreenCapture(info, shot, caption, ScreenFingerprint.fromBitmap(bitmap, pkg, activity))
         } finally {
             bitmap?.recycle()

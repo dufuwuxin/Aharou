@@ -3741,7 +3741,7 @@
     <string name="project_task_unassigned">未分配</string>
     <string name="project_task_block_reason">执行提示：%1$s</string>
     <string name="project_task_map_node">任务：%1$s；父任务：%2$s；依赖：%3$s；负责人：%4$s；状态：%5$s</string>
-    <string name="project_task_dependency_legend">实心灰点已验收，带芯圆圈待验收，空心圆圈未开始，高亮圆点执行中，红点受阻；虚线为前置依赖。点按展开，长按补充或添加子任务。</string>
+    <string name="project_task_dependency_legend">实心灰点已验收，带芯圆圈待验收，空心圆圈未开始，高亮圆点执行中，红点受阻；虚线为前置依赖。点按展开，在底部输入需求，由 AI 补充或安排任务。</string>
     <string name="team_flow_organization_legend">灰色虚线仅为管理员组织关系；有色箭头为真实执行、送审与驳回。</string>
     <string name="project_task_wait_dependencies">等待前置任务按当前需求验收</string>
     <string name="project_task_stopped">用户已停止，尚未完成交付</string>
@@ -3769,7 +3769,7 @@
     <string name="project_task_add_one">手动新增（高级）</string>
     <string name="project_task_add_one_hint">不经 AI，自己填写标题、需求、执行成员、父任务和前置依赖。</string>
     <string name="project_add_content">添加</string>
-    <string name="project_process_hint">点任务查看执行过程，长按可补充内容或添加子任务。流程在项目顶部统一启动，前置依赖决定流转。</string>
+    <string name="project_process_hint">点任务查看执行过程，点项目根节点查看 AI 回复。在底部输入需求，由 AI 判断补充或新增；前置依赖决定流转。</string>
     <string name="project_process_expand">展开过程</string>
     <string name="project_process_collapse">收起过程</string>
     <string name="project_process_record">记录 %1$d</string>
@@ -3832,4 +3832,22 @@
     <string name="project_map_search_clear">清空查找</string>
     <string name="project_map_search_count">命中 %1$d 个任务，%2$d 处</string>
     <string name="chat_status_project_tasks">正在处理项目任务</string>
+    <string name="project_chat_input_hint">说说需求，让 AI 补充或安排任务…</string>
+    <string name="project_chat_binding_failed">项目会话绑定失败，请返回后重试；当前不会向其他会话发送消息。</string>
+    <string name="chat_context_estimate">本进程最近一轮系统注入：%1$d 字符，约 %2$d tokens（按 Unicode 字符四分之一逐段向上取整；不是模型账单）</string>
+    <string name="chat_context_section">标题来源：%1$s · %2$d 字符 · 约 %3$d tokens</string>
+    <string name="memory_proposals_pending">检视待审核整理提议（%1$d）</string>
+    <string name="memory_proposal_title">审核具体整理稿</string>
+    <string name="memory_proposal_notice">批准仅写入以下稿件，不重新调用模型；输入已变化则拒绝写入。提议仅存在本进程，重启后需重新生成。</string>
+    <string name="memory_proposal_before">输入（作用域、路径与版本）</string>
+    <string name="memory_proposal_after">批准后写入的完整稿</string>
+    <string name="memory_proposal_approve">批准此稿</string>
+    <string name="memory_proposal_reject">拒绝此稿</string>
+    <string name="memory_proposal_applied">已写入批准稿</string>
+    <string name="memory_proposal_stale">输入或稿件已变化，提议已失效，请重新整理</string>
+    <string name="memory_proposal_missing">提议已不存在</string>
+    <string name="memory_proposal_failed">写入失败，提议保留，可检查归档后重试</string>
+    <string name="memory_review_proposals_name">整理提议审核</string>
+    <string name="memory_review_proposals_description">默认开启：合并与摘要改写仅生成可检视提议，批准具体稿后写入。关闭后恢复原自动写入路径，不关闭整理任务。</string>
+    <string name="chat_context_request_metadata">请求版本 %1$s · 时间戳 %2$s\n系统 %3$s / 工具定义 %4$s / 历史与消息开销 %5$s / 图片估算 %6$s token（非模型账单）</string>
 </resources>

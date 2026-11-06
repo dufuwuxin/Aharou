@@ -1,6 +1,7 @@
 package com.aharou.feature.editor.lsp
 
 import com.aharou.feature.agent.domain.container.LinuxContainerEngine
+import com.aharou.feature.agent.domain.container.ContainerProfile
 import io.github.rosemoe.sora.lsp.client.connection.StreamConnectionProvider
 import io.github.rosemoe.sora.lsp.client.languageserver.serverdefinition.LanguageServerDefinition
 
@@ -14,7 +15,9 @@ import io.github.rosemoe.sora.lsp.client.languageserver.serverdefinition.Languag
 class ContainerLanguageServerDefinition(
     private val entry: LspServerCatalog.Entry,
     private val engine: LinuxContainerEngine,
-    private val projectPath: String?
+    private val projectPath: String?,
+    private val profile: ContainerProfile,
+    private val remoteProvider: (() -> StreamConnectionProvider)? = null
 ) : LanguageServerDefinition() {
 
     init {
@@ -28,12 +31,13 @@ class ContainerLanguageServerDefinition(
         get() = entry.languageId
 
     override fun createConnectionProvider(workingDir: String): StreamConnectionProvider =
-        ContainerStdioConnectionProvider(
+        remoteProvider?.invoke() ?: ContainerStdioConnectionProvider(
             serverKey = "lsp:${entry.languageId}",
             engine = engine,
             program = entry.program,
             programArgs = entry.args,
             // workingDir 由 LspProject 传入（容器内项目根），优先用它当作容器内工作目录。
-            projectPath = workingDir.ifBlank { projectPath.orEmpty() }.takeIf { it.isNotBlank() }
+            projectPath = workingDir.ifBlank { projectPath.orEmpty() }.takeIf { it.isNotBlank() },
+            runtimeProfile = profile
         )
 }

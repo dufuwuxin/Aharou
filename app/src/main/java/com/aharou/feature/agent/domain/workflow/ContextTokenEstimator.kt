@@ -2,7 +2,6 @@ package com.aharou.feature.agent.domain.workflow
 
 import com.aharou.feature.agent.domain.model.AgentMessage
 import com.aharou.feature.agent.domain.tool.AgentTool
-import com.aharou.feature.agent.domain.tool.modelToolResultText
 import com.aharou.feature.settings.domain.model.ModelContextPolicy
 import com.google.gson.Gson
 
@@ -21,22 +20,8 @@ object ContextTokenEstimator {
     }
 
     fun estimate(message: AgentMessage): Int {
-        val text: String
-        val images: Int
-        when (message) {
-            is AgentMessage.UserMessage -> {
-                text = message.content
-                images = message.images.size
-            }
-            is AgentMessage.AssistantMessage -> {
-                text = message.content + message.reasoning + message.toolCalls.joinToString { it.name + gson.toJson(it.arguments) }
-                images = message.images.size
-            }
-            is AgentMessage.ToolResultMessage -> {
-                text = message.toolName + (message.modelResult ?: modelToolResultText(message.toolName, message.result) ?: message.result)
-                images = message.images.size
-            }
-        }
+        val text = RequestContextComposition.messageText(message)
+        val images = RequestContextComposition.images(message)
         return (ModelContextPolicy.estimateTextTokens(text).toLong() + images * 4_096L + 12)
             .coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
     }

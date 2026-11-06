@@ -1,5 +1,6 @@
 package com.aharou.feature.settings.presentation.component
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -23,16 +24,22 @@ import com.aharou.core.theme.Spacing
 import com.aharou.core.ui.SegmentedTabs
 import com.aharou.feature.agent.domain.mcp.McpServerEntry
 import com.aharou.feature.agent.domain.mcp.McpServerStatus
+import com.aharou.feature.agent.domain.mcp.McpScope
 
 @Composable
 internal fun ToolManagementSection(
     entries: List<McpServerEntry>,
     statuses: List<McpServerStatus>,
+    reloading: Boolean,
+    onReload: () -> Unit,
+    onBrowseDirectory: () -> Unit,
+    onImportJson: () -> Unit,
+    onExportJson: () -> Unit,
     createRequested: Boolean,
     onCreateHandled: () -> Unit,
     onCreateMcp: () -> Unit,
-    onToggle: (McpServerEntry, Boolean) -> Unit,
-    onDelete: (McpServerEntry) -> Unit,
+    onToggle: (String, Boolean, McpScope) -> Unit,
+    onDelete: (String, McpScope) -> Unit,
     onEdit: (McpServerEntry) -> Unit,
     permissionContent: @Composable () -> Unit,
 ) {
@@ -41,28 +48,39 @@ internal fun ToolManagementSection(
     val customState by customViewModel.state.collectAsStateWithLifecycle()
     LaunchedEffect(selected) { if (selected == 2) customViewModel.refresh() }
     var createScript by rememberSaveable { mutableStateOf(false) }
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+    Column(Modifier.fillMaxSize()) {
+        if (selected == 0) {
+            TextButton(onClick = onReload, enabled = !reloading, modifier = Modifier.padding(horizontal = Spacing.lg)) {
+                Text(stringResource(R.string.settings_reconnect))
+            }
+        }
         SegmentedTabs(
             selected = selected,
-            labels = listOf(stringResource(R.string.settings_mcp), stringResource(R.string.script_tools_title), stringResource(R.string.tools_group_custom)),
+            labels = listOf(stringResource(R.string.settings_mcp), stringResource(R.string.script_tools_title), stringResource(R.string.tools_group_custom), stringResource(R.string.settings_scheduled_tasks), stringResource(R.string.settings_permissions)),
             onSelect = { selected = it },
             modifier = Modifier.padding(horizontal = Spacing.lg),
         )
-        if (selected == 2) {
-            ToolsSection(state = customState, viewModel = customViewModel, embedded = true)
-        } else if (selected == 1) {
-            ScriptToolsSection(createRequested = createScript, onCreateHandled = { createScript = false }, embedded = true)
-        } else {
-            Column(Modifier.padding(bottom = Spacing.xl)) {
-                if (entries.isEmpty()) {
-                    Text(stringResource(R.string.settings_tools_empty), Modifier.padding(Spacing.lg))
+        Box(Modifier.weight(1f)) {
+            if (selected == 0) {
+                McpSection(
+                    entries = entries, statuses = statuses, reloading = reloading, onReload = onReload,
+                    onToggle = onToggle, onDelete = onDelete, onEdit = onEdit,
+                    onBrowseDirectory = onBrowseDirectory, onImportJson = onImportJson, onExportJson = onExportJson
+                )
+            } else {
+                Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+                    when (selected) {
+                        1 -> ScriptToolsSection(createRequested = createScript, onCreateHandled = { createScript = false }, embedded = true)
+                        2 -> ToolsSection(state = customState, viewModel = customViewModel, embedded = true)
+                        3 -> ScheduledTasksSection()
+                        else -> {
+                            SettingsGroupHeader(text = stringResource(R.string.settings_permissions))
+                            permissionContent()
+                        }
+                    }
                 }
-                McpToolsSection(entries, statuses, onToggle, onDelete, onEdit)
             }
         }
-        ScheduledTasksSection()
-        SettingsGroupHeader(text = stringResource(R.string.settings_permissions))
-        permissionContent()
     }
     if (createRequested) {
         AlertDialog(

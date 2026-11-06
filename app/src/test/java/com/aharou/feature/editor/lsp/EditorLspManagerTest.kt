@@ -31,12 +31,15 @@ class EditorLspManagerTest {
             mockk<RemoteSshConnection>(relaxed = true),
         ).apply { containerHome = home }
         return EditorLspManager(
-            mockk<LinuxContainerEngine>(relaxed = true),
-            mockk<LanguageServerInstaller>(relaxed = true),
-            resolver,
-            mockk<RuntimeProcessStore>(relaxed = true),
-            mockk<WorkspaceRepository>(relaxed = true),
-            mockk<ContainerSettingsRepository>(relaxed = true),
+            remoteConnection = mockk(relaxed = true),
+            remoteResolver = mockk(relaxed = true),
+            profileResolver = mockk(relaxed = true),
+            engine = mockk<LinuxContainerEngine>(relaxed = true),
+            installer = mockk<LanguageServerInstaller>(relaxed = true),
+            pathHomeResolver = resolver,
+            runtimeProcessStore = mockk<RuntimeProcessStore>(relaxed = true),
+            workspaceRepository = mockk<WorkspaceRepository>(relaxed = true),
+            containerSettingsRepository = mockk<ContainerSettingsRepository>(relaxed = true),
         )
     }
 

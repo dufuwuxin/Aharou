@@ -165,7 +165,7 @@ class SkillRepositoryTest {
         every { agents.listAll() } returns listOf(entry)
         every { globalSource.listSkills() } returns listOf(skill("private"),
             skill("conditional").copy(keywordEnabled = true, keywords = listOf("Kotlin")))
-        val tool = com.aharou.feature.agent.domain.tool.skill.LoadSkillTool(repository)
+        val tool = com.aharou.feature.agent.domain.tool.skill.LoadSkillTool(repository, mockk(relaxed = true))
         val args = mapOf("skill_name" to kotlinx.serialization.json.JsonPrimitive("private"))
         val main = com.aharou.feature.agent.domain.model.AgentContext(null, null, "/project", null)
         assertEquals("SKILL_NOT_ALLOWED", (tool.executeWithContext(args, main) as com.aharou.feature.agent.domain.tool.ToolResult.Error).code)

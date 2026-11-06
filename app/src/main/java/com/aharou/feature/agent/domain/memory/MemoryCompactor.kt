@@ -49,6 +49,7 @@ class MemoryCompactor @Inject constructor(
     private val agentWorkflow: AgentWorkflow,
     private val autoCompactSettings: MemoryAutoCompactSettings,
     private val memoryUsageStore: MemoryUsageStore,
+    private val proposals: MemoryProposalStore,
 ) {
 
     /**
@@ -85,7 +86,7 @@ class MemoryCompactor @Inject constructor(
                 continue
             }
             reservedShrink += group.size - 1
-            if (merge(group, proposal)) {
+            if (submit(group, proposal)) {
                 merged++
                 report = report.copy(merged = merged, archived = report.archived + group.size)
             } else {
@@ -329,7 +330,16 @@ class MemoryCompactor @Inject constructor(
         if (systemPrompt.isEmpty()) return false
         val proposal = propose(systemPrompt, group) ?: return false
         if (proposal.action != CompactAction.MERGE || !passesGuard(group, proposal)) return false
-        return merge(group, proposal)
+        return submit(group, proposal)
+    }
+
+    private fun submit(group: List<Memory>, proposal: CompactProposal): Boolean {
+        if (!autoCompactSettings.reviewProposals) return merge(group, proposal)
+        val name = MemorySource.sanitizeName(proposal.name)
+        if (name.isNotEmpty()) proposals.propose(group, name, proposal.description, proposal.content,
+            proposal.type ?: group.first().type, merge = true)
+        // Pending is not a completed merge; existing reports must not count it as a disk change.
+        return false
     }
 
     /** 一个作用域下参与整理的候选条目：事件类只留档、压缩摘要只留档不可改写、核心档案整份不可拆，都不算候选。 */
@@ -437,7 +447,7 @@ class MemoryCompactor @Inject constructor(
         }
         val raw = agentWorkflow.completeOnce(systemPrompt, input) ?: return@runCatching null
         parseProposal(raw)
-    }.getOrNull()
+    }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }.getOrNull()
 
     private fun parseProposal(raw: String): CompactProposal? {
         val start = raw.indexOf('{')

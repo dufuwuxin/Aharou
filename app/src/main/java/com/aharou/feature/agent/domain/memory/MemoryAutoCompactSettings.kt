@@ -27,6 +27,11 @@ class MemoryAutoCompactSettings @Inject constructor(
         get() = prefs.getBoolean(KEY_AUTO_ORGANIZE, false)
         set(value) = prefs.edit().putBoolean(KEY_AUTO_ORGANIZE, value).apply()
 
+    /** Review is the default; disabling it deliberately restores the existing automatic apply path. */
+    var reviewProposals: Boolean
+        get() = prefs.getBoolean("review_proposals", true)
+        set(value) = prefs.edit().putBoolean("review_proposals", value).apply()
+
     var lastOrganizeAt: Long
         get() = prefs.getLong(KEY_LAST_ORGANIZE_AT, 0L)
         set(value) = prefs.edit().putLong(KEY_LAST_ORGANIZE_AT, value).apply()

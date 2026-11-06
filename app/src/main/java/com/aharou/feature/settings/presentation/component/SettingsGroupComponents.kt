@@ -41,6 +41,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.aharou.R
+import com.aharou.core.theme.Radius
 import com.aharou.core.theme.Spacing
 import com.aharou.core.theme.semanticColors
 import compose.icons.FeatherIcons
@@ -139,7 +140,6 @@ internal fun SettingsGroupHeader(
 }
 
 /** 分组卡片圆角：[SettingsGroup] 与 [LazyGroupItem] 共用，保证「整块卡片」与「逐条拼出」两种形态外观一致。 */
-private val GroupCardCorner = 14.dp
 
 /** 白色/深色分组圆角卡片容器：内部按行排布，行间用 [SettingsDivider] 分隔。[visible] 为 false 时整组不渲染（可折叠分组用）。 */
 @Composable
@@ -153,7 +153,7 @@ internal fun SettingsGroup(
     if (!visible) return
     Surface(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(GroupCardCorner),
+        shape = RoundedCornerShape(Radius.lg),
         color = MaterialTheme.semanticColors.cardSurface,
         shadowElevation = 0.dp
     ) {
@@ -181,10 +181,10 @@ internal fun LazyGroupItem(
     Surface(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(
-            topStart = if (isFirst) GroupCardCorner else 0.dp,
-            topEnd = if (isFirst) GroupCardCorner else 0.dp,
-            bottomStart = if (isLast) GroupCardCorner else 0.dp,
-            bottomEnd = if (isLast) GroupCardCorner else 0.dp
+            topStart = if (isFirst) Radius.lg else 0.dp,
+            topEnd = if (isFirst) Radius.lg else 0.dp,
+            bottomStart = if (isLast) Radius.lg else 0.dp,
+            bottomEnd = if (isLast) Radius.lg else 0.dp
         ),
         color = MaterialTheme.semanticColors.cardSurface,
         shadowElevation = 0.dp

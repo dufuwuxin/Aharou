@@ -52,10 +52,13 @@ class PluginManager @Inject constructor(
     private fun pluginsRoot(): File = File(containerInstaller.aharouDir, "plugins").apply { mkdirs() }
 
     /** 宿主侧插件根目录：`filesDir/aharou/plugins/<id>`。 */
-    fun hostDir(id: String): File = File(pluginsRoot(), id)
+    fun hostDir(id: String): File = PluginPaths.resolve(pluginsRoot(), id)
 
     /** 容器内插件根目录（宿主 [hostDir] 的绑定路径）。 */
-    private fun containerDir(id: String): String = "/root/.aharou/plugins/$id"
+    private fun containerDir(id: String): String {
+        hostDir(id)
+        return "/root/.aharou/plugins/$id"
+    }
 
     /** 读取插件目录里的 manifest.json；不存在返回 null。 */
     fun readManifest(id: String): PluginManifest? {

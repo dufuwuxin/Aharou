@@ -21,7 +21,8 @@ import javax.inject.Inject
  * 随后用 read_file/execute_command 等工具按正文行事。skill 目录在当前执行环境为 `~/.aharou/skills/<name>/`。
  */
 class LoadSkillTool @Inject constructor(
-    private val skillRepository: SkillRepository
+    private val skillRepository: SkillRepository,
+    private val resourceDeployer: com.aharou.feature.agent.domain.skill.BuiltinSkillResourceDeployer
 ) : AgentTool() {
     private companion object {
         const val TAG = "LoadSkillTool"
@@ -83,6 +84,15 @@ class LoadSkillTool @Inject constructor(
                 "未找到技能「$skillName」。可用技能: ${available.ifEmpty { "（无）" }}",
                 "SKILL_NOT_FOUND"
             )
+        }
+
+        val entry = skillRepository.listAllSkills().firstOrNull { it.skill.name == skillName }
+        if (entry?.scope == com.aharou.feature.agent.domain.skill.SkillScope.BUILTIN) {
+            try { resourceDeployer.ensure(skillName, context?.projectRoot) }
+            catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (failure: Exception) {
+                return ToolResult.Error("Builtin skill resources not synchronized: ${failure.message}", "BUILTIN_SKILL_NOT_SYNCED")
+            }
         }
 
         FileLogger.d(TAG, "load_skill 加载成功: $skillName (${instructions.length} 字符)")

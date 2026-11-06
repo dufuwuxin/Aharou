@@ -84,16 +84,18 @@ private data class DotStyle(val color: Color, val filled: Boolean, val glow: Boo
 fun ProjectTaskMap(projectId: String, projectTitle: String, tasks: List<ProjectTask>, processId: String?,
     onOpenProcess: (String) -> Unit, onDismissProcess: () -> Unit, onSupplement: (ProjectTask?) -> Unit,
     onAddChild: (ProjectTask?) -> Unit, modifier: Modifier = Modifier,
+    onContentDrag: () -> Unit = {}, onOpenRoot: () -> Unit = {}, rootConversation: @Composable () -> Unit = {},
     process: @Composable (ProjectTask) -> Unit = {}) {
+    val onDrag by rememberUpdatedState(onContentDrag)
     val byId = remember(tasks) { tasks.associateBy { it.id } }
     val outlines = remember(tasks) { tasks.associate { it.id to ProjectTaskOutline.of(it, tasks) } }
     val outer = LocalDensity.current
     val density = outer.density
+    var viewportWidth by remember(projectId) { mutableFloatStateOf(Float.POSITIVE_INFINITY) }
     var zoom by remember(projectId) { mutableFloatStateOf(DEFAULT_ZOOM) }
     var panX by remember(projectId) { mutableFloatStateOf(0f) }
     var panY by remember(projectId) { mutableFloatStateOf(0f) }
     var reset by remember { mutableIntStateOf(0) }
-    var menuId by remember(projectId) { mutableStateOf<String?>(null) }
     var expanded by rememberSaveable(projectId, stateSaver = StringSetSaver) { mutableStateOf(emptySet<String>()) }
     var openGroups by rememberSaveable(projectId, stateSaver = StringSetSaver) { mutableStateOf(emptySet<String>()) }
     var fullLines by rememberSaveable(projectId, stateSaver = StringSetSaver) { mutableStateOf(emptySet<String>()) }
@@ -135,9 +137,11 @@ fun ProjectTaskMap(projectId: String, projectTitle: String, tasks: List<ProjectT
     val rootStyle = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold)
     val glyph = fontDp(titleStyle.fontSize, outer.fontScale)
     val rootGlyph = fontDp(rootStyle.fontSize, outer.fontScale)
-    val layout = remember(projectId, tasks, projectTitle, heights, glyph, rootGlyph) {
+    val headerLimit = ((viewportWidth - Spacing.lg.value * 2) / DEFAULT_ZOOM - Spacing.xxl.value * 2) / 2
+    val layout = remember(projectId, tasks, projectTitle, heights, glyph, rootGlyph, headerLimit) {
         ProjectTaskMapLayout.build(projectId, tasks, heights, projectTitle, glyph, rootGlyph,
-            siblingGap = Spacing.sm.value, levelGap = Spacing.xxl.value * 2, margin = Spacing.lg.value)
+            siblingGap = Spacing.sm.value, levelGap = Spacing.xxl.value * 2, margin = Spacing.lg.value,
+            maxHeaderWidth = headerLimit)
     }
     fun chain(id: String?) = generateSequence(id?.takeIf { it in byId }) { byId[it]?.parentId?.takeIf { p -> p in byId } }
         .take(tasks.size + 1)
@@ -165,7 +169,7 @@ fun ProjectTaskMap(projectId: String, projectTitle: String, tasks: List<ProjectT
     }
     val zoomed = remember(outer, zoom) { Density(density * zoom, outer.fontScale) }
     val path = remember { Path() }
-    Column(modifier) {
+    Column(modifier.onSizeChanged { viewportWidth = it.width / density }) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
             val clear: (@Composable () -> Unit)? = if (query.isEmpty()) null else { {
                 IconButton(onClick = { query = "" }) {
@@ -189,6 +193,7 @@ fun ProjectTaskMap(projectId: String, projectTitle: String, tasks: List<ProjectT
             overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag("map_hint"))
         BoxWithConstraints(Modifier.weight(1f).fillMaxWidth().clipToBounds().testTag("map_viewport").pointerInput(projectId) {
             detectTransformGestures { centroid, pan, scale, _ ->
+                onDrag()
                 val next = (zoom * scale).coerceIn(ProjectTaskMapLayout.MIN_ZOOM, MAX_ZOOM)
                 val ratio = next / zoom
                 panX = centroid.x / density - (centroid.x / density - panX) * ratio + pan.x / density
@@ -299,11 +304,11 @@ fun ProjectTaskMap(projectId: String, projectTitle: String, tasks: List<ProjectT
                     CompositionLocalProvider(LocalDensity provides zoomed) {
                         if (task == null) ProjectTaskMapRootHeader(projectTitle,
                             stringResource(R.string.project_flow_progress, tasks.count { ProjectWorkflowPlan.delivered(it) }, tasks.size),
-                            rootStyle, onClick = { menuId = node.id })
+                            rootStyle, onClick = onOpenRoot)
                         else Column {
                             ProjectTaskMapHeader(task.title, projectTaskStatusLabel(task.status), outlines[task.id].orEmpty().size, unfolded,
                                 emphasised = node.id in pathIds || node.id in hitIds || task.status == ProjectTaskStatus.RUNNING,
-                                titleStyle = titleStyle, onClick = { toggle(task.id) }, onLongClick = { menuId = node.id })
+                                titleStyle = titleStyle, onClick = { toggle(task.id) }, onLongClick = { toggle(task.id) })
                             if (unfolded) ProjectTaskOutlineView(outlines[task.id].orEmpty(), kindsOpen(task.id), linesOpen(task.id),
                                 hitLines[task.id].orEmpty(),
                                 onToggleGroup = { kind -> val k = "${task.id}#${kind.name}"; openGroups = if (k in openGroups) openGroups - k else openGroups + k },
@@ -312,8 +317,6 @@ fun ProjectTaskMap(projectId: String, projectTitle: String, tasks: List<ProjectT
                                 modifier = Modifier.fillMaxWidth().testTag("map_outline_" + task.id))
                         }
                     }
-                    ProjectTaskNodeMenu(expanded = menuId == node.id, onDismiss = { menuId = null },
-                        onSupplement = { menuId = null; onSupplement(task) }, onAddChild = { menuId = null; onAddChild(task) })
                 }
             } }
             Surface(shape = RoundedCornerShape(Radius.pill), color = colors.surfaceContainerHigh,
@@ -324,6 +327,13 @@ fun ProjectTaskMap(projectId: String, projectTitle: String, tasks: List<ProjectT
                     TextButton(onClick = { zoom = DEFAULT_ZOOM; reset++ }, modifier = Modifier.heightIn(min = 48.dp).testTag("map_reset")) { Text(stringResource(R.string.project_map_reset)) }
                 }
             }
+        }
+    }
+    if (processId == ProjectTaskMapLayout.rootId(projectId)) AdaptiveModalBottomSheet(onDismissRequest = onDismissProcess,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+        Column(Modifier.fillMaxWidth().fillMaxHeight(0.9f).testTag("map_root_conversation")) {
+            Text(projectTitle, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(Spacing.lg))
+            Box(Modifier.weight(1f).fillMaxWidth()) { rootConversation() }
         }
     }
     val selected = byId[processId]

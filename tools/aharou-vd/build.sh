@@ -13,7 +13,7 @@ ASSET=$DIR/../../app/src/main/assets/vd/aharou-vd.jar
 rm -rf "$OUT"
 mkdir -p "$OUT/classes" "$OUT/dex"
 
-javac --release 11 -cp "$AJAR" -d "$OUT/classes" "$DIR/VdMain.java"
+javac -encoding UTF-8 --release 11 -cp "$AJAR" -d "$OUT/classes" "$DIR/VdMain.java"
 "$D8" --release --min-api 26 --lib "$AJAR" --output "$OUT/dex" $(find "$OUT/classes" -name '*.class')
 jar --create --file "$DIR/aharou-vd.jar" -C "$OUT/dex" classes.dex
 cp "$DIR/aharou-vd.jar" "$ASSET"

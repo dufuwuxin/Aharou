@@ -17,7 +17,7 @@ class RemoteBootstrapTransferTest {
         val client = mockk<SSHClient>()
         every { client.isConnected } returns true
         every { client.isAuthenticated } returns true
-        val target = RemoteSshConnection.BootstrapTarget(client, "/home/test")
+        val target = RemoteSshConnection.BootstrapTarget(client, "/home/test", mockk())
         for ((field, value) in listOf("sshClient" to client, "bootstrap" to target)) {
             RemoteSshConnection::class.java.getDeclaredField(field).apply { isAccessible = true }.set(connection, value)
         }
@@ -67,7 +67,7 @@ class RemoteBootstrapTransferTest {
 
     @Test fun staleConnectionIdentityCannotStartAnUploadOnANewConnection() = runBlocking {
         val (connection, _, commands) = fixture()
-        val stale = RemoteSshConnection.BootstrapTarget(mockk(), "/home/old")
+        val stale = RemoteSshConnection.BootstrapTarget(mockk(), "/home/old", mockk())
         try { connection.uploadDocs(mapOf("a.md" to byteArrayOf(1)), stale); fail("stale connection must fail") }
         catch (expected: IllegalStateException) { assertEquals("SSH_CONNECTION_CHANGED", expected.message) }
         assertTrue(commands.isEmpty())

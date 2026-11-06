@@ -10,6 +10,7 @@ import com.aharou.feature.agent.domain.runner.AgentTurnRunner
 import com.aharou.feature.agent.domain.session.SessionUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -46,6 +47,9 @@ class ProjectTaskViewModel @Inject constructor(
 ) : ViewModel() {
     private val mutable = MutableStateFlow(ProjectTaskUiState())
     val state = mutable.asStateFlow()
+    private val sessionMutex = kotlinx.coroutines.sync.Mutex()
+    // Retrying a failed link reuses the already persisted root session.
+    private val pendingProjectSessions = mutableMapOf<Pair<String, String>, String>()
     private val executing = mutableSetOf<String>()
     private val executionJobs = mutableMapOf<String, kotlinx.coroutines.Job>()
     private var busyOwner: Any? = null
@@ -86,6 +90,23 @@ class ProjectTaskViewModel @Inject constructor(
                 if (mutable.value.workspace == path) mutable.update { it.copy(loading = false, error = failure.message ?: "TASK_READ_FAILED") }
             }
         }
+    }
+
+    suspend fun ensureProjectSession(projectId: String, workspace: String): String = sessionMutex.withLock {
+        require(workspace.isNotBlank()) { "WORKSPACE_REQUIRED" }
+        val project = repository.load(workspace).projects.single { it.id == projectId && it.workspace == workspace }
+        val key = workspace to projectId
+        val candidates = (project.flowSessionIds + listOfNotNull(pendingProjectSessions[key])).distinct()
+            .mapNotNull { sessions.getSessionById(it) }
+            .filter { it.parentId == null && it.workspacePath == workspace }
+        val session = candidates.maxByOrNull { it.updatedAt } ?: runner.createSessionEntity(workspace).also {
+            check(it.parentId == null && it.workspacePath == workspace)
+            sessions.upsertSession(it)
+            pendingProjectSessions[key] = it.id
+        }
+        if (session.id !in project.flowSessionIds) repository.linkProjectExecution(projectId, workspace, session.id)
+        pendingProjectSessions.remove(key)
+        session.id
     }
 
     fun selectProject(id: String?) { mutable.update { it.copy(selectedProjectId = id, selectedId = null) } }

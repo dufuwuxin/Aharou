@@ -32,6 +32,7 @@ class MemoryTopicOrganizer @Inject constructor(
     private val agentWorkflow: AgentWorkflow,
     private val memoryTrace: MemoryTraceLog,
     private val settings: MemoryAutoCompactSettings,
+    private val proposals: MemoryProposalStore,
 ) {
     // 每日任务与设置页「打开开关立刻跑一次」可能撞上，同一时刻只许一轮。
     private val running = Mutex()
@@ -63,10 +64,10 @@ class MemoryTopicOrganizer @Inject constructor(
 
     private suspend fun organize(projectRoot: String?, scope: MemoryScope): MemoryOrganizeReport {
         val merged = runCatching { mergeByTopic(projectRoot, scope) }
-            .onFailure { FileLogger.w(TAG, "主题归拢失败（$scope）：${it.message}", it) }
+            .onFailure { if (it is kotlinx.coroutines.CancellationException) throw it; FileLogger.w(TAG, "主题归拢失败（$scope）：${it.message}", it) }
             .getOrDefault(0)
         val described = runCatching { rewriteDescriptions(projectRoot, scope) }
-            .onFailure { FileLogger.w(TAG, "摘要重写失败（$scope）：${it.message}", it) }
+            .onFailure { if (it is kotlinx.coroutines.CancellationException) throw it; FileLogger.w(TAG, "摘要重写失败（$scope）：${it.message}", it) }
             .getOrDefault(0)
         return MemoryOrganizeReport(merged, described)
     }
@@ -81,15 +82,17 @@ class MemoryTopicOrganizer @Inject constructor(
         val budget = maxOf(1, (candidates.size * MAX_SHRINK_RATIO).toInt())
         var shrink = 0
         var merged = 0
+        var attempted = 0
         for (bucket in buckets) {
             for (batch in bucket.chunked(TOPIC_BATCH_SIZE)) {
-                if (merged >= MAX_GROUPS_PER_RUN || shrink >= budget) return merged
+                if (attempted >= MAX_GROUPS_PER_RUN || shrink >= budget) return merged
                 if (batch.size < 2) continue
                 val byName = batch.associateBy { it.name }
                 for (names in proposeGroups(prompt, batch)) {
-                    if (merged >= MAX_GROUPS_PER_RUN || shrink >= budget) return merged
+                    if (attempted >= MAX_GROUPS_PER_RUN || shrink >= budget) return merged
                     val group = names.mapNotNull(byName::get).distinct().take(budget - shrink + 1)
                     if (group.size < 2) continue
+                    attempted++
                     if (memoryCompactor.tryMerge(group)) {
                         merged++
                         shrink += group.size - 1
@@ -139,6 +142,10 @@ class MemoryTopicOrganizer @Inject constructor(
             val file = memory.file ?: continue
             val current = MemoryParser.parse(file, scope) ?: continue
             if (current.version != memory.version) continue
+            if (settings.reviewProposals) {
+                proposals.propose(listOf(current), current.name, desc, current.content, current.type, merge = false)
+                continue
+            }
             val payload = MemoryParser.format(
                 current.name, desc, current.content, current.type, current.keywords, current.expiresAt, current.pending
             )
@@ -165,7 +172,7 @@ class MemoryTopicOrganizer @Inject constructor(
         }
 
     private suspend fun completeJson(prompt: String, input: String): JsonObject? {
-        val raw = runCatching { agentWorkflow.completeOnce(prompt, input) }.getOrNull() ?: return null
+        val raw = runCatching { agentWorkflow.completeOnce(prompt, input) }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }.getOrNull() ?: return null
         val start = raw.indexOf('{')
         val end = raw.lastIndexOf('}')
         if (start < 0 || end <= start) return null

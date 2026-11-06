@@ -41,7 +41,7 @@ class ToolCallReceiptRepository @Inject constructor(
         private const val BUILD_LOG_FRESH_MILLIS = 120_000L
 
         private val GRADLEW_REGEX = Regex("""(^|[/\s])gradlew(\.bat)?(\s|$)""")
-        private val OUTPUT_PATH_REGEX = Regex(""""output_path"\s*:\s*"([^"]+)"""")
+        private val OUTPUT_PATH_REGEX = Regex("\"output_path\"\\s*:\\s*\"([^\"]+)\"")
         private val BUILD_TASK_REGEX = Regex("""task=(\S+)""")
         private val BUILD_TIME_REGEX = Regex("""^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})]""")
         private val BUILD_LOG_TIME_FORMAT = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
@@ -82,6 +82,15 @@ class ToolCallReceiptRepository @Inject constructor(
 
     fun observeSession(sessionId: String, limit: Int = 300): Flow<List<ToolCallReceiptEntity>> =
         dao.observeSession(sessionId, limit)
+
+    suspend fun querySession(
+        sessionId: String, workspace: String, tool: String? = null, status: String? = null,
+        after: Long? = null, before: Long? = null, limit: Int = 40, offset: Int = 0
+    ): List<ToolCallReceiptEntity> {
+        require(offset >= 0 && limit in 1..201)
+        require(after == null || before == null || after <= before)
+        return dao.querySession(sessionId, workspace, tool, status, after, before, limit, offset)
+    }
 
     /**
      * 记一条工具执行回执。

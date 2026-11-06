@@ -564,6 +564,7 @@ object AgentModule {
         fileAccess: FileAccessProvider,
         receiptRepository: ToolCallReceiptRepository,
         ocrEngine: TesseractOcrEngine,
+        injectedContexts: com.aharou.feature.agent.domain.prompt.InjectedContextStore,
         vault: VaultRepository,
         reminderEngine: com.aharou.feature.agent.domain.reminder.ReminderEngine
     ): AgentWorkflow {
@@ -600,6 +601,7 @@ object AgentModule {
             fileAccess,
             receiptRepository,
             ocrEngine,
+            injectedContexts,
             vault,
             reminderEngine,
             memoryCompactor, toolInjectionGate

@@ -69,6 +69,8 @@ internal fun SettingsAharouRows(onOpen: (SettingsSection) -> Unit) {
     ) {
         SettingsGroupHeader(text = stringResource(R.string.settings_category_aharou))
         SettingsGroup {
+            SettingsRow(icon = FeatherIcons.Users, title = stringResource(SettingsSection.AccountCenter.titleRes), onClick = { onOpen(SettingsSection.AccountCenter) })
+            SettingsDivider()
             SettingsRow(
                 icon = FeatherIcons.Smile,
                 title = stringResource(SettingsSection.Soul.titleRes),
@@ -123,6 +125,19 @@ internal fun SettingsAiGroupScreen(onOpen: (SettingsSection) -> Unit) {
         verticalArrangement = Arrangement.spacedBy(Spacing.sm)
     ) {
         SettingsGroup {
+            SettingsRow(icon = FeatherIcons.Server, title = stringResource(SettingsSection.Providers.titleRes), onClick = { onOpen(SettingsSection.Providers) }, modifier = Modifier.onboardingTarget(OnboardingStep.CONFIG_PROVIDER))
+            SettingsDivider()
+            SettingsRow(icon = FeatherIcons.Zap, title = stringResource(SettingsSection.DefaultModels.titleRes), onClick = { onOpen(SettingsSection.DefaultModels) })
+            SettingsDivider()
+            SettingsRow(icon = FeatherIcons.Tool, title = stringResource(SettingsSection.Plugins.titleRes), onClick = { onOpen(SettingsSection.Plugins) })
+            SettingsDivider()
+            SettingsRow(icon = FeatherIcons.Globe, title = stringResource(SettingsSection.Connectors.titleRes), onClick = { onOpen(SettingsSection.Connectors) })
+            SettingsDivider()
+            SettingsRow(icon = FeatherIcons.Lock, title = stringResource(SettingsSection.Vault.titleRes), onClick = { onOpen(SettingsSection.Vault) })
+            SettingsDivider()
+            SettingsRow(icon = FeatherIcons.Clock, title = stringResource(SettingsSection.ScheduledTasks.titleRes), onClick = { onOpen(SettingsSection.ScheduledTasks) })
+        }
+        SettingsGroup {
             SettingsRow(
                 icon = FeatherIcons.Smile,
                 title = stringResource(R.string.memory_settings_title),
@@ -166,6 +181,15 @@ internal fun SettingsAiGroupScreen(onOpen: (SettingsSection) -> Unit) {
                 onClick = { onOpen(SettingsSection.Rules) }
             )
         }
+        SettingsGroup {
+            SettingsRow(icon = FeatherIcons.Smartphone, title = stringResource(SettingsSection.WeixinBot.titleRes), onClick = { onOpen(SettingsSection.WeixinBot) })
+            SettingsDivider()
+            SettingsRow(icon = FeatherIcons.Smartphone, title = stringResource(SettingsSection.FeishuBot.titleRes), onClick = { onOpen(SettingsSection.FeishuBot) })
+            SettingsDivider()
+            SettingsRow(icon = FeatherIcons.Smartphone, title = stringResource(SettingsSection.QqBot.titleRes), onClick = { onOpen(SettingsSection.QqBot) })
+            SettingsDivider()
+            SettingsRow(icon = FeatherIcons.Smartphone, title = stringResource(SettingsSection.TelegramBot.titleRes), onClick = { onOpen(SettingsSection.TelegramBot) })
+        }
     }
 }
 
@@ -186,20 +210,6 @@ internal fun SettingsGeneralRows(
         verticalArrangement = Arrangement.spacedBy(Spacing.sm)
     ) {
         SettingsGroupHeader(text = stringResource(R.string.settings_category_general))
-        SettingsGroup {
-            SettingsRow(
-                icon = FeatherIcons.Server,
-                title = stringResource(SettingsSection.Providers.titleRes),
-                onClick = { onOpen(SettingsSection.Providers) },
-                modifier = Modifier.onboardingTarget(OnboardingStep.CONFIG_PROVIDER)
-            )
-            SettingsDivider()
-            SettingsRow(icon = FeatherIcons.Zap, title = stringResource(SettingsSection.DefaultModels.titleRes), onClick = { onOpen(SettingsSection.DefaultModels) })
-            SettingsDivider()
-            SettingsRow(icon = FeatherIcons.Tool, title = stringResource(SettingsSection.Plugins.titleRes), onClick = { onOpen(SettingsSection.Plugins) })
-            SettingsDivider()
-            SettingsRow(icon = FeatherIcons.Tool, title = stringResource(SettingsSection.Connectors.titleRes), onClick = { onOpen(SettingsSection.Connectors) })
-        }
         SettingsGroup {
             SettingsRow(
                 icon = FeatherIcons.Sliders,
@@ -332,12 +342,6 @@ internal fun SettingsMoreRows(onOpen: (SettingsSection) -> Unit) {
                 icon = FeatherIcons.Key,
                 title = stringResource(SettingsSection.EnvVars.titleRes),
                 onClick = { onOpen(SettingsSection.EnvVars) }
-            )
-            SettingsDivider()
-            SettingsRow(
-                icon = FeatherIcons.Lock,
-                title = stringResource(SettingsSection.Vault.titleRes),
-                onClick = { onOpen(SettingsSection.Vault) }
             )
             SettingsDivider()
             SettingsRow(

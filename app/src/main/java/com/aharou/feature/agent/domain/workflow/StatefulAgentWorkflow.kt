@@ -1,5 +1,4 @@
 package com.aharou.feature.agent.domain.workflow
-
 import android.os.SystemClock
 import android.util.Base64
 import com.aharou.core.util.AILogger
@@ -144,17 +143,15 @@ class StatefulAgentWorkflow @Inject constructor(
     private val fileAccess: FileAccessProvider,
     private val receiptRepository: ToolCallReceiptRepository,
     private val ocrEngine: TesseractOcrEngine,
+    private val injectedContexts: com.aharou.feature.agent.domain.prompt.InjectedContextStore,
     private val vault: VaultRepository, private val reminderEngine: com.aharou.feature.agent.domain.reminder.ReminderEngine,
     private val memoryCompactor: Lazy<MemoryCompactor>, private val toolInjectionGate: ToolInjectionGate // Lazy breaks compactor cycle
 ) : AgentWorkflow {
-
     /** 卡死提示文案：从 prompts 文件读一次并缓存，用户可编辑该文件定制。 */
     private val stuckNudgeText: String by lazy { promptProvider.resolvePrompt(STUCK_NUDGE_FILE) }
-
     internal companion object {
         const val TAG = "StatefulAgentWorkflow"
         const val LIVE_TAIL_CHARS = 20_000
-
         private fun livePreview(text: StringBuilder): String {
             var start = (text.length - LIVE_TAIL_CHARS).coerceAtLeast(0)
             if (start > 0 && text[start].isLowSurrogate() && text[start - 1].isHighSurrogate()) start++
@@ -299,6 +296,7 @@ class StatefulAgentWorkflow @Inject constructor(
     }
 
     override suspend fun compactSession(sessionId: String, onEvent: suspend (AgentEvent) -> Unit): Boolean {
+        injectedContexts.forget(sessionId)
         val config = resolveProviderConfig(sessionId)
             ?: throw IllegalStateException("尚未配置 AI 供应商，请到设置中添加并选择一个")
         if (!config.hasUsableApiKey) throw IllegalStateException("「${config.name}」未填写 API Key")
@@ -605,6 +603,7 @@ class StatefulAgentWorkflow @Inject constructor(
         val providerInUse = workspaceModelChain.current(currentContext.sessionId)?.let { createStandaloneProvider(it, currentContext.sessionId) } ?: aiProvider
         val callMetadata = modelMetadataService.configureChatModel(providerInUse)
         val inputBudget = ModelContextPolicy.effectiveInputBudget(callMetadata)
+        val requestVersion = injectedContexts.beginRequest(currentContext.sessionId)
         val requestSystemPrompt = appendMiddlewarePrompt(providerInUse.providerId, systemPrompt)
         val promptTools = requestTools(currentTools)
         val compactionProvider = resolveCompactionFallbackProvider(currentContext.sessionId) ?: providerInUse
@@ -703,6 +702,7 @@ class StatefulAgentWorkflow @Inject constructor(
             val outboundMasker = outboundMaskerOrNull(generalSettingsRepository.privacyMaskingEnabled())
             val messagesToSend = foldStoredToolResults(sendProjection)
                 .let { list -> if (outboundMasker == null) list else list.maskedForOutbound(outboundMasker) }
+            injectedContexts.recordRequest(currentContext.sessionId, RequestContextComposition.capture(requestVersion, requestSystemPrompt, messagesToSend, promptTools))
             // 采样循环检测：命中后 takeWhile 会取消上游流，模型不再继续把重复内容刷下去。
             var samplingLoopCut = false
             // 用户打断：与采样检测共用同一个 takeWhile，命中即掉断上游流，不再继续吐字。
@@ -746,7 +746,7 @@ class StatefulAgentWorkflow @Inject constructor(
                             lastReasoningDeltaSentAt = now
                         }
                     }
-                    is AIStreamChunk.Retrying -> {
+                    is AIStreamChunk.Retrying -> { injectedContexts.beginRequest(currentContext.sessionId)
                         retryAttempts = maxOf(retryAttempts, chunk.attempt)
                         acc.setLength(0)
                         reasoningAcc.setLength(0)
@@ -756,7 +756,7 @@ class StatefulAgentWorkflow @Inject constructor(
                         lastReasoningDeltaSentAt = 0L
                         emit(AgentEvent.Retrying(chunk.attempt, chunk.maxRetries, chunk.error))
                     }
-                    is AIStreamChunk.KeySwitched -> {
+                    is AIStreamChunk.KeySwitched -> { injectedContexts.beginRequest(currentContext.sessionId)
                         acc.setLength(0)
                         reasoningAcc.setLength(0)
                         pendingTextDelta = false

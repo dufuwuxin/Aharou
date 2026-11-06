@@ -134,7 +134,7 @@ enum class SettingsSection(@param:StringRes val titleRes: Int) {
     AccountCenter(R.string.account_entry_title),
     ProviderEditor(R.string.settings_provider_editor),
     DefaultModels(R.string.settings_default_models),
-    Mcp(R.string.settings_mcp), Connectors(R.string.settings_connectors),
+    Connectors(R.string.settings_connectors),
     Skills(R.string.settings_skills),
     SkillDetail(R.string.settings_skills), SkillEditor(R.string.settings_skills),
     SkillMarket(R.string.skills_market),
@@ -147,6 +147,7 @@ enum class SettingsSection(@param:StringRes val titleRes: Int) {
     SubAgentEditor(R.string.settings_subagents),
     Teams(R.string.settings_teams),
     Tools(R.string.settings_tools),
+    ScheduledTasks(R.string.settings_scheduled_tasks),
     Experiments(R.string.settings_experiments),
     Prompts(R.string.prompts_title),
     Rules(R.string.rules_title),
@@ -284,6 +285,7 @@ fun SettingsScreen(
     // 市场列表的滚动位置：放在这一层，进技能详情页再返回时不会跳回第一条
     val marketListState = rememberLazyListState()
     var logReturnSection by remember { mutableStateOf(SettingsSection.Menu) }
+    var connectorsReturnSection by remember { mutableStateOf(SettingsSection.AiGroup) }
     var editingProvider by remember { mutableStateOf<AIProviderConfig?>(null) }
     var showAddProviderSheet by remember { mutableStateOf(false) }
     var providerPresetPrefill by remember { mutableStateOf<ProviderPreset?>(null) }
@@ -295,7 +297,7 @@ fun SettingsScreen(
     LaunchedEffect(onboardingStep) {
         when (onboardingStep) {
             OnboardingStep.CONFIG_PROVIDER -> {
-                section = SettingsSection.Menu
+                section = SettingsSection.AiGroup
             }
             OnboardingStep.PROVIDER_ADD -> {
                 section = SettingsSection.Providers
@@ -393,10 +395,11 @@ fun SettingsScreen(
         SettingsSection.Soul,
         SettingsSection.ConfigAudit -> (configHome ?: SettingsSection.Menu)
         SettingsSection.Memory -> (configHome ?: SettingsSection.AiGroup)
-        SettingsSection.AccountCenter -> (configHome ?: SettingsSection.AiGroup)
+        SettingsSection.AccountCenter -> (configHome ?: SettingsSection.Menu)
         SettingsSection.Providers, SettingsSection.DefaultModels -> (configHome ?: SettingsSection.Menu)
         SettingsSection.TelegramBot, SettingsSection.WeixinBot, SettingsSection.FeishuBot, SettingsSection.QqBot -> (configHome ?: SettingsSection.AiGroup)
-        SettingsSection.Mcp, SettingsSection.Connectors, SettingsSection.Skills, SettingsSection.Plugins, SettingsSection.Knowledge -> (configHome ?: SettingsSection.Menu)
+        SettingsSection.Connectors -> connectorsReturnSection
+        SettingsSection.Skills, SettingsSection.Plugins, SettingsSection.Knowledge -> (configHome ?: SettingsSection.Menu)
         SettingsSection.General, SettingsSection.Theme -> (configHome ?: SettingsSection.Menu)
         SettingsSection.AppPermissions,
         SettingsSection.Accessibility,
@@ -412,7 +415,7 @@ fun SettingsScreen(
         SettingsSection.TokenStats,
         SettingsSection.Backup,
         SettingsSection.Experiments -> (configHome ?: SettingsSection.Menu)
-        SettingsSection.Tools, SettingsSection.Prompts, SettingsSection.Rules -> (configHome ?: SettingsSection.AiGroup)
+        SettingsSection.Tools, SettingsSection.ScheduledTasks, SettingsSection.Prompts, SettingsSection.Rules -> (configHome ?: SettingsSection.AiGroup)
         SettingsSection.ProviderEditor -> SettingsSection.Providers
         SettingsSection.Log -> logReturnSection.takeUnless { expanded && it == SettingsSection.Menu }
         SettingsSection.SkillDetail, SettingsSection.SkillMarket -> SettingsSection.Skills
@@ -508,6 +511,7 @@ fun SettingsScreen(
 
     // 分区入口：进日志页前刷新一次，并把返回目标指回「更多」分组
     val openSection: (SettingsSection) -> Unit = { target ->
+        if (target == SettingsSection.Connectors) connectorsReturnSection = section
         if (target == SettingsSection.Log) {
             logReturnSection = SettingsSection.Menu
             viewModel.refreshLogs(filterServerName = null)
@@ -724,30 +728,6 @@ fun SettingsScreen(
                             modifier = Modifier.onboardingTarget(OnboardingStep.PROVIDER_ADD)
                         ) {
                             Icon(FeatherIcons.Plus, contentDescription = stringResource(R.string.settings_add_provider))
-                        }
-                        SettingsSection.Mcp -> {
-                            IconButton(onClick = { viewModel.reloadMcp() }) {
-                                if (mcpReloading) {
-                                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                                } else {
-                                    Icon(
-                                        FeatherIcons.RefreshCw,
-                                        contentDescription = stringResource(R.string.settings_reconnect),
-                                        tint = MaterialTheme.colorScheme.onBackground,
-                                        modifier = Modifier.size(22.dp)
-                                    )
-                                }
-                            }
-                            IconButton(onClick = {
-                                mcpDialogRequest = McpDialogRequest(editing = null, prefill = null)
-                            }) {
-                                Icon(
-                                    FeatherIcons.Plus,
-                                    contentDescription = stringResource(R.string.settings_add_mcp_server),
-                                    tint = MaterialTheme.colorScheme.onBackground,
-                                    modifier = Modifier.size(22.dp)
-                                )
-                            }
                         }
                         SettingsSection.Container -> {
                             IconButton(onClick = { showContainerAnnouncement = true }) {
@@ -1013,18 +993,6 @@ fun SettingsScreen(
                     onSelectMemoryModel = { pid, m -> viewModel.setMemoryModel(pid, m) },
                     onClearMemoryModel = { viewModel.clearMemoryModel() },
                 )
-                SettingsSection.Mcp -> McpSection(
-                    entries = mcpEntries,
-                    statuses = mcpStatuses,
-                    reloading = mcpReloading,
-                    onReload = { viewModel.reloadMcp() },
-                    onToggle = { name, enabled, scope -> viewModel.setMcpServerEnabled(name, enabled, scope) },
-                    onEdit = { mcpDialogRequest = McpDialogRequest(editing = it, prefill = null) },
-                    onDelete = { name, scope -> viewModel.deleteMcpServer(name, scope) },
-                    onBrowseDirectory = { section = SettingsSection.Connectors },
-                    onImportJson = { showMcpImportSheet = true },
-                    onExportJson = { showMcpExportSheet = true }
-                )
                 SettingsSection.Connectors -> ConnectorsSection(languageTag = languageTag)
                 SettingsSection.RemoteDevice -> RemoteDeviceSection()
                 SettingsSection.Plugins -> PluginSettingsSection()
@@ -1118,16 +1086,18 @@ fun SettingsScreen(
                     onOpenTeams = { section = SettingsSection.Teams }
                 )
                 SettingsSection.Teams -> SubAgentTeamsSection(expertCount = subAgents.size, onOpenExperts = { section = SettingsSection.SubAgentEditor; editingSubAgent = null; subAgentEditorReturn = SettingsSection.Teams })
+                SettingsSection.ScheduledTasks -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = Spacing.lg)) {
+                    ScheduledTasksSection()
+                }
                 SettingsSection.Tools -> ToolManagementSection(
                     entries = mcpEntries, statuses = mcpStatuses,
+                    reloading = mcpReloading, onReload = { viewModel.reloadMcp() },
+                    onBrowseDirectory = { openSection(SettingsSection.Connectors) },
+                    onImportJson = { showMcpImportSheet = true }, onExportJson = { showMcpExportSheet = true },
                     createRequested = createToolRequested, onCreateHandled = { createToolRequested = false },
                     onCreateMcp = { mcpDialogRequest = McpDialogRequest(editing = null, prefill = null) },
-                    onToggle = { entry, enabled ->
-                        viewModel.setMcpServerEnabled(entry.server.name, enabled, entry.scope)
-                    },
-                    onDelete = { entry ->
-                        viewModel.deleteMcpServer(entry.server.name, entry.scope)
-                    },
+                    onToggle = { name, enabled, scope -> viewModel.setMcpServerEnabled(name, enabled, scope) },
+                    onDelete = { name, scope -> viewModel.deleteMcpServer(name, scope) },
                     onEdit = { entry ->
                         mcpDialogRequest = McpDialogRequest(editing = entry, prefill = null)
                     },
@@ -1309,12 +1279,12 @@ fun SettingsScreen(
             request = request,
             onDismiss = {
                 mcpDialogRequest = null
-                // 只有连接器目录创建后返回 MCP；工具列表的创建、编辑、取消都留在原页。
-                if (section == SettingsSection.Connectors) section = SettingsSection.Mcp
+                // 连接器既可由配置直达，也可由工具目录打开，返回必须保留入口来源。
+                if (section == SettingsSection.Connectors) section = connectorsReturnSection
             },
             onOpenLogs = { name ->
                 mcpDialogRequest = null
-                logReturnSection = if (section == SettingsSection.Connectors) SettingsSection.Mcp else section
+                logReturnSection = if (section == SettingsSection.Connectors) connectorsReturnSection else section
                 viewModel.refreshLogs(filterServerName = name)
                 section = SettingsSection.Log
             }

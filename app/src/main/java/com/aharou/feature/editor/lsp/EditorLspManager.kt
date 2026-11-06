@@ -4,6 +4,7 @@ import com.aharou.core.util.FileLogger
 import com.aharou.feature.agent.domain.container.LinuxContainerEngine
 import com.aharou.feature.agent.domain.container.RuntimeProcessStore
 import com.aharou.feature.settings.data.repository.ContainerSettingsRepository
+import com.aharou.feature.settings.data.repository.ExecutionMode
 import com.aharou.feature.workspace.data.repository.WorkspaceRepository
 import com.aharou.feature.workspace.domain.PathHomeResolver
 import com.aharou.feature.workspace.domain.WorkspacePathMapper
@@ -48,12 +49,15 @@ data class DefinitionTarget(val path: String, val line: Int, val column: Int)
  */
 @Singleton
 class EditorLspManager @Inject constructor(
+    private val profileResolver: com.aharou.feature.agent.domain.container.ContainerProfileResolver,
     private val engine: LinuxContainerEngine,
     private val installer: LanguageServerInstaller,
     private val pathHomeResolver: PathHomeResolver,
     private val runtimeProcessStore: RuntimeProcessStore,
     private val workspaceRepository: WorkspaceRepository,
-    private val containerSettingsRepository: ContainerSettingsRepository
+    private val containerSettingsRepository: ContainerSettingsRepository,
+    private val remoteConnection: com.aharou.feature.agent.domain.container.RemoteSshConnection,
+    private val remoteResolver: com.aharou.feature.agent.domain.container.ActiveRemoteConnectionResolver
 ) {
 
     private companion object {
@@ -70,6 +74,8 @@ class EditorLspManager @Inject constructor(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     init {
+        scope.launch { remoteResolver.activeConfigFlow.drop(1).collect { closeAll() } }
+        scope.launch { containerSettingsRepository.customProfilesFlow.drop(1).collect { closeAll() } }
         // 容器 profile 变化：旧语言服务器钉在旧 rootfs 上，关掉，之后按需在新容器里重起。
         scope.launch {
             containerSettingsRepository.activeProfileIdFlow.drop(1).collect {
@@ -95,8 +101,10 @@ class EditorLspManager @Inject constructor(
     }
 
     /** 容器内项目根（LSP 的 rootUri）：`~/workspace` 展开成 `/root/workspace`。 */
+    @Volatile private var activeRemoteRoot: String? = null
+    private val generation = java.util.concurrent.atomic.AtomicLong()
     private val projectRoot: String
-        get() = pathHomeResolver.expandHome(WorkspacePathMapper.CONTAINER_ROOT)
+        get() = activeRemoteRoot ?: pathHomeResolver.expandHome(WorkspacePathMapper.CONTAINER_ROOT)
 
     private val projects = ConcurrentHashMap<String, LspProject>()
 
@@ -118,26 +126,56 @@ class EditorLspManager @Inject constructor(
      * 少了绑定或 connect 就会出现「服务器装好了但一条诊断都没有」（2026-10-05 实测踩过）。
      * 绑定与 connect 会碰编辑器 View，需在主线程发起；连不上不致命，着色照旧。
      */
-    suspend fun attach(editor: CodeEditor, containerFilePath: String, wrapper: Language): Boolean {
+    suspend fun attach(editor: CodeEditor, containerFilePath: String, wrapper: Language): Boolean = try {
+        attachChecked(editor, containerFilePath, wrapper)
+    } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+    catch (failure: Exception) {
+        FileLogger.w(TAG, "LSP unavailable; retaining editor fallback", failure)
+        false
+    }
+
+    private suspend fun attachChecked(editor: CodeEditor, containerFilePath: String, wrapper: Language): Boolean {
         // 挂载前先异步扫一遍上次残留的语言服务器（失败不阻断本次挂载）。
         scope.launch { runCatching { reapOrphanServers() } }
         val entry = LspServerCatalog.byPath(containerFilePath) ?: return false
-        val cached = installer.cachedStatus(entry.extension)
-        val status = cached ?: installer.probe(entry.extension)
-        if (status !is ExtensionStatus.Installed) {
-            FileLogger.d(TAG, "${entry.languageId} 语言服务器不可用（$status），保持 TextMate")
-            return false
+        val workspace = workspaceRepository.current.value?.path ?: return false
+        val profile = profileResolver.forWorkspace(workspace)
+        val epoch = generation.get()
+        var resolvedRemoteRoot: String? = null
+        val target = withContext(Dispatchers.IO) { if (profile.mode == ExecutionMode.REMOTE_SSH) {
+            val config = remoteResolver.configForProfile(profile.id) ?: return@withContext null
+            val pinned = remoteConnection.connectTarget(config)
+            if (generation.get() != epoch) return@withContext null
+            val probe = remoteConnection.startProcess("command -v ${com.aharou.core.util.shellQuote(entry.program)} >/dev/null", pinned)
+            try {
+                if (!probe.waitFor(5, TimeUnit.SECONDS) || probe.waitFor() != 0) return@withContext null
+            } finally { probe.destroy() }
+            resolvedRemoteRoot = RemoteLspConnectionProvider.remoteRoot(workspace, config.remoteWorkspacePath)
+            pinned
+        } else null }
+        if (profile.mode == ExecutionMode.REMOTE_SSH && target == null) return false
+        if (profile.mode != ExecutionMode.REMOTE_SSH) {
+            val available = withContext(Dispatchers.IO) { engine.runCommandSyncIfReady("command -v ${entry.program}", projectPath = workspace, timeoutMs = 15_000L) }
+            if (available == null || available.exitCode != 0 || available.output.isBlank()) return false
         }
-        val absolutePath = pathHomeResolver.expandHome(containerFilePath)
+        val launchRoot = resolvedRemoteRoot ?: pathHomeResolver.expandHome(WorkspacePathMapper.CONTAINER_ROOT)
+        val absolutePath = if (target == null) pathHomeResolver.expandHome(containerFilePath)
+            else RemoteLspConnectionProvider.filePath(containerFilePath, launchRoot, workspace, target.home)
         return attachLock.withLock {
+            if (generation.get() != epoch) return@withLock false
+            if (workspaceRepository.current.value?.path != workspace || profileResolver.forWorkspace(workspace) != profile) return@withLock false
             // 已经挂上就直接算成功：重复触发不能再抢名额，也不能把已有连接推翻。
             editors[absolutePath]?.takeIf { it.isConnected }?.let { return@withLock true }
             runCatching {
                 val lspEditor = withContext(Dispatchers.Main) {
-                    project().getOrCreateEditor(absolutePath).also { lspEditor ->
-                        lspEditor.wrapperLanguage = wrapper
-                        lspEditor.editor = editor
-                        editors[absolutePath] = lspEditor
+                    synchronized(generation) {
+                        check(generation.get() == epoch) { "LSP_WORKSPACE_CHANGED" }
+                        activeRemoteRoot = resolvedRemoteRoot
+                        project(profile, target, epoch).getOrCreateEditor(absolutePath).also { lspEditor ->
+                            lspEditor.wrapperLanguage = wrapper
+                            lspEditor.editor = editor
+                            editors[absolutePath] = lspEditor
+                        }
                     }
                 }
                 lspEditor.connect(throwException = false).also { ok ->
@@ -145,6 +183,7 @@ class EditorLspManager @Inject constructor(
                     if (!ok) FileLogger.w(TAG, "挂载 LSP 未成功（connect 返回 false）: $containerFilePath")
                 }
             }.getOrElse { e ->
+                if (e is kotlinx.coroutines.CancellationException) throw e
                 FileLogger.w(TAG, "挂载 LSP 失败: $containerFilePath", e)
                 false
             }
@@ -158,7 +197,9 @@ class EditorLspManager @Inject constructor(
      * uri 必须与它 `didOpen` 时发的保持一致——`FileUri` 就是 `"file://" + 绝对路径`，这里照此拼。
      */
     suspend fun findDefinition(containerFilePath: String, line: Int, column: Int): DefinitionTarget? {
-        val absolutePath = pathHomeResolver.expandHome(containerFilePath)
+        val absolutePath = activeRemoteRoot?.let { root ->
+            RemoteLspConnectionProvider.filePath(containerFilePath, root, workspaceRepository.currentPath(), remoteConnection.remoteHome ?: return null)
+        } ?: pathHomeResolver.expandHome(containerFilePath)
         val lspEditor = editors[absolutePath]?.takeIf { it.isConnected } ?: return null
         val params = DefinitionParams(
             TextDocumentIdentifier("file://$absolutePath"),
@@ -192,6 +233,10 @@ class EditorLspManager @Inject constructor(
      */
     fun displayPath(path: String): String {
         val absolute = pathHomeResolver.expandHome(path).replace('\\', '/')
+        activeRemoteRoot?.let { root ->
+            if (absolute == root) return WorkspacePathMapper.CONTAINER_ROOT
+            if (absolute.startsWith("$root/")) return WorkspacePathMapper.CONTAINER_ROOT + absolute.removePrefix(root)
+        }
         val workspaceRoot = pathHomeResolver.home().trimEnd('/') + "/workspace"
         return when {
             absolute == workspaceRoot -> WorkspacePathMapper.CONTAINER_ROOT
@@ -208,22 +253,29 @@ class EditorLspManager @Inject constructor(
     }
 
     /** 语言服务器进程的持有者（每个容器内项目根一个）。首次使用时注册收录的服务器定义。 */
-    private fun project(): LspProject = projects.getOrPut(projectRoot) {
+    private fun project(profile: com.aharou.feature.agent.domain.container.ContainerProfile,
+        target: com.aharou.feature.agent.domain.container.RemoteSshConnection.BootstrapTarget?, epoch: Long): LspProject = projects.getOrPut(projectRoot) {
         LspProject(projectRoot).apply {
+            val launchRoot = projectRoot
             LspServerCatalog.ALL.forEach { entry ->
-                runCatching { addServerDefinition(ContainerLanguageServerDefinition(entry, engine, projectRoot)) }
+                runCatching { addServerDefinition(ContainerLanguageServerDefinition(entry, engine, projectRoot, profile,
+                    if (target == null) null else { { RemoteLspConnectionProvider(remoteConnection, target,
+                        "lsp:${entry.languageId}", launchRoot, entry.program, entry.args) { generation.get() == epoch } } })) }
                     .onFailure { FileLogger.w(TAG, "注册语言服务器定义失败: ${entry.languageId}", it) }
             }
         }
     }
 
     /** 停掉所有语言服务器（容器 profile 变化、工作区切换时调用，避免旧进程钉在旧 rootfs 上）。 */
-    fun closeAll() {
+    fun closeAll(): Unit = synchronized(generation) {
+        generation.incrementAndGet()
+        activeRemoteRoot = null
         projects.values.forEach { runCatching { it.closeAllEditors() } }
         projects.clear()
         editors.clear()
         // 正常关闭后扫一遍残留：closeAllEditors 走 killProcessTree，个别子进程可能漏网。
         scope.launch { runCatching { reapOrphanServers() } }
+        Unit
     }
 
     /**

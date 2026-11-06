@@ -84,6 +84,22 @@ private fun InjectedContextSheet(text: String, onDismiss: () -> Unit) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            val metadata = remember(text) {
+                if (text.startsWith(com.aharou.feature.agent.domain.workflow.RequestContextComposition.PREFIX)) runCatching {
+                    kotlinx.serialization.json.Json.parseToJsonElement(text.lineSequence().first().substringAfter(':')) as kotlinx.serialization.json.JsonObject
+                }.getOrNull() else null
+            }
+            val body = if (metadata == null) text else text.substringAfter('\n')
+            Text(stringResource(R.string.chat_context_estimate,
+                metadata?.get("characters")?.toString()?.toIntOrNull() ?: 0,
+                metadata?.get("estimatedTokens")?.toString()?.toIntOrNull() ?: 0),
+                style = MaterialTheme.typography.bodySmall)
+            metadata?.let {
+                Text(stringResource(R.string.chat_context_request_metadata,
+                    it["requestVersion"].toString(), it["capturedAt"].toString(),
+                    it["system"].toString(), it["tools"].toString(), it["history"].toString(), it["images"].toString()),
+                    style = MaterialTheme.typography.bodySmall)
+            }
             Spacer(Modifier.height(Spacing.md))
             Box(
                 modifier = Modifier
@@ -92,7 +108,7 @@ private fun InjectedContextSheet(text: String, onDismiss: () -> Unit) {
                     .verticalScroll(rememberScrollState())
             ) {
                 ExpandableOutputText(
-                    text = text,
+                    text = body,
                     color = MaterialTheme.colorScheme.onSurface
                 )
             }

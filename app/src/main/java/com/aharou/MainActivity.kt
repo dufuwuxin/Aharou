@@ -1,5 +1,4 @@
 package com.aharou
-
 import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
@@ -100,7 +99,8 @@ import com.aharou.core.ui.rememberViewerDecodeSpec
 import com.aharou.feature.agent.presentation.AIAgentViewModel
 import com.aharou.feature.agent.presentation.AgentAttachment
 import com.aharou.feature.agent.presentation.component.AIChatPanel
-import com.aharou.feature.agent.presentation.component.ProjectTaskWorkbench
+import com.aharou.feature.agent.presentation.component.ProjectChatScreen
+import com.aharou.feature.agent.presentation.component.rememberProjectChatBinding
 import com.aharou.feature.agent.presentation.component.ProjectListScreen
 import com.aharou.feature.agent.presentation.component.ProjectTaskDetailScreen
 import com.aharou.feature.agent.presentation.component.SessionListScreen
@@ -154,23 +154,17 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import com.aharou.R
-
 /** 桌面快捷方式的自定义 action，需与 res/xml/shortcuts.xml 及清单里的 intent-filter 保持一致。 */
 private const val ACTION_NEW_CHAT = "com.aharou.intent.NEW_CHAT"
-
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
-
     /** 用于冷启动时在前台恢复常驻保活通知（App.onCreate 的启动可能被后台 FGS 限制挡掉）。 */
     @Inject
     lateinit var keepaliveSettings: KeepaliveSettingsRepository
-
     @Inject
     lateinit var themeSettings: ThemeSettingsRepository
-
     @Inject
     lateinit var backgroundSettings: BackgroundSettingsRepository
-
     /** 屏幕常亮开关：只在 App 前台约束屏幕，切后台由系统自动失效。 */
     @Inject
     lateinit var screenOnSettings: ScreenOnSettingsRepository
@@ -911,7 +905,12 @@ fun AppNavigation(
                                 blurDp = chatAppearance.backgroundBlurDp,
                                 dim = chatAppearance.backgroundDim
                             )
+                            val projectChat = rememberProjectChatBinding(agentViewModel, projectTaskViewModel,
+                                onBack = { navController.popBackStack() }, onToolDetail = { msg ->
+                                    com.aharou.feature.agent.presentation.component.ToolCallPreviewHolder.current = msg; navController.navigate("toolDetail") })
                             AIChatPanel(
+                                bodyOverride = projectChat?.body, floatingComposer = projectChat != null,
+                                composerSessionId = projectChat?.sessionId, projectChatContext = projectChat?.context.orEmpty(),
                                 viewModel = agentViewModel,
                                 settingsViewModel = settingsViewModel,
                                 workspaceViewModel = workspaceViewModel,
@@ -959,13 +958,13 @@ fun AppNavigation(
                     onOpenTask = { id -> projectTaskViewModel.select(id); navController.navigate("tasks/$id") })
             }
             composable("projects/{projectId}") { entry ->
-                ProjectTaskWorkbench(projectId = entry.arguments?.getString("projectId").orEmpty(), viewModel = projectTaskViewModel,
-                    onBack = { navController.popBackStack() },
-                    conversation = { _, id -> androidx.compose.runtime.key(id) {
-                        com.aharou.feature.agent.presentation.component.ProjectTaskConversation(id, agentViewModel,
-                            onToolDetail = { msg -> com.aharou.feature.agent.presentation.component.ToolCallPreviewHolder.current = msg
-                                navController.navigate("toolDetail") }) } },
-                    approvals = { com.aharou.feature.agent.presentation.component.ProjectFlowApprovals(agentViewModel) })
+                ProjectChatScreen(projectId = entry.arguments?.getString("projectId").orEmpty(), agentViewModel, projectTaskViewModel,
+                    settingsViewModel, workspaceViewModel, onBack = { navController.popBackStack() },
+                    onOpenDrawer = { scope.launch { drawerState.open() } }, onToolDetail = { msg ->
+                        com.aharou.feature.agent.presentation.component.ToolCallPreviewHolder.current = msg; navController.navigate("toolDetail") },
+                    onNavigateToTerminal = { navController.navigate("terminal") }, onNavigateToGit = { navController.navigate("git") },
+                    onNavigateToBrowser = { navController.navigate("browser") }, onNavigateToSandbox = { navController.navigate("sandbox") },
+                    onNavigateToShared = { navController.navigate("shared") }, onNavigateToObserve = { navController.navigate("observe") })
             }
             composable("tasks/{taskId}") { entry ->
                 ProjectTaskDetailScreen(taskId = entry.arguments?.getString("taskId").orEmpty(), viewModel = projectTaskViewModel,
@@ -1007,7 +1006,19 @@ fun AppNavigation(
                     viewModel = settingsViewModel,
                     onNavigateBack = { navController.popBackStack() },
                     onStopAllAndCloseTerminal = { agentViewModel.stopAllAndCloseTerminal() },
-                    menuGroups = listOf(com.aharou.feature.settings.presentation.component.SettingsSection.AiGroup)
+                    menuGroups = listOf(com.aharou.feature.settings.presentation.component.SettingsSection.AiGroup),
+                    onboardingStep = onboardingUiState.step.takeIf { onboardingUiState.active },
+                    onOnboardingModelAdded = {
+                        if (onboardingUiState.active && onboardingUiState.step == OnboardingStep.SIMULATE_FETCH_DIALOG) {
+                            navController.popBackStack()
+                            onboardingCoordinator.nextStep()
+                        }
+                    },
+                    onOnboardingDismissFetchDialog = {
+                        if (onboardingUiState.active && onboardingUiState.step == OnboardingStep.SIMULATE_FETCH_DIALOG) {
+                            onboardingCoordinator.goToStep(OnboardingStep.PROVIDER_FETCH_MODELS)
+                        }
+                    }
                 )
             }
             composable("settings") {
@@ -1021,20 +1032,7 @@ fun AppNavigation(
                         // 大屏返回聊天页后侧栏本就常驻，不再弹 modal 抽屉。
                         if (!expanded) scope.launch { drawerState.open() }
                     },
-                    onStopAllAndCloseTerminal = { agentViewModel.stopAllAndCloseTerminal() },
-                    // 「设置」页：除 AI 组（已拆到「配置」）外的其他分组。
-                    onboardingStep = onboardingUiState.step.takeIf { onboardingUiState.active },
-                    onOnboardingModelAdded = {
-                        if (onboardingUiState.active && onboardingUiState.step == OnboardingStep.SIMULATE_FETCH_DIALOG) {
-                            navController.popBackStack()
-                            onboardingCoordinator.nextStep()
-                        }
-                    },
-                    onOnboardingDismissFetchDialog = {
-                        if (onboardingUiState.active && onboardingUiState.step == OnboardingStep.SIMULATE_FETCH_DIALOG) {
-                            onboardingCoordinator.goToStep(OnboardingStep.PROVIDER_FETCH_MODELS)
-                        }
-                    }
+                    onStopAllAndCloseTerminal = { agentViewModel.stopAllAndCloseTerminal() }
                 )
             }
             composable("terminal") { entry ->
@@ -1328,7 +1326,7 @@ fun AppNavigation(
                         onboardingCoordinator.nextStep()
                     }
                     OnboardingStep.ENTER_SETTINGS -> {
-                        navController.navigate("settings")
+                        navController.navigate("config")
                         scope.launch { drawerState.snapTo(DrawerValue.Closed) }
                         onboardingCoordinator.nextStep()
                     }
@@ -1362,7 +1360,7 @@ fun AppNavigation(
                         onboardingCoordinator.nextStep()
                     }
                     OnboardingStep.ENTER_SETTINGS -> {
-                        navController.navigate("settings")
+                        navController.navigate("config")
                         scope.launch { drawerState.snapTo(DrawerValue.Closed) }
                         onboardingCoordinator.nextStep()
                     }

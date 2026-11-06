@@ -52,7 +52,7 @@ class RemoteSshConnection @Inject constructor(
     @Volatile
     private var sshClient: SSHClient? = null
 
-    class BootstrapTarget internal constructor(internal val client: SSHClient, internal val home: String)
+    class BootstrapTarget internal constructor(internal val client: SSHClient, internal val home: String, internal val config: RemoteConnectionConfig)
     @Volatile private var bootstrap: BootstrapTarget? = null
     fun bootstrapTarget(): BootstrapTarget? = bootstrap?.takeIf { isConnected() }
     fun isCurrentBootstrap(target: BootstrapTarget): Boolean = bootstrap === target && isConnected()
@@ -140,7 +140,15 @@ class RemoteSshConnection @Inject constructor(
         return (AUTH_FAILURE_BACKOFF_MS - (System.currentTimeMillis() - at)).coerceAtLeast(0)
     }
 
-    suspend fun connect(config: RemoteConnectionConfig) = mutex.withLock {
+    suspend fun connect(config: RemoteConnectionConfig) = mutex.withLock { connectLocked(config) }
+
+    /** Return the identity while still holding the lock used by connect/disconnect. */
+    suspend fun connectTarget(config: RemoteConnectionConfig): BootstrapTarget = mutex.withLock {
+        connectLocked(config)
+        requireNotNull(bootstrap).also { check(it.config == config && isCurrentBootstrap(it)) { "SSH_CONNECTION_CHANGED" } }
+    }
+
+    private suspend fun connectLocked(config: RemoteConnectionConfig) {
         // 凭据为空时直接报根因：否则 sshj 只会抛出
         // 「Exhausted available authentication methods」，与「密码错」「服务器拒绝」分不开，
         // 而且会白跑一轮认证（服务器侧可能计入防爆破失败次数）。
@@ -159,7 +167,7 @@ class RemoteSshConnection @Inject constructor(
                 "SSH 认证失败：距上次失败不足 5 分钟，已暂停连接（还需 ${(cooldownLeftMs + 59_999) / 60_000} 分钟）"
             )
         }
-        if (isConnected() && this.config == config) return@withLock
+        if (isConnected() && this.config == config) return
         disconnectInternal()
         this.config = config
         remoteHome = null
@@ -183,7 +191,7 @@ class RemoteSshConnection @Inject constructor(
                 }
                 FileLogger.i(TAG, "SSH 已连接 ${config.host}:${config.port} as ${config.username}")
             }
-            bootstrap = remoteHome?.let { BootstrapTarget(requireNotNull(sshClient), it) }
+            bootstrap = remoteHome?.let { BootstrapTarget(requireNotNull(sshClient), it, config) }
             _connectionState.value = ConnectionState.CONNECTED
             authFailureAt = 0L
             authFailureConfig = null
@@ -315,6 +323,20 @@ class RemoteSshConnection @Inject constructor(
         val session = client.startSession()
         val command = session.exec(commandLine)
         return SshCommandProcess(session, command, commandLine.take(80))
+    }
+
+    /** Pin the exec channel to the verified host, even if another workspace reconnects concurrently. */
+    fun startProcess(commandLine: String, target: BootstrapTarget): SshCommandProcess {
+        check(isCurrentBootstrap(target)) { "SSH_CONNECTION_CHANGED" }
+        val session = target.client.startSession()
+        try {
+            val command = session.exec(commandLine)
+            check(isCurrentBootstrap(target)) { "SSH_CONNECTION_CHANGED" }
+            return SshCommandProcess(session, command, "lsp")
+        } catch (failure: Exception) {
+            runCatching { session.close() }
+            throw failure
+        }
     }
 
     /**
@@ -638,6 +660,51 @@ class RemoteSshConnection @Inject constructor(
                 }
                 FileLogger.i(TAG, "已释放 ${files.size} 个内置文件到远程 $destDir")
             }.getOrThrow()
+        }
+    }
+
+    /** Builtin-only namespace, byte-checked over the pinned SFTP channel; user skills are untouched. */
+    suspend fun uploadBuiltinSkillResources(files: Map<String, ByteArray>, target: BootstrapTarget) = withContext(Dispatchers.IO) {
+        check(isCurrentBootstrap(target)) { "SSH_CONNECTION_CHANGED" }
+        target.client.newSFTPClient().use { client ->
+            check(isCurrentBootstrap(target)) { "SSH_CONNECTION_CHANGED" }
+            for ((name, bytes) in files) {
+                require(name.split('/').all { it.isNotBlank() && it != "." && it != ".." })
+                require(!name.startsWith('/'))
+                check(isCurrentBootstrap(target)) { "SSH_CONNECTION_CHANGED" }
+                val dest = "${target.home.trimEnd('/')}/.aharou/builtin-skills/$name"
+                // lstat rejects links at every managed path component before any write.
+                var current = ""
+                for (part in dest.trimStart('/').split('/')) {
+                    current += "/$part"
+                    val attrs = try { client.lstat(current) } catch (failure: net.schmizz.sshj.sftp.SFTPException) {
+                        if (failure.statusCode == net.schmizz.sshj.sftp.Response.StatusCode.NO_SUCH_FILE) null else throw failure
+                    }
+                    check(attrs?.type != net.schmizz.sshj.sftp.FileMode.Type.SYMLINK) { "BUILTIN_SKILL_SYMLINK" }
+                }
+                val matches = if (client.statExistence(dest) == null) false else client.open(dest).use { remote ->
+                    val actual = ByteArray(bytes.size + 1)
+                    var count = 0
+                    while (count < actual.size) {
+                        val read = remote.read(count.toLong(), actual, count, actual.size - count)
+                        if (read <= 0) break
+                        count += read
+                    }
+                    count == bytes.size && actual.copyOf(count).contentEquals(bytes)
+                }
+                if (matches) continue
+                client.mkdirs(dest.substringBeforeLast('/'))
+                val temporary = "$dest.aharou-${java.util.UUID.randomUUID()}.tmp"
+                try {
+                    client.open(temporary, java.util.EnumSet.of(net.schmizz.sshj.sftp.OpenMode.WRITE,
+                        net.schmizz.sshj.sftp.OpenMode.CREAT, net.schmizz.sshj.sftp.OpenMode.EXCL)).use { remote ->
+                        remote.write(0L, bytes, 0, bytes.size)
+                    }
+                    check(isCurrentBootstrap(target)) { "SSH_CONNECTION_CHANGED" }
+                    client.rename(temporary, dest, java.util.EnumSet.of(net.schmizz.sshj.sftp.RenameFlags.OVERWRITE))
+                } finally { runCatching { client.rm(temporary) } }
+            }
+            check(isCurrentBootstrap(target)) { "SSH_CONNECTION_CHANGED" }
         }
     }
 

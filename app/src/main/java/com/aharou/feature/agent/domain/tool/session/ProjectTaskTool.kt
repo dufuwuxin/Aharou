@@ -28,14 +28,17 @@ internal data class MemberTaskRequest(val action: String, val title: String, val
 internal class ProjectTaskToolException(val code: String, message: String) : IllegalStateException(message)
 
 /**
- * Project task writes for workflow members (`project_tasks`). The caller's session must be a member run of a RUNNING
- * task; that task is the only anchor, and workspace and project are derived from it, never taken from arguments.
+ * Project roots are bound by persisted flowSessionIds; member writes still require the live RUNNING task attempt.
+ * Both paths derive project scope from session identity, never from model-supplied project or workspace arguments.
  */
 class ProjectTaskTool @Inject constructor(
     private val repository: ProjectTaskRepository
 ) : AbstractContextualTool() {
     override val name = "project_tasks"
-    override val description = "Project workflow members only: add tasks under the task you are executing. " +
+    override val description = "In a linked project root conversation, choose action=plan to turn a new requirement into tasks, " +
+        "or action=supplement with task_id to revise an existing task. Both take the user's text in requirement. " +
+        "action=outline reads the current project's task IDs. Project and workspace are derived from your session, never arguments. " +
+        "Workflow members retain only their existing branch/add/outline scope: " +
         "action=branch creates a research subtask and makes your current task depend on it; end your turn right after it, " +
         "the flow runs the branch and then reruns your task with the branch result. action=add creates a follow-up subtask " +
         "under your task (or parent_id = one of its subtasks) that runs after your task, without changing your task. " +
@@ -50,10 +53,11 @@ class ProjectTaskTool @Inject constructor(
     override val parameters: Map<String, ToolParameter> = mapOf(
         "action" to ToolParameter("action", ParameterType.STRING,
             "branch: research subtask your task waits for (end your turn after it); add: follow-up subtask that runs after your task; " +
-                "outline: read the project's tasks line by line",
-            true, enum = listOf("branch", "add", "outline")),
+                "outline: read tasks; linked roots also use plan for new requirements or supplement with task_id for existing work",
+            true, enum = listOf("branch", "add", "outline", "plan", "supplement")),
+        "task_id" to ToolParameter("task_id", ParameterType.STRING, "Root supplement only: an existing task in this project", false),
         "title" to ToolParameter("title", ParameterType.STRING, "branch/add: short task title", false),
-        "requirement" to ToolParameter("requirement", ParameterType.STRING, "branch/add: what the new task must find out or do", false),
+        "requirement" to ToolParameter("requirement", ParameterType.STRING, "User requirement text for branch/add/plan/supplement", false),
         "query" to ToolParameter("query", ParameterType.STRING, "outline only: case-insensitive text; keeps matching tasks and lines", false),
         "parent_id" to ToolParameter("parent_id", ParameterType.STRING,
             "add only: your current task id (default) or a task under it; ignored for branch", false),
@@ -63,10 +67,47 @@ class ProjectTaskTool @Inject constructor(
     override suspend fun executeWithContext(args: Map<String, JsonElement>, context: AgentContext): ToolResult {
         fun text(name: String) = (args[name] as? JsonPrimitive)?.contentOrNull?.trim().orEmpty()
         val action = text("action").lowercase()
-        if (action !in setOf("branch", "add", "outline")) return ToolResult.Error("action must be branch, add or outline", "INVALID_ACTION")
-        if (action != "outline" && (text("title").isBlank() || text("requirement").isBlank())) return ToolResult.Error("title and requirement are required", "MISSING_ARGS")
+        if (action !in setOf("branch", "add", "outline", "plan", "supplement")) return ToolResult.Error("Unknown project task action", "INVALID_ACTION")
+        if (action in setOf("branch", "add") && (text("title").isBlank() || text("requirement").isBlank())) return ToolResult.Error("title and requirement are required", "MISSING_ARGS")
+        if (action in setOf("plan", "supplement") && text("requirement").isBlank()) return ToolResult.Error("requirement is required", "MISSING_ARGS")
         val request = MemberTaskRequest(action, text("title"), text("requirement"), text("parent_id").ifBlank { null }, text("acceptance"))
         val sessionId = context.sessionId ?: return ToolResult.Error(NOT_IN_TASK_MESSAGE, NOT_IN_TASK)
+        val root = repository.snapshots.value[context.projectRoot]?.projects
+            ?.singleOrNull { sessionId in it.flowSessionIds }
+        if (root != null) return try {
+            val snapshot = repository.load(root.workspace)
+            check(snapshot.projects.any { it.id == root.id && sessionId in it.flowSessionIds }) { "PROJECT_SESSION_CHANGED" }
+            val tasks = snapshot.tasks.filter { it.projectId == root.id }
+            when (action) {
+                "plan" -> {
+                    val planned = repository.appendRequirements(root.id, text("requirement"), root.workspace)
+                    ToolResult.Success(buildJsonObject {
+                        put("project_id", root.id); put("rule_fallback", planned.ruleFallback)
+                        put("instruction", "New tasks saved to this project. Do not report execution or acceptance without evidence.")
+                    })
+                }
+                "supplement" -> {
+                    val taskId = text("task_id")
+                    if (tasks.none { it.id == taskId }) return ToolResult.Error("task_id must belong to this project", "OUTSIDE_PROJECT")
+                    val fallback = repository.supplement(taskId, text("requirement"), root.workspace)
+                    ToolResult.Success(buildJsonObject { put("task_id", taskId); put("rule_fallback", fallback) })
+                }
+                "outline" -> ToolResult.Success(buildJsonObject {
+                    val query = text("query")
+                    val matching = if (query.isBlank()) tasks else {
+                        val ids = ProjectTaskOutline.find(tasks, query).mapTo(HashSet()) { it.taskId }
+                        tasks.filter { it.id in ids }
+                    }
+                    put("project_id", root.id)
+                    put("outline", ProjectTaskGraph.tree(matching).joinToString("\n") {
+                        "${it.task.id} [${it.task.status}] ${it.task.title.take(OUTLINE_LINE_MAX)}: ${it.task.requirement.take(OUTLINE_LINE_MAX)}"
+                    }.take(OUTLINE_TOTAL_MAX))
+                })
+                else -> ToolResult.Error("Root conversations use plan, supplement or outline", "ROOT_ACTION_REQUIRED")
+            }
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (failure: Exception) { ToolResult.Error(failure.message ?: "Project update failed", "PROJECT_UPDATE_FAILED") }
+        if (action in setOf("plan", "supplement")) return ToolResult.Error("This action requires a linked project root conversation", NOT_IN_TASK)
         // The runner keeps the store of every running project loaded, so a member run is found without trusting arguments.
         val workspace = repository.snapshots.value.entries.firstOrNull { (_, store) -> store.tasks.any { it.runs(sessionId) } }?.key
             ?: return ToolResult.Error(NOT_IN_TASK_MESSAGE, NOT_IN_TASK)

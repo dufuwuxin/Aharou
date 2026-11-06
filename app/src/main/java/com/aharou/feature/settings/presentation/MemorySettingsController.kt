@@ -70,7 +70,18 @@ class MemorySettingsController @Inject constructor(
     private val workspaceRepository: WorkspaceRepository,
     private val autoCompactSettings: MemoryAutoCompactSettings,
     private val topicOrganizer: MemoryTopicOrganizer,
+    private val proposalStore: com.aharou.feature.agent.domain.memory.MemoryProposalStore,
 ) {
+    val proposals get() = proposalStore.pending
+
+    fun rejectProposal(id: String) = proposalStore.reject(id)
+
+    suspend fun approveProposal(id: String, revision: String): com.aharou.feature.agent.domain.memory.MemoryProposalOutcome {
+        val outcome = withContext(Dispatchers.IO) { proposalStore.approve(id, revision) }
+        refresh()
+        return outcome
+    }
+
     private val _autoOrganize = MutableStateFlow(autoCompactSettings.autoOrganize)
     val autoOrganize: StateFlow<Boolean> = _autoOrganize.asStateFlow()
 
@@ -215,8 +226,8 @@ class MemorySettingsController @Inject constructor(
         _compacting.value = false
         _compactResult.value = report
         // 顺手清理归档：用户点「整理记忆」时也是想把堆积收一收（归档只写不删会一直涨）。
-        runCatching { memoryRepository.pruneArchive(MemoryScope.GLOBAL, null) }
-        projectRoot?.let { runCatching { memoryRepository.pruneArchive(MemoryScope.PROJECT, it) } }
+        if (!autoCompactSettings.reviewProposals) runCatching { memoryRepository.pruneArchive(MemoryScope.GLOBAL, null) }
+        if (!autoCompactSettings.reviewProposals) projectRoot?.let { runCatching { memoryRepository.pruneArchive(MemoryScope.PROJECT, it) } }
         refresh()
     }
 

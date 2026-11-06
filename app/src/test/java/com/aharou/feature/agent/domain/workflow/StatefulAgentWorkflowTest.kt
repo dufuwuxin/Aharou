@@ -125,6 +125,7 @@ class StatefulAgentWorkflowTest {
         // 回执是旁路记录，这些用例不断言它，relaxed mock 兜住全部写入路径。
         receiptRepository = mockk(relaxed = true),
         ocrEngine = mockk(),
+        injectedContexts = com.aharou.feature.agent.domain.prompt.InjectedContextStore(),
         // vault 在结果脱敏与占位符把关路径上会被调到。用 relaxed mock 兜住全部方法（未打桩的
         // hasPlaceholders 默认即 false），只把 redact 显式打桩成原样返回 —— 等价于空库的真实行为。
         vault = mockk(relaxed = true) {

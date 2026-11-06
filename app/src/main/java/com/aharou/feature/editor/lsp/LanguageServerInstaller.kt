@@ -31,6 +31,9 @@ enum class InstallKind {
     /** 预留，暂未实现。 */
     COMPOSER,
 
+    /** 仅使用容器已有 rustup 添加组件，不安装或替换工具链。 */
+    RUSTUP,
+
     /** 不走包管理器，直接下官方 release 静态二进制。 */
     RELEASE
 }
@@ -119,6 +122,14 @@ enum class LanguageExtension(val spec: ServerSpec) {
             installKind = InstallKind.NPM,
             // Volar 的类型推断依赖 typescript 本体，与 typescript-language-server 同理一并装。
             packageName = "@vue/language-server,typescript"
+        )
+    ),
+    RUST(
+        ServerSpec(
+            id = "rust",
+            command = "rust-analyzer",
+            displayName = "Rust Analyzer",
+            installKind = InstallKind.RUSTUP
         )
     );
 
@@ -308,6 +319,9 @@ class LanguageServerInstaller @Inject constructor(
                 val script = buildPipInstallScript(spec) ?: return@run null
                 runIfReady(script, INSTALL_TIMEOUT_MS)
             }
+            InstallKind.RUSTUP -> {
+                if (hasCommand("rustup")) runIfReady("rustup component add rust-analyzer", INSTALL_TIMEOUT_MS) else null
+            }
             InstallKind.COMPOSER -> null
         }
     }
@@ -339,6 +353,7 @@ class LanguageServerInstaller @Inject constructor(
             hasCommand("dnf") -> "dnf install -y $pkg"
             hasCommand("yum") -> "yum install -y $pkg"
             hasCommand("zypper") -> "zypper -n install $pkg"
+            hasCommand("xbps-install") -> "xbps-install -Sy $pkg"
             else -> null
         }
     }
@@ -384,6 +399,11 @@ class LanguageServerInstaller @Inject constructor(
             hasCommand("dnf") -> "dnf install -y $packages"
             hasCommand("yum") -> "yum install -y $packages"
             hasCommand("zypper") -> "zypper -n install $packages"
+            hasCommand("xbps-install") -> {
+                // Void 的 nodejs 包已包含 npm；仅在实际选择 xbps 时应用该映射。
+                val voidPackages = if (kind == RuntimeKind.NPM) "nodejs" else "python3 python3-pip"
+                "xbps-install -Sy $voidPackages"
+            }
             else -> null
         }
     }
@@ -443,39 +463,7 @@ class LanguageServerInstaller @Inject constructor(
      * 失败回退原链）→ 解压到 `~/.aharou/lsp/<command>`，再在已在 PATH 里的 `~/.aharou/bin`
      * 放个同名入口。资产名与入口相对路径全部来自 [ServerSpec]，Lua 的行为与参数化前完全一致。
      */
-    private fun buildReleaseTarballScript(spec: ServerSpec): String? {
-        val repo = spec.releaseRepo ?: return null
-        val version = spec.releaseVersion ?: return null
-        val entry = spec.releaseEntryRelPath ?: return null
-        val pkg = spec.command
-        val lines = mutableListOf(
-            "set -e",
-            "case \"\$(uname -m)\" in",
-            "  aarch64|arm64) asset_arch=linux-arm64 ;;",
-            "  x86_64|amd64)  asset_arch=linux-x64 ;;",
-            "  armv7l|armhf)  asset_arch=linux-armhf ;;",
-            "  *) echo \"不支持的容器架构：\$(uname -m)\"; exit 1 ;;",
-            "esac",
-            "case \"\$asset_arch\" in"
-        )
-        listOf("linux-arm64", "linux-x64", "linux-armhf").forEach { arch ->
-            val asset = spec.releaseAssetFor?.invoke(arch) ?: "$pkg-$version-$arch.tar.gz"
-            lines.add("  $arch) asset=\"$asset\" ;;")
-        }
-        lines += listOf(
-            "esac",
-            "origin=\"https://github.com/$repo/releases/download/$version/\$asset\"",
-            "curl -fsSL -o /tmp/aharou-lsp.tgz \"$RELEASE_MIRROR\$origin\" || curl -fsSL -o /tmp/aharou-lsp.tgz \"\$origin\"",
-            "mkdir -p ~/.aharou/lsp/$pkg",
-            "tar -xzf /tmp/aharou-lsp.tgz -C ~/.aharou/lsp/$pkg",
-            "mkdir -p ~/.aharou/bin",
-            "printf '#!/bin/sh\\nexec ~/.aharou/lsp/$pkg/$entry \"\$@\"\\n' > ~/.aharou/bin/$pkg",
-            "chmod +x ~/.aharou/bin/$pkg",
-            "rm -f /tmp/aharou-lsp.tgz",
-            "echo \"已安装 $pkg $version（\$asset_arch）\""
-        )
-        return lines.joinToString("\n")
-    }
+    private fun buildReleaseTarballScript(spec: ServerSpec): String? = LspReleaseDownload.script(spec)
 
     /**
      * 探测已装版本：按安装方式问最可靠的来源，拿不到再退回 `--version` 输出里找 semver。
@@ -490,7 +478,7 @@ class LanguageServerInstaller @Inject constructor(
             InstallKind.APK -> detectVersionViaPackageManager(spec)
             InstallKind.NPM -> detectVersionViaNpm(spec)
             InstallKind.PIP -> detectVersionViaPip(spec)
-            InstallKind.RELEASE, InstallKind.COMPOSER -> null
+            InstallKind.RELEASE, InstallKind.RUSTUP, InstallKind.COMPOSER -> null
         }
         if (viaManager != null) return viaManager
         val fallback = runIfReady("${spec.command} --version") ?: return null

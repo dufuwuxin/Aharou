@@ -218,9 +218,11 @@ class VdController @Inject constructor(
     ): VdInfo {
         refresh()?.let { running ->
             if (ctlAvailable == null) probeChannel()
-            if (ctlAvailable == true) return running
-            // 升级前起的旧 runner 没有命令通道：照样复用的话，不弹键盘、直接写字这些都不生效。
-            FileLogger.i(TAG, "影子屏 runner 是旧版或非本实例启动，重建")
+            if (ctlAvailable == true) {
+                val ping = runnerCommand("ping")
+                if (ping is CtlResult.Ok && "protocol=2" in ping.body) return running
+            }
+            FileLogger.i(TAG, "影子屏 runner 需要升级或非本实例启动，重建")
             stop()
         }
         ensureDeployed()
@@ -460,7 +462,7 @@ class VdController @Inject constructor(
      * 全程只读写本 App 自己的目录，不经 Shizuku；点一下不必再现拉一个 `input` 进程，也就不会
      * 因为那几百毫秒的延迟点在界面还没就绪的时候。
      *
-     * 返回 null 表示通道不可用（旧版 runner、不是本实例起的、或超时没人取），调用方退回旧路径。
+     * 返回 null 仅表示命令未投递（旧版 runner、非本实例或写入失败）；投递后超时不重试。
      */
     private suspend fun runnerCommand(vararg lines: String): CtlResult? {
         if (ctlAvailable == null) probeChannel()
@@ -490,9 +492,9 @@ class VdController @Inject constructor(
             waited += CTL_POLL_MS
         }
         File(dir, "cmd-$seq.txt").delete()
-        FileLogger.w(TAG, "runner 命令超时未取走：${lines.firstOrNull()}，本轮改走旧路径")
+        FileLogger.w(TAG, "runner 命令超时，执行结果未知：${lines.firstOrNull()}")
         ctlAvailable = false
-        return null
+        return CtlResult.Err("runner 命令超时，执行结果未知；未自动重试，避免重复操作")
     }
 
     /**
@@ -559,20 +561,31 @@ class VdController @Inject constructor(
     private suspend fun currentInfo(): VdInfo =
         _state.value?.takeIf { ctlAvailable == true } ?: refresh() ?: error("影子屏未运行")
 
+    private suspend fun inputCommand(vararg lines: String): Boolean = when (val result = runnerCommand(*lines)) {
+        is CtlResult.Ok -> true
+        is CtlResult.Err -> error("影子屏操作失败：${result.reason.take(200)}")
+        null -> false
+    }
+
+    private suspend fun execInput(command: String) {
+        val result = exec(command, 20_000L)
+        check(result.exitCode == 0) { "影子屏输入失败（${result.exitCode}）：${result.output.take(200)}" }
+    }
+
     /** 在影子屏上点按。 */
     suspend fun tap(x: Int, y: Int) {
         currentInfo()
-        if (runnerCommand("tap", "$x", "$y") is CtlResult.Ok) return
+        if (inputCommand("tap", "$x", "$y")) return
         val info = refresh() ?: error("影子屏未运行")
-        exec("input -d ${info.displayId} tap $x $y", 20_000L)
+        execInput("input -d ${info.displayId} tap $x $y")
     }
 
     /** 在影子屏上滑动。 */
     suspend fun swipe(x1: Int, y1: Int, x2: Int, y2: Int, durationMs: Int = 300) {
         currentInfo()
-        if (runnerCommand("swipe", "$x1", "$y1", "$x2", "$y2", "$durationMs") is CtlResult.Ok) return
+        if (inputCommand("swipe", "$x1", "$y1", "$x2", "$y2", "$durationMs")) return
         val info = refresh() ?: error("影子屏未运行")
-        exec("input -d ${info.displayId} swipe $x1 $y1 $x2 $y2 $durationMs", 20_000L)
+        execInput("input -d ${info.displayId} swipe $x1 $y1 $x2 $y2 $durationMs")
     }
 
     /** 在影子屏上发送按键（如 KEYCODE_BACK / KEYCODE_HOME / 4 / 3）。 */
@@ -581,9 +594,9 @@ class VdController @Inject constructor(
         require(keyCodeRe.matches(c)) { "keycode 不合法：$c" }
         currentInfo()
         val numeric = c.toIntOrNull() ?: android.view.KeyEvent.keyCodeFromString(c).takeIf { it > 0 }
-        if (numeric != null && runnerCommand("key", "$numeric") is CtlResult.Ok) return
+        if (numeric != null && inputCommand("key", "$numeric")) return
         val info = refresh() ?: error("影子屏未运行")
-        exec("input -d ${info.displayId} keyevent $c", 20_000L)
+        execInput("input -d ${info.displayId} keyevent $c")
     }
 
     /**
@@ -598,22 +611,22 @@ class VdController @Inject constructor(
         val info = currentInfo()
         if (ctlAvailable == null) probeChannel()
         val direct = text.isNotEmpty() && uiaAvailable == true &&
-            runnerCommand("settext", "append", text) is CtlResult.Ok
+            inputCommand("settext", "append", text)
         if (text.isNotEmpty() && !direct) {
             if (text.any { it.code > 0x7F }) {
                 setHostClipboard(text)
                 // 等系统把新剪贴板同步到目标进程，再发粘贴键，否则可能粘到旧内容。
                 delay(150L)
-                exec("input -d ${info.displayId} keyevent $KEYCODE_PASTE", 20_000L)
+                execInput("input -d ${info.displayId} keyevent $KEYCODE_PASTE")
             } else {
                 // text 来自模型/用户，进 shell 前整体单引号转义；空格按 input 约定换成 %s。
                 val encoded = text.replace(" ", "%s")
-                exec("input -d ${info.displayId} text ${shellQuote(encoded)}", 20_000L)
+                execInput("input -d ${info.displayId} text ${shellQuote(encoded)}")
             }
         }
         if (submit) {
-            if (runnerCommand("key", "66") !is CtlResult.Ok) {
-                exec("input -d ${info.displayId} keyevent 66", 20_000L)
+            if (!inputCommand("key", "66")) {
+                execInput("input -d ${info.displayId} keyevent 66")
             }
         }
     }

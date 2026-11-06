@@ -26,8 +26,8 @@ internal class BuiltinAssetExtractor {
 
     @Synchronized
     fun extract(assets: AssetManager, configDir: File, directory: String): Int {
-        require(directory in setOf("docs", "prompts", "agents", "teams"))
-        val root = File(configDir, directory)
+        require(directory in setOf("docs", "prompts", "agents", "teams", "skills"))
+        val root = File(configDir, if (directory == "skills") "builtin-skills" else directory)
         check(!Files.isSymbolicLink(root.toPath())) { "Builtin asset directory is a symbolic link" }
         val key = root.canonicalPath
         if (directory == "docs" && root.isDirectory && key in extractedDocs) return 0

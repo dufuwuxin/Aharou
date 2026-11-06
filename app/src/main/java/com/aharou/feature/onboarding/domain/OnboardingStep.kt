@@ -33,27 +33,27 @@ enum class OnboardingStep(
         descRes = R.string.onboarding_enter_settings_desc
     ),
     CONFIG_PROVIDER(
-        route = "settings",
+        route = "config",
         titleRes = R.string.onboarding_config_provider_title,
         descRes = R.string.onboarding_config_provider_desc
     ),
     PROVIDER_ADD(
-        route = "settings",
+        route = "config",
         titleRes = R.string.onboarding_provider_add_title,
         descRes = R.string.onboarding_provider_add_desc
     ),
     PROVIDER_CONFIG_INFO(
-        route = "settings",
+        route = "config",
         titleRes = R.string.onboarding_provider_config_info_title,
         descRes = R.string.onboarding_provider_config_info_desc
     ),
     PROVIDER_FETCH_MODELS(
-        route = "settings",
+        route = "config",
         titleRes = R.string.onboarding_provider_fetch_models_title,
         descRes = R.string.onboarding_provider_fetch_models_desc
     ),
     SIMULATE_FETCH_DIALOG(
-        route = "settings",
+        route = "config",
         titleRes = R.string.onboarding_provider_select_fetched_model_title,
         descRes = R.string.onboarding_provider_select_fetched_model_desc
     ),

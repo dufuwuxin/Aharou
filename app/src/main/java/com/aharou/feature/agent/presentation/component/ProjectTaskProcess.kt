@@ -19,7 +19,7 @@ private const val SUPPLEMENTS_SHOWN = 3
 
 @Composable
 internal fun ProjectTaskProcess(task: ProjectTask, tasks: List<ProjectTask>, onEdit: () -> Unit, onAccept: () -> Unit,
-    conversation: @Composable (ProjectTask, String) -> Unit, modifier: Modifier = Modifier) {
+    conversation: @Composable (ProjectTask, String) -> Unit, modifier: Modifier = Modifier, readOnly: Boolean = false) {
     val records = (task.sessionIds + task.processSessionIds).distinct()
     var selectedSession by rememberSaveable(task.id) { mutableStateOf(records.firstOrNull()) }
     LaunchedEffect(records) { if (selectedSession !in records) selectedSession = records.firstOrNull() }
@@ -28,7 +28,7 @@ internal fun ProjectTaskProcess(task: ProjectTask, tasks: List<ProjectTask>, onE
         Row(Modifier.fillMaxWidth()) {
             Text(stringResource(R.string.project_task_owner_value, task.owner.ifBlank { stringResource(R.string.project_flow_default_member) }),
                 style = MaterialTheme.typography.labelMedium, modifier = Modifier.weight(1f))
-            TextButton(onClick = onEdit) { Text(stringResource(R.string.project_task_edit)) }
+            if (!readOnly) TextButton(onClick = onEdit) { Text(stringResource(R.string.project_task_edit)) }
         }
         if (task.supplements.isNotEmpty()) {
             Text(stringResource(R.string.project_supplements_title, task.supplements.size), style = MaterialTheme.typography.labelMedium)

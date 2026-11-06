@@ -103,7 +103,13 @@ BUILD 与 AUTO 模式下（PLAN 为硬拦截、ALLOW 为完全放行，均不在
 
 授权弹窗里没有「禁止」这个选项（拒绝只影响单次），所以正常使用不会产生禁止规则。
 
-禁止规则目前只能手动编辑配置文件产生：项目规则写在 `<项目根>/.aharou/permissions.json`，全局规则写在 `~/.aharou/permissions.json`。手工编辑保存后 App 会在几秒内自动检测并刷新页面，规则立即生效。
+禁止规则目前只能手动编辑配置文件产生：
+
+- **本地工作区**：项目规则写在 `<项目根>/.aharou/permissions.json`，在当前容器里通常可从 `~/workspace/.aharou/permissions.json` 访问。
+- **全局规则**：容器内路径是 `~/.aharou/permissions.json`，实际保存在 App 私有目录 `filesDir/aharou/permissions.json`，不随容器镜像更换而丢失。
+- **远程 SSH 工作区**：项目规则保存在本机 App 私有目录 `filesDir/aharou/projects/<项目名-标识哈希>/permissions.json`，不是远程服务器项目目录下的文件；不同远程地址或路径的项目分别保存。
+
+手工编辑保存后 App 会在几秒内自动检测并刷新页面，规则立即生效。
 
 配置文件格式：
 

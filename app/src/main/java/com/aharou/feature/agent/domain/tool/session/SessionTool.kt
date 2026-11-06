@@ -29,6 +29,8 @@ import kotlinx.serialization.json.put
  * 再校验其归属，跨工作区一律拒绝。工作区之间是有意隔离的（不同于 `task` 那条按父子关系走的口子）。
  */
 class SessionTool @Inject constructor(
+    private val receipts: com.aharou.feature.agent.domain.receipt.ToolCallReceiptRepository,
+    private val injectedContexts: com.aharou.feature.agent.domain.prompt.InjectedContextStore,
     private val projectTasks: com.aharou.feature.agent.data.task.ProjectTaskRepository,
     private val sessionUseCase: SessionUseCase,
     private val chatSessionDao: ChatSessionDao,
@@ -51,6 +53,7 @@ class SessionTool @Inject constructor(
     override val description =
         "index returns the task index including nullable projectId (legacy unassigned tasks remain null); brief returns selected task briefs (task_ids), since_version and offset/nextOffset supported; neither reads messages. 查看当前工作区下的其他会话。action=list 列出本工作区会话；search 在本工作区聊天记录里搜关键词；" +
             "read 读某个会话的消息（传 session_id，取自 list）。" +
+            "tool_calls reads redacted receipt summaries with tool/status/after/before/limit/offset filters; context returns in-memory section counts and heuristic tokens, not provider billing. " +
             "只能访问当前工作区的会话——其它工作区是有意隔离的，一律看不到。"
 
     // 只读：命中策略引擎的 READ_AGENT_CONFIG 特判，非 AUTO 模式自动放行，PLAN 下也不算危险工具。
@@ -61,7 +64,7 @@ class SessionTool @Inject constructor(
             "action", ParameterType.STRING,
             "操作：list 列出当前工作区会话 / search 在当前工作区聊天记录里搜关键词 / read 读某个会话的消息",
             true,
-            enum = listOf("list", "search", "read", "index", "brief", "field"),
+            enum = listOf("list", "search", "read", "index", "brief", "field", "tool_calls", "context"),
         ),
         "task_id" to ToolParameter("task_id", ParameterType.STRING, "field: explicit task id", false),
         "field" to ToolParameter("field", ParameterType.STRING, "field: projectId/title/requirement/background/constraints/acceptance/brief/evidenceRefs/members/owner/dependencyIds/sessionIds", false),
@@ -74,6 +77,10 @@ class SessionTool @Inject constructor(
             "session_id", ParameterType.STRING,
             "read 专用：目标会话 id（取自 list 结果）", false,
         ),
+        "tool" to ToolParameter("tool", ParameterType.STRING, "tool_calls: exact tool name", false),
+        "status" to ToolParameter("status", ParameterType.STRING, "tool_calls: SUCCESS / ERROR / PARTIAL", false),
+        "after" to ToolParameter("after", ParameterType.INTEGER, "tool_calls: inclusive epoch millis", false),
+        "before" to ToolParameter("before", ParameterType.INTEGER, "tool_calls: inclusive epoch millis", false),
         "query" to ToolParameter(
             "query", ParameterType.STRING,
             "search 专用：关键词", false,
@@ -123,6 +130,7 @@ class SessionTool @Inject constructor(
                 "list" -> listSessions(workspace, limit)
                 "search" -> searchMessages(workspace, args, limit)
                 "read" -> readSession(workspace, args, limit)
+                "tool_calls", "context" -> inspectSession(workspace, args, context, action, limit)
                 else -> ToolResult.Error("未知 action：$action（支持 list / search / read）", "INVALID_ARGS")
             }
         } catch (e: CancellationException) {
@@ -188,6 +196,58 @@ class SessionTool @Inject constructor(
                 })
             }
         )
+    }
+
+    private suspend fun inspectSession(
+        workspace: String, args: Map<String, JsonElement>, context: AgentContext, action: String, limit: Int?
+    ): ToolResult {
+        val id = (args["session_id"] as? JsonPrimitive)?.contentOrNull?.trim()
+            ?: context.sessionId ?: return ToolResult.Error("session_id required", "MISSING_ARGS")
+        // Same ownership predicate as read; SQL repeats it to protect against reassignment races.
+        val session = sessionUseCase.getSessionById(id)
+            ?: return ToolResult.Error("Session not found", "SESSION_NOT_FOUND")
+        if (session.workspacePath != workspace) return ToolResult.Error("Session not visible", "CROSS_WORKSPACE_DENIED")
+        if (action == "context") {
+            if (id != context.sessionId) return ToolResult.Error("Context snapshots are current-session only", "CROSS_SESSION_DENIED")
+            val snapshot = injectedContexts.snapshot(id)
+            return ToolResult.Success(buildJsonObject {
+                put("sessionId", id)
+                put("available", snapshot != null)
+                put("source", "final_outbound_folded_masked_request")
+                put("tokenMethod", "local heuristic including tools, history, framing and images; not provider billing")
+                injectedContexts.requestMetadata(id)?.forEach { (key, value) -> put(key, value) }
+                if (snapshot != null) {
+                    put("characters", snapshot.characters)
+                    put("estimatedTokens", snapshot.estimatedTokens)
+                    put("sections", snapshot.externalSections())
+                }
+            })
+        }
+        val offset = (args["offset"] as? JsonPrimitive)?.intOrNull ?: 0
+        val take = (limit ?: DEFAULT_READ_LIMIT).coerceIn(1, MAX_LIMIT)
+        val status = (args["status"] as? JsonPrimitive)?.contentOrNull
+        fun timestamp(key: String) = (args[key] as? JsonPrimitive)?.contentOrNull?.toLongOrNull()
+        val after = timestamp("after")
+        val before = timestamp("before")
+        if (offset < 0 || offset > Int.MAX_VALUE - MAX_LIMIT ||
+            (status != null && status !in setOf("SUCCESS", "ERROR", "PARTIAL")) ||
+            (args.containsKey("after") && after == null) || (args.containsKey("before") && before == null) ||
+            (after != null && before != null && after > before)) {
+            return ToolResult.Error("Invalid receipt filters", "INVALID_ARGS")
+        }
+        val rows = receipts.querySession(id, workspace, (args["tool"] as? JsonPrimitive)?.contentOrNull,
+            status, after, before, take + 1, offset)
+        return ToolResult.Success(buildJsonObject {
+            put("sessionId", id); put("offset", offset)
+            put("nextOffset", if (rows.size > take) JsonPrimitive(offset + take) else kotlinx.serialization.json.JsonNull)
+            put("paginationPolicy", "Live newest-first receipts; concurrent inserts can shift offsets.")
+            put("receipts", buildJsonArray { rows.take(take).forEach { row -> addJsonObject {
+                put("id", row.id); put("tool", row.toolName); put("category", row.category)
+                put("status", row.status); put("createdAt", row.createdAt); put("durationMs", row.durationMs)
+                put("argsPreview", row.argsPreview); put("resultPreview", row.resultPreview)
+                put("errorCode", row.errorCode?.let(::JsonPrimitive) ?: kotlinx.serialization.json.JsonNull)
+            } } })
+        })
     }
 
     /** 读某个会话的消息（限当前工作区）。 */

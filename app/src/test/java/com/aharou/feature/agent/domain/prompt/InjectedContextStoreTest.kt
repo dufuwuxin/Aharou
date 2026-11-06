@@ -1,49 +1,66 @@
 package com.aharou.feature.agent.domain.prompt
 
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
+import com.aharou.feature.agent.domain.model.AgentImage
+import com.aharou.feature.agent.domain.model.AgentMessage
+import com.aharou.feature.agent.domain.workflow.ContextTokenEstimator
+import com.aharou.feature.agent.domain.workflow.RequestContextComposition
+import org.junit.Assert.*
 import org.junit.Test
 
-/**
- * 「显示全部」的数据源：注入快照只留最近一轮、按会话隔离、空值不落（纯 JVM）。
- *
- * 这里要防的是界面出现空白面板（记了空串）与跨会话串台（A 会话看到 B 会话的注入）。
- */
 class InjectedContextStoreTest {
-
-    @Test
-    fun `按会话隔离记录`() {
-        val store = InjectedContextStore()
-        store.record("s1", "aaa")
-        store.record("s2", "bbb")
-        assertEquals("aaa", store.bySession.value["s1"])
-        assertEquals("bbb", store.bySession.value["s2"])
+    private fun record(store: InjectedContextStore, id: String, text: String) {
+        store.recordRequest(id, RequestContextComposition.capture(store.beginRequest(id), text, emptyList(), emptyList()))
     }
-
-    @Test
-    fun `同一会话只保留最近一轮`() {
+    @Test fun sessionsRemainIsolatedAndLatestRequestReplacesPrevious() {
         val store = InjectedContextStore()
-        store.record("s1", "第一轮")
-        store.record("s1", "第二轮")
-        assertEquals("第二轮", store.bySession.value["s1"])
-        assertEquals(1, store.bySession.value.size)
+        record(store, "a", "aaa")
+        record(store, "b", "bbb")
+        record(store, "a", "new")
+        assertTrue(store.bySession.value.getValue("a").contains("new"))
+        assertTrue(store.bySession.value.getValue("b").contains("bbb"))
+        assertEquals(2, store.bySession.value.size)
     }
-
-    @Test
-    fun `空正文与空会话号不登记`() {
+    @Test fun promptBuildIsNotPublishedAsAnActualRequest() {
         val store = InjectedContextStore()
-        store.record("s1", "")
-        store.record(null, "正文")
-        store.record("  ", "正文")
-        assertEquals(emptyMap<String, String>(), store.bySession.value)
-        assertNull(store.bySession.value["s1"])
+        store.record("a", "draft prompt")
+        assertNull(store.snapshot("a"))
+        assertTrue(store.bySession.value.isEmpty())
     }
-
-    @Test
-    fun `忘记会话后不再返回旧快照`() {
+    @Test fun retryAndCompactionInvalidateLateResults() {
         val store = InjectedContextStore()
-        store.record("s1", "aaa")
-        store.forget("s1")
-        assertNull(store.bySession.value["s1"])
+        val v1 = store.beginRequest("a")
+        val v2 = store.beginRequest("a")
+        store.recordRequest("a", RequestContextComposition.capture(v1, "old", emptyList(), emptyList()))
+        assertNull(store.snapshot("a"))
+        store.recordRequest("a", RequestContextComposition.capture(v2, "current", emptyList(), emptyList()))
+        assertNotNull(store.snapshot("a"))
+        store.forget("a")
+        store.recordRequest("a", RequestContextComposition.capture(v2, "late", emptyList(), emptyList()))
+        assertNull(store.snapshot("a"))
+    }
+    @Test fun allPartsSumToEstimatorIncludingUnicodeToolsHistoryAndImages() {
+        val messages = listOf(AgentMessage.UserMessage(content = "中😀abc", images = listOf(AgentImage("image/png", "PRIVATE_BYTES"))),
+            AgentMessage.ToolResultMessage(toolName = "read", result = "large original", modelResult = "folded"))
+        val snapshot = RequestContextComposition.capture(1, "system😀", messages, emptyList())
+        assertEquals(ContextTokenEstimator.estimate("system😀", messages, emptyList()), snapshot.estimatedTokens)
+        assertEquals(snapshot.estimatedTokens, snapshot.parts.sumOf { it.estimatedTokens })
+        assertEquals(4096, snapshot.parts.single { it.source == "images" }.estimatedTokens)
+        assertFalse(snapshot.text.contains("PRIVATE_BYTES"))
+        assertFalse(snapshot.text.contains("large original"))
+        assertTrue(snapshot.text.contains("folded"))
+    }
+    @Test fun externalMetadataDoesNotExposeHeadingsOrBodies() {
+        val store = InjectedContextStore()
+        record(store, "a", "## PRIVATE_HEADING\nPRIVATE_BODY")
+        val json = store.requestMetadata("a").toString() + store.snapshot("a")!!.externalSections()
+        assertFalse(json.contains("PRIVATE_HEADING"))
+        assertFalse(json.contains("PRIVATE_BODY"))
+        assertTrue(json.contains("not provider billing"))
+    }
+    @Test fun legacyUnicodeHeadingCompositionStillPartitionsExactly() {
+        val text = "lead\n## Memory\n中😀\n## Rules\nabc"
+        val snapshot = InjectedContextStore.composition(text)
+        assertEquals(text.codePointCount(0, text.length), snapshot.characters)
+        assertEquals(snapshot.characters, snapshot.sections.sumOf { it.characters })
     }
 }

@@ -29,6 +29,16 @@ class BuiltinAssetExtractorTest {
         return assets
     }
 
+    @Test fun builtinSkillResourcesAreDeployedWithoutOverwritingCustomSkills() {
+        val custom = File(root, "skills/security-audit/SKILL.md").apply { requireNotNull(parentFile).mkdirs(); writeText("custom") }
+        val source = assets(mapOf("skills/security-audit/scripts/audit.py" to "print('audit')",
+            "skills/security-audit/references/checklist.md" to "check"))
+        assertEquals(2, BuiltinAssetExtractor().extract(source, root, "skills"))
+        assertEquals("print('audit')", File(root, "builtin-skills/security-audit/scripts/audit.py").readText())
+        assertEquals("custom", custom.readText())
+        assertEquals(0, BuiltinAssetExtractor().extract(source, root, "skills"))
+    }
+
     @Test fun unchangedDocumentsWriteZeroFilesAcrossAppRestarts() {
         val source = assets(mapOf("docs/guide/a.md" to "same", "docs/advanced/b.md" to "other"))
         assertEquals(2, BuiltinAssetExtractor().extract(source, root, "docs"))

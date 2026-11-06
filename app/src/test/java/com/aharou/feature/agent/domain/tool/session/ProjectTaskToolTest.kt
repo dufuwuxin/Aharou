@@ -86,6 +86,32 @@ class ProjectTaskToolTest {
         assertFalse(cutText.contains("x".repeat(ProjectTaskTool.OUTLINE_LINE_MAX + 1)))
     }
 
+    @Test fun rootInputChoosesNewPlanOrExistingTaskWithoutTrustingArguments() = runBlocking {
+        val repository = mockk<ProjectTaskRepository>()
+        val project = ProjectPlan(id = "p", workspace = "w", title = "p", requirements = "r", flowSessionIds = listOf("root"))
+        val snapshot = ProjectTaskSnapshot(version = 1, tasks = listOf(task("existing")), projects = listOf(project))
+        every { repository.snapshots } returns MutableStateFlow(mapOf("w" to snapshot))
+        coEvery { repository.load("w") } returns snapshot
+        coEvery { repository.appendRequirements("p", "Add search", "w") } returns
+            com.aharou.feature.agent.data.task.ProjectPlanOutcome(project, false)
+        coEvery { repository.supplement("existing", "Use offline cache", "w") } returns false
+        val tool = ProjectTaskTool(repository)
+        fun args(action: String, text: String, target: String? = null) = buildMap {
+            put("action", JsonPrimitive(action)); put("requirement", JsonPrimitive(text))
+            if (target != null) put("task_id", JsonPrimitive(target))
+            put("project_id", JsonPrimitive("other")); put("workspace", JsonPrimitive("other"))
+        }
+        val root = AgentContext(null, null, "w", null, sessionId = "root")
+        assertTrue(tool.executeWithContext(args("plan", "Add search"), root) is ToolResult.Success)
+        assertTrue(tool.executeWithContext(args("supplement", "Use offline cache", "existing"), root) is ToolResult.Success)
+        val rejected = tool.executeWithContext(args("supplement", "Use offline cache", "other"), root)
+        assertTrue(rejected is ToolResult.Error)
+        assertTrue(tool.executeWithContext(args("plan", "Add search"), root.copy(projectRoot = "other")) is ToolResult.Error)
+        coVerify(exactly = 1) { repository.appendRequirements("p", "Add search", "w") }
+        coVerify(exactly = 1) { repository.supplement("existing", "Use offline cache", "w") }
+        coVerify(exactly = 0) { repository.supplement("other", any(), any()) }
+    }
+
     @Test fun outlineThroughTheToolReadsWithoutWriting() = runBlocking {
         val repository = mockk<ProjectTaskRepository>()
         val store = ProjectTaskSnapshot(version = 1, tasks = listOf(running), projects = listOf(ProjectPlan(id = "p", workspace = "w", title = "p", requirements = "r")))

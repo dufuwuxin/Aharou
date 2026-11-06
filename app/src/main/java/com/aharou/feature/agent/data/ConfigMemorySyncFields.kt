@@ -1,5 +1,8 @@
 package com.aharou.feature.agent.data
 
+import android.content.Context
+import com.aharou.R
+import dagger.hilt.android.qualifiers.ApplicationContext
 import com.aharou.core.config.ConfigAccess
 import com.aharou.core.config.ConfigError
 import com.aharou.core.config.ConfigField
@@ -29,6 +32,7 @@ import javax.inject.Singleton
  */
 @Singleton
 class ConfigMemorySyncFields @Inject constructor(
+    @param:ApplicationContext private val context: Context,
     private val settings: MemorySyncSettings,
     private val scheduler: MemorySyncScheduler,
     private val credentials: FileCredentialRepository,
@@ -36,6 +40,16 @@ class ConfigMemorySyncFields @Inject constructor(
 ) {
 
     fun registerInto(registry: ConfigRegistry) {
+        registry.register(ClosureField(
+            path = "memory.review_proposals",
+            displayName = context.getString(R.string.memory_review_proposals_name),
+            description = context.getString(R.string.memory_review_proposals_description),
+            valueSchema = ConfigSchema.Bool,
+            revertable = true,
+            reader = { ConfigValue.Bool(autoCompactSettings.reviewProposals) },
+            writer = { value -> autoCompactSettings.reviewProposals =
+                (value as? ConfigValue.Bool)?.value ?: throw ConfigError.TypeMismatch("boolean") },
+        ))
         // 同属记忆后台任务的配置，放这里而不是 ConfigBuiltins：那边拿不到 Hilt 注入的单例。
         registry.register(
             ClosureField(

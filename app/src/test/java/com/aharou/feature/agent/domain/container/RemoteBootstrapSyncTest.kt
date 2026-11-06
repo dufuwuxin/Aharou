@@ -21,7 +21,7 @@ class RemoteBootstrapSyncTest {
     private val connection = mockk<RemoteSshConnection>()
     private val context = mockk<Context>()
     private val assets = mockk<AssetManager>()
-    private var current = RemoteSshConnection.BootstrapTarget(mockk<SSHClient>(), "/home/one")
+    private var current = RemoteSshConnection.BootstrapTarget(mockk<SSHClient>(), "/home/one", mockk())
     private lateinit var sync: RemoteBootstrapSync
 
     @Before fun setup() {
@@ -72,7 +72,7 @@ class RemoteBootstrapSyncTest {
     @Test fun reconnectToTheSameHostHasANewConnectionIdentityAndResynchronizes() = runTest {
         sync.syncIfNeeded()
         val old = current
-        current = RemoteSshConnection.BootstrapTarget(mockk<SSHClient>(), "/home/one")
+        current = RemoteSshConnection.BootstrapTarget(mockk<SSHClient>(), "/home/one", mockk())
         sync.syncIfNeeded()
         coVerify(exactly = 1) { connection.uploadDocs(any(), old) }
         coVerify(exactly = 1) { connection.uploadDocs(any(), current) }
@@ -81,7 +81,7 @@ class RemoteBootstrapSyncTest {
     @Test fun connectionChangeDuringUploadDoesNotMarkTheNewTargetComplete() = runTest {
         val old = current
         coEvery { connection.uploadDocs(any(), old) } coAnswers {
-            current = RemoteSshConnection.BootstrapTarget(mockk<SSHClient>(), "/home/two")
+            current = RemoteSshConnection.BootstrapTarget(mockk<SSHClient>(), "/home/two", mockk())
         }
         sync.syncIfNeeded()
         coVerify(exactly = 0) { connection.uploadBuiltinFiles(any(), any(), any(), any(), old) }

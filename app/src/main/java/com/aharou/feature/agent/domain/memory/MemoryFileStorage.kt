@@ -95,7 +95,7 @@ internal object MemoryFileStorage {
     }
 
     fun merge(
-        group: List<Memory>, name: String, description: String, content: String
+        group: List<Memory>, name: String, description: String, content: String, type: MemoryType? = null
     ): Boolean = synchronized(lock) {
         if (group.size < 2 || group.any { it.pending || it.file == null }) return@synchronized false
         val first = group.first()
@@ -118,7 +118,7 @@ internal object MemoryFileStorage {
             if (MemorySource.archiveExistingFile(root, file.nameWithoutExtension) == null) return@synchronized false
         }
         val payload = MemoryParser.format(
-            name, description, content, first.type, group.flatMap { it.keywords }.distinct(), first.expiresAt
+            name, description, content, type ?: first.type, group.flatMap { it.keywords }.distinct(), first.expiresAt
         )
         if (!write(target, payload)) return@synchronized false
         var deleted = true

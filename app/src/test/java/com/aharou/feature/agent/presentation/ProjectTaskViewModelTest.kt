@@ -10,6 +10,7 @@ import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
+import kotlinx.coroutines.async
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -27,6 +28,8 @@ class ProjectTaskViewModelTest {
     private val dispatcher = StandardTestDispatcher()
     private val repository = mockk<ProjectTaskRepository>()
     private val workflow = mockk<com.aharou.feature.agent.domain.task.ProjectWorkflowRunner>()
+    private val sessions = mockk<SessionUseCase>()
+    private val runner = mockk<AgentTurnRunner>()
     private lateinit var viewModel: ProjectTaskViewModel
 
     @Before fun setUp() {
@@ -41,7 +44,7 @@ class ProjectTaskViewModelTest {
         }
         coEvery { repository.supplement(any(), any(), any()) } returns false
         coEvery { workflow.members() } returns listOf("member")
-        viewModel = ProjectTaskViewModel(repository, mockk<SessionUseCase>(), mockk<AgentTurnRunner>(), workflow)
+        viewModel = ProjectTaskViewModel(repository, sessions, runner, workflow)
     }
 
     @After fun tearDown() { Dispatchers.resetMain() }
@@ -192,4 +195,67 @@ class ProjectTaskViewModelTest {
         coVerify(exactly = 1) { repository.appendRequirements("project", "next", "/first") }
         coVerify(exactly = 0) { repository.appendRequirements(any(), any(), "/second") }
     }
+    private fun rootSession(id: String, workspace: String = "/first", updated: Long = 1) =
+        com.aharou.feature.agent.data.local.entity.ChatSessionEntity(id, id, 1, updated, workspacePath = workspace)
+
+    @Test fun concurrentProjectBindingsCreateAndLinkExactlyOneRoot() = runTest(dispatcher) {
+        var snapshot = ProjectTaskSnapshot(projects = listOf(ProjectPlan("p", "/first", "p", "requirements")))
+        coEvery { repository.load("/first") } coAnswers { snapshot }
+        val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val root = rootSession("root")
+        coEvery { runner.createSessionEntity("/first") } coAnswers { gate.await(); root }
+        coEvery { sessions.upsertSession(root) } returns Unit
+        coEvery { sessions.getSessionById("root") } returns root
+        coEvery { repository.linkProjectExecution("p", "/first", "root") } coAnswers {
+            snapshot = snapshot.copy(projects = snapshot.projects.map { it.copy(flowSessionIds = listOf("root")) })
+        }
+        val first = async { viewModel.ensureProjectSession("p", "/first") }
+        val second = async { viewModel.ensureProjectSession("p", "/first") }
+        runCurrent(); gate.complete(Unit)
+        org.junit.Assert.assertEquals("root", first.await())
+        org.junit.Assert.assertEquals("root", second.await())
+        coVerify(exactly = 1) { runner.createSessionEntity("/first"); sessions.upsertSession(root); repository.linkProjectExecution("p", "/first", "root") }
+    }
+
+    @Test fun projectBindingReusesNewestExistingRootAndRejectsChildOrOtherWorkspace() = runTest(dispatcher) {
+        val ids = listOf("old", "latest", "child", "foreign", "deleted")
+        coEvery { repository.load("/first") } returns ProjectTaskSnapshot(projects = listOf(ProjectPlan("p", "/first", "p", "r", flowSessionIds = ids)))
+        coEvery { sessions.getSessionById("old") } returns rootSession("old")
+        coEvery { sessions.getSessionById("latest") } returns rootSession("latest", updated = 2)
+        coEvery { sessions.getSessionById("child") } returns rootSession("child", updated = 99).copy(parentId = "latest")
+        coEvery { sessions.getSessionById("foreign") } returns rootSession("foreign", "/second", 100)
+        coEvery { sessions.getSessionById("deleted") } returns null
+        org.junit.Assert.assertEquals("latest", viewModel.ensureProjectSession("p", "/first"))
+        coVerify(exactly = 0) { runner.createSessionEntity(any()); repository.linkProjectExecution(any(), any(), any()) }
+    }
+
+    @Test fun bindingKeepsItsWorkspaceWhileTheUiSwitches() = runTest(dispatcher) {
+        coEvery { repository.load("/first") } returns ProjectTaskSnapshot(projects = listOf(ProjectPlan("p", "/first", "p", "r")))
+        val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val root = rootSession("root")
+        coEvery { runner.createSessionEntity("/first") } coAnswers { gate.await(); root }
+        coEvery { sessions.upsertSession(root) } returns Unit
+        coEvery { repository.linkProjectExecution("p", "/first", "root") } returns Unit
+        viewModel.workspace("/first"); runCurrent()
+        val binding = async { viewModel.ensureProjectSession("p", "/first") }; runCurrent()
+        viewModel.workspace("/second"); runCurrent(); gate.complete(Unit)
+        org.junit.Assert.assertEquals("root", binding.await())
+        org.junit.Assert.assertEquals("/second", viewModel.state.value.workspace)
+        coVerify(exactly = 0) { repository.linkProjectExecution(any(), "/second", any()) }
+    }
+
+    @Test fun failedProjectLinkDoesNotExposeOrRecreateTheUnboundSession() = runTest(dispatcher) {
+        coEvery { repository.load("/first") } returns ProjectTaskSnapshot(projects = listOf(ProjectPlan("p", "/first", "p", "r")))
+        val root = rootSession("root")
+        coEvery { runner.createSessionEntity("/first") } returns root
+        coEvery { sessions.upsertSession(root) } returns Unit
+        coEvery { sessions.getSessionById("root") } returns root
+        coEvery { repository.linkProjectExecution("p", "/first", "root") } throws IllegalStateException("WRITE_FAILED")
+        val failure = try { viewModel.ensureProjectSession("p", "/first"); null } catch (error: IllegalStateException) { error }
+        org.junit.Assert.assertEquals("WRITE_FAILED", failure?.message)
+        coEvery { repository.linkProjectExecution("p", "/first", "root") } returns Unit
+        org.junit.Assert.assertEquals("root", viewModel.ensureProjectSession("p", "/first"))
+        coVerify(exactly = 1) { runner.createSessionEntity("/first"); sessions.upsertSession(root) }
+    }
+
 }

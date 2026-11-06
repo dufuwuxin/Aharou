@@ -31,6 +31,15 @@ class BuiltinSkillSource @Inject constructor(
     override fun loadInstructions(name: String): String? =
         listSkills().firstOrNull { it.name.equals(name, ignoreCase = true) }?.instructions
 
+    internal fun resourceFiles(name: String): Map<String, ByteArray> {
+        val directory = context.assets.list(ASSETS_ROOT).orEmpty().firstOrNull {
+            readSkill(it)?.name == name
+        } ?: return emptyMap()
+        require(directory.matches(Regex("[A-Za-z0-9_-]+")))
+        return com.aharou.feature.agent.domain.container.collectBuiltinAssets(context.assets, "$ASSETS_ROOT/$directory")
+            .mapKeys { (path, _) -> "$directory/$path" }
+    }
+
     /** 读单个内置技能目录；缺 SKILL.md 或解析失败返回 null，不影响其余技能。 */
     private fun readSkill(dir: String): Skill? = runCatching {
         val path = "$ASSETS_ROOT/$dir/$SKILL_FILE"
