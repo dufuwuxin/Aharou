@@ -121,6 +121,7 @@ internal fun SettingsAiGroupScreen(onOpen: (SettingsSection) -> Unit) {
             .padding(bottom = Spacing.xl),
         verticalArrangement = Arrangement.spacedBy(Spacing.sm)
     ) {
+        OfflineTranslationSettings()
         SettingsGroup {
             SettingsRow(icon = FeatherIcons.Server, title = stringResource(SettingsSection.Providers.titleRes), onClick = { onOpen(SettingsSection.Providers) }, modifier = Modifier.onboardingTarget(OnboardingStep.CONFIG_PROVIDER))
             SettingsDivider()
@@ -131,8 +132,7 @@ internal fun SettingsAiGroupScreen(onOpen: (SettingsSection) -> Unit) {
             SettingsRow(icon = FeatherIcons.Globe, title = stringResource(SettingsSection.Connectors.titleRes), onClick = { onOpen(SettingsSection.Connectors) })
             SettingsDivider()
             SettingsRow(icon = FeatherIcons.Lock, title = stringResource(SettingsSection.Vault.titleRes), onClick = { onOpen(SettingsSection.Vault) })
-            SettingsDivider()
-            SettingsRow(icon = FeatherIcons.Clock, title = stringResource(SettingsSection.ScheduledTasks.titleRes), onClick = { onOpen(SettingsSection.ScheduledTasks) })
+
         }
         SettingsGroup {
             SettingsRow(

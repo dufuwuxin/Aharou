@@ -26,9 +26,9 @@ class ContainerProfileResolver @Inject constructor(
     private val containerSettingsRepository: ContainerSettingsRepository,
     private val containerInstaller: ContainerInstaller
 ) {
-    /** 全局默认 profile；启动首帧为内置 Alpine（等同改动前），flow 发射后更新。 */
+    /** 全局默认 profile；启动首帧为内置 Ubuntu（等同改动前），flow 发射后更新。 */
     @Volatile
-    private var defaultProfileCache: ContainerProfile = ContainerProfile.BUILTIN_ALPINE
+    private var defaultProfileCache: ContainerProfile = ContainerProfile.BUILTIN_UBUNTU
 
     /** 当前选中的 profile id（`container.active_profile` 最新值）。 */
     @Volatile
@@ -50,7 +50,7 @@ class ContainerProfileResolver @Inject constructor(
             }
         }
         // 列表增删改后要重算默认 profile：它可能就是列表里那个自定义 profile，
-        // 只在 activeProfileId 发射时算一次会永远停在启动时的内置 Alpine。
+        // 只在 activeProfileId 发射时算一次会永远停在启动时的内置 Ubuntu。
         CoroutineScope(Dispatchers.IO).launch {
             containerSettingsRepository.customProfilesFlow.collect { profiles ->
                 customProfiles = profiles
@@ -76,7 +76,9 @@ class ContainerProfileResolver @Inject constructor(
     fun forWorkspace(projectPath: String?): ContainerProfile {
         if (workspaceOverrides.isEmpty()) return defaultProfileCache
         val id = ContainerWorkspaceKeys.overrideFor(workspaceOverrides, projectPath) ?: return defaultProfileCache
-        return customProfiles.firstOrNull { it.id == id } ?: defaultProfileCache
+        return customProfiles.firstOrNull { it.id == ContainerProfile.normalizeId(id) }
+            ?: ContainerProfile.BUILTIN_UBUNTU.takeIf { ContainerProfile.normalizeId(id) == it.id }
+            ?: defaultProfileCache
     }
 
     /**
@@ -98,13 +100,14 @@ class ContainerProfileResolver @Inject constructor(
     }
 
     /**
-     * 按 id 解析 profile：从持久化列表找，找不到回退列表第一个，再兜底内置 Alpine（保证引擎始终可用）。
-     * 列表里持久化的 Alpine 覆盖项优先于 [ContainerProfile.BUILTIN_ALPINE] 常量（用户编辑过的配置生效）。
+     * 按 id 解析 profile：从持久化列表找，找不到回退列表第一个，再兜底内置 Ubuntu（保证引擎始终可用）。
+     * 列表里持久化的 Ubuntu 覆盖项优先于 [ContainerProfile.BUILTIN_UBUNTU] 常量（用户编辑过的配置生效）。
      */
     private fun byId(id: String): ContainerProfile =
-        customProfiles.firstOrNull { it.id == id }
+        customProfiles.firstOrNull { it.id == ContainerProfile.normalizeId(id) }
+            ?: ContainerProfile.BUILTIN_UBUNTU.takeIf { ContainerProfile.normalizeId(id) == it.id }
             ?: customProfiles.firstOrNull()
-            ?: ContainerProfile.BUILTIN_ALPINE
+            ?: ContainerProfile.BUILTIN_UBUNTU
 
     private fun refreshDefaultProfile() {
         defaultProfileCache = byId(activeProfileId)

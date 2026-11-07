@@ -31,11 +31,11 @@ class SandboxRootViewModel @Inject constructor(
     ) { id, profiles ->
         val profile = profiles.firstOrNull { it.id == id }
             ?: profiles.firstOrNull()
-            ?: ContainerProfile.BUILTIN_ALPINE
+            ?: ContainerProfile.BUILTIN_UBUNTU
         containerInstaller.rootfsDirFor(profile)
     }.stateIn(
         viewModelScope,
         SharingStarted.Eagerly,
-        containerInstaller.rootfsDirFor(ContainerProfile.BUILTIN_ALPINE),
+        containerInstaller.rootfsDirFor(ContainerProfile.BUILTIN_UBUNTU),
     )
 }

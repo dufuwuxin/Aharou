@@ -6,7 +6,7 @@ description: "要在容器里初始化环境或装依赖时使用：首次进容
 
 # 容器初始化与依赖安装
 
-容器＝AI 执行命令的地方（PRoot + Alpine，aarch64）。装依赖优先走 App 自带流程，不要上来就手搓 `apk add`。
+容器是执行编译与验证命令的地方，内置 Ubuntu Base 24.04 LTS 原生 ARM64，PRoot 只处理系统调用与路径，不做跨架构转译。镜像只带基础系统，按项目选择安装所需工具链，不默认安装所有 SDK。编辑和定位优先用编辑器工具，装依赖先走 App 自带流程。
 
 ## 首次初始化
 
@@ -45,7 +45,7 @@ description: "要在容器里初始化环境或装依赖时使用：首次进容
 
 ## 换软件源
 
-换源菜单选项：`1) 自动探测（推荐）`（实测各镜像源可达性、自动跳过失效/被墙的）、`2~6)` 华为云 / 清华 tuna / 中科大 ustc / 腾讯云 / 阿里云、`0) 不换源`。换源前会备份原配置，失败自动恢复。内置 Alpine 的 rootfs 保持官方源，要国内源就在菜单里换。
+换源菜单选项：`1) 自动探测（推荐）`（实测各镜像源可达性、自动跳过失效/被墙的）、`2~6)` 华为云 / 清华 tuna / 中科大 ustc / 腾讯云 / 阿里云、`0) 不换源`。换源前会备份原配置，失败自动恢复。内置 Ubuntu Base 的 rootfs 保持官方源，要国内源就在菜单里换。
 
 ## 环境体检与补装
 
@@ -59,7 +59,7 @@ description: "要在容器里初始化环境或装依赖时使用：首次进容
 
 - **装软件报错**：容器内硬链接不可用导致。编辑容器 → proot 参数 → 加 `--link2symlink` → 保存 → 重进终端。用内置下载功能导入的镜像默认已带这个参数。
 - **方向键显示成 `^[[A`**：当前 shell 是 `sh`，没有行编辑能力。把 Shell 改成 `/bin/bash`（自带方向键、历史、补全）。
-- **重场景（Android / Flutter）**：会从国内镜像下 JDK、Android SDK（build-tools、platform-tools）、Flutter SDK，耗时长、占存储多。**建议在 Debian / Ubuntu 镜像里装**——内置 Alpine 用 musl libc，需额外处理。ARM64 会自动替换可执行的 `aapt2` 等原生二进制；**ARM64 容器只能构建 Flutter debug APK，release 包得走远程构建**。
+- **重场景（Android / Flutter）**：会从国内镜像下 JDK、Android SDK（build-tools、platform-tools）、Flutter SDK，耗时长、占存储多。使用原生 ARM64 Debian / Ubuntu，不能用 x86 工具加转译器代替。ARM64 会自动替换可执行的 `aapt2` 等原生二进制；**ARM64 容器只能构建 Flutter debug APK，release 包得走远程构建**。
 - **aapt2 覆盖配置别写进项目**：写到全局 `~/.gradle/gradle.properties`（`android.aapt2FromMavenOverride=...`），不要写进项目的 `gradle.properties`。
 - **adb 要装 backports 版**：仓库默认版本过旧、缺 `pair` 命令；`apt install -y -t bookworm-backports adb`。装在容器系统目录，**重装容器后要重装，配对记录也丢**。
 - 装好后新开终端会自动带上 `JAVA_HOME`、`ANDROID_HOME` 等环境变量；老终端里没有，别在旧会话里找不到就以为装失败。

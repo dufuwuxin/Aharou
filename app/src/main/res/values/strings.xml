@@ -704,7 +704,7 @@
     <string name="editor_show_whitespace">显示空白符号</string>
     <string name="editor_error_lens">行尾显示诊断提示</string>
     <string name="editor_language_extensions">语言扩展</string>
-    <string name="editor_language_extensions_desc">语言服务器一般已跟容器一起装好（Alpine 镜像），这里可以查看状态或补装。装上后打开对应文件会由它给出诊断（红/黄波浪线）。容器还没初始化时，先去终端页把容器跑起来。</string>
+    <string name="editor_language_extensions_desc">语言服务器一般已跟容器一起装好（Ubuntu ARM64 镜像），这里可以查看状态或补装。装上后打开对应文件会由它给出诊断（红/黄波浪线）。容器还没初始化时，先去终端页把容器跑起来。</string>
     <string name="editor_extension_installed">已安装 %1$s</string>
     <string name="editor_extension_installed_no_version">已安装</string>
     <string name="editor_extension_not_installed">未安装</string>
@@ -850,8 +850,8 @@
     <string name="container_custom_badge">自定义</string>
     <string name="container_ssh_badge">SSH</string>
     <string name="container_empty">暂无容器与镜像</string>
-    <string name="container_empty_desc">添加一个自定义镜像，或恢复内置 Alpine。</string>
-    <string name="container_restore_builtin">恢复内置 Alpine</string>
+    <string name="container_empty_desc">添加一个自定义镜像，或恢复内置 Ubuntu。</string>
+    <string name="container_restore_builtin">恢复内置 Ubuntu</string>
     <string name="container_health_section">环境体检</string>
     <string name="container_health_overall_healthy">全部正常</string>
     <string name="container_health_overall_warning">有需要注意的项</string>
@@ -3846,5 +3846,17 @@
     <string name="prompts_injection_keyword">关键词 %1$d</string>
     <string name="project_map_fit">适配全图</string>
     <string name="container_recommendation_title">开发容器怎么选</string>
-    <string name="container_recommendation_body">Alpine 保留为离线默认与备用。综合开发优先 Debian / Ubuntu；Arch / Manjaro 适合接受滚动更新的用户；Void 请选择 aarch64 glibc，在线条目须同步发布成功后才出现。各镜像使用独立容器，不混用 libc。</string>
+    <string name="container_recommendation_body">默认内置 Ubuntu 24.04 LTS ARM64，离线解压后按需安装开发工具。不再提供或启动 Alpine、x86 或 32 位 ARM 本地镜像，不使用跨架构转译；Debian 也是可选开发环境；Arch / Manjaro 适合接受滚动更新的用户；Void 请选择 aarch64 glibc，在线条目须同步发布成功后才出现。各镜像使用独立容器，不混用 libc。</string>
+    <string name="translation_title">离线自动翻译</string>
+    <string name="translation_description">自动将英文展示为中文；原消息、提示词、代码和执行参数不变。首次在 Wi-Fi 下下载语言模型，之后可断网使用。</string>
+    <string name="translation_model">英中离线语言模型</string>
+    <string name="translation_download">准备离线翻译模型</string>
+    <string name="translation_download_description">设为 true 后在 Wi-Fi 下下载或重试语言模型，不上传待翻译文本；读取始终为 false。</string>
+    <string name="translation_checking">正在检查本机模型</string>
+    <string name="translation_missing">尚未安装，点击在 Wi-Fi 下下载</string>
+    <string name="translation_downloading">正在准备模型，需要可用的 Wi-Fi</string>
+    <string name="translation_ready">模型已就绪，可离线翻译</string>
+    <string name="translation_failed">模型准备失败，点击重试；原文仍可阅读</string>
+    <string name="translation_preview">中文译文（仅预览，不会保存到原文）</string>
+    <string name="translation_attribution">译文由 Google 翻译端侧模型提供，仅供参考。</string>
 </resources>

@@ -580,7 +580,7 @@ private fun MemoryEntryRow(memory: Memory, onClick: () -> Unit) {
                 }
             }
             Text(
-                text = memory.description.ifBlank { stringResource(R.string.memory_entry_no_description) },
+                text = com.aharou.core.translation.rememberTranslatedText(memory.description.ifBlank { stringResource(R.string.memory_entry_no_description) }),
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 2,
@@ -647,6 +647,8 @@ private fun MemoryEditorPane(
                     singleLine = false,
                     maxLines = 30,
                 )
+                com.aharou.core.translation.TranslationPreview(description)
+                com.aharou.core.translation.TranslationPreview(content)
                 Spacer(modifier = Modifier.height(Spacing.md))
                 Button(
                     onClick = { onSave(description, content, false) },

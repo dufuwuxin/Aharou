@@ -40,7 +40,7 @@ class ContainerTreeRootProvider @Inject constructor(
      */
     private fun resolveActiveProfile(activeId: String, profiles: List<ContainerProfile>): ContainerProfile =
         profiles.firstOrNull { it.id == activeId }
-            ?: ContainerProfile.BUILTIN_ALPINE.takeIf { it.id == activeId }
+            ?: ContainerProfile.BUILTIN_UBUNTU.takeIf { it.id == activeId }
             ?: profiles.firstOrNull()
-            ?: ContainerProfile.BUILTIN_ALPINE
+            ?: ContainerProfile.BUILTIN_UBUNTU
 }

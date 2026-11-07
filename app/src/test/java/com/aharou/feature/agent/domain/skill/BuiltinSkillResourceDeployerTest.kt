@@ -15,7 +15,7 @@ class BuiltinSkillResourceDeployerTest {
     private val deployer = BuiltinSkillResourceDeployer(source, profiles, configs, connection)
     private val profile = mockk<ContainerProfile> { every { mode } returns ExecutionMode.REMOTE_SSH; every { id } returns "remote" }
     @Test fun localSkillLoadingDoesNotCopyOrConnect() = runBlocking {
-        every { profiles.forWorkspace("/w") } returns ContainerProfile.BUILTIN_ALPINE
+        every { profiles.forWorkspace("/w") } returns ContainerProfile.BUILTIN_UBUNTU
         deployer.ensure("security-audit", "/w")
         verify(exactly = 0) { source.resourceFiles(any()) }
         coVerify(exactly = 0) { connection.connectTarget(any()) }

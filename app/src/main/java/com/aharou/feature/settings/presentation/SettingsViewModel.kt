@@ -536,9 +536,9 @@ class SettingsViewModel @Inject constructor(
     private val _customProfiles = MutableStateFlow<List<ContainerProfile>>(emptyList())
     val customProfiles: StateFlow<List<ContainerProfile>> = _customProfiles.asStateFlow()
 
-    /** 全部 profile（内置 Alpine 也作为普通一项持久化在列表里，首次启动自动写入）。 */
+    /** 全部 profile（内置 Ubuntu 也作为普通一项持久化在列表里，首次启动自动写入）。 */
     val profiles: StateFlow<List<ContainerProfile>> = customProfiles
-        .stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.Eagerly, listOf(ContainerProfile.BUILTIN_ALPINE))
+        .stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.Eagerly, listOf(ContainerProfile.BUILTIN_UBUNTU))
 
     /** 各容器已识别的系统类型（profile id → os id），UI 据此显示对应系统图标。 */
     val containerOsMap: StateFlow<Map<String, String>> = containerOsDetector.osMap
@@ -1251,7 +1251,7 @@ class SettingsViewModel @Inject constructor(
     /** 把 [id] 应用为当前激活 profile：持久化 + 按 mode 切执行模式。找不到时回退列表第一个，再兜底内置。 */
     private suspend fun applyProfile(id: String) {
         val profile = _customProfiles.value.firstOrNull { it.id == id }
-            ?: ContainerProfile.BUILTIN_ALPINE.takeIf { it.id == id }
+            ?: ContainerProfile.BUILTIN_UBUNTU.takeIf { it.id == id }
             ?: _customProfiles.value.firstOrNull()
             ?: return
         containerSettingsRepository.setActiveProfile(profile.id)
@@ -1299,7 +1299,7 @@ class SettingsViewModel @Inject constructor(
         if (_containerReset.value != null) return
         viewModelScope.launch {
             if (profile.isBuiltin) {
-                containerSettingsRepository.upsertCustomProfile(ContainerProfile.BUILTIN_ALPINE)
+                containerSettingsRepository.upsertCustomProfile(ContainerProfile.BUILTIN_UBUNTU)
             }
             withResetProgress(profile) { onProgress ->
                 containerInstaller.resetRootfs(profile, onProgress)
@@ -1336,10 +1336,10 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    /** 空态恢复：把内置 Alpine 默认配置重新加回列表。 */
+    /** 空态恢复：把内置 Ubuntu 默认配置重新加回列表。 */
     fun restoreBuiltinAlpine() {
         viewModelScope.launch {
-            containerSettingsRepository.upsertCustomProfile(ContainerProfile.BUILTIN_ALPINE)
+            containerSettingsRepository.upsertCustomProfile(ContainerProfile.BUILTIN_UBUNTU)
         }
     }
 
@@ -1370,13 +1370,13 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    /** 删除容器 profile（内置 Alpine 也可删，删光后由空态恢复），连带清理本地 rootfs。 */
+    /** 删除容器 profile（内置 Ubuntu 也可删，删光后由空态恢复），连带清理本地 rootfs。 */
     fun deleteContainerProfile(profile: ContainerProfile) {
         viewModelScope.launch {
             containerSettingsRepository.deleteCustomProfile(profile.id)
             cleanRootfsWithProgress(profile)
             if (_activeProfileId.value == profile.id) {
-                // 删除的是当前激活项：切到剩余第一个；列表空则回退内置 id（引擎 Alpine 兜底）
+                // 删除的是当前激活项：切到剩余第一个；列表空则回退内置 id（引擎 Ubuntu 兜底）
                 val remaining = _customProfiles.value.filterNot { it.id == profile.id }
                 applyProfile(remaining.firstOrNull()?.id ?: ContainerProfile.BUILTIN_ID)
             }

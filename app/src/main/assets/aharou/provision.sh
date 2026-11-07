@@ -8,8 +8,8 @@
 # 由 App 启动时提取到 ~/.aicode/provision.sh（容器内 /root/.aicode/provision.sh，经 -b 绑定可见）；
 # 公共能力（包管理器探测/包名映射/版本探测/换源/场景）在 lib/env-common.sh，与本脚本一并提取。
 # 修改包清单/安装逻辑/镜像源后，需同步在 LinuxContainerEngine.PROVISION_VERSION 上 +1 触发存量设备重跑。
-# 注意：apk 源分支 v3.24 需与 assets 内 alpine-rootfs 的 Alpine 分支一致（见 ContainerInstaller.ROOTFS_ASSET_VERSION）。
-# 不用 ContainerInstaller.INSTALL_VERSION 对照：那是「是否需要重装」的标记，刻意与 assets 的 Alpine 版本解耦。
+# 默认内置镜像为 Ubuntu 24.04 LTS ARM64；以下包管理器分支按实际环境识别，
+# 保留多发行版适配，不将其它发行版的软件源混入默认 Ubuntu。
 
 PROVISION_VERSION="provision-script-v15"
 PROVISION_SKIPPED="provision-script-skipped"

@@ -30,9 +30,9 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * 负责把打进 assets 的 Alpine rootfs 与 PRoot 二进制安装到 App 私有目录。
+ * 负责把打进 assets 的原生 ARM64 Ubuntu rootfs 与 PRoot 二进制安装到 App 私有目录。
  *
- * 自动根据设备架构（ARM / x86）加载对应资源。targetSdk 锁定 28，数据目录文件才可执行（见 build.gradle.kts）。
+ * 仅支持原生 ARM64 客体；PRoot 使用 nativeLibraryDir 中的既有二进制，不进行 ISA 转译。
  */
 @Singleton
 class ContainerInstaller @Inject constructor(
@@ -229,33 +229,9 @@ class ContainerInstaller @Inject constructor(
             }
         }
 
-        /**
-         * **重装触发器**——它的值是「已安装」标记（`.installed`）的唯一判据（见 [isInstalled]），
-         * **刻意与 assets 里放的 Alpine 版本解耦**。
-         *
-         * 值一变，所有已装用户下次进容器就会被整体清空重装：容器里 `apk add` 装的包、初始化菜单装的
-         * Android SDK / Flutter SDK / JDK 全都没了（几百 MB 重新下载），而且清理前没有任何预警。
-         * 所以：
-         * - **只有安装逻辑本身变化才递增**：换 proot、改解压流程、换 apk 源分支；
-         * - **assets 里换成新的 Alpine 补丁版时不要动它**。新装用户自然解压到新基线，已装用户保持
-         *   原样不受影响，想换新基线由用户主动「重置容器」触发（重置确认框已写明会删除容器内已装工具）。
-         *
-         * 与 assets 实际版本的对应关系见 [ROOTFS_ASSET_VERSION]；容器内真实版本以 `/etc/alpine-release`
-         * 为准，不要靠本标记推断。
-         *
-         * 内置 rootfs 固定在 3.24 分支，apk 源分支也据此固定（见 assets/aharou/lib/env-common.sh 的兜底 v3.24）。
-         *
-         * 3.23 起 Alpine 的 apk-tools 是 3.x：它用 memfd_create + execveat 跑包脚本，在 proot 下
-         * 要靠 proot 对 `lib/apk/exec/` 的 memfd 过滤兜底（termux/proot-distro#595）。换 rootfs 时
-         * 别把 proot 退到 5.1.107-69 之前，否则 apk 装包会炸。
-         */
-        private const val INSTALL_VERSION = "alpine-3.24.2-v7"
-
-        /**
-         * assets 里实际打包的 Alpine 版本，**仅用于日志与排查**，不参与是否需要重装的判定。
-         * 换 assets 时同步更新这里，让日志里「重装标记」与「实际内容版本」都有据可查。
-         */
-        private const val ROOTFS_ASSET_VERSION = "3.24.2"
+        // A separate destination keeps the retired rootfs intact until Ubuntu is verified.
+        private const val INSTALL_VERSION = "ubuntu-24.04-arm64-v1"
+        private const val ROOTFS_ASSET_VERSION = "24.04.5"
 
         /** 删 rootfs 时每删这么多条目回调一次进度（太密会刷爆 UI 状态流）。 */
         private const val DELETE_PROGRESS_STEP = 2000
@@ -269,11 +245,11 @@ class ContainerInstaller @Inject constructor(
 
     // 故意用中性的 .bin 后缀：AGP 的 asset 合并会把 .tar.gz/.tgz 当归档自动解压并改名，
     // 导致运行时 open("...tar.gz") 找不到文件。.bin 让它当普通二进制原样打包。
-    val ASSET_ROOTFS: String get() = "$ASSET_DIR/alpine-rootfs.bin"
+    val ASSET_ROOTFS: String get() = "$ASSET_DIR/ubuntu-rootfs.bin"
 
     /** rootfs 解压根目录 */
     val rootfsDir: File
-        get() = File(context.filesDir, "rootfs")
+        get() = File(context.filesDir, "rootfs_ubuntu")
 
     /**
      * AI 配置数据根目录（skill 指令 + MCP 配置），固定在 app 私有 filesDir。
@@ -342,9 +318,14 @@ class ContainerInstaller @Inject constructor(
     /** 检查 rootfs 是否已按当前版本解压就绪（proot 随 APK 安装，不属于安装状态） */
     fun isInstalled(): Boolean {
         if (!rootfsDir.isDirectory) return false
-        val marker = installedMarker
-        return marker.exists() && marker.readText().trim() == INSTALL_VERSION
+        return isBuiltinCommitted() && !File(context.filesDir, "rootfs").exists() &&
+            !File(context.filesDir, "rootfs_ubuntu.previous").exists()
     }
+
+    private fun isBuiltinCommitted(): Boolean = runCatching {
+        installedMarker.isFile && installedMarker.readText().trim() == INSTALL_VERSION &&
+            runCatching { NativeArm64Rootfs.requireUbuntu2404(rootfsDir) }.isSuccess
+    }.getOrDefault(false)
 
     /**
      * 安装互斥。
@@ -373,42 +354,27 @@ class ContainerInstaller @Inject constructor(
      * Mutex 不可重入，所以锁只加在入口、主体走这里；profile 入口也复用这一段。
      */
     private suspend fun installBuiltinRootfs(onProgress: (ContainerInitState) -> Unit) {
-        if (isInstalled()) {
-            FileLogger.d(TAG, "rootfs 已是当前版本（$INSTALL_VERSION），跳过解压")
+        val migration = BuiltinContainerMigration(context.filesDir)
+        if (isBuiltinCommitted()) {
+            migration.finishCleanup()
             return
         }
-
         val startedAt = System.currentTimeMillis()
-        FileLogger.i(
-            TAG,
-            "开始安装容器 rootfs（标记版本 $INSTALL_VERSION，asset 内 Alpine $ROOTFS_ASSET_VERSION，" +
-                "asset=$ASSET_ROOTFS，目标=${rootfsDir.absolutePath}，" +
-                "父目录可用空间=${usableSpaceMb(rootfsDir.parentFile)}MB）"
-        )
+        FileLogger.i(TAG, "Installing Ubuntu $ROOTFS_ASSET_VERSION native ARM64 asset=$ASSET_ROOTFS")
         try {
-            // 版本不匹配时清掉旧的，保证干净安装（大 rootfs 删一遍很慢，带进度报给界面）
-            purgeRootfs(rootfsDir, installedMarker) { onProgress(ContainerInitState.CleaningOldRootfs(it)) }
-            rootfsDir.mkdirs()
-            if (!rootfsDir.isDirectory) FileLogger.e(TAG, "rootfs 目录创建失败：${rootfsDir.absolutePath}")
-
-            val entries = extractRootfs(onProgress)
-            configureResolvConf()
-            applySourcePreferences(rootfsDir)
-            prootTmpDir.mkdirs()
-            verifyRootfsReady(rootfsDir)
-            installedMarker.writeText(INSTALL_VERSION)
-            FileLogger.i(
-                TAG,
-                "容器 rootfs 安装完成：$entries 个条目，耗时 ${System.currentTimeMillis() - startedAt}ms，" +
-                    "标记=${installedMarker.absolutePath}"
-            )
+            val stage = migration.prepareStage()
+            val entries = context.assets.open(ASSET_ROOTFS).use {
+                extractRootfsTo(stage, it, CompressedFormat.GZIP, onProgress)
+            }
+            NativeArm64Rootfs.requireUbuntu2404(stage)
+            configureResolvConf(stage)
+            applySourcePreferences(stage)
+            File(stage, "tmp").mkdirs()
+            verifyRootfsReady(stage)
+            migration.commit(INSTALL_VERSION) { NativeArm64Rootfs.requireUbuntu2404(it) }
+            FileLogger.i(TAG, "Ubuntu rootfs installed: $entries entries, ${System.currentTimeMillis() - startedAt}ms")
         } catch (e: Exception) {
-            FileLogger.e(
-                TAG,
-                "容器 rootfs 安装失败（耗时 ${System.currentTimeMillis() - startedAt}ms，" +
-                    "剩余空间=${usableSpaceMb(rootfsDir.parentFile)}MB）",
-                e
-            )
+            FileLogger.e(TAG, "Ubuntu installation failed; existing homes retained (free=${usableSpaceMb(rootfsDir.parentFile)}MB)", e)
             throw e
         }
     }
@@ -423,7 +389,7 @@ class ContainerInstaller @Inject constructor(
      * 目录隔离——内置与自定义互不共享、互不删除，切回内置时其 rootfs 原封不动。
      */
     fun rootfsDirFor(profile: ContainerProfile): File =
-        if (profile.isBuiltin) rootfsDir
+        if (profile.normalizeBuiltin().isBuiltin) rootfsDir
         else File(context.filesDir, "rootfs_${profile.id}")
 
     /** 自定义镜像的已安装标记（独立于内置 .installed，避免混淆）。 */
@@ -433,9 +399,10 @@ class ContainerInstaller @Inject constructor(
     /** 按 [profile] 判断是否已安装就绪：内置走现有版本校验，自定义本地看目录与标记，远程 SSH 恒就绪。 */
     fun isInstalledFor(profile: ContainerProfile): Boolean =
         when {
-            profile.isBuiltin -> isInstalled()
+            profile.normalizeBuiltin().isBuiltin -> isInstalled()
             profile.rootfsSource is RootfsSource.RemoteSsh -> true
-            else -> rootfsDirFor(profile).isDirectory && customInstalledMarker(profile).exists()
+            else -> rootfsDirFor(profile).isDirectory && customInstalledMarker(profile).exists() &&
+                runCatching { NativeArm64Rootfs.requireSupported(rootfsDirFor(profile), profile.shellPath) }.isSuccess
         }
 
     /**
@@ -457,7 +424,7 @@ class ContainerInstaller @Inject constructor(
             // 等锁期间别的协程可能已经把同一个 rootfs 装好了，重新判一次，别重复解压。
             if (isInstalledFor(profile)) return@withLock
 
-            if (profile.isBuiltin) {
+            if (profile.normalizeBuiltin().isBuiltin) {
                 installBuiltinRootfs(onProgress)
                 return@withLock
             }
@@ -474,13 +441,17 @@ class ContainerInstaller @Inject constructor(
         profile: ContainerProfile,
         onProgress: (ContainerInitState) -> Unit
     ) {
-        val dest = rootfsDirFor(profile)
-        FileLogger.i(TAG, "安装自定义容器 rootfs：${profile.id} -> ${dest.absolutePath}")
-        purgeRootfs(dest, customInstalledMarker(profile)) { onProgress(ContainerInitState.CleaningOldRootfs(it)) }
-        dest.mkdirs()
+        val target = rootfsDirFor(profile)
+        if (Files.exists(target.toPath(), LinkOption.NOFOLLOW_LINKS)) {
+            NativeArm64Rootfs.requireSupported(target, profile.shellPath)
+            throw IOException("Existing rootfs data retained; reset explicitly or import into a new profile")
+        }
+        val dest = File(target.parentFile, "${target.name}.stage")
+        purgeRootfs(dest, File(dest, ".installed_custom")) { onProgress(ContainerInitState.CleaningOldRootfs(it)) }
+        if (!dest.mkdirs()) throw IOException("Cannot create rootfs staging directory")
 
         when (val src = profile.rootfsSource) {
-            is RootfsSource.Asset -> context.assets.open("${ASSET_DIR}/${src.path}").use {
+            is RootfsSource.Asset -> context.assets.open(ASSET_ROOTFS).use {
                 extractRootfsTo(dest, it, CompressedFormat.GZIP, onProgress)
             }
             is RootfsSource.LocalFile -> {
@@ -493,11 +464,13 @@ class ContainerInstaller @Inject constructor(
             }
             is RootfsSource.RemoteSsh -> { /* 无本地 rootfs，上面已提前 return */ }
         }
+        NativeArm64Rootfs.requireSupported(dest, profile.shellPath)
         configureResolvConf(dest)
-        prootTmpDirFor(profile).mkdirs()
+        File(dest, "tmp").mkdirs()
         repairRootfsCompatibility(dest)
         verifyRootfsReady(dest)
-        customInstalledMarker(profile).writeText("custom")
+        File(dest, ".installed_custom").writeText("custom")
+        if (!dest.renameTo(target)) throw IOException("Cannot commit native rootfs; original data retained")
         FileLogger.i(TAG, "自定义容器 rootfs 安装完成：${profile.id}")
     }
 
@@ -592,21 +565,38 @@ class ContainerInstaller @Inject constructor(
      * 失败时抛的文案走资源，由 UI 层展示。
      */
     private suspend fun verifyRootfsReady(rootfs: File) {
-        val doctor = containerDoctor?.get() ?: return
-        when (val verdict = doctor.verifyRootfs(rootfs)) {
-            RootfsVerdict.Ready -> return
-            is RootfsVerdict.LayoutMissing -> throw IllegalStateException(
-                context.getString(
-                    R.string.container_verify_layout_missing,
-                    verdict.entries.joinToString("、")
-                )
-            )
-            is RootfsVerdict.BootFailed -> throw IllegalStateException(
-                context.getString(R.string.container_verify_boot_failed, verdict.detail)
-            )
-            is RootfsVerdict.BootTimeout -> throw IllegalStateException(
-                context.getString(R.string.container_verify_boot_timeout, verdict.timeoutMs / 1000)
-            )
+        NativeArm64Rootfs.requireSupported(rootfs)
+        repairRootfsCompatibility(rootfs)
+        // JVM installer fixtures have no native Android runtime; production always injects the doctor.
+        if (containerDoctor == null) return
+        val output = File(rootfs, "tmp/.native-boot-probe.log")
+        val builder = ProcessBuilder(
+            prootBin.absolutePath, "--link2symlink", "--kill-on-exit", "-0",
+            "-r", rootfs.absolutePath, "-b", "/dev", "-b", "/proc", "-b", "/sys",
+            "-w", "/", "/bin/sh", "-c", "exit 0"
+        ).redirectErrorStream(true).redirectOutput(output)
+        builder.environment().apply {
+            put("PROOT_LOADER", prootLoader.absolutePath)
+            put("PROOT_TMP_DIR", File(rootfs, "tmp").absolutePath)
+            put("LD_LIBRARY_PATH", "${prootLibDir.absolutePath}:/system/lib64:/system/lib")
+        }
+        val process = builder.start()
+        try {
+            if (!process.waitFor(15, java.util.concurrent.TimeUnit.SECONDS)) {
+                throw IOException(context.getString(R.string.container_verify_boot_timeout, 15))
+            }
+            if (process.exitValue() != 0) {
+                val detail = output.reader().use { reader ->
+                    val chars = CharArray(1000)
+                    val count = reader.read(chars)
+                    if (count > 0) String(chars, 0, count) else "exit=${process.exitValue()}"
+                }
+                throw IOException(context.getString(R.string.container_verify_boot_failed, detail))
+            }
+        } finally {
+            process.destroy()
+            if (process.isAlive) process.destroyForcibly()
+            output.delete()
         }
     }
 
@@ -714,7 +704,7 @@ class ContainerInstaller @Inject constructor(
     }
 
     /**
-     * 重置内置 Alpine 容器：删除其 rootfs 目录（含 .installed / .provisioned 标记），
+     * 重置内置 Ubuntu 容器：删除其 rootfs 目录（含 .installed / .provisioned 标记），
      * 下次 [ensureInstalled] 会重新解压；进入终端时由初始化菜单重新引导安装。供内置镜像「重置」按钮调用。
      */
     suspend fun resetBuiltinRootfs(onProgress: (Int) -> Unit = {}) = withContext(Dispatchers.IO) {
@@ -800,19 +790,12 @@ class ContainerInstaller @Inject constructor(
     /** 从 assets 提取环境工具（aicode 命令 + 共享库）到 ~/.aharou/{bin,lib} 并赋可执行位。 */
     fun extractEnvTool() = extractEnvTool(context)
 
-    /** 解压 alpine-minirootfs.tar.gz，正确处理目录/文件/符号链接/硬链接与权限位；返回解压条目数。 */
-    private fun extractRootfs(onProgress: (ContainerInitState) -> Unit): Int {
-        context.assets.open(ASSET_ROOTFS).use { rawIn ->
-            return extractRootfsTo(rootfsDir, rawIn, CompressedFormat.GZIP, onProgress)
-        }
-    }
-
-    /** 镜像压缩格式：内置 Alpine 用 gzip，用户导入的可能是 gzip 或 xz。 */
+    /** 镜像压缩格式：内置 Ubuntu 用 gzip，用户导入的可能是 gzip 或 xz。 */
     enum class CompressedFormat { GZIP, XZ }
 
     /**
      * 把 tar.gz / tar.xz 流解压到 [destDir]，正确处理目录/文件/符号链接/硬链接与权限位。
-     * 内置 Alpine（[extractRootfs] 传 assets 流）与用户自定义镜像（[installRootfsIfNeed] 传 content uri 流）共用。
+     * 内置 Ubuntu（assets 流）与用户自定义镜像（[installRootfsIfNeed] 传 content uri 流）共用。
      */
     fun extractRootfsTo(
         destDir: File,

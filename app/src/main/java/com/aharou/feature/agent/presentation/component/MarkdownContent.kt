@@ -228,6 +228,27 @@ internal fun MarkdownContent(
     modifier: Modifier = Modifier,
     cache: MarkdownRenderCache? = null,
     compact: Boolean = false,
+    loading: (@Composable () -> Unit)? = null,
+    lazyScroll: Boolean = false,
+    cacheEnabled: Boolean = true,
+    retainState: Boolean = true,
+    largeContentGuard: Boolean = true,
+) {
+    RenderedMarkdownContent(
+        text = com.aharou.core.translation.rememberTranslatedText(text),
+        color = color, modifier = modifier, cache = cache, compact = compact,
+        loading = loading, lazyScroll = lazyScroll, cacheEnabled = cacheEnabled,
+        retainState = retainState, largeContentGuard = largeContentGuard,
+    )
+}
+
+@Composable
+private fun RenderedMarkdownContent(
+    text: String,
+    color: Color,
+    modifier: Modifier = Modifier,
+    cache: MarkdownRenderCache? = null,
+    compact: Boolean = false,
     /** 解析未完成（Loading）时显示的内容；为 null 时回退显示原文纯文本（聊天流式场景）。 */
     loading: (@Composable () -> Unit)? = null,
     /** 长文本虚拟化渲染：正文改用 LazyColumn 逐块渲染（调用方需配合 heightIn 等有限高度约束

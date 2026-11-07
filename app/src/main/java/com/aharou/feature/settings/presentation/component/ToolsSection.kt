@@ -357,14 +357,14 @@ private fun ToolRow(
             Spacer(modifier = Modifier.width(Spacing.md))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = entry.name,
+                    text = com.aharou.core.translation.rememberTranslatedText(entry.name),
                     style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
                     color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    text = entry.description.ifBlank { stringResource(R.string.tools_no_description) },
+                    text = com.aharou.core.translation.rememberTranslatedText(entry.description.ifBlank { stringResource(R.string.tools_no_description) }),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 2,

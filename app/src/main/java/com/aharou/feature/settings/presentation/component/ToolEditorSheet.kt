@@ -204,6 +204,7 @@ internal fun ToolEditorSheet(
                     enabled = !saving,
                     supportingText = { Text(stringResource(R.string.tools_description_hint)) }
                 )
+                com.aharou.core.translation.TranslationPreview(description)
                 ParametersEditor(
                     text = parametersText,
                     onTextChange = { parametersText = it },

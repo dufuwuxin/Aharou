@@ -356,7 +356,7 @@ private fun SubAgentRow(
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Text(
-                        text = entry.name,
+                        text = com.aharou.core.translation.rememberTranslatedText(entry.name),
                         style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
                         color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 1,
@@ -380,7 +380,7 @@ private fun SubAgentRow(
                     }
                 }
                 Text(
-                    text = entry.description.ifBlank { stringResource(R.string.mcp_no_description) },
+                    text = com.aharou.core.translation.rememberTranslatedText(entry.description.ifBlank { stringResource(R.string.mcp_no_description) }),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,

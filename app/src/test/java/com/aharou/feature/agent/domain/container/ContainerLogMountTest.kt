@@ -13,7 +13,7 @@ class ContainerLogMountTest {
     @get:Rule
     val temporary = TemporaryFolder()
 
-    private fun profile() = ContainerProfile.BUILTIN_ALPINE.copy(id = "test-profile")
+    private fun profile() = ContainerProfile.BUILTIN_UBUNTU.copy(id = "test-profile")
 
     @Test
     fun environmentUsesHostWorkspaceIdentity() {

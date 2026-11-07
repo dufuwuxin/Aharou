@@ -27,8 +27,8 @@ import javax.inject.Singleton
  *
  * 这样文件类工具（read/write/edit）无需进 PRoot 即可读写整个容器文件系统，与 `execute_command` 看到的一致。
  *
- * **profile 感知**：rootfs 目录随当前选中 profile 变化（内置 Alpine 用 filesDir/rootfs，自定义用 filesDir/rootfs_<id>）。
- * [currentProfile] 缓存自 [ContainerSettingsRepository]，避免同步读 DataStore；启动首帧为内置 Alpine，等同改动前。
+ * **profile 感知**：rootfs 目录随当前选中 profile 变化（内置 Ubuntu 用 filesDir/rootfs，自定义用 filesDir/rootfs_<id>）。
+ * [currentProfile] 缓存自 [ContainerSettingsRepository]，避免同步读 DataStore；启动首帧为内置 Ubuntu，等同改动前。
  *
  * 用本映射器统一：
  * - 工具入参（AI 给的路径）经 [toHostFile] 落到宿主真实文件；
@@ -64,12 +64,12 @@ class WorkspacePathMapper @Inject constructor(
     }
 
     /**
-     * 当前选中的 profile（缓存，避免同步读 DataStore）。启动首帧为内置 Alpine，等同改动前。
+     * 当前选中的 profile（缓存，避免同步读 DataStore）。启动首帧为内置 Ubuntu，等同改动前。
      * profile 切换后由 flow collector 更新；切换瞬间与引擎缓存可能短暂不一致，但 ensureInstalled 与文件工具
      * 调用之间有自然顺序，实际不影响。
      */
     @Volatile
-    private var currentProfile: ContainerProfile = ContainerProfile.BUILTIN_ALPINE
+    private var currentProfile: ContainerProfile = ContainerProfile.BUILTIN_UBUNTU
 
     init {
         CoroutineScope(Dispatchers.IO).launch {
@@ -82,8 +82,9 @@ class WorkspacePathMapper @Inject constructor(
     private suspend fun resolveProfile(id: String): ContainerProfile {
         val profiles = containerSettingsRepository.customProfilesFlow.first()
         return profiles.firstOrNull { it.id == id }
+            ?: ContainerProfile.BUILTIN_UBUNTU.takeIf { ContainerProfile.normalizeId(id) == it.id }
             ?: profiles.firstOrNull()
-            ?: ContainerProfile.BUILTIN_ALPINE
+            ?: ContainerProfile.BUILTIN_UBUNTU
     }
 
     /**

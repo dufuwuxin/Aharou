@@ -52,7 +52,7 @@ class ContainerImageCatalogParseTest {
     fun `未知字段被忽略_带新字段的清单照常解析`() {
         val json = """
             {"sources":{"s":{"name":{"zh":"源"},"distros":{"alpine":"https://x"}}},
-             "images":[{"id":"a-1","name":"A","version":"1","path":"p","eol":"2030-01-01",
+             "images":[{"id":"a-1","name":"A","version":"1","path":"p","abiNames":{"arm64":"arm64"},"eol":"2030-01-01",
                         "futureField":42,"nested":{"k":"v"}}]}
         """.trimIndent()
         val data = ContainerImageCatalog.parseContainerImageCatalog(json)!!
@@ -64,12 +64,30 @@ class ContainerImageCatalogParseTest {
 
     @Test
     fun `缺EOL字段的旧清单_按无数据处理且展示名不变`() {
-        val json = """{"sources":{},"images":[{"id":"x","name":"X","version":"1.2","path":"p"}]}"""
+        val json = """{"sources":{},"images":[{"id":"x","name":"X","version":"1.2","path":"p","abiNames":{"arm64":"arm64"}}]}"""
         val entry = ContainerImageCatalog.parseContainerImageCatalog(json)!!.images.single()
         assertNull(entry.eol)
         assertNull(entry.supportEnds)
         assertEquals(ContainerImageEolStatus.NO_DATA, entry.eolStatus(LocalDate.of(2026, 10, 20)))
         assertEquals("X 1.2", entry.displayLabel())
+    }
+
+    @Test
+    fun `历史网络和磁盘清单均退役Alpine及异构架构`() {
+        val data = ContainerImageCatalog.parseContainerImageCatalog("""
+            {"sources":{"official":{"distros":{"alpine":"https://x/alpine","ubuntu":"https://x/ubuntu"}}},
+             "images":[
+               {"id":"alpine-1","name":"Alpine","version":"1","distro":"alpine","path":"p","abiNames":{"arm64":"aarch64"}},
+               {"id":"wrong","name":"Wrong","version":"1","path":"p","abiNames":{"x86_64":"amd64"}},
+               {"id":"missing","name":"Missing","version":"1","path":"p"},
+               {"id":"u","name":"Ubuntu","version":"24.04","distro":"ubuntu","path":"{abi}.tar.gz",
+                "abiNames":{"arm64":"arm64","x86_64":"amd64","arm":"armhf"},
+                "sha256ByAbi":{"arm64":"unchanged","x86_64":"retired"}}]}
+        """.trimIndent())!!
+        assertEquals(listOf("u"), data.images.map { it.id })
+        assertEquals(mapOf("arm64" to "arm64"), data.images.single().abiNames)
+        assertEquals(mapOf("arm64" to "unchanged"), data.images.single().sha256ByAbi)
+        assertEquals(setOf("ubuntu"), data.sources.getValue("official").distros.keys)
     }
 
     @Test
@@ -79,7 +97,10 @@ class ContainerImageCatalogParseTest {
         assertNotNull("内置清单必须能解析", data)
 
         val images = data!!.images
-        assertTrue("内置清单条目数应 ≥ 12，实际 ${images.size}", images.size >= 12)
+        assertEquals(setOf("ubuntu-20.04", "ubuntu-22.04", "ubuntu-24.04", "ubuntu-25.10",
+            "ubuntu-26.04", "ubuntu-26.10", "debian-12", "debian-13", "arch-lite", "manjaro-lite"),
+            images.map { it.id }.toSet())
+        assertTrue(images.all { it.distro != "alpine" && it.abiNames.keys == setOf("arm64") })
         assertEquals("条目 id 必须唯一", images.size, images.map { it.id }.distinct().size)
 
         for (entry in images) {

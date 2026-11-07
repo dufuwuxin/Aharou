@@ -364,6 +364,7 @@ dependencies {
     // 协程
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
+    implementation("com.google.mlkit:translate:17.0.3")
 
     // Kotlin 序列化
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.1")

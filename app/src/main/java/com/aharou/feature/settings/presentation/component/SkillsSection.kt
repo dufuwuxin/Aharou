@@ -411,7 +411,7 @@ private fun SkillRowActionsSheet(
             verticalArrangement = Arrangement.spacedBy(Spacing.sm)
         ) {
             Text(
-                text = entry.name,
+                text = com.aharou.core.translation.rememberTranslatedText(entry.name),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurface,
@@ -487,7 +487,7 @@ private fun SkillRowContent(
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Text(
-                    text = entry.name,
+                    text = com.aharou.core.translation.rememberTranslatedText(entry.name),
                     style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
                     color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
@@ -509,7 +509,7 @@ private fun SkillRowContent(
                 }
             }
             Text(
-                text = entry.description.ifBlank { stringResource(R.string.mcp_no_description) },
+                text = com.aharou.core.translation.rememberTranslatedText(entry.description.ifBlank { stringResource(R.string.mcp_no_description) }),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,

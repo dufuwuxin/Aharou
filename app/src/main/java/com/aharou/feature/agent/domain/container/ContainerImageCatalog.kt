@@ -144,6 +144,28 @@ data class ContainerImageCatalogData(
     val images: List<ContainerImageEntry> = emptyList()
 )
 
+private val NON_NATIVE_IMAGE = Regex("(?i)(x86|amd64|i[3-6]86|armhf|armv[4-7]|arm32)")
+
+private fun ContainerImageEntry.supportsNativeArm64(): Boolean =
+    !listOf(id, name, distro, path).any { it.contains("alpine", ignoreCase = true) || NON_NATIVE_IMAGE.containsMatchIn(it) } &&
+        abiNames[ContainerImageCatalog.CURRENT_ABI] in setOf("arm64", "aarch64", "arm64v8")
+
+private fun ContainerImageCatalogData.nativeArm64Only(): ContainerImageCatalogData = copy(
+    sources = sources.mapValues { (_, source) ->
+        source.copy(distros = source.distros.filter { (distro, url) ->
+            !distro.contains("alpine", ignoreCase = true) && !url.contains("alpine", ignoreCase = true) &&
+                !NON_NATIVE_IMAGE.containsMatchIn(url)
+        })
+    },
+    images = images.filter { it.supportsNativeArm64() }.map { entry ->
+        entry.copy(
+            abiNames = entry.abiNames.filterKeys { it == ContainerImageCatalog.CURRENT_ABI },
+            sha256ByAbi = entry.sha256ByAbi.filterKeys { it == ContainerImageCatalog.CURRENT_ABI },
+            paths = entry.paths.filterValues { !NON_NATIVE_IMAGE.containsMatchIn(it) && !it.contains("alpine", ignoreCase = true) }
+        )
+    }
+)
+
 /**
  * 可下载镜像目录：读取顺序「内存缓存 -> 磁盘已下载文件 -> 内置 assets」。
  *
@@ -252,10 +274,12 @@ class ContainerImageCatalog @Inject constructor(
 
     /** 当前设备架构下，[entry] 指定源的完整下载 URL；源/发行版/架构缺失返回 null。 */
     fun urlFor(entry: ContainerImageEntry, sourceId: String, abi: String): String? {
+        if (abi != CURRENT_ABI || !entry.supportsNativeArm64()) return null
         val prefix = data.sources[sourceId]?.distros?.get(entry.distro)
             ?.trimEnd('/')?.takeIf { it.isNotEmpty() } ?: return null
         val abiName = entry.abiNames[abi] ?: return null
         val path = entry.paths[sourceId] ?: entry.path
+        if (NON_NATIVE_IMAGE.containsMatchIn(path) || path.contains("alpine", ignoreCase = true)) return null
         return "$prefix/$path".replace("{abi}", abiName)
     }
 
@@ -276,7 +300,7 @@ class ContainerImageCatalog @Inject constructor(
         internal fun parseContainerImageCatalog(raw: String?): ContainerImageCatalogData? {
             if (raw.isNullOrBlank()) return null
             return runCatching {
-                json.decodeFromString<ContainerImageCatalogData>(raw)
+                json.decodeFromString<ContainerImageCatalogData>(raw).nativeArm64Only()
             }.getOrNull()
         }
 

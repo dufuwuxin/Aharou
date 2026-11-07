@@ -147,7 +147,6 @@ enum class SettingsSection(@param:StringRes val titleRes: Int) {
     SubAgentEditor(R.string.settings_subagents),
     Teams(R.string.settings_teams),
     Tools(R.string.settings_tools),
-    ScheduledTasks(R.string.settings_scheduled_tasks),
     Experiments(R.string.settings_experiments),
     Prompts(R.string.prompts_title),
     Rules(R.string.rules_title),
@@ -415,7 +414,7 @@ fun SettingsScreen(
         SettingsSection.TokenStats,
         SettingsSection.Backup,
         SettingsSection.Experiments -> (configHome ?: SettingsSection.Menu)
-        SettingsSection.Tools, SettingsSection.ScheduledTasks, SettingsSection.Prompts, SettingsSection.Rules -> (configHome ?: SettingsSection.AiGroup)
+        SettingsSection.Tools, SettingsSection.Prompts, SettingsSection.Rules -> (configHome ?: SettingsSection.AiGroup)
         SettingsSection.ProviderEditor -> SettingsSection.Providers
         SettingsSection.Log -> logReturnSection.takeUnless { expanded && it == SettingsSection.Menu }
         SettingsSection.SkillDetail, SettingsSection.SkillMarket -> SettingsSection.Skills
@@ -1082,9 +1081,6 @@ fun SettingsScreen(
                             android.widget.Toast.makeText(context, context.getString(R.string.team_role_card_missing, name), android.widget.Toast.LENGTH_LONG).show()
                         }
                     })
-                SettingsSection.ScheduledTasks -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = Spacing.lg)) {
-                    ScheduledTasksSection()
-                }
                 SettingsSection.Tools -> ToolManagementSection(
                     entries = mcpEntries, statuses = mcpStatuses,
                     reloading = mcpReloading, onReload = { viewModel.reloadMcp() },

@@ -39,6 +39,26 @@ class ContainerImageSyncTest(unittest.TestCase):
             "sizes": {"arm64": len(self.payload)}, "extra": "fixture",
         }
 
+    def test_retire_offline_removes_alpine_and_foreign_architectures(self):
+        original = {"sources": {"official": {"distros": {"alpine": "old", "ubuntu": "keep"}}},
+                    "images": [dict(self.entry),
+                               dict(self.entry, id="alpine-old", distro="alpine"),
+                               dict(self.entry, id="amd64-only", abiNames={"x86_64": "amd64"})]}
+        original["images"][0]["sha256ByAbi"] = {"arm64": "preserved", "x86_64": "remove"}
+        with tempfile.TemporaryDirectory() as directory:
+            paths = [str(Path(directory) / name) for name in ("one.json", "two.json")]
+            for path in paths:
+                Path(path).write_text(json.dumps(original))
+            with patch.object(SYNC, "MANIFESTS", paths), patch("sys.argv", ["sync", "--retire-unsupported"]):
+                self.assertEqual(0, SYNC.main())
+                first = Path(paths[0]).read_bytes()
+                self.assertEqual(0, SYNC.main())
+                self.assertEqual(first, Path(paths[1]).read_bytes())
+            data = json.loads(first)
+            self.assertEqual(["void-glibc"], [e["id"] for e in data["images"]])
+            self.assertEqual({"arm64": "preserved"}, data["images"][0]["sha256ByAbi"])
+            self.assertEqual({"ubuntu": "keep"}, data["sources"]["official"]["distros"])
+
     def test_void_is_a_supported_cli_distro(self):
         with patch("sys.argv", ["sync", "--distro", "void"]):
             self.assertEqual(SYNC.parse_args().distro, "void")

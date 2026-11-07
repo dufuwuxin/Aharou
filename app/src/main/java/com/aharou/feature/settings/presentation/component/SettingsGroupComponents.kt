@@ -229,14 +229,14 @@ internal fun SettingsRow(
         }
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = title,
+                text = com.aharou.core.translation.rememberTranslatedText(title),
                 style = MaterialTheme.typography.bodyLarge,
                 fontWeight = FontWeight.Normal,
                 color = MaterialTheme.colorScheme.onSurface
             )
             if (subtitle != null) {
                 Text(
-                    text = subtitle,
+                    text = com.aharou.core.translation.rememberTranslatedText(subtitle),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

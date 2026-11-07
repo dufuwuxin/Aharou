@@ -6,7 +6,7 @@ import kotlinx.serialization.Serializable
 /**
  * 一个可切换的容器配置：镜像来源 + shell 路径 + 额外 proot 绑定/参数。
  *
- * 内置 [BUILTIN_ALPINE] 描述现有 Alpine rootfs（来自 assets）。用户自定义 profile 通过导入
+ * 内置 [BUILTIN_UBUNTU] 描述原生 ARM64 Ubuntu 24.04 LTS rootfs（来自 assets）。用户自定义 profile 通过导入
  * tar.gz 提供 rootfs。所有容器首次进入终端时统一弹出初始化菜单（见 assets/aharou/provision.sh），
  * 由用户选择自动安装基础工具或手动安装，装包失败不阻塞进入 shell，处理方式一致。
  *
@@ -32,8 +32,25 @@ data class ContainerProfile(
     /** 添加时间（毫秒时间戳），容器列表按此降序排列；旧数据/内置默认 0 排最后。 */
     val createdAt: Long = 0
 ) {
+    /** Asset profiles share one builtin directory; retain user args/bindings, never the retired OS. */
+    fun normalizeBuiltin(): ContainerProfile {
+        if (id != LEGACY_BUILTIN_ID && id != BUILTIN_ID && !isBuiltin && rootfsSource !is RootfsSource.Asset) return this
+        val legacy = id == LEGACY_BUILTIN_ID || (rootfsSource as? RootfsSource.Asset)?.path?.contains("alpine") == true
+        return copy(
+            id = BUILTIN_ID,
+            name = if (legacy) BUILTIN_UBUNTU.name else name,
+            rootfsSource = BUILTIN_UBUNTU.rootfsSource,
+            shellPath = if (legacy) null else shellPath,
+            isBuiltin = true,
+            mode = ExecutionMode.LOCAL_PROOT
+        )
+    }
+
     companion object {
-        const val BUILTIN_ID = "builtin-alpine"
+        const val BUILTIN_ID = "builtin-ubuntu"
+        const val LEGACY_BUILTIN_ID = "builtin-alpine"
+
+        fun normalizeId(id: String): String = if (id == LEGACY_BUILTIN_ID) BUILTIN_ID else id
 
         /**
          * 新容器默认注入的 proot 参数。刻意与用户手动添加走同一条路径（[extraArgs]，追加在 proot argv
@@ -65,11 +82,11 @@ data class ContainerProfile(
             return null
         }
 
-        /** 内置 Alpine profile：镜像来自 assets，复用现有安装/provision 全流程。 */
-        val BUILTIN_ALPINE = ContainerProfile(
+        /** 内置 Ubuntu profile：镜像来自 assets，复用现有安装/provision 全流程。 */
+        val BUILTIN_UBUNTU = ContainerProfile(
             id = BUILTIN_ID,
-            name = "内置 Alpine",
-            rootfsSource = RootfsSource.Asset("alpine-rootfs.bin"),
+            name = "Ubuntu 24.04 LTS",
+            rootfsSource = RootfsSource.Asset("container/arm/ubuntu-rootfs.bin"),
             shellPath = null,
             extraArgs = DEFAULT_PROOT_ARGS,
             isBuiltin = true
@@ -79,7 +96,7 @@ data class ContainerProfile(
 
 @Serializable
 sealed interface RootfsSource {
-    /** 内置：assets 里的 rootfs 文件（[ContainerProfile.BUILTIN_ALPINE] 用）。 */
+    /** 内置：assets 里的 rootfs 文件（[ContainerProfile.BUILTIN_UBUNTU] 用）。 */
     @Serializable
     data class Asset(val path: String) : RootfsSource
 

@@ -59,7 +59,7 @@ class ContainerGradleHeapApplier @Inject constructor(
         val profile = runCatching {
             val activeId = settings.activeProfileIdFlow.first()
             if (activeId == ContainerProfile.BUILTIN_ID) {
-                ContainerProfile.BUILTIN_ALPINE
+                ContainerProfile.BUILTIN_UBUNTU
             } else {
                 settings.customProfilesFlow.first().firstOrNull { it.id == activeId }
             }

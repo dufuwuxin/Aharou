@@ -430,7 +430,7 @@ class McpManager @Inject constructor(
     private suspend fun currentActiveProfile(): ContainerProfile {
         val id = containerSettingsRepository.activeProfileIdFlow.first()
         val profiles = containerSettingsRepository.customProfilesFlow.first()
-        return profiles.firstOrNull { it.id == id } ?: ContainerProfile.BUILTIN_ALPINE
+        return profiles.firstOrNull { it.id == id } ?: ContainerProfile.BUILTIN_UBUNTU
     }
 
     /**

@@ -307,6 +307,7 @@ private fun RuleEditorPane(
                     maxLines = 30,
                     enabled = !saving
                 )
+                com.aharou.core.translation.TranslationPreview(content)
                 if (error != null) {
                     Spacer(Modifier.height(Spacing.sm))
                     Text(

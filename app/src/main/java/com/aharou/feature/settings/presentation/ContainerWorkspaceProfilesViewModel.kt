@@ -32,7 +32,7 @@ data class ContainerWorkspaceProfilesUiState(
     /** 可选容器（含内置 Alpine：列表就绪前先补一项内置，避免下拉空着）。 */
     val profiles: List<ContainerProfile> = emptyList(),
     /** 全局默认容器的显示名，「跟随全局（X）」里那个 X。 */
-    val defaultProfileName: String = ContainerProfile.BUILTIN_ALPINE.name,
+    val defaultProfileName: String = ContainerProfile.BUILTIN_UBUNTU.name,
 )
 
 /**
@@ -57,11 +57,11 @@ class ContainerWorkspaceProfilesViewModel @Inject constructor(
         val profiles = if (customProfiles.any { it.id == ContainerProfile.BUILTIN_ID }) {
             customProfiles
         } else {
-            listOf(ContainerProfile.BUILTIN_ALPINE) + customProfiles
+            listOf(ContainerProfile.BUILTIN_UBUNTU) + customProfiles
         }
         val defaultName = profiles.firstOrNull { it.id == activeId }?.name
             ?: profiles.firstOrNull()?.name
-            ?: ContainerProfile.BUILTIN_ALPINE.name
+            ?: ContainerProfile.BUILTIN_UBUNTU.name
         val rows = workspaces
             .filter { it.type != WorkspaceType.REMOTE }
             .map { workspace ->

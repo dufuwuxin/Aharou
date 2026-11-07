@@ -256,6 +256,7 @@ private fun LocalKnowledgeDialog(
                     label = stringResource(R.string.knowledge_local_markdown),
                     singleLine = false, minLines = 5, maxLines = 10, colors = dialogTextFieldColors()
                 )
+                com.aharou.core.translation.TranslationPreview(markdown)
                 if (error != null) Text(
                     stringResource(R.string.knowledge_local_error, error), color = MaterialTheme.colorScheme.error
                 )
@@ -302,7 +303,7 @@ private fun KnowledgeRow(
     ) {
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = title,
+                text = com.aharou.core.translation.rememberTranslatedText(title),
                 style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
@@ -310,7 +311,7 @@ private fun KnowledgeRow(
             )
             if (description.isNotBlank()) {
                 Text(
-                    text = description,
+                    text = com.aharou.core.translation.rememberTranslatedText(description),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 2,

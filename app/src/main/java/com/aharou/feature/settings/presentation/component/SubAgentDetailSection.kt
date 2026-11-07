@@ -72,7 +72,7 @@ internal fun SubAgentDetailSection(
         SettingsGroupHeader(text = stringResource(R.string.skills_summary))
         SettingsGroup {
             Text(
-                text = entry.description.ifBlank { stringResource(R.string.mcp_no_description) },
+                text = com.aharou.core.translation.rememberTranslatedText(entry.description.ifBlank { stringResource(R.string.mcp_no_description) }),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier

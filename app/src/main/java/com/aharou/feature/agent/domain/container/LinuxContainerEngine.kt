@@ -818,8 +818,9 @@ class LinuxContainerEngine @Inject constructor(
         profile: ContainerProfile
     ): ProotInvocation {
         val argv = buildBaseProotArgv(projectPath, profile)
-        // 用同一 profile 的 shell：bash 装好后 AI 命令与终端会话都走 bash；装机期间/失败回退 /bin/sh。
-        argv.add(defaultShellFor(profile))
+        val shell = defaultShellFor(profile)
+        NativeArm64Rootfs.requireSupported(containerInstaller.rootfsDirFor(profile), shell)
+        argv.add(shell)
         argv.add("-c")
         argv.add(command)
         return ProotInvocation(argv, buildContainerEnv(profile, projectPath) + profile.env)
@@ -831,6 +832,7 @@ class LinuxContainerEngine @Inject constructor(
      */
     private fun buildBaseProotArgv(projectPath: String?, profile: ContainerProfile): MutableList<String> {
         val rootfs = containerInstaller.rootfsDirFor(profile).absolutePath
+        NativeArm64Rootfs.requireSupported(java.io.File(rootfs))
         val prootBin = containerInstaller.prootBin.absolutePath
         if (!containerInstaller.prootBin.exists()) {
             // 不可能缺失除非打包配置回退：jniLibs sourceSet 或 packaging.jniLibs.useLegacyPackaging

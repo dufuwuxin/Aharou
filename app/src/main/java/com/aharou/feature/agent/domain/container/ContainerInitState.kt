@@ -11,10 +11,10 @@ sealed interface ContainerInitState {
     /** 正在清理上个容器留下的数据（重置/换镜像后旧 rootfs 的删除），[processed] 为已清理条目数。 */
     data class CleaningOldRootfs(val processed: Int) : ContainerInitState
 
-    /** 正在解压 Alpine rootfs，[processed] 为已处理的 tar 条目数。 */
+    /** 正在解压 Ubuntu / 原生 ARM64 rootfs，[processed] 为已处理的 tar 条目数。 */
     data class ExtractingRootfs(val processed: Int) : ContainerInitState
 
-    /** 正在安装基础包（python3/git/pip/node/npm/rg），[line] 为 apk 的实时输出行（可为 null）。 */
+    /** 正在安装基础包（python3/git/pip/node/npm/rg），[line] 为包管理器的实时输出行（可为 null）。 */
     data class InstallingPackages(val line: String?) : ContainerInitState
 
     /** 容器已就绪（rootfs 解压 + 基础包安装均完成；proot 随 APK 安装，无需部署）。 */

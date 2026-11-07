@@ -147,11 +147,13 @@ class SettingsNavigationTest(unittest.TestCase):
                 self.assertIn(f"onOpen(SettingsSection.{name})", config)
         self.assertIn("OnboardingStep.CONFIG_PROVIDER", config)
 
-    def test_automation_has_direct_config_entry_and_reuses_existing_page(self):
-        self.assertIn("onOpen(SettingsSection.ScheduledTasks)", function(self.groups, "SettingsAiGroupScreen"))
-        self.assertRegex(self.screen, r"ScheduledTasks\(R\.string\.settings_scheduled_tasks\)")
-        self.assertIn("ScheduledTasksSection()", block(self.screen, "SettingsSection.ScheduledTasks ->"))
-        self.assertIn("ScheduledTasksSection()", self.tools)
+    def test_automation_has_one_entry_in_tools_and_keeps_existing_page(self):
+        self.assertNotIn("SettingsSection.ScheduledTasks", self.groups + self.screen)
+        enum = block(self.screen, "enum class SettingsSection")
+        self.assertNotRegex(enum, r"\bScheduledTasks\(")
+        self.assertIn("onOpen(SettingsSection.Tools)", function(self.groups, "SettingsAiGroupScreen"))
+        self.assertEqual(1, self.tools.count("ScheduledTasksSection()"))
+        self.assertIn("R.string.settings_scheduled_tasks", self.tools)
 
     def test_duplicate_mcp_page_route_is_removed_not_mcp_features(self):
         self.assertNotRegex(self.screen, r"SettingsSection\.Mcp\b")

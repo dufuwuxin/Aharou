@@ -34,9 +34,9 @@ class ContainerInstallerResetTest {
 
     @Test
     fun resetRootfs_内置容器_返回时目录已彻底删除() = runTest {
-        val rootfs = fakeRootfs(File(filesDir, "rootfs"), ".installed")
+        val rootfs = fakeRootfs(File(filesDir, "rootfs_ubuntu"), ".installed")
 
-        installer.resetRootfs(ContainerProfile.BUILTIN_ALPINE)
+        installer.resetRootfs(ContainerProfile.BUILTIN_UBUNTU)
 
         assertFalse("重置返回时 rootfs 必须已删完", rootfs.exists())
         assertFalse(installer.isInstalled())
@@ -44,10 +44,10 @@ class ContainerInstallerResetTest {
 
     @Test
     fun resetRootfs_回报已删条目数() = runTest {
-        fakeRootfs(File(filesDir, "rootfs"), ".installed")
+        fakeRootfs(File(filesDir, "rootfs_ubuntu"), ".installed")
         val reported = mutableListOf<Int>()
 
-        installer.resetRootfs(ContainerProfile.BUILTIN_ALPINE) { reported += it }
+        installer.resetRootfs(ContainerProfile.BUILTIN_UBUNTU) { reported += it }
 
         // rootfs 本身 + usr + usr/bin + busybox；安装标记在删除前先删，不计入
         assertEquals(4, reported.last())
@@ -57,7 +57,7 @@ class ContainerInstallerResetTest {
     fun resetRootfs_自定义容器_只删自己的目录并清系统缓存() = runTest {
         val custom = localProfile("custom-1")
         val customRootfs = fakeRootfs(File(filesDir, "rootfs_custom-1"), ".installed_custom")
-        val builtinRootfs = fakeRootfs(File(filesDir, "rootfs"), ".installed")
+        val builtinRootfs = fakeRootfs(File(filesDir, "rootfs_ubuntu"), ".installed")
         osDetector.cacheOs("custom-1", "ubuntu")
 
         installer.resetRootfs(custom)
@@ -95,10 +95,10 @@ class ContainerInstallerResetTest {
     fun resetRootfs_不跟随符号链接删到链接目标() = runTest {
         val outside = File(root, "outside").apply { mkdirs() }
         val keep = File(outside, "important.txt").apply { writeText("keep me") }
-        val rootfs = fakeRootfs(File(filesDir, "rootfs"), ".installed")
+        val rootfs = fakeRootfs(File(filesDir, "rootfs_ubuntu"), ".installed")
         Files.createSymbolicLink(File(rootfs, "mnt").toPath(), outside.toPath())
 
-        installer.resetRootfs(ContainerProfile.BUILTIN_ALPINE)
+        installer.resetRootfs(ContainerProfile.BUILTIN_UBUNTU)
 
         assertFalse(rootfs.exists())
         assertTrue("符号链接指向的目录不能被跟着删掉", outside.exists())
@@ -110,10 +110,10 @@ class ContainerInstallerResetTest {
         val custom = localProfile("custom-4")
         fakeRootfs(File(filesDir, "rootfs_custom-4"), ".installed_custom")
         File(filesDir, "rootfs_custom-4/tmp").mkdirs()
-        fakeRootfs(File(filesDir, "rootfs"), ".installed")
-        File(filesDir, "rootfs/tmp").mkdirs()
+        fakeRootfs(File(filesDir, "rootfs_ubuntu"), ".installed")
+        File(filesDir, "rootfs_ubuntu/tmp").mkdirs()
 
-        installer.resetRootfs(ContainerProfile.BUILTIN_ALPINE)
+        installer.resetRootfs(ContainerProfile.BUILTIN_UBUNTU)
 
         // PROOT_TMP_DIR 曾固定取内置 rootfs 的 tmp，重置内置容器会让所有容器报 can't canonicalize。
         val customTmp = installer.prootTmpDirFor(custom)
@@ -137,20 +137,13 @@ class ContainerInstallerResetTest {
         return dir
     }
 
-    /**
-     * 已发布出去的标记值必须继续被认作「已安装」。
-     *
-     * 回归点：`INSTALL_VERSION` 是**重装触发器**，值一变，所有已装用户下次进容器就会被整体清空重装——
-     * 容器里 `apk add` 装的包、初始化菜单装的 Android / Flutter SDK、JDK 全没，且清理前没有任何预警。
-     * 这里刻意把标记字面量写死，就是为了让「顺手把标记跟着 assets 的 Alpine 版本一起 +1」这种改动
-     * 在单测阶段就被拦住。若确实要强制重装，请连同本测试一起改，并在发版说明里写明用户代价。
-     */
+    /** The retired marker must never launch Alpine; its directory remains available to migration. */
     @Test
-    fun 已发布的安装标记必须继续被认作已安装() {
+    fun 已发布的Alpine标记保留数据但不再被认作可启动() {
         val rootfs = File(filesDir, "rootfs").apply { mkdirs() }
         File(rootfs, ".installed").writeText("alpine-3.24.2-v7")
-
-        assertTrue("改了 INSTALL_VERSION 会让所有老用户被静默清空重装", installer.isInstalled())
+        assertTrue("旧目录必须保留给迁移，不能先清空", rootfs.isDirectory)
+        assertFalse("旧 Alpine 标记不得继续被认作可启动", installer.isInstalled())
     }
 
     private class FakeContext(private val files: File, private val cache: File) : ContextWrapper(null) {

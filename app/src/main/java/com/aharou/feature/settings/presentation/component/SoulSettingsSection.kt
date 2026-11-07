@@ -272,7 +272,7 @@ internal fun SoulSettingsSection() {
                     )
                     if (style.isNotBlank()) {
                         Text(
-                            text = style,
+                            text = com.aharou.core.translation.rememberTranslatedText(style),
                             fontSize = 13.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -324,6 +324,7 @@ internal fun SoulSettingsSection() {
                     placeholder = stringResource(R.string.soul_body_placeholder),
                     singleLine = false,
                 )
+                com.aharou.core.translation.TranslationPreview(body)
                 Spacer(Modifier.height(6.dp))
                 val overLimit = bodyLimitCheck.isOverLimit
                 val indicatorText: String = when (val check = bodyLimitCheck) {

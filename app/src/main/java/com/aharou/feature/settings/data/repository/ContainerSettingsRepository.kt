@@ -2,6 +2,7 @@ package com.aharou.feature.settings.data.repository
 
 import android.app.ActivityManager
 import android.content.Context
+import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
@@ -43,7 +44,7 @@ data class DownloadedImageRecord(
  * 持久化当前选中的容器 profile 与用户自定义 profile 列表。
  *
  * DataStore 用法与 [ThemeSettingsRepository] 一致（构造注入即可，无需 DI module）。
- * 无 [ACTIVE_PROFILE_ID_KEY] 时返回 [ContainerProfile.BUILTIN_ID]，等同改动前——默认内置 Alpine。
+ * 无 [ACTIVE_PROFILE_ID_KEY] 时返回 [ContainerProfile.BUILTIN_ID]，等同改动前——默认内置 Ubuntu。
  */
 @Singleton
 class ContainerSettingsRepository @Inject constructor(
@@ -82,9 +83,9 @@ class ContainerSettingsRepository @Inject constructor(
 
         val ACTIVE_PROFILE_ID_KEY = stringPreferencesKey("active_profile_id")
         val CUSTOM_PROFILES_KEY = stringPreferencesKey("custom_profiles_json")
-        /** 远程工作区模式下本地 MCP stdio 等服务的运行容器；无值时默认内置 Alpine。 */
+        /** 远程工作区模式下本地 MCP stdio 等服务的运行容器；无值时默认内置 Ubuntu。 */
         val DEFAULT_CONTAINER_ID_KEY = stringPreferencesKey("default_container_profile_id")
-        /** 首次启动是否已写入内置 Alpine 默认项；置位后用户删光列表不再自动补回。 */
+        /** 首次启动是否已写入内置 Ubuntu 默认项；置位后用户删光列表不再自动补回。 */
         val INITIALIZED_KEY = booleanPreferencesKey("initialized")
         /** 列表顺序是否已归一为「新建在前」的显示序；见 [ensureProfileDisplayOrder]。 */
         val ORDER_MIGRATED_KEY = booleanPreferencesKey("profile_order_migrated")
@@ -102,9 +103,9 @@ class ContainerSettingsRepository @Inject constructor(
         val json = Json { ignoreUnknownKeys = true }
     }
 
-    /** 当前选中的 profile id；无值时默认内置 Alpine。 */
+    /** 当前选中的 profile id；无值时默认内置 Ubuntu。 */
     val activeProfileIdFlow: Flow<String> = context.containerDataStore.data.map { prefs ->
-        prefs[ACTIVE_PROFILE_ID_KEY]?.takeIf { it.isNotBlank() } ?: ContainerProfile.BUILTIN_ID
+        ContainerProfile.normalizeId(prefs[ACTIVE_PROFILE_ID_KEY]?.takeIf { it.isNotBlank() } ?: ContainerProfile.BUILTIN_ID)
     }
 
     /**
@@ -117,16 +118,16 @@ class ContainerSettingsRepository @Inject constructor(
         decodeWorkspaceProfiles(prefs[WORKSPACE_PROFILES_KEY])
     }
 
-    /** 远程模式下的默认容器 id；无值时默认内置 Alpine。 */
+    /** 远程模式下的默认容器 id；无值时默认内置 Ubuntu。 */
     val defaultContainerIdFlow: Flow<String> = context.containerDataStore.data.map { prefs ->
-        prefs[DEFAULT_CONTAINER_ID_KEY]?.takeIf { it.isNotBlank() } ?: ContainerProfile.BUILTIN_ID
+        ContainerProfile.normalizeId(prefs[DEFAULT_CONTAINER_ID_KEY]?.takeIf { it.isNotBlank() } ?: ContainerProfile.BUILTIN_ID)
     }
 
     /** 用户自定义 profile 列表（不含内置）。解析失败回退空列表。 */
     val customProfilesFlow: Flow<List<ContainerProfile>> = context.containerDataStore.data.map { prefs ->
         prefs[CUSTOM_PROFILES_KEY]?.let { raw ->
             runCatching { json.decodeFromString(profileSerializer, raw) }.getOrNull()
-        } ?: emptyList()
+        }?.map { it.normalizeBuiltin() }?.distinctBy { it.id } ?: emptyList()
     }
 
     /** 设备总内存（MB），只查一次：binder IPC，不必每次 flow 发射都问。 */
@@ -147,11 +148,11 @@ class ContainerSettingsRepository @Inject constructor(
     }
 
     suspend fun setActiveProfile(id: String) {
-        context.containerDataStore.edit { it[ACTIVE_PROFILE_ID_KEY] = id }
+        context.containerDataStore.edit { it[ACTIVE_PROFILE_ID_KEY] = ContainerProfile.normalizeId(id) }
     }
 
     suspend fun setDefaultContainerId(id: String) {
-        context.containerDataStore.edit { it[DEFAULT_CONTAINER_ID_KEY] = id }
+        context.containerDataStore.edit { it[DEFAULT_CONTAINER_ID_KEY] = ContainerProfile.normalizeId(id) }
     }
 
     /**
@@ -163,7 +164,7 @@ class ContainerSettingsRepository @Inject constructor(
         context.containerDataStore.edit { prefs ->
             val current = decodeWorkspaceProfiles(prefs[WORKSPACE_PROFILES_KEY])
             prefs[WORKSPACE_PROFILES_KEY] = json.encodeToString(
-                workspaceProfilesSerializer, current + (key to profileId)
+                workspaceProfilesSerializer, current + (key to ContainerProfile.normalizeId(profileId))
             )
         }
     }
@@ -186,15 +187,29 @@ class ContainerSettingsRepository @Inject constructor(
     /** 解析覆盖表 JSON；历史/损坏数据回退空表（等同于没配覆盖，走全局默认）。 */
     private fun decodeWorkspaceProfiles(raw: String?): Map<String, String> =
         raw?.let { runCatching { json.decodeFromString(workspaceProfilesSerializer, it) }.getOrNull() }
-            ?: emptyMap()
+            ?.mapValues { ContainerProfile.normalizeId(it.value) } ?: emptyMap()
+
+    private fun migrateBuiltinPreferences(prefs: MutablePreferences) {
+        prefs[ACTIVE_PROFILE_ID_KEY]?.let { prefs[ACTIVE_PROFILE_ID_KEY] = ContainerProfile.normalizeId(it) }
+        prefs[DEFAULT_CONTAINER_ID_KEY]?.let { prefs[DEFAULT_CONTAINER_ID_KEY] = ContainerProfile.normalizeId(it) }
+        prefs[WORKSPACE_PROFILES_KEY]?.let {
+            prefs[WORKSPACE_PROFILES_KEY] = json.encodeToString(workspaceProfilesSerializer, decodeWorkspaceProfiles(it))
+        }
+        prefs[CUSTOM_PROFILES_KEY]?.let { raw ->
+            val profiles = runCatching { json.decodeFromString(profileSerializer, raw) }.getOrNull() ?: return@let
+            prefs[CUSTOM_PROFILES_KEY] = json.encodeToString(profileSerializer,
+                profiles.map { it.normalizeBuiltin() }.distinctBy { it.id })
+        }
+    }
 
     /**
-     * 首次启动（或旧版本升级）兜底：把内置 Alpine 补入列表（若缺），保证列表始终有内置项。
+     * 首次启动（或旧版本升级）兜底：把内置 Ubuntu 补入列表（若缺），保证列表始终有内置项。
      * 置位初始化标记后不再自动补回——用户后续删光列表由空态手动恢复。
      * 存量设备已配自定义镜像时同样补入（旧版列表始终含内置项，升级不能让它消失）。
      */
     suspend fun ensureBuiltinDefault() {
         context.containerDataStore.edit { prefs ->
+            migrateBuiltinPreferences(prefs)
             if (prefs[INITIALIZED_KEY] == true) return@edit
             prefs[INITIALIZED_KEY] = true
             val current = prefs[CUSTOM_PROFILES_KEY]?.let { raw ->
@@ -202,7 +217,7 @@ class ContainerSettingsRepository @Inject constructor(
             } ?: emptyList()
             if (current.none { it.id == ContainerProfile.BUILTIN_ID }) {
                 prefs[CUSTOM_PROFILES_KEY] = json.encodeToString(
-                    profileSerializer, listOf(ContainerProfile.BUILTIN_ALPINE) + current
+                    profileSerializer, listOf(ContainerProfile.BUILTIN_UBUNTU) + current
                 )
             }
         }
@@ -297,20 +312,22 @@ class ContainerSettingsRepository @Inject constructor(
      * 编辑原地替换、不动位置。
      */
     suspend fun upsertCustomProfile(profile: ContainerProfile) {
+        val normalized = profile.normalizeBuiltin()
         context.containerDataStore.edit { prefs ->
             val current = prefs[CUSTOM_PROFILES_KEY]?.let { raw ->
                 runCatching { json.decodeFromString(profileSerializer, raw) }.getOrNull()
             } ?: emptyList()
-            val existing = current.firstOrNull { it.id == profile.id }
+            val migrated = current.map { it.normalizeBuiltin() }.distinctBy { it.id }
+            val existing = migrated.firstOrNull { it.id == normalized.id }
             val final = when {
-                profile.createdAt != 0L -> profile
-                existing != null && existing.createdAt != 0L -> profile.copy(createdAt = existing.createdAt)
-                else -> profile.copy(createdAt = System.currentTimeMillis())
+                normalized.createdAt != 0L -> normalized
+                existing != null && existing.createdAt != 0L -> normalized.copy(createdAt = existing.createdAt)
+                else -> normalized.copy(createdAt = System.currentTimeMillis())
             }
             val merged = if (existing != null) {
-                current.map { if (it.id == final.id) final else it }
+                migrated.map { if (it.id == final.id) final else it }
             } else {
-                listOf(final) + current
+                listOf(final) + migrated
             }
             prefs[CUSTOM_PROFILES_KEY] = json.encodeToString(profileSerializer, merged)
         }

@@ -91,6 +91,12 @@ jobs:
         run: python3 scripts/check_skills.py
 
       # 架构门禁：禁用组件 import、文件行数棘轮、双语 strings 一致性。
+      - name: Check native ARM64 Ubuntu builtin asset
+        run: |
+          python3 scripts/check_builtin_container.py
+          python3 scripts/test_builtin_ubuntu.py
+          python3 -m unittest discover -s scripts -p test_container_image_sync.py
+
       - name: Check architecture rules
         run: |
           python3 scripts/check_architecture.py

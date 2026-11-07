@@ -3,7 +3,7 @@
 
 用法：
   python3 scripts/sync-container-images.py                  # dry-run：只打印差异（默认）
-  python3 scripts/sync-container-images.py --distro alpine   # 只检查某一类（alpine|ubuntu|debian）
+  python3 scripts/sync-container-images.py --distro ubuntu   # 只检查某一类（ubuntu|debian|arch|manjaro|void）
   CNB_TOKEN=<token> python3 scripts/sync-container-images.py --apply   # 真下载 + 校验 + 上传 + 改清单
 
 环境变量：
@@ -13,11 +13,10 @@
   CNB_TAG     资产所在 Release 的 tag，默认 container-images
 
 上游发现路径（2026-10-18 逐个实测可用）：
-  alpine  {base}/alpine/v<series>/releases/<abi>/        取最大 alpine-minirootfs-<ver>-<abi>.tar.gz（排除 _rcN）
   ubuntu  {base}/ubuntu-base/releases/<series>/release/  取最大 ubuntu-base-<ver>-base-<abi>.tar.gz
   debian  {base}/job/tianon/job/debuerreotype/job/<abi>/lastSuccessfulBuild/
           artifact/<suite>/rootfs.debian_version 给出版本号，rootfs.tar.xz 是产物
-  base 官方在前、国内镜像兜底；三类发行版在官方与镜像上的相对路径一致（实测过）。
+  base 官方在前、国内镜像兜底；各发行版在官方与镜像上的相对路径一致（实测过）。
 
 EOL 标注：版本之外还同步每个分支的支持周期（endoflife.date 的结构化 API），写入条目的
   `eol`（常规支持结束）与 `supportEnds`（延伸支持结束，仅有两段式支持周期的发行版才有）。
@@ -25,10 +24,10 @@ EOL 标注：版本之外还同步每个分支的支持周期（endoflife.date �
 
 清单约定（动手改之前先读）：
   - `sizeBytes` 取 **arm64** 那份产物的字节数（现有 12 条的实测值全部等于 arm64 产物），不是两份之和
-  - `path` 与 `paths.*` 里的 {abi} 由 abiNames 替换（alpine aarch64 / ubuntu arm64 /
+  - `path` 与 `paths.*` 里的 {abi} 由 abiNames 替换（ubuntu arm64 /
     debian arm64v8）；cnb 上的资产名就是 `paths.aharou` 替换后的字符串
   - `eol` / `supportEnds` 为 `yyyy-MM-dd`；`supportEnds` 只在该发行版确有延伸支持期时下发
-    （Alpine、非 LTS 的 Ubuntu 没有），且恒不早于 `eol`
+    （非 LTS 的 Ubuntu 没有），且恒不早于 `eol`
   - 两份清单（assets 内置 + data 远端）必须逐字节一致，本脚本改完会自行比对
 """
 
@@ -55,7 +54,7 @@ MANIFESTS = [
     os.path.join(ROOT, "data/container-images.json"),
 ]
 ABIS = ("arm64",)
-DISTROS = ("alpine", "ubuntu", "debian", "arch", "manjaro", "void")
+DISTROS = ("ubuntu", "debian", "arch", "manjaro", "void")
 CNB_OWNER = os.environ.get("CNB_OWNER") or "huxiangli"
 CNB_REPO = os.environ.get("CNB_REPO") or "aharou-releases"
 CNB_TAG = os.environ.get("CNB_TAG") or "container-images"
@@ -64,12 +63,6 @@ CNB_API = f"https://api.cnb.cool/{CNB_OWNER}/{CNB_REPO}"
 
 # 官方在前：镜像的更新时间晚于官方，把镜像放前面会在发版当天「看不到刚出的版本」
 DISCOVERY_BASES = {
-    "alpine": [
-        "https://dl-cdn.alpinelinux.org",
-        "https://mirrors.aliyun.com",
-        "https://repo.huaweicloud.com",
-        "https://mirrors.cloud.tencent.com",
-    ],
     "ubuntu": [
         "https://cdimage.ubuntu.com",
         "https://mirrors.aliyun.com/ubuntu-cdimage",
@@ -96,11 +89,9 @@ Server = https://mirrors.aliyun.com/manjaro/arm-stable/$repo/$arch
 HREF_RE = re.compile(r'href="([^"]+)"')
 
 # EOL 数据源：endoflife.date 的结构化 API（一个发行版一个 slug）。
-# 注意 alpine 的 slug 是 alpine-linux——写成 alpine 会 404（实测）。
 # 字段口径：`eol` 是常规支持结束，`extendedSupport` 是延伸支持结束（Ubuntu 的 ESM / Debian 的 LTS），
-# 后者为 false 表示该分支没有延伸支持期（Alpine 全部、Ubuntu 非 LTS）。
+# 后者为 false 表示该分支没有延伸支持期（Ubuntu 非 LTS）。
 EOL_API = {
-    "alpine": "https://endoflife.date/api/alpine-linux.json",
     "ubuntu": "https://endoflife.date/api/ubuntu.json",
     "debian": "https://endoflife.date/api/debian.json",
 }
@@ -214,7 +205,7 @@ def is_newer(a: str, b: str) -> bool:
 
 
 def series_of(entry: dict) -> str:
-    """条目 id 里的分支号：alpine-3.24 → 3.24；ubuntu-24.04 → 24.04。"""
+    """条目 id 里的分支号：ubuntu-24.04 → 24.04。"""
     return entry["id"].split("-", 1)[1]
 
 
@@ -233,8 +224,6 @@ def debian_version_str(debian_version: str, suite: str) -> str:
 def path_for(entry: dict, version: str) -> str:
     """按清单现有约定生成上游相对路径；{abi} 留给替换方处理。"""
     d = entry["distro"]
-    if d == "alpine":
-        return f"alpine/v{series_of(entry)}/releases/{{abi}}/alpine-minirootfs-{version}-{{abi}}.tar.gz"
     if d == "ubuntu":
         return f"ubuntu-base/releases/{series_of(entry)}/release/ubuntu-base-{version}-base-{{abi}}.tar.gz"
     if d == "debian":
@@ -259,18 +248,6 @@ def discover(entry: dict, base: str) -> dict:
     """在指定 base 上探测该条目当前上游版本，返回 {version, urls, extra}；探测不通抛异常。"""
     d = entry["distro"]
     arm_name = entry["abiNames"]["arm64"]
-    if d == "alpine":
-        series = series_of(entry)
-        pat = re.compile(rf"^alpine-minirootfs-(\d+\.\d+\.\d+)-{re.escape(arm_name)}\.tar\.gz$")
-        vers = sorted({m.group(1) for f in dir_entries(f"{base}/alpine/v{series}/releases/{arm_name}/")
-                       if (m := pat.match(f))}, key=version_tuple)
-        if not vers:
-            raise RuntimeError(f"目录里没有 alpine-minirootfs-*-{arm_name}.tar.gz")
-        ver = vers[-1]
-        urls = {abi: f"{base}/alpine/v{series}/releases/{entry['abiNames'][abi]}/"
-                     f"alpine-minirootfs-{ver}-{entry['abiNames'][abi]}.tar.gz" for abi in ABIS}
-        return {"version": ver, "urls": urls, "extra": f"候选 {len(vers)} 个"}
-
     if d == "ubuntu":
         series = series_of(entry)
         pat = re.compile(rf"^ubuntu-base-({re.escape(series)}(?:\.\d+)?)-base-{arm_name}\.tar\.gz$")
@@ -345,13 +322,6 @@ def report_unlisted_series(data: dict) -> None:
     """
     known = {(e.get("distro"), series_of(e)) for e in (data.get("images") or [])}
     hints: list = []
-    try:
-        for f in dir_entries("https://dl-cdn.alpinelinux.org/alpine/"):
-            m = re.match(r"^v(\d+\.\d+)/$", f)
-            if m and ("alpine", m.group(1)) not in known:
-                hints.append(f"Alpine {m.group(1)}")
-    except Exception:  # noqa: BLE001
-        pass
     try:
         for f in dir_entries("https://cdimage.ubuntu.com/ubuntu-base/releases/"):
             m = re.match(r"^(\d+\.\d+)/$", f)
@@ -474,20 +444,12 @@ def probe_artifacts(entry: dict) -> tuple:
 def fetch_checksums(entry: dict, info: dict) -> dict:
     """取各 ABI 的官方 SHA256，缺哪份返回 None（调用方在报告里注明「未校验」）。
 
-    三类发行版给校验的形式不同：alpine 是每个产物一个 .sha256，ubuntu 是目录里的 SHA256SUMS，
+    发行版给校验的形式不同：ubuntu 是目录里的 SHA256SUMS，
     debian 是产物旁的 .sha256（内容只有一串裸哈希）。
     """
     d = entry["distro"]
     base, ver = info["base"], info["version"]
     out = {abi: None for abi in ABIS}
-    if d == "alpine":
-        series = series_of(entry)
-        for abi in ABIS:
-            n = entry["abiNames"][abi]
-            txt = http_text(f"{base}/alpine/v{series}/releases/{n}/"
-                            f"alpine-minirootfs-{ver}-{n}.tar.gz.sha256")
-            out[abi] = txt.split()[0].lower()
-        return out
     if d == "ubuntu":
         series = series_of(entry)
         table = {}
@@ -693,7 +655,12 @@ def load_manifests():
 
 def save_manifests(data: dict) -> bool:
     """两份一起写（先临时文件再 rename），写完逐字节比对。"""
-    for entry in data.get("images", []):
+    data["images"] = [entry for entry in data.get("images", [])
+                      if entry.get("distro") != "alpine"
+                      and entry.get("abiNames", {}).get("arm64") in ("arm64", "aarch64", "arm64v8")]
+    for source in data.get("sources", {}).values():
+        source.get("distros", {}).pop("alpine", None)
+    for entry in data["images"]:
         for field in ("abiNames", "sha256ByAbi"):
             if field in entry:
                 entry[field] = {abi: value for abi, value in entry[field].items() if abi in ABIS}
@@ -726,8 +693,9 @@ def parse_args():
     mode.add_argument("--apply", action="store_true",
                    help="真下载 + 校验 + 上传 cnb + 改写清单（需要 CNB_TOKEN）")
     p.add_argument("--distro", choices=DISTROS, help="只处理某一类发行版；缺省全部检查")
-    mode.add_argument("--prune-unsupported-abis", action="store_true",
-                   help="仅离线移除清单中不支持的架构，不下载或上传")
+    mode.add_argument("--retire-unsupported", "--prune-unsupported-abis",
+                   dest="prune_unsupported_abis", action="store_true",
+                   help="仅离线退役 Alpine 及非 ARM64 条目/字段，不联网、不需 CNB_TOKEN")
     return p.parse_args()
 
 
@@ -739,7 +707,8 @@ def main() -> int:
     if args.prune_unsupported_abis:
         return 0 if save_manifests(data) else 1
     images = data.setdefault("images", [])
-    candidates = list(images)
+    candidates = [e for e in images if e.get("distro") in DISTROS
+                  and e.get("abiNames", {}).get("arm64") in ("arm64", "aarch64", "arm64v8")]
     if not any(e.get("distro") == "void" for e in images):
         # 种子只在内存中参与发现；只有校验、上传成功才写入可下载清单。
         candidates.append({

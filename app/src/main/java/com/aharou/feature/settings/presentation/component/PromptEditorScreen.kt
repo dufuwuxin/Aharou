@@ -205,6 +205,8 @@ internal fun PromptEditorScreen(
                 )
             }
 
+            com.aharou.core.translation.TranslationPreview(description)
+            com.aharou.core.translation.TranslationPreview(content)
             SettingsGroupHeader(text = stringResource(R.string.prompts_field_content))
             SettingsGroup {
                 AppTextField(

@@ -6,7 +6,6 @@
         "en": "Official"
       },
       "distros": {
-        "alpine": "https://dl-cdn.alpinelinux.org",
         "ubuntu": "https://cdimage.ubuntu.com",
         "debian": "https://doi-janky.infosiftr.net"
       }
@@ -17,7 +16,6 @@
         "en": "Huawei Cloud"
       },
       "distros": {
-        "alpine": "https://repo.huaweicloud.com",
         "ubuntu": "https://repo.huaweicloud.com/ubuntu-cdimage"
       }
     },
@@ -27,7 +25,6 @@
         "en": "Aliyun"
       },
       "distros": {
-        "alpine": "https://mirrors.aliyun.com",
         "ubuntu": "https://mirrors.aliyun.com/ubuntu-cdimage"
       }
     },
@@ -37,7 +34,6 @@
         "en": "Tencent Cloud"
       },
       "distros": {
-        "alpine": "https://mirrors.cloud.tencent.com",
         "ubuntu": ""
       }
     },
@@ -47,7 +43,6 @@
         "en": "Aharou (self-hosted)"
       },
       "distros": {
-        "alpine": "https://cnb.cool/huxiangli/aharou-releases/-/releases/download/container-images",
         "ubuntu": "https://cnb.cool/huxiangli/aharou-releases/-/releases/download/container-images",
         "debian": "https://cnb.cool/huxiangli/aharou-releases/-/releases/download/container-images",
         "arch": "https://cnb.cool/huxiangli/aharou-releases/-/releases/download/container-images",
@@ -56,82 +51,6 @@
     }
   },
   "images": [
-    {
-      "id": "alpine-3.21",
-      "name": "Alpine Linux",
-      "version": "3.21.9",
-      "description": "极简 Linux 发行版，rootfs 仅数 MB",
-      "eol": "2026-11-01",
-      "sizeBytes": 3830409,
-      "distro": "alpine",
-      "path": "alpine/v3.21/releases/{abi}/alpine-minirootfs-3.21.9-{abi}.tar.gz",
-      "paths": {
-        "aharou": "alpine-3.21-{abi}.tar.gz"
-      },
-      "abiNames": {
-        "arm64": "aarch64"
-      },
-      "sha256ByAbi": {
-        "arm64": "a389940ee42579ead202fb91607fb25698a58a3a5b55c15b4603e5d39cfa4492"
-      }
-    },
-    {
-      "id": "alpine-3.22",
-      "name": "Alpine Linux",
-      "version": "3.22.7",
-      "description": "极简 Linux 发行版，rootfs 仅数 MB，解压快、占用小",
-      "eol": "2027-05-01",
-      "sizeBytes": 3971679,
-      "distro": "alpine",
-      "path": "alpine/v3.22/releases/{abi}/alpine-minirootfs-3.22.7-{abi}.tar.gz",
-      "paths": {
-        "aharou": "alpine-3.22-{abi}.tar.gz"
-      },
-      "abiNames": {
-        "arm64": "aarch64"
-      },
-      "sha256ByAbi": {
-        "arm64": "7e9b34ff3304381909e566e2c93de450664ccc724191261423974fc121c11623"
-      }
-    },
-    {
-      "id": "alpine-3.23",
-      "name": "Alpine Linux",
-      "version": "3.23.7",
-      "description": "极简 Linux 发行版，rootfs 仅数 MB，解压快、占用小",
-      "eol": "2027-11-01",
-      "sizeBytes": 4028109,
-      "distro": "alpine",
-      "path": "alpine/v3.23/releases/{abi}/alpine-minirootfs-3.23.7-{abi}.tar.gz",
-      "paths": {
-        "aharou": "alpine-3.23-{abi}.tar.gz"
-      },
-      "abiNames": {
-        "arm64": "aarch64"
-      },
-      "sha256ByAbi": {
-        "arm64": "7dcc7420bcc426a615c0512cc85b4a52e9f89df9c600b93ce78d22e0e9234891"
-      }
-    },
-    {
-      "id": "alpine-3.24",
-      "name": "Alpine Linux",
-      "version": "3.24.3",
-      "description": "极简 Linux 发行版，rootfs 仅数 MB；当前最新稳定版",
-      "eol": "2028-06-01",
-      "sizeBytes": 4029999,
-      "distro": "alpine",
-      "path": "alpine/v3.24/releases/{abi}/alpine-minirootfs-3.24.3-{abi}.tar.gz",
-      "paths": {
-        "aharou": "alpine-3.24-{abi}.tar.gz"
-      },
-      "abiNames": {
-        "arm64": "aarch64"
-      },
-      "sha256ByAbi": {
-        "arm64": "4d3f80afaebd447c5591a63a73bde380a149fe8b2d85488cafabb2ff97551f50"
-      }
-    },
     {
       "id": "ubuntu-20.04",
       "name": "Ubuntu",

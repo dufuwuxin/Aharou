@@ -64,7 +64,7 @@ internal fun PromptDetailSection(fragment: PromptFragment) {
             SettingsGroupHeader(text = stringResource(R.string.skills_summary))
             SettingsGroup {
                 Text(
-                    text = fragment.description,
+                    text = com.aharou.core.translation.rememberTranslatedText(fragment.description),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier

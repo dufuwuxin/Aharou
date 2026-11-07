@@ -31,7 +31,7 @@ class Arm64AssetsTest(unittest.TestCase):
         original = {
             "sources": {"official": {"base": "unchanged"}},
             "images": [{
-                "id": "fixture", "version": "1", "sizeBytes": 123,
+                "id": "fixture", "distro": "ubuntu", "version": "1", "sizeBytes": 123,
                 "abiNames": {"arm64": "aarch64", "x86_64": "amd64"},
                 "sha256ByAbi": {"arm64": "arm-hash", "x86_64": "x86-hash"},
             }],

@@ -26,6 +26,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -269,7 +270,9 @@ private fun MarketSkillRow(
 ) {
     val skill = ui.skill
     // 仓库只给英文的条目：模型翻好后标题与描述都换成中文（英文原名留在下面那行小字里）
-    val translation = translations[skill.translationKey()]
+    val translationService = com.aharou.core.translation.translationService()
+    val translationEnabled = translationService.enabled.collectAsState().value
+    val translation = if (translationEnabled) translations[skill.translationKey()] else null
     val title = translation?.name?.takeIf { it.isNotBlank() }
         ?: skill.displayName.ifBlank { skill.name }
     val description = translation?.description?.takeIf { it.isNotBlank() } ?: skill.description
@@ -283,7 +286,7 @@ private fun MarketSkillRow(
     ) {
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = title,
+                text = com.aharou.core.translation.rememberTranslatedText(title),
                 style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
@@ -291,7 +294,7 @@ private fun MarketSkillRow(
             )
             if (description.isNotBlank()) {
                 Text(
-                    text = description,
+                    text = com.aharou.core.translation.rememberTranslatedText(description),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 2,

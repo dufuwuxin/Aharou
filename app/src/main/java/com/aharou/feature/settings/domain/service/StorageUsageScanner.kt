@@ -136,11 +136,11 @@ class StorageUsageScanner @Inject constructor(
         var total = 0L
         var largest: Pair<File, Long>? = null
         dirs.forEach { dir ->
-            val id = if (dir.name == ROOTFS_DIR) ContainerProfile.BUILTIN_ID else dir.name.removePrefix("${ROOTFS_DIR}_")
+            val id = if (dir.name == "rootfs_ubuntu") ContainerProfile.BUILTIN_ID else dir.name.removePrefix("${ROOTFS_DIR}_")
             val size = dirSize(dir, cancelled)
             total += size
             val label = nameById[id]
-                ?: if (id == ContainerProfile.BUILTIN_ID) ContainerProfile.BUILTIN_ALPINE.name else dir.name
+                ?: if (id == ContainerProfile.BUILTIN_ID) ContainerProfile.BUILTIN_UBUNTU.name else dir.name
             details += StorageDetail(label = label, bytes = size, note = dir.name)
             if (size > (largest?.second ?: 0L)) largest = dir to size
         }
