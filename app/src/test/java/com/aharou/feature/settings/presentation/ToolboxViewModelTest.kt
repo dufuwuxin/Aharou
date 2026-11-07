@@ -1,6 +1,7 @@
 package com.aharou.feature.settings.presentation
 
 import android.content.Context
+import androidx.lifecycle.viewModelScope
 import com.aharou.feature.agent.domain.container.CommandEngine
 import com.aharou.feature.agent.domain.container.CommandResult
 import com.aharou.feature.agent.domain.permission.ToolPermissionPolicyEngine
@@ -25,6 +26,7 @@ class ToolboxViewModelTest {
     private val workspace = mockk<WorkspaceRepository>()
     private val context = mockk<Context>(relaxed = true)
     private val policy = mockk<ToolPermissionPolicyEngine>()
+    private val viewModels = mutableListOf<ToolboxViewModel>()
 
     @Before fun setup() {
         Dispatchers.setMain(dispatcher)
@@ -33,8 +35,14 @@ class ToolboxViewModelTest {
         coEvery { policy.evaluate(any(), any(), any(), any(), any(), any()) } returns
             ToolPermissionPolicyEngine.EvalResult(ToolPermissionPolicyEngine.Verdict.ASK, emptyList())
     }
-    @After fun cleanup() { Dispatchers.resetMain() }
-    private fun vm() = ToolboxViewModel(store, registry, engine, workspace, context, policy)
+    @After fun cleanup() {
+        try {
+            runTest(dispatcher) {
+                viewModels.forEach { it.viewModelScope.coroutineContext[Job]?.cancelAndJoin() }
+            }
+        } finally { Dispatchers.resetMain() }
+    }
+    private fun vm() = ToolboxViewModel(store, registry, engine, workspace, context, policy).also(viewModels::add)
 
     @Test fun strictImportRejectsBadDefinitionsAndRoundTripsOriginalFormat() {
         val tool = CustomToolDefinition("example", command = "printf %s {{path}}", parameters = listOf(CustomToolParameter("path", required = true)))
