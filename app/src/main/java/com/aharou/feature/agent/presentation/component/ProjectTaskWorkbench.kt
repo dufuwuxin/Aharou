@@ -13,9 +13,12 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -25,6 +28,12 @@ import com.aharou.core.theme.Spacing
 import com.aharou.core.theme.semanticColors
 import com.aharou.feature.agent.domain.task.*
 import com.aharou.feature.agent.presentation.ProjectTaskViewModel
+import compose.icons.FeatherIcons
+import compose.icons.feathericons.Check
+import compose.icons.feathericons.Layers
+import compose.icons.feathericons.MoreVertical
+import compose.icons.feathericons.Play
+import compose.icons.feathericons.Square
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -39,6 +48,9 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
     var expandedId by rememberSaveable(projectId) { mutableStateOf<String?>(null) }
     var collapsed by remember(projectId) { mutableStateOf(emptySet<String>()) }
     var overview by remember { mutableStateOf(false) }
+    var viewMenu by remember { mutableStateOf(false) }
+    var moreMenu by remember { mutableStateOf(false) }
+    var legend by remember { mutableStateOf(false) }
     var adding by rememberSaveable(projectId) { mutableStateOf(false) }
     var addingParentId by rememberSaveable(projectId) { mutableStateOf<String?>(null) }
     val planning = projectId in state.planningProjectIds
@@ -55,19 +67,44 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
     val dragConnection = rememberContentDragConnection(onContentDrag)
     Column(Modifier.fillMaxSize().nestedScroll(dragConnection)
         .padding(Spacing.md), verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-        Row(Modifier.fillMaxWidth()) {
-            TextButton(onClick = onBack, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.project_back)) }
-            TextButton(onClick = { overview = true }, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) {
-                Text(project?.title.orEmpty(), maxLines = 1, style = MaterialTheme.typography.titleMedium)
+        Row(Modifier.fillMaxWidth().testTag("project_action_bar"), verticalAlignment = Alignment.CenterVertically) {
+            val active = projectId in state.activeProjectIds
+            IconButton(onClick = { if (active) viewModel.stopProject(projectId) else viewModel.startProject(projectId) },
+                enabled = active || (!state.loading && !state.busy && !planning && tasks.any { !ProjectWorkflowPlan.delivered(it) }),
+                modifier = Modifier.size(48.dp).testTag(if (active) "project_flow_stop" else "project_flow_start")) {
+                Icon(if (active) FeatherIcons.Square else FeatherIcons.Play,
+                    stringResource(if (active) R.string.project_flow_stop else R.string.project_flow_start), Modifier.size(Spacing.lg))
             }
-        }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-            if (projectId in state.activeProjectIds) Button(onClick = { viewModel.stopProject(projectId) }, modifier = Modifier.testTag("project_flow_stop")) {
-                Text(stringResource(R.string.project_flow_stop))
-            } else Button(onClick = { viewModel.startProject(projectId) }, enabled = !state.loading && !state.busy && !planning && tasks.any { !ProjectWorkflowPlan.delivered(it) },
-                modifier = Modifier.testTag("project_flow_start")) { Text(stringResource(R.string.project_flow_start)) }
             Text(stringResource(R.string.project_flow_progress, tasks.count { ProjectWorkflowPlan.delivered(it) }, tasks.size),
-                style = MaterialTheme.typography.labelSmall, modifier = Modifier.weight(1f).padding(top = Spacing.sm))
+                style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            Box {
+                IconButton(onClick = { viewMenu = true }, modifier = Modifier.size(48.dp).testTag("project_view_menu")) {
+                    Icon(FeatherIcons.Layers, stringResource(R.string.project_view_options), Modifier.size(Spacing.lg))
+                }
+                DropdownMenu(expanded = viewMenu, onDismissRequest = { viewMenu = false }) {
+                    listOf("tree" to R.string.project_task_tree, "map" to R.string.project_task_map).forEach { (mode, label) ->
+                        DropdownMenuItem(text = { Text(stringResource(label)) }, onClick = {
+                            if (viewMode != mode) expandedId = null
+                            viewMode = mode; viewMenu = false
+                        }, leadingIcon = {
+                            if (viewMode == mode) Icon(FeatherIcons.Check, null, Modifier.size(Spacing.lg))
+                        }, modifier = Modifier.heightIn(min = 48.dp).semantics { selected = viewMode == mode }.testTag("project_mode_$mode"))
+                    }
+                    DropdownMenuItem(text = { Text(stringResource(R.string.project_map_legend)) },
+                        onClick = { legend = true; viewMenu = false })
+                }
+            }
+            Box {
+                IconButton(onClick = { moreMenu = true }, modifier = Modifier.size(48.dp).testTag("project_more_menu")) {
+                    Icon(FeatherIcons.MoreVertical, stringResource(R.string.project_more_options), Modifier.size(Spacing.lg))
+                }
+                DropdownMenu(expanded = moreMenu, onDismissRequest = { moreMenu = false }) {
+                    DropdownMenuItem(text = { Text(stringResource(R.string.project_task_overview)) },
+                        onClick = { overview = true; moreMenu = false })
+                    DropdownMenuItem(text = { Text(stringResource(R.string.project_add_task)) }, enabled = !state.busy,
+                        onClick = { addingParentId = null; adding = true; moreMenu = false }, modifier = Modifier.testTag("project_add_task"))
+                }
+            }
         }
         if (planning) Column(Modifier.fillMaxWidth().testTag("project_planning"), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
             Text(stringResource(R.string.project_planning), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
@@ -76,16 +113,8 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
             contentColor = MaterialTheme.semanticColors.onWarningContainer, modifier = Modifier.fillMaxWidth().testTag("project_rule_fallback")) {
             Text(stringResource(R.string.project_rule_fallback), style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(Spacing.sm))
         }
-        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().testTag("project_view_mode")) {
-            listOf("tree" to R.string.project_task_tree, "map" to R.string.project_task_map).forEachIndexed { index, (mode, label) ->
-                SegmentedButton(selected = viewMode == mode, onClick = { if (viewMode != mode) expandedId = null; viewMode = mode },
-                    shape = SegmentedButtonDefaults.itemShape(index, 2), modifier = Modifier.heightIn(min = 48.dp).testTag("project_mode_$mode")) { Text(stringResource(label)) }
-            }
-        }
         state.error?.let { Text(stringResource(R.string.project_task_error, projectTaskExecutionReasonLabel(it)), color = MaterialTheme.colorScheme.error) }
         approvals()
-        TextButton(onClick = { addingParentId = null; adding = true }, enabled = !state.busy,
-            modifier = Modifier.testTag("project_add_task")) { Text(stringResource(R.string.project_add_task)) }
         BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
             val processHeight = (maxHeight * 0.9f).coerceIn(240.dp, 640.dp)
             if (viewMode == "map") ProjectTaskMap(projectId, project?.title.orEmpty(), tasks, processId = expandedId,
@@ -154,6 +183,10 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
             viewModel.addTaskByDescription(projectId, description, parentId = addingParentId)
             adding = false
         }, onDismiss = { adding = false })
+    if (legend) AlertDialog(onDismissRequest = { legend = false },
+        title = { Text(stringResource(R.string.project_map_legend)) },
+        text = { Text(stringResource(R.string.project_task_dependency_legend), modifier = Modifier.verticalScroll(rememberScrollState())) },
+        confirmButton = { TextButton(onClick = { legend = false }) { Text(stringResource(R.string.project_close)) } })
     if (overview && project != null) AlertDialog(onDismissRequest = { overview = false },
         title = { Text(project.title) }, text = { Text(project.requirements, modifier = Modifier.verticalScroll(rememberScrollState())) },
         confirmButton = { TextButton(onClick = { overview = false }) { Text(stringResource(R.string.project_close)) } })

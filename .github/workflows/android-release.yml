@@ -162,6 +162,7 @@ jobs:
           python3 scripts/test_build_logging.py
           python3 scripts/test_code_structure.py
           python3 scripts/test_settings_navigation.py
+          python3 scripts/test_project_compact_layout.py
           python3 scripts/test_background_shell.py
           ./gradlew :core-agent:test :app:testArmsoloDebugUnitTest
 

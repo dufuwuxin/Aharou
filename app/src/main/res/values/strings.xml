@@ -3821,6 +3821,10 @@
     <string name="project_outline_fold">收起</string>
     <string name="project_outline_process">执行过程</string>
     <string name="project_outline_empty">暂无内容</string>
+    <string name="project_view_options">视图选项</string>
+    <string name="project_more_options">更多项目操作</string>
+    <string name="project_map_legend">图例与操作说明</string>
+    <string name="project_map_search_close">关闭查找</string>
     <string name="project_map_search">查找任务或内容</string>
     <string name="project_map_search_clear">清空查找</string>
     <string name="project_map_search_count">命中 %1$d 个任务，%2$d 处</string>
