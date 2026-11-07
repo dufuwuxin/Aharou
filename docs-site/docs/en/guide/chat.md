@@ -50,7 +50,6 @@ From left to right:
 - **Model button**: shows the current model; tapping it opens the picker. A search box at the top filters models fuzzily, models are grouped by vendor, and tapping a group header collapses or expands it (the collapsed state is remembered, and kept when you reopen the dialog or restart the app; while searching, matching groups expand automatically). Each row is labelled with capability tags (`Image`, `Tools`, input and output length) — one tap switches the model.
 - **Workspace button**: shows the current workspace name; tapping it opens the workspace management panel (see below).
 - **Reasoning effort button**: a lightning icon with the current level next to it; tapping it opens a bottom sheet with seven levels (`None` / `Default` / `Low` / `Medium` / `High` / `Extra high` / `Max`) — see [AI Vendors & Models](/guide/providers).
-- **Voice button**: a mic icon; a light tap starts or stops a voice call — see [Voice calls & reading aloud](/guide/voice).
 - **"+" button**: upload attachments. It opens a bottom sheet with **Upload File / Upload Image / Take photo**: a file is attached for the AI to read; an image is picked from the system gallery (multiple selection allowed, and the current model must support image input); Take photo opens the camera directly.
 - **Send button**: a plain send button while the AI is idle. While the AI is working it becomes a stop button if the input box is empty, or an orange send button if there is content (the message is queued).
 
