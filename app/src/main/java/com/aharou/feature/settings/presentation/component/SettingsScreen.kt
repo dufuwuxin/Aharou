@@ -1069,8 +1069,13 @@ fun SettingsScreen(
                     },
                     onOpenTeams = { section = SettingsSection.Teams }
                 )
-                SettingsSection.Teams -> SubAgentTeamsSection(expertCount = subAgents.size,
-                    onOpenExperts = { section = SettingsSection.SubAgents },
+                SettingsSection.Teams -> SubAgentTeamsSection(
+                    onCreateRoleCard = {
+                        editingSubAgent = null
+                        viewModel.clearSubAgentSaveState()
+                        subAgentEditorReturn = SettingsSection.Teams
+                        section = SettingsSection.SubAgentEditor
+                    },
                     onOpenRoleCard = { name ->
                         val card = subAgents.firstOrNull { it.name.equals(name, ignoreCase = true) }
                         if (card != null) {

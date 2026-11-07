@@ -98,6 +98,15 @@ class ToolSettingsStore @Inject constructor(
         return mutate { writeCustomTool(normalized) }
     }
 
+    suspend fun createCustomTool(definition: CustomToolDefinition): Boolean {
+        val normalized = definition.normalized()
+        if (!normalized.isValidName) return false
+        return mutate {
+            if (customDirs().any { File(it, "${normalized.name}.json").exists() }) false
+            else writeCustomTool(normalized)
+        }
+    }
+
     suspend fun deleteCustomTool(name: String): Boolean = mutate {
         var deleted = false
         customDirs().forEach { dir ->

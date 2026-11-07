@@ -5,6 +5,7 @@ Set AHAROU_TEST_ROOT to check another implementation tree with this same suite.
 import os
 import re
 import unittest
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 ROOT = Path(os.environ.get("AHAROU_TEST_ROOT", Path(__file__).resolve().parents[1])).resolve()
@@ -60,6 +61,45 @@ class SettingsNavigationTest(unittest.TestCase):
             self.assertIn(f"SettingsSection.{name} ->", actions)
         self.assertIn("viewModel.deleteSubAgent(target.name, target.scope)", self.screen)
         self.assertIn("editingSubAgent = entry", self.screen)
+
+    def test_team_create_role_card_opens_empty_editor_and_returns_to_team(self):
+        team = source(SETTINGS / "SubAgentTeamsSection.kt")
+        start = team.rfind("SettingsRow(", 0, team.index("R.string.team_create_member"))
+        row = block(team[start:], "SettingsRow", "(", ")")
+        self.assertIn("onClick = onCreateRoleCard", row)
+        self.assertNotIn("onOpenExperts", row)
+        self.assertNotIn("expertCount", row)
+        route = block(self.screen, "SettingsSection.Teams -> SubAgentTeamsSection", "(", ")")
+        create = block(route, "onCreateRoleCard =")
+        self.assertIn("editingSubAgent = null", create)
+        self.assertIn("viewModel.clearSubAgentSaveState()", create)
+        self.assertIn("subAgentEditorReturn = SettingsSection.Teams", create)
+        self.assertIn("section = SettingsSection.SubAgentEditor", create)
+        self.assertNotRegex(create, r"section\s*=\s*SettingsSection\.SubAgents\b")
+        editor = block(self.screen, "current == SettingsSection.SubAgentEditor -> SubAgentEditorScreen", "(", ")")
+        for callback in ("onSaved =", "onNavigateBack ="):
+            self.assertIn("section = subAgentEditorReturn", block(editor, callback))
+
+    def test_team_page_reloads_role_cards_after_returning_from_creation(self):
+        team = source(SETTINGS / "SubAgentTeamsSection.kt")
+        self.assertIn("viewModel.refresh()", block(team, "LaunchedEffect(Unit)"))
+        model = source(SETTINGS.parent / "TeamSettingsViewModel.kt")
+        self.assertIn("load()", function(model, "refresh"))
+        reload = function(model, "load")
+        self.assertIn("_members.value =", reload)
+        self.assertIn("agentDefinitionRepository.listEnabled()", reload)
+        self.assertIn("availableMembers = availableMembers", team)
+
+    def test_role_management_does_not_show_old_subagent_terminology(self):
+        resources = ET.parse(ROOT / "app/src/main/res/values/strings.xml").getroot()
+        values = {item.attrib["name"]: "".join(item.itertext()) for item in resources.findall("string")}
+        for name in ("SubAgentsSection.kt", "SubAgentEditorScreen.kt", "SubAgentDetailSection.kt"):
+            references = re.findall(r"R\.string\.(\w+)", source(SETTINGS / name))
+            for reference in references:
+                with self.subTest(file=name, resource=reference):
+                    self.assertNotIn("子代理", values[reference])
+        self.assertIn("communicationEnabled", source(SETTINGS / "SubAgentsSection.kt"))
+        self.assertIn("setCommunicationEnabled", source(SETTINGS / "SubAgentsSection.kt"))
 
     def test_bottom_roots_hide_titles_and_back_but_keep_child_navigation(self):
         self.assertIn("current == SettingsSection.Menu || current == configHome", self.screen)

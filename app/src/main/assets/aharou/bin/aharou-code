@@ -1,0 +1,2 @@
+#!/bin/sh
+exec python3 -I "$HOME/.aharou/lib/codekit/query.py" "$@"

@@ -4,6 +4,9 @@
 
 ## 本轮新增能力
 
+- 可执行工具箱：工具页默认提供参数表单、命令风险预览、手动运行、退出码/截断、单条原格式JSON预览导入和导出分享；保存只创建、不覆盖同名，执行复用CustomCommandTool与原权限策略，不经过模型或自动安装。编辑器设置入口复用原页面，实际LSP补全仍需编辑器上下文与已安装服务。
+- 代码结构查询：`code_structure` 经原注册器、只读权限和 `tool_search` 接入；`aharou-code` 随原 bin/lib 资源提取，提供 Kotlin/Rust/Python 的限额新鲜结构快照、符号及词法调用点候选，action=check提供三语言词法/括号和Python AST检查，明确非编译验证，不执行源码、不替代语义分析或编译。展开状态按会话与工作区隔离；CodeGraph 状态/索引仅为需保存的 ASK 命令草稿，安装及 MCP 接入由现有入口负责，不默认下载或授权。
+
 - OpenAI 速度档位：供应商选项中的默认/Fast/Ultrafast 与 `config providers.<id>.service_tier` 同步；复用自定义请求头保存，实际请求体也发送 `service_tier`，Ultrafast 走 Responses，不等同于思考强度。不自动替用户选择收费档位。
 - AI 自动构建任务树：创建、追加、添加任务和长按补充都经规划器调用模型，失败退回按行规则；成员可用 `project_tasks` 分出研究分支或追加子任务，分支和补充让当前任务回到待执行，流程续跑而不中止。
 - 项目完整树图/导图：节点内展开过程，负责人和成员逐个真实执行，同名角色有独立记录；修改参与者使本任务及下游交付失效。用户验收与成员交付仍区分。
@@ -11,9 +14,9 @@
 
 ## 0. 工具集合与事实来源
 
-- 内置工具的唯一注册点是 `app/src/main/java/com/aharou/di/AgentModule.kt:471-509`，共 **39 个**：`readFile` `sendFile` `sendToChat` `viewImage` `writeFile` `editFile` `generateImage` `Bash` `Shizuku` `terminal` `list` `search` `loadSkill` `loadRule` `knowledge_search` `askUserQuestion` `manageMcp` `tool_search` `websearch` `webfetch` `planMode` `todo` `memory` `task` `messageParent` `observe` `browser` `config` `vscreen` `a11y` `open_app` `check_dependencies` `sessions` `project_tasks` `device` `personal_context` `petAvatar` `diagnostics` `git_blame`。
+- 内置工具的唯一注册点是 `app/src/main/java/com/aharou/di/AgentModule.kt:471-509`，共 **40 个**：`readFile` `sendFile` `sendToChat` `viewImage` `writeFile` `editFile` `generateImage` `Bash` `Shizuku` `terminal` `list` `search` `loadSkill` `loadRule` `knowledge_search` `askUserQuestion` `manageMcp` `tool_search` `websearch` `webfetch` `planMode` `todo` `memory` `task` `messageParent` `observe` `browser` `config` `vscreen` `a11y` `open_app` `check_dependencies` `sessions` `project_tasks` `device` `personal_context` `petAvatar` `diagnostics` `git_blame` `code_structure`。
 - MCP 工具在连接时动态注册（`feature/agent/domain/mcp/McpManager.kt:266`，卸载见 `:272` / `:354`）。
-- 每轮注入：工具集经成员允许清单、`ToolInjectionGate` 的 every_round/keyword/off 策略过滤，并应用兼容的描述与 schema 说明覆盖；不能把注册工具总数当作每轮实际可见数量。MCP 的延迟加载仍由原有检索链路（`tool_search`）处理。
+- 每轮注入：工具集经成员允许清单、`ToolInjectionGate` 的 every_round/keyword/off 策略过滤，并应用兼容的描述与 schema 说明覆盖；不能把注册工具总数当作每轮实际可见数量。MCP 与代码结构工具的延迟加载由原有检索链路（`tool_search`）处理，展开记录限定当前会话和工作区，重启或较久未使用后可重新发现。
 - `config`（`di/AgentModule.kt:475`，实现 `feature/agent/domain/tool/config/ConfigTool.kt`）是一层**通用配置接口**：agent 能改什么，取决于 `ConfigRegistry` 里注册了哪些字段，注册入口集中在 `AIEditorApp.kt:409-434`（24 个 `Config*Fields`）。下文写“config `path`”即指这条路径。
 - 权限档只影响“执行时要不要弹确认”（`ToolPermissionPolicyEngine`），**不影响工具有没有**；本表只统计有没有。
 
@@ -65,6 +68,8 @@
 | 打开 / 预览文件 | `ChatDrawer.kt:938`（`onOpenFile`）→ `MainActivity.kt:795`；沙盒 `FileBrowserScreen.kt:195` → `FilePreviewScreen.kt:99` | 有 | `readFile`（`AgentModule.kt:449`）、`viewImage`（`:452`） | 无；图片走 `viewImage`，文本走 `readFile` |
 
 ## 4. 模型与供应商配置
+
+会话级双模型规划：用户在会话页选择规划、执行模型并开关；Agent 通过 `dual_model.sessions.<sessionId>.enabled / planning / execution` 配置同一份会话数据。模型字段使用 `providerId:model`，只按第一个冒号拆分。PLAN 与执行阶段按当前模式路由，不改变计划批准与工具权限；不继承到新会话或子代理。界面在运行中不可修改配置，配置通道更新在下一轮生效，本轮配置冻结。
 
 个人中心页面及设置路由已移除；聊天身份存储与 `ConfigBuiltins.kt` 的身份配置字段保留，不清除用户已有昵称和头像。
 

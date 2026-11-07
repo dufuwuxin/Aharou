@@ -98,7 +98,9 @@ class OfflineTranslation @Inject constructor(
         }
     }
 
-    suspend fun translate(text: String): String {
+    suspend fun translate(text: String): String = translationOrOriginal(text) { translateReady(text) }
+
+    private suspend fun translateReady(text: String): String {
         if (!enabled.value) return text
         val parts = TranslationDocument.parts(text)
         if (parts.none { it.translate }) return text

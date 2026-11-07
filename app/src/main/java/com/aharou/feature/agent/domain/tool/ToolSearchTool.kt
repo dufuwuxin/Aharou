@@ -1,6 +1,7 @@
 package com.aharou.feature.agent.domain.tool
 
 import com.aharou.core.util.FileLogger
+import com.aharou.feature.agent.domain.model.AgentContext
 import com.google.gson.Gson
 import dagger.Lazy
 import javax.inject.Inject
@@ -20,7 +21,7 @@ import kotlinx.serialization.json.jsonPrimitive
 class ToolSearchTool @Inject constructor(
     // 必须是 Lazy：ToolRegistry 的 provider 要把本工具注册进去，直接注入会形成依赖环。
     private val toolRegistry: Lazy<ToolRegistry>
-) : AgentTool() {
+) : AbstractContextualTool() {
 
     private companion object {
         const val TAG = "ToolSearchTool"
@@ -37,9 +38,9 @@ class ToolSearchTool @Inject constructor(
     override val name = "tool_search"
 
     override val description =
-        "搜索按需加载的工具目录（MCP 工具默认不可直接调用，要靠它展开）。" +
+        "搜索按需加载的工具目录（含 MCP 与代码结构查询，要靠它展开）。" +
             "query 传关键词，多个词用空格分隔且需全部命中；留空则列出目录里的全部工具。" +
-            "命中的工具会立即展开，从下一轮起可直接调用。"
+            "命中的工具仅在当前会话工作区展开，从下一轮起可直接调用。"
 
     // 纯目录查询，不改动任何外部状态，无需逐次过用户审核。
     override val permissionPolicy = ToolPermissionPolicy.AUTO_APPROVE
@@ -53,11 +54,11 @@ class ToolSearchTool @Inject constructor(
         )
     )
 
-    override suspend fun execute(args: Map<String, JsonElement>): ToolResult {
+    override suspend fun executeWithContext(args: Map<String, JsonElement>, context: AgentContext): ToolResult {
         val query = args["query"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
         val catalog = toolRegistry.get().getDeferredTools()
         if (catalog.isEmpty()) {
-            return ToolResult.Success(JsonPrimitive("按需加载的工具目录是空的（当前没有已连接的 MCP server）。"))
+            return ToolResult.Success(JsonPrimitive("按需加载的工具目录是空的。"))
         }
 
         val terms = query.lowercase().split(Regex("\\s+")).filter { it.isNotBlank() }
@@ -79,7 +80,7 @@ class ToolSearchTool @Inject constructor(
         }
 
         val picked = matched.take(MAX_RESULTS)
-        toolRegistry.get().activate(picked.map { it.name })
+        toolRegistry.get().activate(picked.map { it.name }, context)
         FileLogger.i(TAG, "tool_search「$query」匹配 ${matched.size} 个，展开 ${picked.size} 个")
 
         val text = buildString {

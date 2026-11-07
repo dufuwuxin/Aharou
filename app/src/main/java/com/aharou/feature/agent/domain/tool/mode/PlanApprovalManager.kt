@@ -7,13 +7,11 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private const val TAG = "PlanApprovalManager"
 
@@ -39,9 +37,6 @@ class PlanApprovalManager @Inject constructor(
     private val _pendingApproval = MutableStateFlow<PlanApprovalRequest?>(null)
     val pendingApproval: StateFlow<PlanApprovalRequest?> = _pendingApproval.asStateFlow()
 
-    // SupervisorJob：一次回滚失败不能让整个 scope 永久取消，否则之后所有「拒绝→回滚 PLAN」静默失效。
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-
     /** 挂起等待用户在计划审查面板中的决策。 */
     suspend fun awaitApproval(reason: String, sessionId: String? = null): PlanApprovalChoice {
         val request = PlanApprovalRequest(
@@ -56,11 +51,17 @@ class PlanApprovalManager @Inject constructor(
         }
 
         try {
-            return decision.await()
+            val choice = decision.await()
+            if (choice == PlanApprovalChoice.REFINE) rollbackModeToPlan(sessionId)
+            return choice
         } catch (e: CancellationException) {
             // 用户未批准切换（点「停止」等取消路径）：SwitchModeTool 已把目标模式写入 DB，
             // 取消意味着未获批准，需回滚，否则模式会未经批准直接切过去。
-            rollbackModeToPlan(sessionId)
+            try {
+                withContext(NonCancellable) { rollbackModeToPlan(sessionId) }
+            } catch (failure: Exception) {
+                e.addSuppressed(failure)
+            }
             throw e
         } finally {
             synchronized(entries) {
@@ -79,24 +80,18 @@ class PlanApprovalManager @Inject constructor(
             }
         } ?: return
 
-        // 用户拒绝时，回滚数据库中的模式到 PLAN（SwitchModeTool 已写入 BUILD）
-        if (choice == PlanApprovalChoice.REFINE) {
-            rollbackModeToPlan(entry.request.sessionId)
-        }
         entry.decision.complete(choice)
     }
 
     /** 回滚会话模式到 PLAN（SwitchModeTool 已提前写入目标模式，未获批准时还原）。 */
-    private fun rollbackModeToPlan(sessionId: String?) {
+    private suspend fun rollbackModeToPlan(sessionId: String?) {
         val sid = sessionId ?: return
-        scope.launch {
-            runCatching {
-                val entity = chatSessionDao.getById(sid)
-                if (entity != null && entity.mode != "PLAN") {
-                    chatSessionDao.upsert(entity.copy(mode = "PLAN"))
-                }
-            }.onFailure { FileLogger.w(TAG, "回滚 PLAN 模式失败: $sid", it) }
-        }
+        runCatching {
+            val entity = chatSessionDao.getById(sid)
+            if (entity != null && entity.mode != "PLAN") {
+                chatSessionDao.upsert(entity.copy(mode = "PLAN"))
+            }
+        }.onFailure { FileLogger.w(TAG, "回滚 PLAN 模式失败: $sid", it) }.getOrThrow()
     }
 }
 

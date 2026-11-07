@@ -136,7 +136,7 @@ class StatefulAgentWorkflow @Inject constructor(
     private val keyRotator: ProviderKeyRotator,
     private val generatedImagePersister: GeneratedImagePersister,
     private val failoverCoordinator: ProviderFailoverCoordinator,
-    private val workspaceModelChain: WorkspaceModelChain,
+    private val workspaceModelChain: WorkspaceModelChain, private val dualModelRouter: DualModelRouter,
     private val agentNotificationCenter: AgentNotificationCenter,
     private val eventInjector: AgentEventInjector,
     private val memoryCurator: MemoryCurator,
@@ -257,9 +257,8 @@ class StatefulAgentWorkflow @Inject constructor(
             val previousResults: Map<String, ToolBatchResult> = emptyMap()
         ) : AgentSideEffect
     }
-
-    private suspend fun getEffectiveProvider(sessionId: String?): AIProvider {
-        val config = resolveProviderConfig(sessionId)
+    private suspend fun getEffectiveProvider(sessionId: String?, routing: com.aharou.feature.agent.domain.session.DualModelSettings? = null): AIProvider {
+        val config = resolveProviderConfig(sessionId, routing)
             ?: throw IllegalStateException("尚未配置 AI 供应商，请到设置中添加并选择一个")
         if (!config.hasUsableApiKey) throw IllegalStateException("「${config.name}」未填写 API Key")
         if (config.effectiveModel.isBlank()) throw IllegalStateException("「${config.name}」未选择模型")
@@ -267,7 +266,8 @@ class StatefulAgentWorkflow @Inject constructor(
     }
 
     /** 解析当前生效的 provider 配置：优先 session 绑定的 providerId/model，回退全局 active provider；绑定失效也回退，保老会话不中断。 */
-    private suspend fun resolveProviderConfig(sessionId: String?): AIProviderConfig? {
+    private suspend fun resolveProviderConfig(sessionId: String?, routing: com.aharou.feature.agent.domain.session.DualModelSettings? = null): AIProviderConfig? {
+        dualModelRouter.resolve(sessionId, routing)?.let { return it }
         // 回退覆盖优先：主供应商已因额度/鉴权/限流失败过，不要每轮再撞一次
         failoverCoordinator.overrideConfig(sessionId)?.let { return it }
         if (sessionId != null) {
@@ -323,7 +323,7 @@ class StatefulAgentWorkflow @Inject constructor(
         val compactionProvider = resolveCompactionFallbackProvider(sessionId) ?: provider
         val reuseMainPrefix = compactionProvider.providerId == provider.providerId && compactionProvider.model == provider.model  // 前缀缓存只同 provider 同 model 内生效，配了独立压缩模型就不复用主前缀
         return contextCompactor.compactIfNeeded(history, compactionProvider, sessionId, force = true, windowProvider = provider,
-            systemPrompt = if (reuseMainPrefix) appendMiddlewarePrompt(provider.providerId, withContext(Dispatchers.IO) { promptProvider.build(context, consumeInbox = false) }) else "", tools = if (reuseMainPrefix) requestTools(tools) else emptyList(), onEvent = onEvent).compacted
+            systemPrompt = if (reuseMainPrefix) appendMiddlewarePrompt(provider.providerId, withContext(Dispatchers.IO) { promptProvider.build(context, consumeInbox = false) }) else "", tools = if (reuseMainPrefix) requestTools(tools, context) else emptyList(), onEvent = onEvent).compacted
     }
 
     /**
@@ -447,16 +447,19 @@ class StatefulAgentWorkflow @Inject constructor(
             )
         )
 
+        val routingSettings = if (currentContext.agentDefinition != null) com.aharou.feature.agent.domain.session.DualModelSettings() else dualModelRouter.settingsForTurn(currentContext.sessionId)
+
         // 提示词构建会读取技能/子代理/记忆等文件（远程经 SFTP），须离开收集本工作流的线程（主线程）。
         val promptStartedNs = System.nanoTime()
         FileLogger.memoryCheckpoint(TAG, "prompt.start", details = "operation=$promptStartedNs")
-        val systemPrompt = withContext(Dispatchers.IO) { promptProvider.build(currentContext) }
+        val systemPrompt = withContext(Dispatchers.IO) { promptProvider.build(if (routingSettings.enabled) currentContext.copy(modelIdentity = null) else currentContext) }
         FileLogger.memoryCheckpoint(TAG, "prompt.ready",
             elapsedMs = (System.nanoTime() - promptStartedNs) / 1_000_000,
             details = "operation=$promptStartedNs promptChars=${systemPrompt.length}")
-        val chainConfig = workspaceModelChain.begin(currentContext.projectRoot, currentContext.sessionId,
+        val dualConfig = dualModelRouter.resolve(currentContext.sessionId, routingSettings)
+        val chainConfig = if (dualConfig != null) null else workspaceModelChain.begin(currentContext.projectRoot, currentContext.sessionId,
             currentContext.agentDefinition == null && currentContext.sessionId?.let { sessionUseCase.getSessionById(it)?.parentId } == null)
-        val aiProvider = chainConfig?.let { createStandaloneProvider(it, currentContext.sessionId) } ?: getEffectiveProvider(currentContext.sessionId)
+        val aiProvider = (dualConfig ?: chainConfig)?.let { createStandaloneProvider(it, currentContext.sessionId) } ?: getEffectiveProvider(currentContext.sessionId, routingSettings)
         val metadata = modelMetadataService.configureChatModel(aiProvider)
         val inputBudget = ModelContextPolicy.effectiveInputBudget(metadata)
         val historyStartedNs = System.nanoTime()
@@ -464,10 +467,10 @@ class StatefulAgentWorkflow @Inject constructor(
         val lastAssistantIndex = currentContext.history.indexOfLast { it is AgentMessage.AssistantMessage && it.inputTokens > 0 }
         // 预算基线与两个「本轮只试一次」的开关都只在 LLM 调用分支用到，收成一个可变对象，
         // 让该分支抽成独立函数后不必在主循环里再留 4 个跨挂起点局部变量。
-        val llmBudget = LlmCallBudgetState(
+        val llmBudget = LlmCallBudgetState(routingSettings = routingSettings, providerKey = "${aiProvider.providerId.length}:${aiProvider.providerId}:${aiProvider.model}",
             baselineEstimate = withContext(Dispatchers.Default) { ContextTokenEstimator.estimate(systemPrompt,
-                currentContext.history.take(lastAssistantIndex.coerceAtLeast(0)), requestTools(currentTools)) },
-            baselineUsage = if (currentContext.lastInputTokens > 0 && lastAssistantIndex >= 0) {
+                currentContext.history.take(lastAssistantIndex.coerceAtLeast(0)), requestTools(currentTools, currentContext)) },
+            baselineUsage = if (!routingSettings.enabled && currentContext.lastInputTokens > 0 && lastAssistantIndex >= 0) {
                 (currentContext.history[lastAssistantIndex] as AgentMessage.AssistantMessage).inputTokens
             } else 0
         )
@@ -549,20 +552,10 @@ class StatefulAgentWorkflow @Inject constructor(
         emit(AgentEvent.Completed)
     }
 
-    /**
-     * 同一轮任务内跨多次 LLM 调用保持的预算基线与恢复开关（只在 LLM 调用分支使用）。
-     * [compactionAttemptFailed] 与 [overflowRecoveryAttempted] 都是「本轮只试一次」的标记。
-     */
-    private class LlmCallBudgetState(
-        var baselineEstimate: Int,
-        var baselineUsage: Int,
-        var compactionAttemptFailed: Boolean = false,
-        var overflowRecoveryAttempted: Boolean = false
-    )
-
     /** 会话是否收到了「用户打断」：peek 到就打勾并 ack 掉（一次性消费），主循环与收流两处共用。 */
     /** 随请求发送的工具（延迟加载的 MCP 工具要 tool_search 展开过）；压缩与预算估算共用此口径。 */
-    private fun requestTools(tools: List<AgentTool>) = tools.filter { !it.deferredLoading || toolRegistry.isActivated(it.name) }
+    private fun requestTools(tools: List<AgentTool>, context: AgentContext) =
+        tools.filter { !it.deferredLoading || toolRegistry.isActivated(it.name, context) }
 
     private fun consumeUserInterrupt(sessionId: String?): Boolean {
         if (sessionId == null) return false
@@ -600,12 +593,14 @@ class StatefulAgentWorkflow @Inject constructor(
         telemetry: AgentTurnTelemetry
     ): AgentSessionState {
         var state = initialState.copy(messages = initialState.messages + drainInsertedUserMessages(currentContext.sessionId))
-        val providerInUse = workspaceModelChain.current(currentContext.sessionId)?.let { createStandaloneProvider(it, currentContext.sessionId) } ?: aiProvider
+        val dualConfig = dualModelRouter.resolve(currentContext.sessionId, budget.routingSettings)
+        val providerInUse = (dualConfig ?: workspaceModelChain.current(currentContext.sessionId))?.let { createStandaloneProvider(it, currentContext.sessionId) } ?: aiProvider
+        budget.selectProvider("${providerInUse.providerId.length}:${providerInUse.providerId}:${providerInUse.model}")
         val callMetadata = modelMetadataService.configureChatModel(providerInUse)
         val inputBudget = ModelContextPolicy.effectiveInputBudget(callMetadata)
         val requestVersion = injectedContexts.beginRequest(currentContext.sessionId)
         val requestSystemPrompt = appendMiddlewarePrompt(providerInUse.providerId, systemPrompt)
-        val promptTools = requestTools(currentTools)
+        val promptTools = requestTools(currentTools, currentContext)
         val compactionProvider = resolveCompactionFallbackProvider(currentContext.sessionId) ?: providerInUse
         val reuseMainPrefix = compactionProvider.providerId == providerInUse.providerId && compactionProvider.model == providerInUse.model  // 前缀缓存只同 provider 同 model 内生效，配了独立压缩模型就不复用主前缀
         var compactedMessages = state.messages
@@ -819,8 +814,9 @@ class StatefulAgentWorkflow @Inject constructor(
             throw e
         } catch (e: Exception) {
             if (finalResponse == null && !captureSnapshot().hasSnapshotData() &&
-                (workspaceModelChain.configured(currentContext.sessionId) || e.isKeySwitchFailure() || e.isQuotaExhausted())) {
-                val target = if (workspaceModelChain.configured(currentContext.sessionId)) workspaceModelChain.next(currentContext.sessionId)
+                ((dualConfig == null && workspaceModelChain.configured(currentContext.sessionId)) || e.isKeySwitchFailure() || e.isQuotaExhausted())) {
+                val target = if (dualConfig != null) dualModelRouter.next(currentContext.sessionId, budget.routingSettings)
+                    else if (workspaceModelChain.configured(currentContext.sessionId)) workspaceModelChain.next(currentContext.sessionId)
                     else aiProviderRepository.getProviderById(providerInUse.providerId)?.let { failoverCoordinator.next(currentContext.sessionId, it) }
                 if (target != null) {
                     callError = e.message ?: e.javaClass.simpleName

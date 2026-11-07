@@ -234,7 +234,7 @@ fun AIChatPanel(
         .find { it.id == defaultProviderId }
         ?.takeIf { it.hasUsableApiKey }
         ?.let { if (defaultModelName.isNotBlank() && defaultModelName in it.models) it.copy(selectedModel = defaultModelName) else it }
-    val activeProvider = run {
+    val boundProvider = run {
         val (boundProviderId, boundModel) = sessionProviderModel
         if (!boundProviderId.isNullOrBlank()) {
             // 与 workflow.resolveProviderConfig 保持一致：绑定 provider 须启用且已填 apiKey，否则回退默认模型
@@ -252,6 +252,7 @@ fun AIChatPanel(
     // 会话绑定的工作区：手打对话也按会话走，不跟界面上选中的工作区
     val projectRoot by viewModel.currentSessionWorkspace.collectAsStateWithLifecycle()
     val currentMode by viewModel.currentSessionMode.collectAsStateWithLifecycle()
+    val activeProvider = dualModelProvider(currentSessionId?.takeIf { currentSession?.parentId == null }, currentMode, providers, boundProvider)
     val slashCommands by viewModel.slashCommands.collectAsStateWithLifecycle()
     // 输入草稿只认 ViewModel 这一份：本地 remember 活不过切页，双份必然对不上。
     val inputText by viewModel.inputDraft.collectAsStateWithLifecycle()
@@ -1254,7 +1255,7 @@ fun AIChatPanel(
             val floatingLayerMaxHeight = maxHeight
             // 内容层：消息列表延伸到屏幕底部，输入框悬浮其上，滚动时卡片可滑入输入框后面
             Column(modifier = Modifier.fillMaxSize()) {
-            GhostModeIndicator(isGhost = ghostMode, onToggle = viewModel::setGhostMode)
+            ChatSessionModelControls(ghostMode, viewModel::setGhostMode, currentSessionId?.takeIf { currentSession?.parentId == null }, currentMode, providers, modelMetadata, currentSessionId in activeAgentSessions || isCompacting, { if (viewModel.currentSessionId.value == currentSessionId) viewModel.setSessionMode(com.aharou.feature.agent.domain.model.AgentMode.PLAN) })
             if (ghostMode) GhostModeBanner()
             Box(modifier = Modifier.weight(1f)) {
                 if (bodyOverride != null) {
@@ -1519,9 +1520,7 @@ fun AIChatPanel(
                     activeProvider = activeProvider,
                     providers = providers,
                     modelMetadata = modelMetadata, modelChainWorkspace = projectRoot,
-                    onSelectModel = { p, m ->
-                        viewModel.setSessionProviderModel(p, m)
-                    },
+                    onSelectModel = dualModelSelectionHandler(currentSessionId?.takeIf { currentSession?.parentId == null }, currentMode, currentSessionId in activeAgentSessions || isCompacting, viewModel::setSessionProviderModel),
                     currentMode = currentMode,
                     onToggleMode = { viewModel.setSessionMode(it) },
                     reasoningEffort = reasoningEffort,

@@ -103,6 +103,9 @@ jobs:
           python3 -m unittest discover -s scripts -p test_arm64_assets.py
           python3 scripts/test_void_toolchain.py
           python3 scripts/test_build_logging.py
+          python3 scripts/test_code_structure.py
+          python3 scripts/test_settings_navigation.py
+          python3 scripts/test_background_shell.py
           python3 scripts/test_builtin_system.py
           python3 scripts/check_builtin_seed_history.py
           python3 scripts/test_builtin_seed_history.py

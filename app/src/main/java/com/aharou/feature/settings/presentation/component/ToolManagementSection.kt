@@ -46,17 +46,19 @@ internal fun ToolManagementSection(
     var selected by rememberSaveable { mutableStateOf(0) }
     val customViewModel: ToolsViewModel = androidx.hilt.navigation.compose.hiltViewModel()
     val customState by customViewModel.state.collectAsStateWithLifecycle()
-    LaunchedEffect(selected) { if (selected == 2) customViewModel.refresh() }
+    LaunchedEffect(selected) { if (selected == 3) customViewModel.refresh() }
     var createScript by rememberSaveable { mutableStateOf(false) }
     Column(Modifier.fillMaxSize()) {
         SegmentedTabs(
             selected = selected,
-            labels = listOf(stringResource(R.string.settings_mcp), stringResource(R.string.script_tools_title), stringResource(R.string.tools_group_custom), stringResource(R.string.settings_scheduled_tasks), stringResource(R.string.settings_permissions)),
+            labels = listOf(stringResource(R.string.toolbox_title), stringResource(R.string.settings_mcp), stringResource(R.string.script_tools_title), stringResource(R.string.tools_group_custom), stringResource(R.string.settings_scheduled_tasks), stringResource(R.string.settings_permissions)),
             onSelect = { selected = it },
             modifier = Modifier.padding(horizontal = Spacing.lg),
         )
         Box(Modifier.weight(1f)) {
             if (selected == 0) {
+                ToolboxSection()
+            } else if (selected == 1) {
                 Column {
                     TextButton(onClick = onReload, enabled = !reloading, modifier = Modifier.padding(horizontal = Spacing.lg)) {
                         Text(stringResource(R.string.settings_reconnect))
@@ -70,9 +72,9 @@ internal fun ToolManagementSection(
             } else {
                 Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
                     when (selected) {
-                        1 -> ScriptToolsSection(createRequested = createScript, onCreateHandled = { createScript = false }, embedded = true)
-                        2 -> ToolsSection(state = customState, viewModel = customViewModel, embedded = true)
-                        3 -> ScheduledTasksSection()
+                        2 -> ScriptToolsSection(createRequested = createScript, onCreateHandled = { createScript = false }, embedded = true)
+                        3 -> ToolsSection(state = customState, viewModel = customViewModel, embedded = true)
+                        4 -> ScheduledTasksSection()
                         else -> {
                             SettingsGroupHeader(text = stringResource(R.string.settings_permissions))
                             permissionContent()
@@ -88,13 +90,13 @@ internal fun ToolManagementSection(
             title = { Text(stringResource(R.string.tools_add_type)) },
             text = {
                 Column {
-                    TextButton(onClick = { selected = 0; onCreateHandled(); onCreateMcp() }) {
+                    TextButton(onClick = { selected = 1; onCreateHandled(); onCreateMcp() }) {
                         Text(stringResource(R.string.settings_add_mcp_server))
                     }
-                    TextButton(onClick = { selected = 2; customViewModel.startCreate(); onCreateHandled() }) {
+                    TextButton(onClick = { selected = 3; customViewModel.startCreate(); onCreateHandled() }) {
                         Text(stringResource(R.string.tools_add))
                     }
-                    TextButton(onClick = { selected = 1; createScript = true; onCreateHandled() }) {
+                    TextButton(onClick = { selected = 2; createScript = true; onCreateHandled() }) {
                         Text(stringResource(R.string.script_tools_add))
                     }
                 }

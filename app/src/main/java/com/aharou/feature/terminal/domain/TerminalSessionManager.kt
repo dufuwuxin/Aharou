@@ -210,7 +210,7 @@ class TerminalSessionManager @Inject constructor(
         val afterCommand = if (notify) "; exit \$ec" else "; exec ${containerEngine.defaultShellFor(profile)}"
         // 用大括号包住命令再接退出标记：命令末行若是 heredoc 结束符、注释或 `&`，直接接分号会让标记被吞掉或报语法错误。
         val shellCommand = "cd ~/workspace 2>/dev/null; export ENV=/etc/profile; " +
-            "{ $command\n}; ec=\$?; echo \"[command exited: \$ec]\"$afterCommand"
+            "{ $command\n}; ec=\$?; printf '\\n[command exited: %s]\\n' \"\$ec\"$afterCommand"
         val (session, client) = buildSession(shellCommand, workspace)
         addTab(
             TerminalTab(

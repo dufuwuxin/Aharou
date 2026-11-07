@@ -97,6 +97,10 @@ class StatefulAgentWorkflowTest {
         cachedInputTokens = 40, images = listOf(image))
     private val eventInjector = mockk<com.aharou.feature.agent.domain.notification.AgentEventInjector>()
     private val approvals = mockk<PlanApprovalManager>()
+    private val dualRouter = mockk<DualModelRouter> {
+        coEvery { resolve(any(), any()) } returns null
+        coEvery { settingsForTurn(any()) } returns com.aharou.feature.agent.domain.session.DualModelSettings()
+    }
     private val workflow = spyk(StatefulAgentWorkflow(
         toolRegistry = registry,
         aiProviderRepository = providers,
@@ -122,6 +126,7 @@ class StatefulAgentWorkflowTest {
         generatedImagePersister = imagePersister,
         failoverCoordinator = failoverCoordinator,
         workspaceModelChain = workspaceModels,
+        dualModelRouter = dualRouter,
         agentNotificationCenter = notifications,
         eventInjector = eventInjector,
         memoryCurator = mockk(),
@@ -259,6 +264,51 @@ class StatefulAgentWorkflowTest {
             })
         assertTrue(turn.finished.single().result.contains("ALLOW_BOUND_BODY"))
         assertFalse(turn.finished.single().isError)
+    }
+
+    @Test
+    fun approvedDualModelPlanGetsIndependentCompactionAfterPlanningFailure() = runTest {
+        var executing = false
+        var approved = false
+        var planningAttempts = 0
+        var executionAttempts = 0
+        val executionConfig = config.copy(selectedModel = "execution")
+        val choices = com.aharou.feature.agent.domain.session.DualModelSettings(true,
+            com.aharou.feature.settings.domain.model.FallbackTarget(config.id, "model"),
+            com.aharou.feature.settings.domain.model.FallbackTarget(config.id, "execution"))
+        val tool = object : AgentTool() {
+            override val name = "planMode"
+            override val description = "plan exit fixture"
+            override val parameters: Map<String, ToolParameter> = emptyMap()
+            override suspend fun executeWithContext(args: Map<String, JsonElement>, context: AgentContext): ToolResult {
+                executing = true
+                return ToolResult.Success(JsonPrimitive("ok"))
+            }
+        }
+        val turn = runToolBatchTurn(tool,
+            listOf(ToolCall("exit-plan", tool.name, mapOf("action" to JsonPrimitive("exit")))),
+            runContext = context.copy(mode = AgentMode.PLAN, modeBeforePlan = AgentMode.AUTO), configure = {
+                coEvery { dualRouter.settingsForTurn(any()) } returns choices
+                coEvery { dualRouter.resolve(any(), any()) } answers { if (executing) executionConfig else config }
+                coEvery { workflow["createStandaloneProvider"](executionConfig, "session") } answers {
+                    assertTrue("Execution model cannot run before approval returns", approved)
+                    provider
+                }
+                every { provider.model } answers { if (executing) "execution" else "model" }
+                coEvery { approvals.awaitApproval(any(), any()) } answers { approved = true; PlanApprovalChoice.APPROVE }
+                coEvery { compactor.compactIfNeeded(any(), any(), any(), any(), any(), any(), any(), any(), any()) } coAnswers {
+                    if (executing) executionAttempts++ else {
+                        planningAttempts++
+                        arg<suspend (AgentEvent) -> Unit>(8)(AgentEvent.CompactionFailed("planning fixture failure"))
+                    }
+                    CompactionResult(firstArg(), false)
+                }
+            })
+        assertFalse(turn.finished.single().isError)
+        assertEquals(1, planningAttempts)
+        assertEquals(1, executionAttempts)
+        coVerify(exactly = 1) { approvals.awaitApproval(any(), "session") }
+        assertTrue(turn.secondRoundMessages.filterIsInstance<AgentMessage.ToolResultMessage>().isNotEmpty())
     }
 
     private fun prepare(chunks: Flow<AIStreamChunk>) {

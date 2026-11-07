@@ -1,5 +1,6 @@
 package com.aharou.feature.agent.domain.tool
 
+import com.aharou.feature.agent.domain.model.AgentContext
 import com.aharou.feature.agent.domain.tool.custom.CustomToolSource
 import com.aharou.feature.agent.domain.tool.custom.ToolSettingsStore
 import java.util.Collections
@@ -15,8 +16,10 @@ class ToolRegistry @Inject constructor(
     // 前缀顺序漂移打断隐式前缀缓存；synchronizedMap 保证并发注册/读取安全。
     private val tools = Collections.synchronizedMap(LinkedHashMap<String, AgentTool>())
 
-    /** 已展开的延迟加载工具名。只在 [activate] 里增长，[unregister] 时随之清理。 */
-    private val activated = mutableSetOf<String>()
+    private val activated = LinkedHashMap<Pair<String, String>, MutableSet<String>>(16, 0.75f, true)
+
+    private fun scope(context: AgentContext) =
+        (context.sessionId ?: context.inputMessageId) to context.projectRoot
 
     fun register(name: String, tool: AgentTool) {
         // 统一套一层重复调用守卫：模型拿完全相同的参数反复打同一个工具时直接拦下。
@@ -29,7 +32,7 @@ class ToolRegistry @Inject constructor(
 
     fun unregister(name: String) {
         tools.remove(name)
-        synchronized(activated) { activated.remove(name) }
+        synchronized(activated) { activated.values.forEach { it.remove(name) } }
     }
 
     fun getToolNames(): Set<String> {
@@ -69,11 +72,15 @@ class ToolRegistry @Inject constructor(
     }
 
     /** 展开一批延迟加载工具，使其进入后续每轮的 tools 数组。 */
-    fun activate(names: Collection<String>) {
-        synchronized(activated) { activated.addAll(names) }
+    fun activate(names: Collection<String>, context: AgentContext) {
+        synchronized(activated) {
+            activated.getOrPut(scope(context)) { mutableSetOf() }.addAll(names)
+            while (activated.size > 128) activated.remove(activated.keys.first())
+        }
     }
 
-    fun isActivated(name: String): Boolean = synchronized(activated) { name in activated }
+    fun isActivated(name: String, context: AgentContext): Boolean =
+        synchronized(activated) { activated[scope(context)]?.contains(name) == true }
 
     fun hasTool(name: String): Boolean {
         return tools.containsKey(name) || customTools().any { it.name == name }

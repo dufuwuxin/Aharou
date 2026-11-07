@@ -4,6 +4,40 @@ package com.aharou.feature.agent.domain.tool.custom
 object PracticalToolTemplates {
     val all: List<CustomToolDefinition> = listOf(
         CustomToolDefinition(
+            name = "code_callers", description = "Bounded Kotlin/Rust/Python callers; lexical structure only, not compiler validation. No installation or project execution.",
+            command = "python3 -I \"\$HOME/.aharou/lib/codekit/query.py\" callers --path {{path}} --name {{name}}",
+            parameters = listOf(path(), CustomToolParameter("name", description = "Exact symbol name", required = true)), injectionMode = ToolInjectionMode.KEYWORD,
+            keywords = listOf("code callers", "callers")
+        ),
+        CustomToolDefinition(
+            name = "code_symbols", description = "Bounded Kotlin/Rust/Python symbols; lexical structure only, not compiler validation. No installation or project execution.",
+            command = "python3 -I \"\$HOME/.aharou/lib/codekit/query.py\" symbols --path {{path}}",
+            parameters = listOf(path()), injectionMode = ToolInjectionMode.KEYWORD,
+            keywords = listOf("code symbols", "symbols")
+        ),
+        CustomToolDefinition(
+            name = "code_check", description = "Bounded Kotlin/Rust/Python check; lexical structure only, not compiler validation. No installation or project execution.",
+            command = "python3 -I \"\$HOME/.aharou/lib/codekit/query.py\" check --path {{path}}",
+            parameters = listOf(path()), injectionMode = ToolInjectionMode.KEYWORD,
+            keywords = listOf("code check", "check")
+        ),
+        CustomToolDefinition(
+            name = "code_map", description = "Bounded fresh Kotlin/Rust/Python repo map. Structural only, not a semantic call graph; no installation or project execution.",
+            command = "python3 -I \"\$HOME/.aharou/lib/codekit/query.py\" map --path {{path}}",
+            parameters = listOf(path()), injectionMode = ToolInjectionMode.KEYWORD,
+            keywords = listOf("repo map", "代码地图", "项目符号")
+        ),
+        CustomToolDefinition(
+            name = "codegraph_status", description = "Query an explicitly installed CodeGraph. Does not install it, connect MCP or build an index; missing command is a native error.",
+            command = "codegraph status", injectionMode = ToolInjectionMode.KEYWORD,
+            keywords = listOf("CodeGraph", "代码图状态")
+        ),
+        CustomToolDefinition(
+            name = "codegraph_index", description = "Build a CodeGraph index in the current workspace using an explicitly installed executable. Writes .codegraph; may consume significant CPU, memory and disk. Does not install anything or auto-configure other agents.",
+            command = "codegraph init", timeoutSeconds = 600, injectionMode = ToolInjectionMode.KEYWORD,
+            keywords = listOf("CodeGraph", "建立代码图")
+        ),
+        CustomToolDefinition(
             name = "build_android", description = "Build one Android Gradle task without installing tools. Returns the last 80 lines, exit code and full log path. Raw logs may contain sensitive data; no automatic redaction.",
             command = "aharou-build android {{task}}",
             parameters = listOf(CustomToolParameter("task", description = "One Gradle task, e.g. :app:assembleArmsoloDebug", required = true)),

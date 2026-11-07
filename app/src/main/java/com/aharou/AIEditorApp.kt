@@ -218,6 +218,7 @@ class AIEditorApp : Application(), Configuration.Provider {
 
     @Inject
     lateinit var configStewardFields: com.aharou.feature.agent.data.ConfigStewardFields
+    @Inject lateinit var configDualModelFields: com.aharou.feature.agent.data.ConfigDualModelFields
 
     @Inject
     lateinit var configSubAgentFields: com.aharou.feature.agent.data.ConfigSubAgentFields
@@ -414,7 +415,7 @@ class AIEditorApp : Application(), Configuration.Provider {
         configChatFields.registerInto(configRegistry)
         configBrowserFields.registerInto(configRegistry)
         configImFields.registerInto(configRegistry)
-        configStewardFields.registerInto(configRegistry)
+        configStewardFields.registerInto(configRegistry); configDualModelFields.registerInto(configRegistry)
         configSubAgentFields.registerInto(configRegistry)
         configExperimentFields.registerInto(configRegistry)
         configTranslationFields.registerInto(configRegistry)

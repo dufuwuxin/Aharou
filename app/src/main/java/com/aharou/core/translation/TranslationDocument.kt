@@ -4,8 +4,8 @@ internal data class TranslationPart(val text: String, val translate: Boolean)
 
 internal object TranslationDocument {
     private val protected = Regex(
-        "]\\([^\\r\\n)]*\\)|https?://[^\\s<>]+|[\\w.+-]+@[\\w.-]+\\.[A-Za-z]+|" +
-            "\\{\\{[^}]*}}|\\$\\{[^}]*}|\\{[\\w.:-]+}|\\$[A-Za-z_]\\w*|%[0-9$]*[sdif]|<[^>\\r\\n]+>|" +
+        "\\]\\([^\\r\\n)]*\\)|https?://[^\\s<>]+|[\\w.+-]+@[\\w.-]+\\.[A-Za-z]+|" +
+            "\\{\\{[^}]*\\}\\}|\\$\\{[^}]*\\}|\\{[\\w.:-]+\\}|\\$[A-Za-z_]\\w*|%[0-9$]*[sdif]|<[^>\\r\\n]+>|" +
             "(?:[~./]|[A-Za-z]:[\\\\/])[^\\s]+|\\b[\\w.-]+(?:[/\\\\][\\w.-]+)+|" +
             "\\b[\\w-]+\\.[A-Za-z][\\w.-]*\\b|--[A-Za-z][\\w-]*|" +
             "\\b[A-Za-z]\\w*[_][\\w]+\\b|\\b[a-z]+[A-Z]\\w*\\b"

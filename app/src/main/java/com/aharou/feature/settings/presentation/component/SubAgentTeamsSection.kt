@@ -22,6 +22,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -61,13 +62,11 @@ import compose.icons.feathericons.Users
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun SubAgentTeamsSection(
-    /** 已有成员数量：只用于「创建成员」这行的摘要。 */
-    expertCount: Int = 0,
-    /** 打开成员管理页（创建/编辑/删除成员）。 */
-    onOpenExperts: () -> Unit = {},
+    onCreateRoleCard: () -> Unit,
     onOpenRoleCard: (String) -> Unit = {},
     viewModel: TeamSettingsViewModel = hiltViewModel()
 ) {
+    LaunchedEffect(Unit) { viewModel.refresh() }
     val teams by viewModel.teams.collectAsStateWithLifecycle()
     val availableMembers by viewModel.members.collectAsStateWithLifecycle()
     val saveState by viewModel.saveState.collectAsStateWithLifecycle()
@@ -91,14 +90,7 @@ internal fun SubAgentTeamsSection(
                     icon = FeatherIcons.Users,
                     title = stringResource(R.string.team_create_member),
                     subtitle = stringResource(R.string.settings_team_experts_desc),
-                    trailing = {
-                        Text(
-                            text = expertCount.toString(),
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    },
-                    onClick = onOpenExperts
+                    onClick = onCreateRoleCard
                 )
             }
         }

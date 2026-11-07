@@ -1,5 +1,6 @@
 package com.aharou.feature.agent.domain.tool
 
+import com.aharou.feature.agent.domain.model.AgentContext
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Assert.assertEquals
@@ -49,6 +50,37 @@ class ToolRegistryTest {
         assertFalse(registry.hasTool("temp_tool"))
         assertNull(registry.getTool("temp_tool"))
         assertTrue(registry.getToolNames().isEmpty())
+    }
+
+    @Test
+    fun activationIsIsolatedBySessionAndWorkspace() {
+        val first = AgentContext(null, null, "/one", null, sessionId = "a")
+        val otherSession = first.copy(sessionId = "b")
+        val otherWorkspace = first.copy(projectRoot = "/two")
+        registry.activate(listOf("deferred"), first)
+        assertTrue(registry.isActivated("deferred", first))
+        assertTrue(registry.isActivated("deferred", first.copy(currentUserText = "next turn")))
+        assertFalse(registry.isActivated("deferred", otherSession))
+        assertFalse(registry.isActivated("deferred", otherWorkspace))
+    }
+
+    @Test
+    fun unregisterClearsActivationInEveryScope() {
+        val first = AgentContext(null, null, "/one", null, sessionId = "a")
+        val second = first.copy(sessionId = "b")
+        registry.activate(listOf("deferred"), first)
+        registry.activate(listOf("deferred"), second)
+        registry.unregister("deferred")
+        assertFalse(registry.isActivated("deferred", first))
+        assertFalse(registry.isActivated("deferred", second))
+    }
+
+    @Test
+    fun anonymousCallsAreNotSharedAcrossInputMessages() {
+        val first = AgentContext(null, null, "/one", null)
+        val second = AgentContext(null, null, "/one", null)
+        registry.activate(listOf("deferred"), first)
+        assertFalse(registry.isActivated("deferred", second))
     }
 
     @Test

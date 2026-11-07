@@ -84,7 +84,15 @@ class ContainerImageChecksumTest {
         val file = File("src/main/assets/container-images.json")
         assertTrue("找不到内置清单：${file.absolutePath}", file.isFile)
         val images = json.decodeFromString<ContainerImageCatalogData>(file.readText()).images
-        assertTrue("内置清单条目数应 ≥ 12，实际 ${images.size}", images.size >= 12)
+        val requiredIds = setOf(
+            "ubuntu-20.04", "ubuntu-22.04", "ubuntu-24.04", "ubuntu-25.10", "ubuntu-26.04", "ubuntu-26.10",
+            "debian-12", "debian-13", "arch-lite", "manjaro-lite"
+        )
+        val ids = images.map { it.id }.toSet()
+        assertTrue("内置清单缺少既定镜像：${requiredIds - ids}", ids.containsAll(requiredIds))
+        assertEquals("内置清单 ID 不得重复", images.size, ids.size)
+        assertTrue("内置清单不得恢复已退役的 Alpine", images.none { it.distro == "alpine" })
+        assertTrue("内置清单仅支持 ARM64", images.all { it.abiNames.keys == setOf("arm64") })
 
         val hex = "0123456789abcdef"
         for (e in images) {

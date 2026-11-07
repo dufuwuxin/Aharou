@@ -72,6 +72,22 @@ class ToolSettingsStoreTest {
     }
 
     @Test
+    fun createCustomTool_preservesExistingDefinitionAcrossScopes() = runBlocking {
+        val global = tempDir("create-global")
+        val project = tempDir("create-project")
+        val store = ToolSettingsStore(FakeLocator(global, project))
+        assertTrue(store.createCustomTool(definition("first")))
+        assertFalse(store.createCustomTool(definition("first").copy(command = "overwritten")))
+        assertEquals("echo {{text}}", store.snapshotCustomTool("first")?.command)
+        val globalStore = ToolSettingsStore(FakeLocator(global))
+        assertTrue(globalStore.createCustomTool(definition("global")))
+        assertFalse(store.createCustomTool(definition("global").copy(command = "overwritten")))
+        globalStore.refresh()
+        assertEquals("echo {{text}}", globalStore.snapshotCustomTool("global")?.command)
+        assertFalse(File(project, "custom/global.json").exists())
+    }
+
+    @Test
     fun saveCustomTool_rejectsInvalidName() = runBlocking {
         val store = ToolSettingsStore(FakeLocator(tempDir("invalid")))
         assertFalse(store.saveCustomTool(definition("bad name!")))

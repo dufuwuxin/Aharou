@@ -45,6 +45,7 @@ import com.aharou.feature.agent.domain.tool.dependency.DependencyCheckTool
 import com.aharou.feature.agent.domain.tool.device.DeviceTool
 import com.aharou.feature.agent.domain.tool.container.ExecuteCommandTool
 import com.aharou.feature.agent.domain.tool.container.TerminalSessionTool
+import com.aharou.feature.agent.domain.tool.explorer.CodeStructureTool
 import com.aharou.feature.agent.domain.tool.explorer.ListFilesTool
 import com.aharou.feature.agent.domain.tool.explorer.SearchCodeTool
 import com.aharou.feature.agent.domain.tool.shizuku.ShizukuTool
@@ -463,6 +464,7 @@ object AgentModule {
         personalContextTool: PersonalContextTool,
         petAvatarTool: PetAvatarTool,
         diagnosticsTool: DiagnosticsTool,
+        codeStructureTool: CodeStructureTool,
         gitBlameTool: GitBlameTool,
         customToolSource: CustomToolSource,
         guard: ToolCallGuard
@@ -506,6 +508,7 @@ object AgentModule {
             register("personal_context", personalContextTool)
             register("petAvatar", petAvatarTool)
             register("diagnostics", diagnosticsTool)
+            register("code_structure", codeStructureTool)
             register("git_blame", gitBlameTool)
         }
     }
@@ -556,6 +559,7 @@ object AgentModule {
         generatedImagePersister: GeneratedImagePersister,
         failoverCoordinator: ProviderFailoverCoordinator,
         workspaceModelChain: com.aharou.feature.agent.domain.workflow.WorkspaceModelChain,
+        dualModelRouter: com.aharou.feature.agent.domain.workflow.DualModelRouter,
         agentNotificationCenter: AgentNotificationCenter,
         eventInjector: AgentEventInjector,
         memoryCurator: MemoryCurator,
@@ -594,7 +598,7 @@ object AgentModule {
             keyRotator,
             generatedImagePersister,
             failoverCoordinator,
-            workspaceModelChain,
+            workspaceModelChain, dualModelRouter,
             agentNotificationCenter,
             eventInjector,
             memoryCurator,

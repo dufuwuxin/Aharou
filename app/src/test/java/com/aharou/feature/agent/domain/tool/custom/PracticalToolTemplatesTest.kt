@@ -9,7 +9,7 @@ import org.junit.Test
 class PracticalToolTemplatesTest {
     @Test fun draftsAreKeywordOnlyAndHaveExecutableParameterContracts() {
         assertEquals(setOf("git_status", "git_diff", "git_log", "find_files", "rtk_command",
-            "build_android", "build_rust", "build_python", "build_logs"), PracticalToolTemplates.all.map { it.name }.toSet())
+            "build_android", "build_rust", "build_python", "build_logs", "code_map", "code_check", "code_symbols", "code_callers", "codegraph_status", "codegraph_index"), PracticalToolTemplates.all.map { it.name }.toSet())
         PracticalToolTemplates.all.forEach { draft ->
             assertTrue(draft.isValidName)
             assertEquals(ToolInjectionMode.KEYWORD, draft.injectionMode)
