@@ -53,7 +53,101 @@ class ProjectTaskRepositoryTest {
         coEvery { workflow.completeOnce(any(), any(), any()) } returns null // Rule split unless a test answers.
     }
 
-    private fun repository(planner: ProjectPlanner = realPlanner) = ProjectTaskRepository(context, Provider { planner })
+    private val workspaces = mockk<com.aharou.feature.workspace.data.repository.WorkspaceRepository>()
+    private fun repository(planner: ProjectPlanner = realPlanner) = ProjectTaskRepository(context, Provider { planner }, Provider { workspaces })
+
+    @Test fun ownedWorkspaceDirectoryIsStableDiscoverableAndCannotBeRenamedOrReclaimed() = runBlocking {
+        val resolver = mockk<com.aharou.feature.agent.domain.container.ContainerProfileResolver>()
+        every { resolver.forWorkspace(any()) } returns com.aharou.feature.agent.domain.container.ContainerProfile.BUILTIN_UBUNTU
+        val mode = com.aharou.feature.settings.data.repository.ExecutionModeHolder()
+        fun workspaceRepository() = com.aharou.feature.workspace.data.repository.WorkspaceRepository(context,
+            mode, mockk(relaxed = true), mockk(relaxed = true), mockk(relaxed = true), mockk(relaxed = true), resolver)
+        val workspaces = workspaceRepository()
+        val source = requireNotNull(workspaces.createWorkspace("source-${java.util.UUID.randomUUID()}"))
+        workspaces.selectWorkspaceByPath(source.path)
+        val id = java.util.UUID.randomUUID().toString()
+        val allocated = workspaces.allocateProjectWorkspace(id, source.path)
+        assertEquals("aharou-project-$id", File(allocated.path).name)
+        assertEquals(id, File(allocated.path, ".aharou-project-owner").readText())
+        assertEquals(source.path, workspaces.currentPath())
+        try { workspaces.allocateProjectWorkspace(id, source.path); fail("existing directory claimed") }
+        catch (_: IllegalStateException) { }
+        assertNull(workspaces.renameWorkspace(allocated.name, "renamed"))
+        assertTrue(File(allocated.path).isDirectory)
+        val reopened = workspaceRepository()
+        reopened.initialize()
+        assertTrue(reopened.workspaces.value.any { it.path == allocated.path })
+        assertTrue(reopened.activateProjectWorkspace(allocated.path, reopened.currentPath()) { true })
+        assertEquals(allocated.path, reopened.currentPath())
+        mode.setMode(com.aharou.feature.settings.data.repository.ExecutionMode.REMOTE_SSH)
+        try { workspaces.allocateProjectWorkspace(java.util.UUID.randomUUID().toString(), source.path); fail("remote allocation accepted") }
+        catch (_: IllegalStateException) { }
+    }
+
+    @Test fun ownedProjectsWithTheSameTitleUseDifferentPathsAndSurviveReload() = runBlocking {
+        coEvery { workspaces.allocateProjectWorkspace(any(), "/w") } answers {
+            com.aharou.feature.workspace.domain.model.Workspace("aharou-project-${firstArg<String>()}", "/owned/aharou-project-${firstArg<String>()}")
+        }
+        val store = repository()
+        val first = store.createOwnedProject("same", "first", "/w", java.util.UUID.randomUUID().toString()).project
+        val second = store.createOwnedProject("same", "second", "/w", java.util.UUID.randomUUID().toString()).project
+        assertTrue(first.workspace != second.workspace)
+        assertEquals("owned", repository().load(first.workspace).projects.single().workspaceOwnership)
+        assertEquals(second, repository().load(second.workspace).projects.single())
+        try { store.createProject("another", "task", first.workspace); fail("owned workspace accepted another project") }
+        catch (_: IllegalArgumentException) { }
+    }
+
+    @Test fun allocationFailureDoesNotCallThePlannerOrWriteAProject() = runBlocking {
+        val planner = mockk<ProjectPlanner>()
+        coEvery { workspaces.allocateProjectWorkspace(any(), any()) } throws IllegalStateException("mkdir failed")
+        try { repository(planner).createOwnedProject("name", "requirements", "/w", java.util.UUID.randomUUID().toString()); fail("creation succeeded") }
+        catch (_: IllegalStateException) { }
+        io.mockk.coVerify(exactly = 0) { planner.members() }
+        assertTrue(repository().load("/w").projects.isEmpty())
+    }
+
+    @Test fun historicalProjectJsonDefaultsToLegacyWithoutMovingItsWorkspace() {
+        val project = kotlinx.serialization.json.Json.decodeFromString<ProjectPlan>("""{"id":"old","workspace":"/original","title":"old","requirements":"task"}""")
+        assertEquals("legacy_shared", project.workspaceOwnership)
+        assertEquals("/original", project.workspace)
+    }
+
+    @Test fun explicitLegacyContinuationKeepsOriginalAndReplansWithoutOldAcceptanceOrSessions() = runBlocking {
+        val store = repository()
+        val original = store.createProject("legacy", "deliver the app", "/legacy").project
+        val task = store.load("/legacy").tasks.single()
+        val deliverable = store.save(task.copy(acceptance = "review deliverable", evidenceRefs = listOf("old-artifact")))
+        store.save(deliverable.copy(status = ProjectTaskStatus.DONE, acceptedRequirementsVersion = deliverable.requirementsVersion,
+            sessionIds = listOf("old-execution")))
+        store.linkProjectExecution(original.id, "/legacy", "old-root")
+        val before = repository().load("/legacy")
+        val id = java.util.UUID.randomUUID().toString()
+        coEvery { workspaces.allocateProjectWorkspace(id, "/legacy") } returns
+            com.aharou.feature.workspace.domain.model.Workspace("aharou-project-$id", "/continued/$id")
+        val continuation = store.continueInOwnedWorkspace(original.id, "/legacy", id).project
+        assertEquals(before, repository().load("/legacy"))
+        assertEquals(original.id, continuation.continuationSourceProjectId)
+        assertEquals(original.title, continuation.title)
+        assertEquals(original.requirements, continuation.requirements)
+        assertTrue(continuation.id != original.id && continuation.workspace != original.workspace)
+        assertTrue(continuation.flowSessionIds.isEmpty())
+        val fresh = repository().load(continuation.workspace).tasks
+        assertTrue(fresh.isNotEmpty())
+        assertTrue(fresh.none { next -> before.tasks.any { it.id == next.id } })
+        assertTrue(fresh.all { it.status != ProjectTaskStatus.DONE && it.acceptedRequirementsVersion == null &&
+            it.sessionIds.isEmpty() && it.processSessionIds.isEmpty() })
+    }
+
+    @Test fun aRunningLegacyProjectCannotAllocateAContinuation() = runBlocking {
+        val store = repository()
+        val original = store.createProject("legacy", "task", "/running").project
+        val task = store.load("/running").tasks.single()
+        store.save(task.copy(status = ProjectTaskStatus.RUNNING))
+        try { store.continueInOwnedWorkspace(original.id, "/running", java.util.UUID.randomUUID().toString()); fail("running source accepted") }
+        catch (_: IllegalArgumentException) { }
+        io.mockk.coVerify(exactly = 0) { workspaces.allocateProjectWorkspace(any(), any()) }
+    }
 
     private suspend fun project(repository: ProjectTaskRepository, requirements: String): List<ProjectTask> {
         val created = repository.createProject("app", requirements, "/w")

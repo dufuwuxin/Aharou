@@ -208,6 +208,7 @@ internal fun projectTaskExecutionReasonLabel(reason: String): String = when (rea
     "REQUIREMENTS_CHANGED", "UPSTREAM_CHANGED" -> stringResource(R.string.project_task_requirements_changed)
     "WAITING_DEPENDENCIES" -> stringResource(R.string.project_task_wait_dependencies)
     "STOPPED" -> stringResource(R.string.project_task_stopped)
+    "PROJECT_BUSY" -> stringResource(R.string.project_workspace_busy)
     "FAILED" -> stringResource(R.string.project_task_failed)
     "INTERRUPTED_PREVIOUS_PROCESS" -> stringResource(R.string.project_task_interrupted)
     "SUCCEEDED" -> stringResource(R.string.project_task_execution_finished)

@@ -60,11 +60,15 @@ class ProjectChatComposerContract(unittest.TestCase):
                          "sessions.upsertSession(", "repository.linkProjectExecution("):
             self.assertIn(contract, vm)
 
-    def test_tree_has_no_manual_add_or_supplement_path(self):
+    def test_tree_preserves_manual_add_without_inline_editing(self):
         workbench = source("ProjectTaskWorkbench.kt")
-        for removed in ("ProjectTaskNodeMenu(", "ProjectTaskEditor(", "ProjectTaskAddSheet(",
+        for removed in ("ProjectTaskNodeMenu(", "ProjectTaskEditor(",
                         "ProjectTaskSupplementSheet(", "R.string.project_add_content"):
             self.assertNotIn(removed, workbench)
+        self.assertIn("ProjectTaskAddSheet(", workbench)
+        self.assertIn("viewModel.addTaskByDescription(", workbench)
+        self.assertIn('testTag("project_more_menu")', workbench)
+        self.assertIn("addingParentId = row.task.id", workbench)
         self.assertNotIn("ProjectTaskNodeMenu(", source("ProjectTaskMap.kt"))
         self.assertIn("readOnly = true", workbench)
         self.assertIn("if (!readOnly) TextButton(onClick = onEdit)", source("ProjectTaskProcess.kt"))

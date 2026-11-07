@@ -954,7 +954,7 @@ fun AppNavigation(
             }
             composable("projects") {
                 ProjectListScreen(projectTaskViewModel, taskCreateRequested, { taskCreateRequested = false },
-                    onOpenProject = { id -> projectTaskViewModel.selectProject(id); navController.navigate("projects/$id") },
+                    onOpenProject = { id -> projectTaskViewModel.openProject(id) { navController.navigate("projects/$id") } },
                     onOpenTask = { id -> projectTaskViewModel.select(id); navController.navigate("tasks/$id") })
             }
             composable("projects/{projectId}") { entry ->

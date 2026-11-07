@@ -106,6 +106,15 @@ def skill_metadata(text: str) -> tuple[dict[str, str], str]:
 
 
 class BuiltinSystemTest(unittest.TestCase):
+    def test_identity_does_not_promise_a_fixed_or_preinstalled_environment(self):
+        identity = (ROOT / "app/src/main/java/com/aharou/core/soul/SoulStore.kt").read_text()
+        base = (ASSETS / "prompts/agent/subagent-base.md").read_text()
+        self.assertNotIn("Alpine Linux via PRoot", identity)
+        self.assertNotIn("fully functional Linux sandbox", identity)
+        self.assertIn("session's configured Linux container or remote SSH environment", identity)
+        self.assertNotIn("内置 `git`、`rg`", base)
+        self.assertIn("不保证已安装 Git", base)
+
     def test_builtin_teams_have_complete_rosters_and_one_admin(self):
         admins = {
             "feature-delivery": "Software Architect",

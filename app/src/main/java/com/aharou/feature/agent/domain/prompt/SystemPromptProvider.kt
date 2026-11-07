@@ -88,7 +88,7 @@ class SystemPromptProvider @Inject constructor(
 
     }
 
-    /** 子代理专用精简基线：只保留工具用法、路径约定与安全边界，不含模式切换、结尾总结等主代理专属规则。 */
+    /** 独立成员的执行、交付、工具与安全基线；与数字片段的继承条件分别处理。 */
     private inner class SubAgentBaseSource : PromptSource {
         @Volatile private var cached: String? = null
 
@@ -805,7 +805,7 @@ class SystemPromptProvider @Inject constructor(
 
     /**
      * 按子代理定义组装提示词：只注入 [AgentDefinition.inject] 列出的片段，再接 agent 自己的提示词。
-     * 不注入可用子代理部门索引（子代理不能嵌套派发）。定义正文里的 `{{AICODE_*}}` 变量同样会展开。
+     * 定义正文里的 `{{AICODE_*}}` 变量同样会展开；成员派发能力仍由工具过滤及执行层深度限制决定。
      */
     private fun buildForSubAgent(
         definition: AgentDefinition,

@@ -454,7 +454,7 @@ object SystemPromptBuilder {
      * Android chat hits this line.
      */
     private const val IDENTITY_TEMPLATE =
-        "You are {name}, a capable AI assistant running on an Android device with a fully functional Linux sandbox (Alpine Linux via PRoot, aarch64). "
+        "You are {name}, an AI assistant running on Android. Commands run in the session's configured Linux container or remote SSH environment; verify the actual distribution, architecture and installed tools before relying on them. "
 
     /**
      * `soul.lang` 到模型指令的映射：`zh` / `en` 各自给一条硬约束，`auto`（或任何未知值）

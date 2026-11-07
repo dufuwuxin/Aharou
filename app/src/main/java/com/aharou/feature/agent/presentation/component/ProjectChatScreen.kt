@@ -36,11 +36,11 @@ internal fun rememberProjectChatBinding(agent: AIAgentViewModel, projects: Proje
     }
     if (projectId == null && project == null) return null
     val id = projectId ?: project!!.id
-    val workspace = state.workspace
+    val workspace = project?.workspace.orEmpty()
     var sessionId by remember(id, workspace) { mutableStateOf<String?>(null) }
     var failed by remember(id, workspace) { mutableStateOf(false) }
-    LaunchedEffect(id, workspace, project != null) {
-        if (project == null || workspace.isBlank()) return@LaunchedEffect
+    LaunchedEffect(id, workspace, project != null, state.workspace) {
+        if (project == null || workspace.isBlank() || state.workspace != workspace) return@LaunchedEffect
         try {
             val root = projects.ensureProjectSession(id, workspace)
             if (projects.state.value.workspace == workspace) { sessionId = root; agent.selectSession(root) }

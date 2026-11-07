@@ -11,5 +11,7 @@ data class ProjectPlan(
     val title: String,
     val requirements: String,
     val createdAt: Long = System.currentTimeMillis(),
-    val flowSessionIds: List<String> = emptyList()
+    val flowSessionIds: List<String> = emptyList(),
+    val workspaceOwnership: String = "legacy_shared",
+    val continuationSourceProjectId: String? = null
 )

@@ -29,16 +29,19 @@ class ProjectTaskViewModelTest {
     private val repository = mockk<ProjectTaskRepository>()
     private val workflow = mockk<com.aharou.feature.agent.domain.task.ProjectWorkflowRunner>()
     private val sessions = mockk<SessionUseCase>()
+    private val workspaces = mockk<com.aharou.feature.workspace.data.repository.WorkspaceRepository>()
     private val runner = mockk<AgentTurnRunner>()
     private lateinit var flows: com.aharou.feature.agent.domain.task.ProjectFlowController
     private lateinit var viewModel: ProjectTaskViewModel
 
     @Before fun setUp() {
         Dispatchers.setMain(dispatcher)
+        every { workspaces.workspaces } returns MutableStateFlow(emptyList())
+        coEvery { workspaces.activateProjectWorkspace(any(), any(), any()) } returns true
         every { repository.snapshots } returns MutableStateFlow(emptyMap())
         coEvery { repository.load(any()) } returns ProjectTaskSnapshot()
-        coEvery { repository.createProject(any(), any(), any(), any()) } answers {
-            ProjectPlanOutcome(ProjectPlan(id = arg(3), workspace = thirdArg(), title = firstArg(), requirements = secondArg()), ruleFallback = true)
+        coEvery { repository.createOwnedProject(any(), any(), any(), any()) } answers {
+            ProjectPlanOutcome(ProjectPlan(id = arg(3), workspace = "/owned/${arg<String>(3)}", title = firstArg(), requirements = secondArg()), ruleFallback = true)
         }
         coEvery { repository.appendRequirements(any(), any(), any()) } answers {
             ProjectPlanOutcome(ProjectPlan(id = firstArg(), workspace = thirdArg(), title = "p", requirements = secondArg()), ruleFallback = false)
@@ -46,7 +49,7 @@ class ProjectTaskViewModelTest {
         coEvery { repository.supplement(any(), any(), any()) } returns false
         coEvery { workflow.members() } returns listOf("member")
         flows = com.aharou.feature.agent.domain.task.ProjectFlowController(repository, javax.inject.Provider { workflow })
-        viewModel = ProjectTaskViewModel(repository, sessions, runner, workflow, flows)
+        viewModel = ProjectTaskViewModel(repository, sessions, runner, workflow, flows, javax.inject.Provider { workspaces })
     }
 
     @After fun tearDown() {
@@ -76,13 +79,13 @@ class ProjectTaskViewModelTest {
         viewModel.createProject("project", "requirement")
         viewModel.workspace("/second")
         runCurrent()
-        coVerify(exactly = 1) { repository.createProject("project", "requirement", "/first", any()) }
-        coVerify(exactly = 0) { repository.createProject(any(), any(), "/second", any()) }
+        coVerify(exactly = 1) { repository.createOwnedProject("project", "requirement", "/first", any()) }
+        coVerify(exactly = 0) { repository.createOwnedProject(any(), any(), "/second", any()) }
     }
 
     @Test fun aPlannedProjectStartsItsFlowOnceSetupIsReleasedAndRecordsTheFallback() = runTest(dispatcher) {
         val finish = kotlinx.coroutines.CompletableDeferred<Unit>()
-        coEvery { workflow.run(any(), "/first") } coAnswers { finish.await() }
+        coEvery { workflow.run(any(), match { it.startsWith("/owned/") }) } coAnswers { finish.await() }
         viewModel.workspace("/first"); runCurrent()
         viewModel.createProject("project", "requirement"); runCurrent()
         val state = viewModel.state.value
@@ -91,8 +94,77 @@ class ProjectTaskViewModelTest {
         org.junit.Assert.assertTrue(state.planningProjectIds.isEmpty())
         org.junit.Assert.assertEquals(setOf(id), state.ruleFallbackProjectIds)
         org.junit.Assert.assertEquals(setOf(id), state.activeProjectIds)
-        coVerify(exactly = 1) { workflow.run(id, "/first") }
+        coVerify(exactly = 1) { workflow.run(id, "/owned/$id") }
         viewModel.stopProject(id); runCurrent()
+    }
+
+    @Test fun lateCreationContinuesInOwnedWorkspaceWithoutTakingNewSelection() = runTest(dispatcher) {
+        val result = kotlinx.coroutines.CompletableDeferred<ProjectPlanOutcome>()
+        coEvery { repository.createOwnedProject(any(), any(), any(), any()) } coAnswers { result.await() }
+        coEvery { workflow.run(any(), "/owned/new") } coAnswers { kotlinx.coroutines.awaitCancellation() }
+        viewModel.workspace("/first"); runCurrent()
+        viewModel.createProject("same", "requirements"); runCurrent()
+        viewModel.workspace("/second"); viewModel.selectProject("other"); runCurrent()
+        result.complete(ProjectPlanOutcome(ProjectPlan("new", "/owned/new", "same", "requirements", workspaceOwnership = "owned"), false)); runCurrent()
+        org.junit.Assert.assertEquals("/second", viewModel.state.value.workspace)
+        org.junit.Assert.assertEquals("other", viewModel.state.value.selectedProjectId)
+        coVerify(exactly = 0) { workspaces.activateProjectWorkspace(any(), any(), any()) }
+        coVerify(exactly = 1) { workflow.run(any(), "/owned/new") }
+    }
+
+    @Test fun aggregatedProjectOpenLoadsTheActualWorkspaceBeforeNavigation() = runTest(dispatcher) {
+        val project = ProjectPlan("p", "/actual", "project", "requirements")
+        val snapshots = MutableStateFlow(mapOf("/actual" to ProjectTaskSnapshot(projects = listOf(project))))
+        every { repository.snapshots } returns snapshots
+        coEvery { repository.load("/actual") } returns snapshots.value.getValue("/actual")
+        viewModel = ProjectTaskViewModel(repository, sessions, runner, workflow, flows, javax.inject.Provider { workspaces })
+        viewModel.workspace("/other"); runCurrent()
+        var opened = false
+        viewModel.openProject("p") { opened = true }; runCurrent()
+        org.junit.Assert.assertTrue(opened)
+        org.junit.Assert.assertEquals("/actual", viewModel.state.value.workspace)
+        org.junit.Assert.assertEquals("p", viewModel.state.value.selectedProjectId)
+        coVerify(exactly = 1) { workspaces.activateProjectWorkspace("/actual", "/other", any()) }
+    }
+
+    @Test fun explicitContinuationUsesTheLegacySourceAndSelectsOnlyTheNewOwnedProject() = runTest(dispatcher) {
+        val original = ProjectPlan("legacy", "/legacy", "same title", "requirements")
+        val snapshots = MutableStateFlow(mapOf("/legacy" to ProjectTaskSnapshot(projects = listOf(original))))
+        every { repository.snapshots } returns snapshots
+        coEvery { repository.continueInOwnedWorkspace("legacy", "/legacy", any()) } answers {
+            ProjectPlanOutcome(ProjectPlan(thirdArg(), "/continued", "same title", "requirements",
+                workspaceOwnership = "owned", continuationSourceProjectId = "legacy"), false)
+        }
+        coEvery { workflow.run(any(), "/continued") } coAnswers { kotlinx.coroutines.awaitCancellation() }
+        viewModel = ProjectTaskViewModel(repository, sessions, runner, workflow, flows, javax.inject.Provider { workspaces })
+        viewModel.workspace("/other"); runCurrent()
+        var opened: String? = null
+        viewModel.continueInOwnedWorkspace("legacy") { opened = it }; runCurrent()
+        org.junit.Assert.assertNotNull(opened)
+        org.junit.Assert.assertTrue(opened != original.id)
+        org.junit.Assert.assertEquals(opened, viewModel.state.value.selectedProjectId)
+        org.junit.Assert.assertEquals("/continued", viewModel.state.value.workspace)
+        org.junit.Assert.assertEquals(original, snapshots.value.getValue("/legacy").projects.single())
+        coVerify(exactly = 1) { repository.continueInOwnedWorkspace("legacy", "/legacy", any()) }
+        coVerify(exactly = 0) { repository.createOwnedProject(any(), any(), any(), any()) }
+    }
+
+    @Test fun runningOrPlanningLegacyProjectRejectsExplicitContinuation() = runTest(dispatcher) {
+        val original = ProjectPlan("legacy", "/legacy", "legacy", "requirements")
+        every { repository.snapshots } returns MutableStateFlow(mapOf("/legacy" to ProjectTaskSnapshot(projects = listOf(original))))
+        coEvery { workflow.run("legacy", "/legacy") } coAnswers { kotlinx.coroutines.awaitCancellation() }
+        coEvery { repository.appendRequirements("legacy", any(), "/legacy") } coAnswers { kotlinx.coroutines.awaitCancellation() }
+        viewModel = ProjectTaskViewModel(repository, sessions, runner, workflow, flows, javax.inject.Provider { workspaces })
+        viewModel.workspace("/legacy"); runCurrent()
+        viewModel.startProject("legacy"); runCurrent()
+        viewModel.continueInOwnedWorkspace("legacy") { error("must not navigate") }; runCurrent()
+        coVerify(exactly = 0) { repository.continueInOwnedWorkspace(any(), any(), any()) }
+        viewModel.stopProject("legacy"); runCurrent()
+        viewModel.appendRequirements("legacy", "more", "request"); runCurrent()
+        viewModel.continueInOwnedWorkspace("legacy") { error("must not navigate") }; runCurrent()
+        org.junit.Assert.assertFalse(viewModel.canContinueInOwnedWorkspace(original))
+        coVerify(exactly = 0) { repository.continueInOwnedWorkspace(any(), any(), any()) }
+        androidx.lifecycle.ViewModelStore().also { it.put("planning", viewModel) }.clear(); runCurrent()
     }
 
     @Test fun addingASubtaskPassesTheChosenParentToThePlanner() = runTest(dispatcher) {
@@ -239,7 +311,7 @@ class ProjectTaskViewModelTest {
         viewModel.startProject("p"); runCurrent()
         store.clear(); runCurrent()
         org.junit.Assert.assertEquals(1, flows.state.value.projects.size)
-        viewModel = ProjectTaskViewModel(repository, sessions, runner, workflow, flows)
+        viewModel = ProjectTaskViewModel(repository, sessions, runner, workflow, flows, javax.inject.Provider { workspaces })
         viewModel.workspace("/first"); runCurrent()
         org.junit.Assert.assertEquals(setOf("p"), viewModel.state.value.activeProjectIds)
         coVerify(exactly = 1) { workflow.run("p", "/first") }

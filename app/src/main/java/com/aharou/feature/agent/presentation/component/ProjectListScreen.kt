@@ -31,10 +31,11 @@ fun ProjectListScreen(viewModel: ProjectTaskViewModel, createRequested: Boolean,
     var requirements by rememberSaveable { mutableStateOf("") }
     var submitted by remember { mutableStateOf(false) }
     var previousProject by remember { mutableStateOf<String?>(null) }
+    var continuationId by rememberSaveable { mutableStateOf<String?>(null) }
     var unassigned by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(createRequested) { if (createRequested) { creating = true; onCreateConsumed() } }
-    LaunchedEffect(state.busy, state.selectedProjectId) {
-        if (submitted && !state.busy && state.error == null && state.selectedProjectId != previousProject) {
+    LaunchedEffect(state.busy, state.createdProjectId) {
+        if (submitted && !state.busy && state.error == null && state.createdProjectId != null && state.createdProjectId != previousProject && state.selectedProjectId == state.createdProjectId) {
             submitted = false; creating = false; name = ""; requirements = ""
             state.selectedProjectId?.let(onOpenProject)
         }
@@ -43,15 +44,24 @@ fun ProjectListScreen(viewModel: ProjectTaskViewModel, createRequested: Boolean,
         .padding(Spacing.lg), verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
         Button(onClick = { creating = true }, enabled = !state.loading && !state.busy && state.workspace.isNotBlank(),
             modifier = Modifier.heightIn(min = 48.dp).testTag("create_project")) { Text(stringResource(R.string.project_create)) }
-        state.error?.let { Text(stringResource(R.string.project_task_error, it), color = MaterialTheme.colorScheme.error) }
+        state.error?.let { Text(stringResource(R.string.project_task_error, projectTaskExecutionReasonLabel(it)), color = MaterialTheme.colorScheme.error) }
+        Text(stringResource(R.string.project_workspace_continue_notice), style = MaterialTheme.typography.bodySmall)
         LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
             items(state.projects, key = { it.id }) { project ->
                 Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceContainer,
                     modifier = Modifier.fillMaxWidth().clickable { onOpenProject(project.id) }) {
                     Column(Modifier.padding(Spacing.md)) {
                         Text(project.title, style = MaterialTheme.typography.titleMedium)
+                        Text(stringResource(if (project.workspaceOwnership == "owned") R.string.project_workspace_owned else R.string.project_workspace_legacy, project.workspace))
+                        project.continuationSourceProjectId?.let { Text(stringResource(R.string.project_workspace_continuation_source, it)) }
+                        if (project.workspaceOwnership == "legacy_shared") TextButton(
+                            onClick = { continuationId = project.id },
+                            enabled = viewModel.canContinueInOwnedWorkspace(project),
+                            modifier = Modifier.testTag("project_continue_owned_${project.id}")) {
+                            Text(stringResource(R.string.project_workspace_continue))
+                        }
                         Text(project.requirements, maxLines = 2, style = MaterialTheme.typography.bodySmall)
-                        Text(stringResource(R.string.project_task_count, state.tasks.count { it.projectId == project.id }))
+                        Text(stringResource(R.string.project_task_count, state.projectTaskCounts[project.id] ?: 0))
                     }
                 }
             }
@@ -63,6 +73,15 @@ fun ProjectListScreen(viewModel: ProjectTaskViewModel, createRequested: Boolean,
             }
         }
     }
+    val continuation = state.projects.firstOrNull { it.id == continuationId }
+    if (continuation != null) AlertDialog(onDismissRequest = { continuationId = null },
+        title = { Text(stringResource(R.string.project_workspace_continue)) },
+        text = { Text(stringResource(R.string.project_workspace_continue_notice)) },
+        confirmButton = { TextButton(enabled = viewModel.canContinueInOwnedWorkspace(continuation), onClick = {
+            continuationId = null
+            viewModel.continueInOwnedWorkspace(continuation.id, onOpenProject)
+        }) { Text(stringResource(R.string.project_workspace_continue)) } },
+        dismissButton = { TextButton(onClick = { continuationId = null }) { Text(stringResource(R.string.project_close)) } })
     if (creating) AdaptiveModalBottomSheet(onDismissRequest = { if (!state.busy) creating = false },
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         val count = remember(name, requirements, state.workspace) {
@@ -74,8 +93,8 @@ fun ProjectListScreen(viewModel: ProjectTaskViewModel, createRequested: Boolean,
             AppTextField(name, { name = it }, label = stringResource(R.string.project_name), singleLine = true)
             AppTextField(requirements, { requirements = it }, label = stringResource(R.string.project_requirements), minLines = 5, singleLine = false)
             Text(stringResource(R.string.project_draft_preview, count))
-            state.error?.let { Text(stringResource(R.string.project_task_error, it), color = MaterialTheme.colorScheme.error) }
-            Button(onClick = { previousProject = state.selectedProjectId; submitted = true; viewModel.createProject(name, requirements) },
+            state.error?.let { Text(stringResource(R.string.project_task_error, projectTaskExecutionReasonLabel(it)), color = MaterialTheme.colorScheme.error) }
+            Button(onClick = { previousProject = state.createdProjectId; submitted = true; viewModel.createProject(name, requirements) },
                 enabled = count > 0 && !state.busy, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("save_project_drafts")) {
                 Text(stringResource(R.string.project_create_generate))
             }

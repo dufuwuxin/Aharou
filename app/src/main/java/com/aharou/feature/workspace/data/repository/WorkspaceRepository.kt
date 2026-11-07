@@ -63,7 +63,8 @@ class WorkspaceRepository @Inject constructor(
     private val remoteSshConnection: RemoteSshConnection,
     private val pathHomeResolver: PathHomeResolver,
     private val sessionUseCase: SessionUseCase,
-    private val generalSettingsRepository: GeneralSettingsRepository
+    private val generalSettingsRepository: GeneralSettingsRepository,
+    private val profileResolver: com.aharou.feature.agent.domain.container.ContainerProfileResolver
 ) {
     /**
      * 外部工作区记录的读改写互斥。
@@ -381,6 +382,16 @@ class WorkspaceRepository @Inject constructor(
         selectWorkspaceByPath(path)
     }
 
+    suspend fun activateProjectWorkspace(path: String, expectedPath: String, canActivate: () -> Boolean): Boolean = withContext(Dispatchers.IO) {
+        refreshWorkspaces()
+        val target = _workspaces.value.firstOrNull { it.path == path && it.available } ?: return@withContext false
+        if (currentPath() != expectedPath || !canActivate()) return@withContext false
+        _current.value = target
+        context.workspaceDataStore.edit { it[currentNameKeyForMode()] = target.name }
+        if (target.type == WorkspaceType.REMOTE) remoteSshConnection.updateWorkspaceSymlink(target.path)
+        true
+    }
+
     private suspend fun selectWorkspaceBy(match: (Workspace) -> Boolean) = withContext(Dispatchers.IO) {
         val target = _workspaces.value.firstOrNull { it.available && match(it) } ?: return@withContext
         _current.value = target
@@ -434,6 +445,24 @@ class WorkspaceRepository @Inject constructor(
             FileLogger.i(TAG, "新建工作区(远程): $name")
             Workspace(name = name, path = remotePath, type = WorkspaceType.REMOTE)
         }
+    }
+
+    suspend fun allocateProjectWorkspace(projectId: String, source: String): Workspace = withContext(Dispatchers.IO) {
+        require(java.util.UUID.fromString(projectId).toString() == projectId) { "INVALID_PROJECT_ID" }
+        val dir = File(projectsRoot, "aharou-project-$projectId")
+        check(isLocal() && _workspaces.value.any { it.path == source && it.available && it.type != WorkspaceType.REMOTE } &&
+            profileResolver.forWorkspace(source).mode != ExecutionMode.REMOTE_SSH &&
+            profileResolver.forWorkspace(dir.absolutePath).mode != ExecutionMode.REMOTE_SSH) {
+            context.getString(R.string.project_workspace_remote_unsupported)
+        }
+        check(!dir.exists() && _workspaces.value.none { it.path == dir.absolutePath } && dir.mkdir()) {
+            context.getString(R.string.project_workspace_create_failed)
+        }
+        check(File(dir, ".aharou-project-owner").apply { writeText(projectId) }.readText() == projectId) {
+            context.getString(R.string.project_workspace_create_failed)
+        }
+        _workspaces.value = refreshLocalWorkspaces()
+        Workspace(name = dir.name, path = dir.absolutePath)
     }
 
     /**
@@ -591,6 +620,10 @@ class WorkspaceRepository @Inject constructor(
     suspend fun renameWorkspace(oldName: String, rawNewName: String): Workspace? = withContext(Dispatchers.IO) {
         _renameError.value = null
         val target = _workspaces.value.firstOrNull { it.name == oldName } ?: return@withContext null
+        if (target.type == WorkspaceType.INTERNAL && File(target.path, ".aharou-project-owner").exists()) {
+            _renameError.value = context.getString(R.string.project_workspace_rename_owned)
+            return@withContext null
+        }
         val newName = sanitize(rawNewName)
         if (newName.isEmpty()) {
             _renameError.value = context.getString(R.string.workspace_rename_invalid)

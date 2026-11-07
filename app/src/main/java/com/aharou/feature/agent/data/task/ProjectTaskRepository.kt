@@ -35,7 +35,8 @@ data class ProjectPlanOutcome(val project: ProjectPlan, val ruleFallback: Boolea
  * The planner is a Provider because it reaches the agent workflow, whose tools read this repository.
  */
 @Singleton
-class ProjectTaskRepository @Inject constructor(@ApplicationContext context: Context, private val plannerProvider: Provider<ProjectPlanner>) {
+class ProjectTaskRepository @Inject constructor(@ApplicationContext context: Context, private val plannerProvider: Provider<ProjectPlanner>,
+    private val workspaces: Provider<com.aharou.feature.workspace.data.repository.WorkspaceRepository>) {
     private val root = File(context.filesDir, "project-tasks")
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private val mutable = MutableStateFlow<Map<String, ProjectTaskSnapshot>>(emptyMap())
@@ -116,14 +117,41 @@ class ProjectTaskRepository @Inject constructor(@ApplicationContext context: Con
         return current.copy(version = tasks.maxOfOrNull { it.version } ?: updated.version, tasks = tasks) to updated
     }
 
-    /** The planner runs before any lock is taken; only the final commit is synchronized. */
+    suspend fun createOwnedProject(name: String, requirements: String, sourceWorkspace: String,
+        projectId: String): ProjectPlanOutcome {
+        require(name.isNotBlank() && requirements.isNotBlank() && sourceWorkspace.isNotBlank()) { "REQUIRED_FIELDS" }
+        val workspace = workspaces.get().allocateProjectWorkspace(projectId, sourceWorkspace)
+        return planProject(ProjectPlan(id = projectId, workspace = workspace.path, title = name.trim(),
+            requirements = requirements, workspaceOwnership = "owned"))
+    }
+
+    suspend fun continueInOwnedWorkspace(sourceProjectId: String, sourceWorkspace: String,
+        projectId: String): ProjectPlanOutcome {
+        val source = load(sourceWorkspace)
+        val original = source.projects.single { it.id == sourceProjectId && it.workspace == sourceWorkspace }
+        require(original.workspaceOwnership == "legacy_shared") { "PROJECT_ALREADY_OWNED" }
+        require(source.tasks.none { it.projectId == sourceProjectId && it.status == ProjectTaskStatus.RUNNING }) { "PROJECT_BUSY" }
+        require(original.title.isNotBlank() && original.requirements.isNotBlank()) { "REQUIRED_FIELDS" }
+        require(projectId != sourceProjectId) { "PROJECT_EXISTS" }
+        val workspace = workspaces.get().allocateProjectWorkspace(projectId, sourceWorkspace)
+        return planProject(ProjectPlan(id = projectId, workspace = workspace.path, title = original.title,
+            requirements = original.requirements, workspaceOwnership = "owned", continuationSourceProjectId = original.id))
+    }
+
     suspend fun createProject(name: String, requirements: String, workspace: String,
-        projectId: String = java.util.UUID.randomUUID().toString()): ProjectPlanOutcome = withContext(Dispatchers.IO) {
-        val project = ProjectPlan(id = projectId, workspace = workspace, title = name.trim(), requirements = requirements)
-        require(project.title.isNotBlank() && requirements.isNotBlank()) { "REQUIRED_FIELDS" }
-        snapshot(workspace) // An unreadable store rejects the request before any model call.
+        projectId: String = java.util.UUID.randomUUID().toString()): ProjectPlanOutcome {
+        require(!File(workspace, ".aharou-project-owner").exists()) { "PROJECT_WORKSPACE_OWNED" }
+        return planProject(ProjectPlan(id = projectId, workspace = workspace, title = name.trim(), requirements = requirements))
+    }
+
+    private suspend fun planProject(project: ProjectPlan): ProjectPlanOutcome = withContext(Dispatchers.IO) {
+        require(project.title.isNotBlank() && project.requirements.isNotBlank()) { "REQUIRED_FIELDS" }
+        val current = snapshot(project.workspace)
+        require(current.projects.none { it.id == project.id }) { "PROJECT_EXISTS" }
+        require(current.projects.none { it.workspaceOwnership == "owned" } &&
+            (project.workspaceOwnership != "owned" || current.projects.isEmpty())) { "PROJECT_WORKSPACE_OWNED" }
         val planner = plannerProvider.get()
-        val planned = planner.plan(project, requirements, emptyList(), planner.members())
+        val planned = planner.plan(project, project.requirements, emptyList(), planner.members())
         createProjectLocked(project, planned.tasks)
         ProjectPlanOutcome(project, planned.ruleFallback)
     }
@@ -133,6 +161,8 @@ class ProjectTaskRepository @Inject constructor(@ApplicationContext context: Con
         val workspace = project.workspace
         val current = snapshot(workspace)
         require(current.projects.none { it.id == project.id }) { "PROJECT_EXISTS" }
+        require(current.projects.none { it.workspaceOwnership == "owned" } &&
+            (project.workspaceOwnership != "owned" || current.projects.isEmpty())) { "PROJECT_WORKSPACE_OWNED" }
         val tasks = drafts.mapIndexed { index, task -> task.copy(version = current.version + index + 1) }
         val next = current.copy(version = current.version + tasks.size, projects = current.projects + project, tasks = current.tasks + tasks)
         require(ProjectTaskGraph.validate(next.tasks) == null) { "INVALID_TASK_GRAPH" }

@@ -3868,7 +3868,7 @@
     <string name="dual_model_loading">双模型 · 读取中</string>
     <string name="dual_model_read_error">双模型 · 读取失败</string>
     <string name="dual_model_enable">启用双模型规划</string>
-    <string name="dual_model_hint">仅影响当前会话。计划模式使用规划模型，退出计划模式后使用执行模型；计划审批和工具权限保持不变。开启时优先于工作区模型链，关闭后恢复原模型选择。</string>
+    <string name="dual_model_hint">仅影响当前会话。计划模式使用规划模型，退出计划模式后使用执行模型；计划审批和工具权限保持不变。开启时优先于工作区模型链，关闭后恢复原模型选择。 仅主会话，不改变团队成员；团队已规划时无需重复开启。</string>
     <string name="dual_model_planning">规划模型</string>
     <string name="dual_model_execution">执行模型</string>
     <string name="dual_model_unselected">点击选择模型</string>
@@ -3907,4 +3907,13 @@
     <string name="toolbox_save_import">保存这条工具</string>
     <string name="toolbox_exit_code">退出码：%1$s</string>
     <string name="toolbox_unknown">未知（未报告）</string>
+    <string name="project_workspace_remote_unsupported">暂不支持为 SSH 项目分配独立工作区，请切换到本地环境后创建。已有远程项目不受影响。</string>
+    <string name="project_workspace_create_failed">独立工作区创建失败或目录已存在，请重试。未开始规划项目。</string>
+    <string name="project_workspace_rename_owned">项目独立工作区使用固定标识目录，不能重命名；可修改项目名称。</string>
+    <string name="project_workspace_legacy">旧共享 / 未独立 · %1$s</string>
+    <string name="project_workspace_owned">独立工作区 · %1$s</string>
+    <string name="project_workspace_continue">在独立工作区继续</string>
+    <string name="project_workspace_continue_notice">旧项目可在独立空目录中重新规划为新项目。不复制旧源码或附件，原目录、历史和附件保留，旧交付与验收不会自动有效；这不是搬迁。</string>
+    <string name="project_workspace_continuation_source">独占延续新项目 · 来源项目 %1$s（非搬迁）</string>
+    <string name="project_workspace_busy">项目正在运行或规划，暂不能创建独占延续项目。</string>
 </resources>
