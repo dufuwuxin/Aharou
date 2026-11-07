@@ -34,6 +34,14 @@ class ProjectChatComposerContract(unittest.TestCase):
         self.assertIn("ProjectChatScreen(", main)
         self.assertIn("rememberProjectChatBinding(", main)
 
+    def test_status_questions_do_not_force_requirement_writes(self):
+        screen = source("ProjectChatScreen.kt")
+        self.assertIn("Only new or changed requirements", screen)
+        self.assertIn("use read-only queries for them", screen)
+        self.assertIn("Saving is not evidence of execution or acceptance", screen)
+        self.assertIn("PLAN only saves", screen)
+        self.assertNotIn("apply the appropriate action before reporting changes", screen)
+
     def test_collapsing_is_gesture_or_real_ime_dismissal(self):
         floating = source("FloatingProjectComposer.kt")
         for contract in ("WindowInsets.ime", "wasImeVisible && !imeVisible",

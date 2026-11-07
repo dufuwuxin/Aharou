@@ -22,11 +22,13 @@ class ProjectTaskContext @Inject constructor(private val repository: ProjectTask
                     append(it.id).append(" [").append(it.status).append("] ").append(it.title.take(120))
                         .append(": ").append(it.requirement.take(240)).append('\n')
                 }
-                append("For new user instructions, decide whether they add work or supplement an existing task. ")
+                append("Only actual new or changed requirements add work or supplement an existing task. ")
+                append("Progress questions, requests for explanation and repeated reports of an already recorded issue use read-only queries; do not rewrite requirements. ")
                 append("Use project_tasks(action=plan, requirement=...) for new work; ")
                 append("use project_tasks(action=supplement, task_id=..., requirement=...) for an existing task. ")
                 append("Use action=outline for task IDs. Do not ask the user to classify their message. ")
                 append("Keep the user's meaning; attachments and files remain accessible through the normal conversation tools. ")
+                append("Successful requirement writes request background continuation outside PLAN; PLAN only saves. ")
                 append("Do not claim execution or acceptance solely because planning was saved.")
             }
         }

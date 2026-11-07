@@ -2,6 +2,7 @@ package com.aharou.feature.agent.domain.tool.session
 
 import com.aharou.feature.agent.data.task.ProjectTaskRepository
 import com.aharou.feature.agent.domain.model.AgentContext
+import com.aharou.feature.agent.domain.model.AgentMode
 import com.aharou.feature.agent.domain.task.ProjectTask
 import com.aharou.feature.agent.domain.task.ProjectTaskChange
 import com.aharou.feature.agent.domain.task.ProjectTaskGraph
@@ -32,11 +33,14 @@ internal class ProjectTaskToolException(val code: String, message: String) : Ill
  * Both paths derive project scope from session identity, never from model-supplied project or workspace arguments.
  */
 class ProjectTaskTool @Inject constructor(
-    private val repository: ProjectTaskRepository
+    private val repository: ProjectTaskRepository,
+    private val flows: com.aharou.feature.agent.domain.task.ProjectFlowController
 ) : AbstractContextualTool() {
     override val name = "project_tasks"
     override val description = "In a linked project root conversation, choose action=plan to turn a new requirement into tasks, " +
         "or action=supplement with task_id to revise an existing task. Both take the user's text in requirement. " +
+        "Successful requirement writes request background continuation outside PLAN; PLAN only saves. " +
+        "Progress questions use read-only outline, not requirement writes. " +
         "action=outline reads the current project's task IDs. Project and workspace are derived from your session, never arguments. " +
         "Workflow members retain only their existing branch/add/outline scope: " +
         "action=branch creates a research subtask and makes your current task depend on it; end your turn right after it, " +
@@ -47,8 +51,7 @@ class ProjectTaskTool @Inject constructor(
         "tree depth ${ProjectTaskGraph.MAX_TREE_DEPTH}."
     override val permissionPolicy = ToolPermissionPolicy.AUTO_APPROVE
 
-    // Writes only the project task store, the same class of state as todo: no workspace files, commands or network.
-    override val capabilities = setOf(ToolCapability.MODIFY_TODO_STATE)
+    override val capabilities = setOf(ToolCapability.MODIFY_TODO_STATE, ToolCapability.MODIFY_SESSION_STATE)
 
     override val parameters: Map<String, ToolParameter> = mapOf(
         "action" to ToolParameter("action", ParameterType.STRING,
@@ -80,7 +83,9 @@ class ProjectTaskTool @Inject constructor(
             val tasks = snapshot.tasks.filter { it.projectId == root.id }
             when (action) {
                 "plan" -> {
+                    val stopEpoch = flows.stopEpoch(root.id, root.workspace)
                     val planned = repository.appendRequirements(root.id, text("requirement"), root.workspace)
+                    if (context.mode != AgentMode.PLAN) flows.continueProject(root.id, root.workspace, stopEpoch)
                     ToolResult.Success(buildJsonObject {
                         put("project_id", root.id); put("rule_fallback", planned.ruleFallback)
                         put("instruction", "New tasks saved to this project. Do not report execution or acceptance without evidence.")
@@ -89,7 +94,9 @@ class ProjectTaskTool @Inject constructor(
                 "supplement" -> {
                     val taskId = text("task_id")
                     if (tasks.none { it.id == taskId }) return ToolResult.Error("task_id must belong to this project", "OUTSIDE_PROJECT")
+                    val stopEpoch = flows.stopEpoch(root.id, root.workspace)
                     val fallback = repository.supplement(taskId, text("requirement"), root.workspace)
+                    if (context.mode != AgentMode.PLAN) flows.continueProject(root.id, root.workspace, stopEpoch)
                     ToolResult.Success(buildJsonObject { put("task_id", taskId); put("rule_fallback", fallback) })
                 }
                 "outline" -> ToolResult.Success(buildJsonObject {

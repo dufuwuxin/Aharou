@@ -52,9 +52,12 @@ internal fun rememberProjectChatBinding(agent: AIAgentViewModel, projects: Proje
         selectedWorkspace == workspace && state.workspace == workspace
     val context = project?.let {
         "\n\n[Project conversation: project_id=${JsonPrimitive(it.id)}, workspace=${JsonPrimitive(workspace)}. " +
-            "Use project_tasks action=outline to inspect task IDs; action=plan with requirement=user request adds tasks; " +
-            "action=supplement with task_id and requirement revises an existing branch. Decide from the user request, " +
-            "apply the appropriate action before reporting changes, then continue the project workflow. Do not create a separate project.]"
+            "Use project_tasks action=outline to inspect task IDs. Only new or changed requirements call action=plan " +
+            "with requirement=user request to add tasks, or action=supplement with task_id and requirement to revise an existing branch. " +
+            "Questions, progress checks and reports of an already recorded issue do not change requirements; use read-only queries for them. " +
+            "Successful requirement writes request background continuation outside PLAN; PLAN only saves. " +
+            "Saving is not evidence of execution or acceptance. " +
+            "Continue the project workflow without creating a separate project.]"
     }.orEmpty()
     return ProjectChatBinding(sessionId.takeIf { ready }, context) { collapse ->
         if (project != null) ProjectTaskWorkbench(id, projects, onBack, onContentDrag = collapse,

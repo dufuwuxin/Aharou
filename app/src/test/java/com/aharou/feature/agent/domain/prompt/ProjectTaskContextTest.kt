@@ -25,6 +25,9 @@ class ProjectTaskContextTest {
         assertTrue(prompt.contains("ours"))
         assertTrue(prompt.contains("action=plan"))
         assertTrue(prompt.contains("action=supplement"))
+        assertTrue(prompt.contains("Only actual new or changed requirements"))
+        assertTrue(prompt.contains("use read-only queries; do not rewrite requirements"))
+        assertTrue(prompt.contains("PLAN only saves"))
         assertFalse(prompt.contains("PRIVATE OTHER"))
     }
 

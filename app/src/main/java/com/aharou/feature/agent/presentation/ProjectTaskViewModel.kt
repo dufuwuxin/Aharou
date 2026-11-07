@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.aharou.feature.agent.data.task.ProjectTaskRepository
 import com.aharou.feature.agent.domain.task.ProjectTask
+import com.aharou.feature.agent.domain.task.ProjectFlowController
 import com.aharou.feature.agent.domain.task.ProjectPlan
 import com.aharou.feature.agent.domain.task.ProjectTaskStatus
 import com.aharou.feature.agent.domain.runner.AgentTurnRunner
@@ -43,23 +44,21 @@ class ProjectTaskViewModel @Inject constructor(
     private val repository: ProjectTaskRepository,
     private val sessions: SessionUseCase,
     private val runner: AgentTurnRunner,
-    private val projectWorkflow: com.aharou.feature.agent.domain.task.ProjectWorkflowRunner
+    private val projectWorkflow: com.aharou.feature.agent.domain.task.ProjectWorkflowRunner,
+    private val flows: ProjectFlowController
 ) : ViewModel() {
     private val mutable = MutableStateFlow(ProjectTaskUiState())
     val state = mutable.asStateFlow()
     private val sessionMutex = kotlinx.coroutines.sync.Mutex()
     // Retrying a failed link reuses the already persisted root session.
     private val pendingProjectSessions = mutableMapOf<Pair<String, String>, String>()
-    private val executing = mutableSetOf<String>()
-    private val executionJobs = mutableMapOf<String, kotlinx.coroutines.Job>()
+    private val executing = mutableSetOf<Pair<String, String>>()
+    private val executionJobs = mutableMapOf<Pair<String, String>, kotlinx.coroutines.Job>()
     private var busyOwner: Any? = null
-    private val projectJobs = mutableMapOf<String, kotlinx.coroutines.Job>()
-    /** Projects with a single-task run in progress (task id -> project id); a whole-project flow is not queued behind it. */
-    private val singleTaskProjects = mutableMapOf<String, String>()
-    /** Projects that got new or changed tasks while their flow was running; one more pass runs when that flow ends. */
-    private val rerunAfterFlow = mutableSetOf<String>()
+    private var flowErrors = emptyMap<String, String>()
 
     init {
+        viewModelScope.launch { flows.state.collect { refreshExecutionState() } }
         viewModelScope.launch {
             try { val members = projectWorkflow.members(); mutable.update { it.copy(availableMembers = members) } }
             catch (cancelled: CancellationException) { throw cancelled }
@@ -76,10 +75,11 @@ class ProjectTaskViewModel @Inject constructor(
 
     fun workspace(path: String) {
         if (path == mutable.value.workspace && !mutable.value.loading) return
-        mutable.value = ProjectTaskUiState(workspace = path, activeTaskIds = executionJobs.keys.toSet(), activeProjectIds = projectJobs.keys.toSet(),
+        mutable.value = ProjectTaskUiState(workspace = path,
             availableMembers = mutable.value.availableMembers, projectSessionIds = mutable.value.projectSessionIds,
             indexedSessionWorkspaces = mutable.value.indexedSessionWorkspaces, failedSessionWorkspaces = mutable.value.failedSessionWorkspaces,
             planningProjectIds = mutable.value.planningProjectIds, ruleFallbackProjectIds = mutable.value.ruleFallbackProjectIds)
+        refreshExecutionState()
         viewModelScope.launch {
             if (path.isBlank()) { mutable.update { it.copy(loading = false) }; return@launch }
             try {
@@ -138,14 +138,15 @@ class ProjectTaskViewModel @Inject constructor(
     }
 
     /** [block] returns whether rules replaced the model. On success the flow starts once the setup lock is released. */
-    private fun planning(projectId: String, block: suspend (String) -> Boolean) = operation(onSuccess = { workspace ->
-        startProjectIn(projectId, workspace, continueAfterRun = true)
-    }) { workspace ->
-        mutable.update { it.copy(planningProjectIds = it.planningProjectIds + projectId) }
-        val fallback = try { block(workspace) } finally {
-            mutable.update { it.copy(planningProjectIds = it.planningProjectIds - projectId) }
+    private fun planning(projectId: String, block: suspend (String) -> Boolean) {
+        val stopEpoch = flows.stopEpoch(projectId, mutable.value.workspace)
+        operation(onSuccess = { workspace -> flows.continueProject(projectId, workspace, stopEpoch) }) { workspace ->
+            mutable.update { it.copy(planningProjectIds = it.planningProjectIds + projectId) }
+            val fallback = try { block(workspace) } finally {
+                mutable.update { it.copy(planningProjectIds = it.planningProjectIds - projectId) }
+            }
+            mutable.update { it.copy(ruleFallbackProjectIds = if (fallback) it.ruleFallbackProjectIds + projectId else it.ruleFallbackProjectIds - projectId) }
         }
-        mutable.update { it.copy(ruleFallbackProjectIds = if (fallback) it.ruleFallbackProjectIds + projectId else it.ruleFallbackProjectIds - projectId) }
     }
 
     /** Load only known workspace stores to exclude project executions from ordinary history. */
@@ -179,54 +180,30 @@ class ProjectTaskViewModel @Inject constructor(
         startProjectIn(projectId, mutable.value.workspace)
     }
 
-    /**
-     * No busy check: automatic starts run right after their own setup lock is released and must not be dropped.
-     * [continueAfterRun] (automatic starts) marks a running flow to take one more pass once it ends, which covers tasks
-     * that arrive just as the flow finishes; a failed or stopped flow does not take that pass.
-     */
     private fun startProjectIn(projectId: String, workspace: String, continueAfterRun: Boolean = false) {
-        if (workspace.isBlank() || (continueAfterRun && projectId in singleTaskProjects.values)) return
-        if (projectJobs[projectId]?.isActive == true) { if (continueAfterRun) rerunAfterFlow += projectId; return }
-        val job = viewModelScope.launch(start = kotlinx.coroutines.CoroutineStart.LAZY) {
-            var completed = false
-            try { projectWorkflow.run(projectId, workspace); completed = true }
-            catch (cancelled: CancellationException) { throw cancelled }
-            catch (failure: Exception) { error(failure.message ?: "PROJECT_FLOW_FAILED", workspace) }
-            finally {
-                projectJobs.remove(projectId)
-                mutable.update { it.copy(activeProjectIds = projectJobs.keys.toSet()) }
-            }
-            if (rerunAfterFlow.remove(projectId) && completed && hasPendingTasks(projectId, workspace)) startProjectIn(projectId, workspace, continueAfterRun = true)
-        }
-        projectJobs[projectId] = job
-        mutable.update { it.copy(activeProjectIds = projectJobs.keys.toSet(), error = null) }
-        job.start()
+        flows.startProject(projectId, workspace, continueAfterRun)
     }
-    fun stopProject(projectId: String) { rerunAfterFlow -= projectId; projectJobs[projectId]?.cancel() }
-
-    private suspend fun hasPendingTasks(projectId: String, workspace: String): Boolean = try {
-        repository.load(workspace).tasks.any { it.projectId == projectId && !com.aharou.feature.agent.domain.task.ProjectWorkflowPlan.delivered(it) }
-    } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { false }
+    fun stopProject(projectId: String) { flows.stopProject(projectId, mutable.value.workspace) }
 
     fun runProjectTask(task: ProjectTask) {
-        val projectId = task.projectId ?: return
-        if (projectJobs[projectId]?.isActive == true || !executing.add(task.id)) return
-        singleTaskProjects[task.id] = projectId
-        val job = viewModelScope.launch(start = kotlinx.coroutines.CoroutineStart.LAZY) {
-            try { projectWorkflow.run(projectId, task.workspace, task.id) }
-            catch (cancelled: CancellationException) { throw cancelled }
-            catch (failure: Exception) { error(failure.message ?: "PROJECT_TASK_RUN_FAILED", task.workspace) }
-            finally {
-                executing.remove(task.id); executionJobs.remove(task.id); singleTaskProjects.remove(task.id)
-                mutable.update { it.copy(activeTaskIds = executionJobs.keys.toSet()) }
-            }
-        }
-        executionJobs[task.id] = job
-        mutable.update { it.copy(activeTaskIds = executionJobs.keys.toSet(), error = null) }
-        job.start()
+        if ((task.workspace to task.id) in executing) return
+        flows.runProjectTask(task)
     }
 
-    fun cancelExecution(taskId: String) { executionJobs[taskId]?.cancel() }
+    fun cancelExecution(taskId: String) {
+        flows.cancelExecution(taskId, mutable.value.workspace)
+        executionJobs[mutable.value.workspace to taskId]?.cancel()
+    }
+
+    private fun refreshExecutionState() {
+        val shared = flows.state.value
+        mutable.update { current -> current.copy(
+            activeProjectIds = shared.projects.filter { it.workspace == current.workspace }.mapTo(mutableSetOf()) { it.projectId },
+            activeTaskIds = executionJobs.keys.filter { it.first == current.workspace }.map { it.second }.toSet() + shared.tasks.filter { it.workspace == current.workspace }.map { it.taskId },
+            error = shared.errors[current.workspace] ?: current.error.takeUnless { it == flowErrors[current.workspace] }
+        ) }
+        flowErrors = shared.errors
+    }
 
     fun accept(task: ProjectTask) {
         if (task.status != ProjectTaskStatus.REVIEW ||
@@ -237,9 +214,9 @@ class ProjectTaskViewModel @Inject constructor(
     /** A new conversation is persisted and linked first. No network request until explicit start. */
     fun execute(task: ProjectTask, start: Boolean, runExecution: suspend (String, String, String) -> com.aharou.feature.agent.domain.task.ProjectTaskExecutionOutcome) = operation {
         val setupOwner = busyOwner
-        if (!executing.add(task.id)) return@operation
-        executionJobs[task.id] = requireNotNull(kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job])
-        mutable.update { it.copy(activeTaskIds = executionJobs.keys.toSet()) }
+        if (flows.state.value.tasks.any { it.workspace == task.workspace && it.taskId == task.id } || !executing.add(task.workspace to task.id)) return@operation
+        executionJobs[task.workspace to task.id] = requireNotNull(kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job])
+        refreshExecutionState()
         try {
             val beforeStart = repository.load(task.workspace).tasks
             val latestTask = beforeStart.first { it.id == task.id }
@@ -278,8 +255,8 @@ class ProjectTaskViewModel @Inject constructor(
             }
             throw failure // Including CancellationException; never turn cancellation into successful completion.
         } finally {
-            executing.remove(task.id); executionJobs.remove(task.id)
-            mutable.update { it.copy(activeTaskIds = executionJobs.keys.toSet()) }
+            executing.remove(task.workspace to task.id); executionJobs.remove(task.workspace to task.id)
+            refreshExecutionState()
         }
     }
 

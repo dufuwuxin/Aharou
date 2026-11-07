@@ -30,6 +30,7 @@ class ProjectTaskViewModelTest {
     private val workflow = mockk<com.aharou.feature.agent.domain.task.ProjectWorkflowRunner>()
     private val sessions = mockk<SessionUseCase>()
     private val runner = mockk<AgentTurnRunner>()
+    private lateinit var flows: com.aharou.feature.agent.domain.task.ProjectFlowController
     private lateinit var viewModel: ProjectTaskViewModel
 
     @Before fun setUp() {
@@ -44,10 +45,16 @@ class ProjectTaskViewModelTest {
         }
         coEvery { repository.supplement(any(), any(), any()) } returns false
         coEvery { workflow.members() } returns listOf("member")
-        viewModel = ProjectTaskViewModel(repository, sessions, runner, workflow)
+        flows = com.aharou.feature.agent.domain.task.ProjectFlowController(repository, javax.inject.Provider { workflow })
+        viewModel = ProjectTaskViewModel(repository, sessions, runner, workflow, flows)
     }
 
-    @After fun tearDown() { Dispatchers.resetMain() }
+    @After fun tearDown() {
+        flows.state.value.projects.forEach { flows.stopProject(it.projectId, it.workspace) }
+        flows.state.value.tasks.forEach { flows.cancelExecution(it.taskId, it.workspace) }
+        dispatcher.scheduler.runCurrent()
+        Dispatchers.resetMain()
+    }
 
     @Test fun oneProjectStartIsIdempotentAndDoesNotFollowWorkspaceSwitch() = runTest(dispatcher) {
         val finish = kotlinx.coroutines.CompletableDeferred<Unit>()
@@ -55,9 +62,10 @@ class ProjectTaskViewModelTest {
         viewModel.workspace("/first"); runCurrent()
         viewModel.startProject("p"); viewModel.startProject("p")
         viewModel.workspace("/second"); runCurrent()
-        org.junit.Assert.assertTrue("p" in viewModel.state.value.activeProjectIds)
+        org.junit.Assert.assertTrue(viewModel.state.value.activeProjectIds.isEmpty())
         coVerify(exactly = 1) { workflow.run("p", "/first") }
         coVerify(exactly = 0) { workflow.run("p", "/second") }
+        viewModel.workspace("/first"); runCurrent()
         viewModel.stopProject("p"); runCurrent()
         org.junit.Assert.assertTrue(viewModel.state.value.activeProjectIds.isEmpty())
     }
@@ -193,6 +201,7 @@ class ProjectTaskViewModelTest {
         val finish = kotlinx.coroutines.CompletableDeferred<Unit>()
         coEvery { workflow.run("p", "/first", "t") } coAnswers { finish.await() }
         val task = com.aharou.feature.agent.domain.task.ProjectTask(id = "t", workspace = "/first", title = "t", requirement = "t", projectId = "p")
+        viewModel.workspace("/first"); runCurrent()
         viewModel.runProjectTask(task); viewModel.runProjectTask(task); runCurrent()
         org.junit.Assert.assertTrue("t" in viewModel.state.value.activeTaskIds)
         coVerify(exactly = 1) { workflow.run("p", "/first", "t") }
@@ -209,6 +218,35 @@ class ProjectTaskViewModelTest {
         coVerify(exactly = 1) { repository.appendRequirements("project", "next", "/first") }
         coVerify(exactly = 0) { repository.appendRequirements(any(), any(), "/second") }
     }
+    @Test fun stoppingWhileSupplementIsPlanningRejectsItsLateContinuation() = runTest(dispatcher) {
+        val saved = kotlinx.coroutines.CompletableDeferred<Boolean>()
+        coEvery { workflow.run("p", "/first") } coAnswers { kotlinx.coroutines.awaitCancellation() }
+        coEvery { repository.supplement("t", "late", "/first") } coAnswers { saved.await() }
+        viewModel.workspace("/first"); runCurrent()
+        viewModel.startProject("p"); runCurrent()
+        viewModel.supplement(projectTask, "late"); runCurrent()
+        viewModel.stopProject("p"); runCurrent()
+        saved.complete(false); runCurrent()
+        org.junit.Assert.assertTrue(flows.state.value.projects.isEmpty())
+        coVerify(exactly = 1) { workflow.run("p", "/first") }
+    }
+
+    @Test fun clearingAndRecreatingTheViewModelKeepsSharedExecution() = runTest(dispatcher) {
+        coEvery { workflow.run("p", "/first") } coAnswers { kotlinx.coroutines.awaitCancellation() }
+        val store = androidx.lifecycle.ViewModelStore()
+        store.put("project", viewModel)
+        viewModel.workspace("/first"); runCurrent()
+        viewModel.startProject("p"); runCurrent()
+        store.clear(); runCurrent()
+        org.junit.Assert.assertEquals(1, flows.state.value.projects.size)
+        viewModel = ProjectTaskViewModel(repository, sessions, runner, workflow, flows)
+        viewModel.workspace("/first"); runCurrent()
+        org.junit.Assert.assertEquals(setOf("p"), viewModel.state.value.activeProjectIds)
+        coVerify(exactly = 1) { workflow.run("p", "/first") }
+        viewModel.stopProject("p"); runCurrent()
+        org.junit.Assert.assertTrue(flows.state.value.projects.isEmpty())
+    }
+
     private fun rootSession(id: String, workspace: String = "/first", updated: Long = 1) =
         com.aharou.feature.agent.data.local.entity.ChatSessionEntity(id, id, 1, updated, workspacePath = workspace)
 

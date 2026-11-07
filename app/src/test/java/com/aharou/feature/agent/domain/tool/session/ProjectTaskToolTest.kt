@@ -23,6 +23,7 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ProjectTaskToolTest {
+    private val flows = mockk<com.aharou.feature.agent.domain.task.ProjectFlowController>(relaxed = true)
     private fun task(id: String, parent: String? = null, status: ProjectTaskStatus = ProjectTaskStatus.READY,
         sessions: List<String> = emptyList(), by: String? = null) = ProjectTask(id = id, workspace = "w", projectId = "p",
         title = id, requirement = id, parentId = parent, status = status, processSessionIds = sessions,
@@ -95,7 +96,7 @@ class ProjectTaskToolTest {
         coEvery { repository.appendRequirements("p", "Add search", "w") } returns
             com.aharou.feature.agent.data.task.ProjectPlanOutcome(project, false)
         coEvery { repository.supplement("existing", "Use offline cache", "w") } returns false
-        val tool = ProjectTaskTool(repository)
+        val tool = ProjectTaskTool(repository, flows)
         fun args(action: String, text: String, target: String? = null) = buildMap {
             put("action", JsonPrimitive(action)); put("requirement", JsonPrimitive(text))
             if (target != null) put("task_id", JsonPrimitive(target))
@@ -110,6 +111,36 @@ class ProjectTaskToolTest {
         coVerify(exactly = 1) { repository.appendRequirements("p", "Add search", "w") }
         coVerify(exactly = 1) { repository.supplement("existing", "Use offline cache", "w") }
         coVerify(exactly = 0) { repository.supplement("other", any(), any()) }
+        io.mockk.verify(exactly = 2) { flows.continueProject("p", "w", 0L) }
+        io.mockk.verify(exactly = 0) { flows.continueProject(any(), "other", any()) }
+        val planning = root.copy(mode = com.aharou.feature.agent.domain.model.AgentMode.PLAN)
+        assertTrue(tool.executeWithContext(args("plan", "Add search"), planning) is ToolResult.Success)
+        assertTrue(tool.executeWithContext(args("supplement", "Use offline cache", "existing"), planning) is ToolResult.Success)
+        io.mockk.verify(exactly = 2) { flows.continueProject(any(), any(), any()) }
+        coEvery { repository.appendRequirements("p", "Add search", "w") } throws IllegalStateException("WRITE_FAILED")
+        coEvery { repository.supplement("existing", "Use offline cache", "w") } throws IllegalStateException("WRITE_FAILED")
+        assertTrue(tool.executeWithContext(args("plan", "Add search"), root) is ToolResult.Error)
+        assertTrue(tool.executeWithContext(args("supplement", "Use offline cache", "existing"), root) is ToolResult.Error)
+        assertTrue(tool.executeWithContext(mapOf("action" to JsonPrimitive("outline")), root) is ToolResult.Success)
+        assertTrue(tool.executeWithContext(args("plan", ""), root) is ToolResult.Error)
+        io.mockk.verify(exactly = 2) { flows.continueProject(any(), any(), any()) }
+    }
+
+    @Test fun rootContinuationCapturesStopEpochBeforeSaving() = runBlocking {
+        val repository = mockk<ProjectTaskRepository>()
+        val project = ProjectPlan(id = "p", workspace = "w", title = "p", requirements = "r", flowSessionIds = listOf("root"))
+        val snapshot = ProjectTaskSnapshot(tasks = listOf(task("existing")), projects = listOf(project))
+        every { repository.snapshots } returns MutableStateFlow(mapOf("w" to snapshot))
+        coEvery { repository.load("w") } returns snapshot
+        var stopEpoch = 5L
+        every { flows.stopEpoch("p", "w") } answers { stopEpoch }
+        coEvery { repository.supplement("existing", "late", "w") } coAnswers { stopEpoch++; false }
+        val result = ProjectTaskTool(repository, flows).executeWithContext(mapOf(
+            "action" to JsonPrimitive("supplement"), "task_id" to JsonPrimitive("existing"), "requirement" to JsonPrimitive("late")),
+            AgentContext(null, null, "w", null, sessionId = "root"))
+        assertTrue(result is ToolResult.Success)
+        io.mockk.verify(exactly = 1) { flows.continueProject("p", "w", 5L) }
+        io.mockk.verify(exactly = 0) { flows.continueProject("p", "w", 6L) }
     }
 
     @Test fun outlineThroughTheToolReadsWithoutWriting() = runBlocking {
@@ -117,11 +148,12 @@ class ProjectTaskToolTest {
         val store = ProjectTaskSnapshot(version = 1, tasks = listOf(running), projects = listOf(ProjectPlan(id = "p", workspace = "w", title = "p", requirements = "r")))
         every { repository.snapshots } returns MutableStateFlow(mapOf("w" to store))
         coEvery { repository.load("w") } returns store
-        val result = ProjectTaskTool(repository).executeWithContext(mapOf("action" to JsonPrimitive("outline")),
+        val result = ProjectTaskTool(repository, flows).executeWithContext(mapOf("action" to JsonPrimitive("outline")),
             AgentContext(null, null, "w", null, sessionId = "member"))
         assertTrue((result as ToolResult.Success).data.jsonObject.getValue("outline").jsonPrimitive.content.contains("(id=current, current)"))
         coVerify(exactly = 0) { repository.transact(any(), any()) }
         coVerify(exactly = 0) { repository.save(any()) }
+        io.mockk.verify(exactly = 0) { flows.continueProject(any(), any(), any()) }
     }
 
     @Test fun memberAddedTasksAndTreeDepthAreCapped() {
@@ -160,7 +192,7 @@ class ProjectTaskToolTest {
             staged += changes
             changes.map { it.task }
         }
-        val tool = ProjectTaskTool(repository)
+        val tool = ProjectTaskTool(repository, flows)
         val args = mapOf("action" to JsonPrimitive("branch"), "title" to JsonPrimitive("Research"), "requirement" to JsonPrimitive("why"),
             "workspace" to JsonPrimitive("/elsewhere"))
         val result = tool.executeWithContext(args, AgentContext(null, null, "/elsewhere", null, sessionId = "member"))
