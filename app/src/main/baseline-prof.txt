@@ -36,7 +36,6 @@ HSPLcom/aharou/feature/agent/data/ConfigSkillMarketFields;->registerInto(Lcom/ah
 HSPLcom/aharou/feature/settings/data/ConfigVoiceFields;->registerInto(Lcom/aharou/core/config/ConfigRegistry;)V
 HSPLcom/aharou/feature/agent/data/ConfigChatFields;->registerInto(Lcom/aharou/core/config/ConfigRegistry;)V
 HSPLcom/aharou/feature/browser/data/ConfigBrowserFields;->registerInto(Lcom/aharou/core/config/ConfigRegistry;)V
-HSPLcom/aharou/feature/im/data/ConfigImFields;->registerInto(Lcom/aharou/core/config/ConfigRegistry;)V
 HSPLcom/aharou/feature/agent/data/ConfigStewardFields;->registerInto(Lcom/aharou/core/config/ConfigRegistry;)V
 HSPLcom/aharou/feature/agent/data/ConfigSubAgentFields;->registerInto(Lcom/aharou/core/config/ConfigRegistry;)V
 HSPLcom/aharou/feature/settings/data/ConfigExperimentFields;->registerInto(Lcom/aharou/core/config/ConfigRegistry;)V

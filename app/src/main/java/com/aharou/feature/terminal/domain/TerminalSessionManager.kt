@@ -95,6 +95,7 @@ class TerminalSessionManager @Inject constructor(
     override val tabFinishedEvents: SharedFlow<TabFinishedEvent> = _tabFinishedEvents.asSharedFlow()
 
     private val idCounter = AtomicInteger(0)
+    private val keepaliveTabs = mutableSetOf<String>()
 
     private val monitorScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -233,9 +234,8 @@ class TerminalSessionManager @Inject constructor(
         // 后台命令不抢占当前标签焦点：仅当没有活动标签时才设为当前。
         if (_activeTabId.value == null) _activeTabId.value = id
 
+        tab(id)?.let(::startKeepaliveService)
         if (notify) monitorBackgroundExit(id)
-
-        startKeepaliveService(tab(id)?.workspacePath)
         FileLogger.i(TAG, "后台命令标签 $id: $command")
         return id
     }
@@ -526,11 +526,14 @@ class TerminalSessionManager @Inject constructor(
         return session to client
     }
 
-    private fun startKeepaliveService(workspacePath: String?) {
-        // 走 companion 的包装：裸 startService 在后台会被系统拒（Android 8+ 后台启动限制）并抛
-        // IllegalStateException，未被捕获会直接崩在通知回调/监控协程里。
-        TerminalKeepaliveService.startSession(appContext, workspacePath?.takeIf { it.isNotBlank() })
-        FileLogger.i(TAG, "后台保活 Service 已启动（workspace=$workspacePath）")
+    private fun startKeepaliveService(tab: TerminalTab) {
+        synchronized(keepaliveTabs) {
+            if (tab.runState !is RunState.Running || !keepaliveTabs.add(tab.id)) return
+            val workspacePath = tab.workspacePath
+            // 走 companion 包装，避免后台启动限制抛出的异常中断回调。
+            TerminalKeepaliveService.startSession(appContext, workspacePath?.takeIf { it.isNotBlank() })
+            FileLogger.i(TAG, "后台保活 Service 已启动（workspace=$workspacePath）")
+        }
     }
 
     private fun stopKeepaliveService(workspacePath: String? = null) {
@@ -539,8 +542,10 @@ class TerminalSessionManager @Inject constructor(
     }
 
     private fun maybeStopKeepalive(closingTab: TerminalTab) {
-        if (closingTab.isBackground && _tabs.value.none { it.isBackground && it.runState is RunState.Running }) {
-            stopKeepaliveService()
+        synchronized(keepaliveTabs) {
+            if (closingTab.isBackground && keepaliveTabs.remove(closingTab.id)) {
+                stopKeepaliveService(closingTab.workspacePath)
+            }
         }
     }
 }

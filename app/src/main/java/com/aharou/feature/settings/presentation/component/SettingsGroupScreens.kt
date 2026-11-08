@@ -159,15 +159,6 @@ internal fun SettingsAiGroupScreen(onOpen: (SettingsSection) -> Unit) {
             )
 
         }
-        SettingsGroup {
-            SettingsRow(icon = FeatherIcons.Smartphone, title = stringResource(SettingsSection.WeixinBot.titleRes), onClick = { onOpen(SettingsSection.WeixinBot) })
-            SettingsDivider()
-            SettingsRow(icon = FeatherIcons.Smartphone, title = stringResource(SettingsSection.FeishuBot.titleRes), onClick = { onOpen(SettingsSection.FeishuBot) })
-            SettingsDivider()
-            SettingsRow(icon = FeatherIcons.Smartphone, title = stringResource(SettingsSection.QqBot.titleRes), onClick = { onOpen(SettingsSection.QqBot) })
-            SettingsDivider()
-            SettingsRow(icon = FeatherIcons.Smartphone, title = stringResource(SettingsSection.TelegramBot.titleRes), onClick = { onOpen(SettingsSection.TelegramBot) })
-        }
     }
 }
 

@@ -166,13 +166,12 @@ class SettingsNavigationTest(unittest.TestCase):
         self.assertIn("UserIdentityStore.setName", source(SRC / "core/config/ConfigBuiltins.kt"))
         self.assertTrue((SRC / "core/identity/UserIdentityStore.kt").is_file())
 
-    def test_all_four_im_pages_have_clickable_entries(self):
-        config = function(self.groups, "SettingsAiGroupScreen")
+    def test_all_four_im_pages_and_entries_are_removed(self):
         for name in ("TelegramBot", "WeixinBot", "FeishuBot", "QqBot"):
-            rows = config
             with self.subTest(section=name):
-                self.assertRegex(rows, rf"onClick\s*=\s*\{{\s*onOpen\(SettingsSection\.{name}\)")
-                self.assertRegex(self.screen, rf"SettingsSection\.{name}\s*->")
+                self.assertNotRegex(self.screen + self.groups, rf"\b{name}\b")
+                self.assertFalse((SETTINGS / f"{name}Section.kt").exists())
+                self.assertFalse((SETTINGS.parent / f"{name}ViewModel.kt").exists())
 
     def test_ai_configuration_lives_in_config_not_general_or_more(self):
         config = function(self.groups, "SettingsAiGroupScreen")

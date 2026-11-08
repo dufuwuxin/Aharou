@@ -9,6 +9,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
+import java.nio.file.Files
+import java.nio.file.LinkOption
+import java.nio.file.StandardOpenOption
 
 /** 面板分享包：脚本源码 + 该提供商的面板 DIY 参数。 */
 data class PanelPackage(
@@ -57,9 +60,10 @@ object PanelScriptImporter {
         val name = queryDisplayName(context, uri) ?: return@withContext null
         runCatching {
             val dir = scriptsDir(context).apply { mkdirs() }
-            val dest = File(dir, name)
+            val dest = resolvePanelScriptFile(dir, name) ?: return@runCatching null
             context.contentResolver.openInputStream(uri)?.use { input ->
-                dest.outputStream().use { output -> input.copyTo(output) }
+                Files.newOutputStream(dest.toPath(), StandardOpenOption.CREATE, StandardOpenOption.WRITE,
+                    StandardOpenOption.TRUNCATE_EXISTING, LinkOption.NOFOLLOW_LINKS).use { output -> input.copyTo(output) }
             } ?: return@withContext null
             dest.name
         }.onFailure { FileLogger.w("PanelScriptImporter", "脚本导入失败：$uri", it) }.getOrNull()
@@ -112,8 +116,11 @@ object PanelScriptImporter {
     suspend fun writePackageScript(context: Context, pkg: PanelPackage): String? = withContext(Dispatchers.IO) {
         runCatching {
             val dir = scriptsDir(context).apply { mkdirs() }
-            val dest = File(dir, pkg.scriptName)
-            dest.writeText(pkg.script)
+            val dest = resolvePanelScriptFile(dir, pkg.scriptName) ?: return@runCatching null
+            Files.newOutputStream(dest.toPath(), StandardOpenOption.CREATE, StandardOpenOption.WRITE,
+                StandardOpenOption.TRUNCATE_EXISTING, LinkOption.NOFOLLOW_LINKS).use { output ->
+                output.write(pkg.script.toByteArray(Charsets.UTF_8))
+            }
             dest.name
         }.onFailure { FileLogger.w("PanelScriptImporter", "面板包导入失败：${pkg.scriptName}", it) }.getOrNull()
     }

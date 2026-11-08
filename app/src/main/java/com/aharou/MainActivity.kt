@@ -22,7 +22,6 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.DrawerValue
@@ -66,6 +65,8 @@ import android.content.Intent
 import android.net.Uri
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
+import com.aharou.core.util.ACTIVITY_STATE_VERSION_KEY
+import com.aharou.core.util.activityStateForVersion
 import com.aharou.core.util.FileLogger
 import com.aharou.core.util.PanelScriptImporter
 import com.aharou.feature.agent.presentation.SharedIntakeHolder
@@ -294,8 +295,7 @@ class MainActivity : ComponentActivity() {
      * 接收划词（ACTION_PROCESS_TEXT）与桌面快捷方式的自定义 action。
      *
      * 划词文本与「新建对话」交给 [AppNavigation]——那里才有 NavController 与 Activity 级
-     * [AIAgentViewModel]，能把文本落进聊天输入框、把页面切到聊天页。「开始语音通话」只置标志，
-     * 等 onResume（Activity 可见）后再启动。
+     * [AIAgentViewModel]，能把文本落进聊天输入框、把页面切到聊天页。
      */
     private fun handleLaunchIntent(intent: Intent?) {
         if (intent == null) return
@@ -310,7 +310,7 @@ class MainActivity : ComponentActivity() {
         setTheme(R.style.Theme_AICode)
         // 绘制到系统状态栏/导航栏之下，让应用背景与系统栏融为一体（消除割裂的色块）。
         enableEdgeToEdge()
-        super.onCreate(savedInstanceState)
+        super.onCreate(activityStateForVersion(savedInstanceState, BuildConfig.VERSION_CODE))
 
         // 冷启动若由分享拉起，直接导入附件（singleTop 复用时走 [onNewIntent]）。
         handleShareIntent(intent)
@@ -418,8 +418,9 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    override fun onDestroy() {
-        super.onDestroy()
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putInt(ACTIVITY_STATE_VERSION_KEY, BuildConfig.VERSION_CODE)
     }
 
 }

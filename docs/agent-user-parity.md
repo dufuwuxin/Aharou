@@ -130,14 +130,9 @@
 | 查看已配对设备 | `RemoteDeviceSection.kt:135`（`devices.forEachIndexed` 列表） | 有 | `config` `action=get path=remote.devices.<设备id>`（`ConfigRemoteDeviceFields.kt:211`） | 有 |
 | 撤销某台设备授权 | `RemoteDeviceSection.kt:144`（`viewModel.revoke`） | 有 | `config` `action=remove path=remote.devices id=<设备id>`（`ConfigRemoteDeviceFields.kt:246`） | 有 |
 
-## 9. IM 接入
+## 9. Messaging bots removed
 
-| 用户能做什么 | 界面入口（file:line） | Agent 有对应工具吗 | 工具名与入口（file:line） | 差距说明 |
-|---|---|---|---|---|
-| 启用/停用渠道（微信/飞书/QQ/Telegram） | 挂载 `SettingsScreen.kt:1266-1269`；`component/TelegramBotSection.kt:86`（以 Telegram 为例） | 有 | `config` `im.telegram.enabled` / `im.weixin.enabled` / `im.feishu.enabled` / `im.qq.enabled`（`feature/im/data/ConfigImFields.kt:35`、`:84`、`:134`、`:184`） | 无 |
-| 填 token / app_id / app_secret / base_url / 代理 | `TelegramBotSection.kt:121-140`（token 输入） | 有 | `config` `im.<渠道>.bot_token` / `.app_id` / `.app_secret` / `.base_url` / `.proxy`（`ConfigImFields.kt:45-221`） | 凭证是 SENSITIVE，写入需弹确认 |
-| 看连接状态 | `TelegramBotSection.kt:100`（状态行） | 无 | 未找到（`ConfigImFields` 无状态字段） | **缺口**：通道到底连上没有，agent 看不到 |
-| 向当前 IM 会话发文件/图片 | 用户在 IM 客户端聊天（无 App 内入口） | 有 | `sendToChat`（`AgentModule.kt:451`；`SendImFileTool.kt:32`） | 无（仅 IM 会话内可用） |
+WeChat, Feishu, QQ and Telegram bot settings, services, startup restoration, configuration fields and the bot file-sending tool have been removed. Existing conversations, files and saved configuration data are retained. Agent communication, MCP, SSH and remote-device collaboration are unchanged.
 
 ## 10. 会话
 
@@ -193,7 +188,6 @@
 14. 技能：导出（`SkillDetailSection.kt:121`）
 15. MCP：重连接/刷新（`SettingsScreen.kt:755`）
 16. 远程设备：接受协助（`RemoteDeviceSection.kt:139`）
-17. IM：看连接状态（`TelegramBotSection.kt:100`）
 18. 项目：创建及批量草稿（项目首页）
 19. 会话：切换（`MainActivity.kt:838`）
 20. 会话：重命名（`ChatDrawer.kt:508`）
@@ -226,7 +220,7 @@
 
 ## 14. 方法说明
 
-- **“有工具”的判据**：`di/AgentModule.kt:453-489` 里出现注册名，且工具实现里确实有对应动作（逐个读了 `MemoryTool.kt`、`ConfigTool.kt`、`SessionTool.kt`、`ManageMcpTool.kt`、`BrowserTool.kt`、`LoadSkillTool.kt`、`LoadRuleTool.kt`、`SendImFileTool.kt`、`PlanModeTool.kt` 的 `name`/`description`/`parameters`）。
+- **“有工具”的判据**：`di/AgentModule.kt:453-489` 里出现注册名，且工具实现里确实有对应动作（逐个读了 `MemoryTool.kt`、`ConfigTool.kt`、`SessionTool.kt`、`ManageMcpTool.kt`、`BrowserTool.kt`、`LoadSkillTool.kt`、`LoadRuleTool.kt`、`PlanModeTool.kt` 的 `name`/`description`/`parameters`）。
 - **`config` 通道算不算“有工具”**：算。它同样是 agent 可调用的工具，只是能力面由字段注册决定；因此“有 config 字段”一律记为“有”，并在差距说明里注明“无独立工具、要靠 `config list` 才能在索引里发现”。
 - **界面入口的判据**：从 `component/SettingsScreen.kt:123-178`（`SettingsSection` 枚举）与 `:963-1331`（分区到组件的映射）找到分区文件，再在该文件里定位真正触发调用的 `onClick`/`viewModel.*` 行；不按文件名猜。
 - **没读到就不写“有”**：所有“无 / 未找到”都做了全仓 `rg`（关键词含 `rename`、`revoke`、`setPort`、`runNow`、`temperature`、`archived`、`reasoning_effort`、`testConnection` 等），并检查了 `Config*Fields` 的注册清单（`AIEditorApp.kt:409-434`）。
@@ -241,7 +235,7 @@
 
 ## 脚本工具与片段注入
 
-配置页现集中供应商、默认模型、插件、连接器和凭据；账号中心在设置，四 IM 入口在配置。自动化直达与工具页复用同一任务页，MCP 批量管理、目录、导入导出与重连保留在工具页。连接器普通返回及日志、弹窗关闭均按实际入口来源返回，不固定跳工具页。
+配置页现集中供应商、默认模型、插件、连接器和凭据；机器人通讯入口已移除。自动化直达与工具页复用同一任务页，MCP 批量管理、目录、导入导出与重连保留在工具页。连接器普通返回及日志、弹窗关闭均按实际入口来源返回，不固定跳工具页。
 
 虚拟屏仅使用指定显示屏的唤醒接口；新版安卓优先使用 InputManagerGlobal，按文字定位后仍注入该屏的原生点击；明确执行失败和投递后超时不自动重放。截图附带原帧序号、帧龄和显示状态，不把缓存文件新建等同应用响应。导图手机首层按视口限制标题宽度，仍保留平移、缩放和大于等于 48dp 的最小触控行高。
 

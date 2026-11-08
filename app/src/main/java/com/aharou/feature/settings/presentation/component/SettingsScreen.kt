@@ -147,7 +147,6 @@ enum class SettingsSection(@param:StringRes val titleRes: Int) {
     ContainerDownloads(R.string.container_download_image),
     ContainerSources(R.string.container_sources_title),
     Proxy(R.string.proxy_title),
-    TelegramBot(R.string.settings_telegram_bot), WeixinBot(R.string.settings_weixin_bot), FeishuBot(R.string.settings_feishu_bot), QqBot(R.string.settings_qq_bot),
     Log(R.string.settings_log),
     AppPermissions(R.string.settings_app_permissions),
     BackgroundRun(R.string.settings_category_background),
@@ -390,7 +389,6 @@ fun SettingsScreen(
         SettingsSection.ConfigAudit -> (configHome ?: SettingsSection.Menu)
         SettingsSection.Memory -> (configHome ?: SettingsSection.AiGroup)
         SettingsSection.Providers, SettingsSection.DefaultModels -> (configHome ?: SettingsSection.Menu)
-        SettingsSection.TelegramBot, SettingsSection.WeixinBot, SettingsSection.FeishuBot, SettingsSection.QqBot -> (configHome ?: SettingsSection.AiGroup)
         SettingsSection.Connectors -> connectorsReturnSection
         SettingsSection.Skills, SettingsSection.Plugins -> (configHome ?: SettingsSection.Menu)
         SettingsSection.General, SettingsSection.Theme -> (configHome ?: SettingsSection.Menu)
@@ -1100,10 +1098,6 @@ fun SettingsScreen(
                     onSetPassword = viewModel::setProxyPassword,
                     onSetNoProxy = viewModel::setProxyNoProxy
                 )
-                SettingsSection.WeixinBot -> WeixinBotSection()
-                SettingsSection.FeishuBot -> FeishuBotSection()
-                SettingsSection.QqBot -> QqBotSection()
-                SettingsSection.TelegramBot -> TelegramBotSection()
                 SettingsSection.Log -> LogSection(
                     current = logLevel,
                     onSelect = { viewModel.setLogLevel(it) },
