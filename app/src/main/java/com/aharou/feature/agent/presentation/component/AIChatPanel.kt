@@ -1260,19 +1260,7 @@ fun AIChatPanel(
             Box(modifier = Modifier.weight(1f)) {
                 if (bodyOverride != null) {
                     Box(Modifier.fillMaxSize().padding(bottom = with(LocalDensity.current) { floatingLayerHeightPx.toDp() })) {
-                        ProjectChatMenuHost(
-                            sessionId = currentSessionId?.takeIf { sessionReady && currentSession?.parentId == null },
-                            mode = currentMode, providers = providers, metadata = modelMetadata,
-                            running = currentSessionId in activeAgentSessions || isCompacting,
-                            onEnterPlan = { if (viewModel.currentSessionId.value == currentSessionId) viewModel.setSessionMode(com.aharou.feature.agent.domain.model.AgentMode.PLAN) },
-                            onTerminal = onNavigateToTerminal, onGit = onNavigateToGit,
-                            onBrowser = onNavigateToBrowser, onSandbox = onNavigateToSandbox,
-                            onShared = onNavigateToShared,
-                            onObserve = { currentSessionId?.let { ObserveTargetHolder.sessionId = it }; onNavigateToObserve() },
-                            onActivity = { showActivity = true },
-                            connectionState = connectionState?.takeIf { isRemote },
-                            inputTokens = sessionInputTokens, outputTokens = sessionOutputTokens
-                        ) { bodyOverride(composer::collapse) }
+                        ProjectChatMenuHost(sessionId = currentSessionId?.takeIf { sessionReady && currentSession?.parentId == null }, mode = currentMode, providers = providers, metadata = modelMetadata, running = currentSessionId in activeAgentSessions || isCompacting, onEnterPlan = { if (viewModel.currentSessionId.value == currentSessionId) viewModel.setSessionMode(com.aharou.feature.agent.domain.model.AgentMode.PLAN) }, onTerminal = onNavigateToTerminal, onGit = onNavigateToGit, onBrowser = onNavigateToBrowser, onSandbox = onNavigateToSandbox, onShared = onNavigateToShared, onObserve = { currentSessionId?.let { ObserveTargetHolder.sessionId = it }; onNavigateToObserve() }, onActivity = { showActivity = true }, connectionState = connectionState?.takeIf { isRemote }, inputTokens = sessionInputTokens, outputTokens = sessionOutputTokens) { bodyOverride(composer::collapse) }
                     }
                 } else if (!messagesReady) {
                     // 远程模式连接未就绪时显示连接状态占位，避免空白或旧工作区记录闪烁
