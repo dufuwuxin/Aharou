@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Source-contract regression only; this does not exercise Compose clicks or IME."""
 import unittest
 from pathlib import Path
@@ -33,6 +32,9 @@ class ProjectChatComposerContract(unittest.TestCase):
         main = (JAVA / "MainActivity.kt").read_text()
         self.assertIn("ProjectChatScreen(", main)
         self.assertIn("rememberProjectChatBinding(", main)
+        self.assertIn("bodyOverride = binding.body, floatingComposer = true, composerSessionId = binding.sessionId", screen)
+        self.assertIn("if (bodyOverride == null) ChatHeader(", source("AIChatPanel.kt"))
+        self.assertIn("header = header, process = process)", source("ProjectTaskWorkbench.kt"))
 
     def test_status_questions_do_not_force_requirement_writes(self):
         screen = source("ProjectChatScreen.kt")
@@ -67,7 +69,7 @@ class ProjectChatComposerContract(unittest.TestCase):
             self.assertNotIn(removed, workbench)
         self.assertIn("ProjectTaskAddSheet(", workbench)
         self.assertIn("viewModel.addTaskByDescription(", workbench)
-        self.assertIn('testTag("project_more_menu")', workbench)
+        self.assertRegex(workbench, r'(?s)val header:.*?DropdownMenu\(expanded = menuOpen, onDismissRequest = \{ menuOpen = false \}\).*?DropdownMenuItem\(text = \{ Text\(stringResource\(R.string.project_add_task\)\) \}, enabled = !state.busy,\s*modifier = Modifier.testTag\("project_add_task"\),\s*onClick = \{ addingParentId = null; adding = true; menuOpen = false \}\)')
         self.assertIn("addingParentId = row.task.id", workbench)
         self.assertNotIn("ProjectTaskNodeMenu(", source("ProjectTaskMap.kt"))
         self.assertIn("readOnly = true", workbench)

@@ -15,6 +15,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.joinAll
+import kotlinx.coroutines.withContext
 
 data class ProjectRunKey(val workspace: String, val projectId: String)
 data class ProjectTaskRunKey(val workspace: String, val taskId: String)
@@ -34,6 +36,7 @@ class ProjectFlowController @Inject constructor(
     private val taskJobs = mutableMapOf<ProjectTaskRunKey, Job>()
     private val singleTaskProjects = mutableMapOf<ProjectTaskRunKey, ProjectRunKey>()
     private val rerun = mutableSetOf<ProjectRunKey>()
+    private val deleting = mutableSetOf<ProjectRunKey>()
     private val generations = mutableMapOf<ProjectRunKey, Any>()
     private val stopEpochs = ConcurrentHashMap<ProjectRunKey, AtomicLong>()
     private val mutable = MutableStateFlow(ProjectFlowState())
@@ -54,7 +57,7 @@ class ProjectFlowController @Inject constructor(
     }
 
     private fun start(key: ProjectRunKey, automatic: Boolean) {
-        if (key.workspace.isBlank() || (automatic && key in singleTaskProjects.values)) return
+        if (key.workspace.isBlank() || key in deleting || (automatic && key in singleTaskProjects.values)) return
         if (key in projectJobs) {
             if (automatic && projectJobs.getValue(key).isActive) rerun += key
             return
@@ -101,12 +104,28 @@ class ProjectFlowController @Inject constructor(
         }
     }
 
+    suspend fun withProjectStopped(projectId: String, workspace: String, delete: suspend () -> Unit) =
+        withContext(Dispatchers.Main.immediate) {
+            val key = ProjectRunKey(workspace, projectId)
+            check(deleting.add(key)) { "PROJECT_BUSY" }
+            try {
+                stopEpochs.computeIfAbsent(key) { AtomicLong() }.incrementAndGet()
+                generations.remove(key)
+                rerun -= key
+                val jobs = (listOfNotNull(projectJobs[key]) + singleTaskProjects.filterValues { it == key }
+                    .keys.mapNotNull { taskJobs[it] }).distinct()
+                jobs.forEach { it.cancel() }
+                jobs.joinAll()
+                delete()
+            } finally { deleting -= key }
+        }
+
     fun runProjectTask(task: ProjectTask) {
         val projectId = task.projectId ?: return
         scope.launch {
             val key = ProjectRunKey(task.workspace, projectId)
             val taskKey = ProjectTaskRunKey(task.workspace, task.id)
-            if (key in projectJobs || taskKey in taskJobs) return@launch
+            if (key in deleting || key in projectJobs || taskKey in taskJobs) return@launch
             singleTaskProjects[taskKey] = key
             val job = scope.launch(start = CoroutineStart.LAZY) {
                 try { workflow.get().run(projectId, task.workspace, task.id) }

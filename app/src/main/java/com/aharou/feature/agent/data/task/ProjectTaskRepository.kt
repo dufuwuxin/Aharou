@@ -85,7 +85,6 @@ class ProjectTaskRepository @Inject constructor(@ApplicationContext context: Con
     @Synchronized
     private fun deleteProjectLocked(projectId: String, workspace: String): Boolean {
         val current = snapshot(workspace)
-        check(current.tasks.none { it.projectId == projectId && it.status == ProjectTaskStatus.RUNNING }) { "PROJECT_BUSY" }
         val deletion = ProjectDeletion.plan(projectId, current.projects, current.tasks)
         if (!deletion.changed) return false
         val next = current.copy(version = current.version + 1, projects = deletion.projects, tasks = deletion.tasks)

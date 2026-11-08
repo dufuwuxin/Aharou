@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.withContext
 
 data class ProjectTaskUiState(
@@ -56,6 +57,7 @@ class ProjectTaskViewModel @Inject constructor(
     // Retrying a failed link reuses the already persisted root session.
     private val pendingProjectSessions = mutableMapOf<Pair<String, String>, String>()
     private val executing = mutableSetOf<Pair<String, String>>()
+    private val deletingProjects = mutableSetOf<Pair<String, String>>()
     private val executionJobs = mutableMapOf<Pair<String, String>, kotlinx.coroutines.Job>()
     @Volatile private var selectionEpoch = 0L
     private var knownWorkspacePaths: Set<String>? = null
@@ -154,37 +156,35 @@ class ProjectTaskViewModel @Inject constructor(
         }
     }
 
-    fun canDeleteProject(project: ProjectPlan): Boolean = !mutable.value.busy && projectIsIdle(project)
-
-    private fun projectIsIdle(project: ProjectPlan): Boolean {
-        val state = mutable.value
-        val shared = flows.state.value
-        val tasks = repository.snapshots.value[project.workspace]?.tasks.orEmpty().filter { it.projectId == project.id }
-        return !state.loading && project.id !in state.planningProjectIds &&
-            shared.projects.none { it.workspace == project.workspace && it.projectId == project.id } &&
-            tasks.none { task -> task.status == ProjectTaskStatus.RUNNING ||
-                shared.tasks.any { it.workspace == project.workspace && it.taskId == task.id } ||
-                (project.workspace to task.id) in executing }
-    }
+    fun canDeleteProject(project: ProjectPlan): Boolean = !mutable.value.busy && !mutable.value.loading &&
+        project.id !in mutable.value.planningProjectIds && (project.workspace to project.id) !in deletingProjects
 
     /** Remove project metadata and links only; owned directories and conversations are retained. */
     fun deleteProject(projectId: String) {
         val project = mutable.value.projects.firstOrNull { it.id == projectId } ?: return
         if (!canDeleteProject(project)) { error("PROJECT_BUSY"); return }
         operation {
-            sessionMutex.withLock {
-                check(projectIsIdle(project)) { "PROJECT_BUSY" }
-                repository.deleteProject(projectId, project.workspace)
-                pendingProjectSessions.remove(project.workspace to projectId)
-                mutable.update { state -> state.copy(
-                    selectedProjectId = state.selectedProjectId.takeUnless { it == projectId },
-                    selectedId = state.selectedId.takeUnless { id ->
-                        state.workspace == project.workspace && state.tasks.any { it.id == id && it.projectId == projectId }
-                    },
-                    planningProjectIds = state.planningProjectIds - projectId,
-                    ruleFallbackProjectIds = state.ruleFallbackProjectIds - projectId
-                ) }
-            }
+            val key = project.workspace to projectId
+            if (!deletingProjects.add(key)) return@operation
+            selectionEpoch++
+            try {
+                val taskIds = repository.load(project.workspace).tasks.filter { it.projectId == projectId }.map { it.id }.toSet()
+                val jobs = executionJobs.filterKeys { it.first == project.workspace && it.second in taskIds }.values.toList()
+                jobs.forEach { it.cancel() }
+                flows.withProjectStopped(projectId, project.workspace) {
+                    jobs.joinAll()
+                    sessionMutex.withLock {
+                        repository.deleteProject(projectId, project.workspace)
+                        pendingProjectSessions.remove(key)
+                        mutable.update { state -> state.copy(
+                            selectedProjectId = state.selectedProjectId.takeUnless { state.workspace == project.workspace && it == projectId },
+                            selectedId = state.selectedId.takeUnless { state.workspace == project.workspace && it in taskIds },
+                            planningProjectIds = state.planningProjectIds - projectId,
+                            ruleFallbackProjectIds = state.ruleFallbackProjectIds - projectId
+                        ) }
+                    }
+                }
+            } finally { deletingProjects -= key }
         }
     }
 
@@ -333,6 +333,7 @@ class ProjectTaskViewModel @Inject constructor(
     /** A new conversation is persisted and linked first. No network request until explicit start. */
     fun execute(task: ProjectTask, start: Boolean, runExecution: suspend (String, String, String) -> com.aharou.feature.agent.domain.task.ProjectTaskExecutionOutcome) = operation {
         val setupOwner = busyOwner
+        if ((task.workspace to task.projectId) in deletingProjects) return@operation
         if (flows.state.value.tasks.any { it.workspace == task.workspace && it.taskId == task.id } || !executing.add(task.workspace to task.id)) return@operation
         executionJobs[task.workspace to task.id] = requireNotNull(kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job])
         refreshExecutionState()

@@ -14,6 +14,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runCurrent
@@ -69,16 +70,92 @@ class ProjectTaskViewModelTest {
         coVerify(exactly = 0) { repository.deleteProject("owned", "/other") }
     }
 
-    @Test fun deletionRejectsRunningProjectWithoutCancellingIt() = runTest(dispatcher) {
+    @Test fun deletionWaitsForRunningProjectCleanupBeforeRemovingIt() = runTest(dispatcher) {
+        val project = ProjectPlan(id = "p", workspace = "/first", title = "p", requirements = "r")
+        val task = projectTask
+        val snapshot = ProjectTaskSnapshot(projects = listOf(project), tasks = listOf(task))
+        (repository.snapshots as MutableStateFlow<Map<String, ProjectTaskSnapshot>>).value = mapOf("/first" to snapshot)
+        coEvery { repository.load("/first") } returns snapshot
+        coEvery { repository.deleteProject("p", "/first") } returns true
+        val finish = kotlinx.coroutines.CompletableDeferred<Unit>()
+        var cancelled = false
+        coEvery { workflow.run("p", "/first") } coAnswers {
+            try { kotlinx.coroutines.awaitCancellation() } finally {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { cancelled = true; finish.await() }
+            }
+        }
+        viewModel.workspace("/first"); runCurrent(); viewModel.selectProject("p"); viewModel.select("t")
+        viewModel.startProject("p"); runCurrent()
+        org.junit.Assert.assertTrue(viewModel.canDeleteProject(project))
+        viewModel.deleteProject("p"); runCurrent()
+        org.junit.Assert.assertTrue(cancelled)
+        coVerify(exactly = 0) { repository.deleteProject(any(), any()) }
+        finish.complete(Unit); runCurrent()
+        coVerify(exactly = 1) { repository.deleteProject("p", "/first") }
+        org.junit.Assert.assertNull(viewModel.state.value.selectedProjectId)
+        org.junit.Assert.assertNull(viewModel.state.value.selectedId)
+        org.junit.Assert.assertTrue(flows.state.value.projects.isEmpty())
+        org.junit.Assert.assertFalse(viewModel.state.value.busy)
+    }
+
+    @Test fun deletionWaitsForLocalExecutionAndKeepsSameTaskIdInOtherWorkspace() = runTest(dispatcher) {
+        val firstTask = projectTask.copy(status = com.aharou.feature.agent.domain.task.ProjectTaskStatus.RUNNING)
+        val otherTask = firstTask.copy(workspace = "/other", projectId = "other")
+        val stores = mapOf(
+            "/first" to ProjectTaskSnapshot(tasks = listOf(firstTask), projects = listOf(ProjectPlan(id = "p", workspace = "/first", title = "p", requirements = "r"))),
+            "/other" to ProjectTaskSnapshot(tasks = listOf(otherTask), projects = listOf(ProjectPlan(id = "other", workspace = "/other", title = "q", requirements = "r")))
+        )
+        (repository.snapshots as MutableStateFlow<Map<String, ProjectTaskSnapshot>>).value = stores
+        coEvery { repository.load(any()) } answers { stores.getValue(firstArg()) }
+        coEvery { repository.save(any()) } answers { firstArg() }
+        coEvery { runner.createSessionEntity(any()) } answers { rootSession("session-" + firstArg<String>(), firstArg()) }
+        coEvery { sessions.upsertSession(any()) } returns Unit
+        val firstStarted = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val otherStarted = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val cleanup = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val deleted = kotlinx.coroutines.CompletableDeferred<Unit>()
+        var firstCancelled = false
+        var otherCancelled = false
+        coEvery { repository.deleteProject("p", "/first") } answers { deleted.complete(Unit); true }
+        viewModel.workspace("/first"); runCurrent()
+        viewModel.execute(firstTask, true) { _, _, _ ->
+            firstStarted.complete(Unit)
+            try { kotlinx.coroutines.awaitCancellation() } finally {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { firstCancelled = true; cleanup.await() }
+            }
+        }
+        firstStarted.await()
+        viewModel.workspace("/other"); runCurrent()
+        viewModel.execute(otherTask, true) { _, _, _ ->
+            otherStarted.complete(Unit)
+            try { kotlinx.coroutines.awaitCancellation() } finally { otherCancelled = true }
+        }
+        otherStarted.await()
+        viewModel.selectProject("other"); viewModel.select("t")
+        viewModel.deleteProject("p"); runCurrent()
+        org.junit.Assert.assertTrue(firstCancelled)
+        org.junit.Assert.assertFalse(otherCancelled)
+        org.junit.Assert.assertFalse(deleted.isCompleted)
+        coVerify(exactly = 0) { repository.deleteProject(any(), any()) }
+        cleanup.complete(Unit)
+        deleted.await(); runCurrent()
+        org.junit.Assert.assertFalse(otherCancelled)
+        org.junit.Assert.assertEquals("other", viewModel.state.value.selectedProjectId)
+        org.junit.Assert.assertEquals("t", viewModel.state.value.selectedId)
+        viewModel.cancelExecution("t")
+        viewModel.state.first { it.activeTaskIds.isEmpty() }
+    }
+
+    @Test fun failedDeletionKeepsTheProjectAndSelection() = runTest(dispatcher) {
         val project = ProjectPlan(id = "p", workspace = "/first", title = "p", requirements = "r")
         (repository.snapshots as MutableStateFlow<Map<String, ProjectTaskSnapshot>>).value = mapOf("/first" to ProjectTaskSnapshot(projects = listOf(project)))
-        val finish = kotlinx.coroutines.CompletableDeferred<Unit>()
-        coEvery { workflow.run("p", "/first") } coAnswers { finish.await() }
-        viewModel.workspace("/first"); runCurrent(); viewModel.startProject("p"); runCurrent()
+        coEvery { repository.deleteProject("p", "/first") } throws IllegalStateException("WRITE_FAILED")
+        viewModel.workspace("/first"); runCurrent(); viewModel.selectProject("p")
         viewModel.deleteProject("p"); runCurrent()
-        coVerify(exactly = 0) { repository.deleteProject(any(), any()) }
-        org.junit.Assert.assertTrue(flows.state.value.projects.any { it.projectId == "p" })
-        finish.complete(Unit); runCurrent()
+        org.junit.Assert.assertEquals(listOf(project), viewModel.state.value.projects)
+        org.junit.Assert.assertEquals("p", viewModel.state.value.selectedProjectId)
+        org.junit.Assert.assertEquals("WRITE_FAILED", viewModel.state.value.error)
+        org.junit.Assert.assertTrue(viewModel.canDeleteProject(project))
     }
 
     @Test fun oneProjectStartIsIdempotentAndDoesNotFollowWorkspaceSwitch() = runTest(dispatcher) {

@@ -184,7 +184,7 @@ fun ProjectTaskMap(projectId: String, projectTitle: String, tasks: List<ProjectT
         header { dismiss ->
             DropdownMenuItem(text = { Text(stringResource(if (showSearch) R.string.project_map_search_close else R.string.project_map_search)) },
                 modifier = Modifier.testTag("map_search_toggle"),
-                onClick = { showSearch = !showSearch; if (!showSearch) query = ""; dismiss() })
+                onClick = { showSearch = !showSearch; if (!showSearch) { query = ""; keyboard?.hide() }; dismiss() })
             val allOpen = tasks.isNotEmpty() && tasks.all { it.id in expanded }
             DropdownMenuItem(text = { Text(stringResource(if (allOpen) R.string.project_task_collapse_all else R.string.project_task_expand_all)) },
                 modifier = Modifier.testTag("map_expand_all"), onClick = {
@@ -212,7 +212,7 @@ fun ProjectTaskMap(projectId: String, projectTitle: String, tasks: List<ProjectT
             AppTextField(query, { query = it }, modifier = Modifier.weight(1f).testTag("map_search"),
                 placeholder = stringResource(R.string.project_map_search),
                 leadingIcon = { Icon(FeatherIcons.Search, null, modifier = Modifier.size(Spacing.lg)) }, trailingIcon = clear)
-            IconButton(onClick = { showSearch = false; query = "" }, modifier = Modifier.testTag("map_search_close")) {
+            IconButton(onClick = { showSearch = false; query = ""; keyboard?.hide() }, modifier = Modifier.testTag("map_search_close")) {
                 Icon(FeatherIcons.X, stringResource(R.string.project_map_search_close))
             }
         }

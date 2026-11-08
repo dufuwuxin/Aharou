@@ -21,23 +21,35 @@ class IntegrationContracts(unittest.TestCase):
         self.assertLess(delete.index("persist(workspace, next)"), delete.index("mutable.value ="))
         self.assertNotIn("deleteRecursively", delete)
 
-    def test_running_projects_are_rejected_and_delete_uses_owned_workspace(self):
+    def test_running_projects_are_stopped_and_delete_uses_owned_workspace(self):
         vm = self.read("feature/agent/presentation/ProjectTaskViewModel.kt")
         ui = self.read("feature/agent/presentation/component/ProjectListScreen.kt")
         repo = self.read("feature/agent/data/task/ProjectTaskRepository.kt")
         self.assertIn("enabled = viewModel.canDeleteProject(project)", ui)
         self.assertIn("if (!canDeleteProject(project))", vm)
-        self.assertIn("check(projectIsIdle(project))", vm)
+        self.assertIn("project.id !in mutable.value.planningProjectIds", vm)
+        self.assertIn("flows.withProjectStopped(projectId, project.workspace)", vm)
+        eligibility = vm[vm.index("fun canDeleteProject("):vm.index("fun deleteProject(")]
+        self.assertNotIn("projectIsIdle", eligibility)
+        self.assertNotIn("ProjectTaskStatus.RUNNING", eligibility)
         self.assertIn("repository.deleteProject(projectId, project.workspace)", vm)
-        self.assertIn("it.projectId == projectId && it.status == ProjectTaskStatus.RUNNING", repo)
+        deletion = repo[repo.index("private fun deleteProjectLocked"):repo.index("suspend fun save(")]
+        self.assertNotIn("ProjectTaskStatus.RUNNING", deletion)
         self.assertNotIn("deleteRecursively", repo)
 
     def test_delete_waits_for_owned_jobs(self):
         vm = self.read("feature/agent/presentation/ProjectTaskViewModel.kt")
         delete = vm[vm.index("fun deleteProject("):vm.index("fun createProject(")]
-        self.assertLess(delete.index("cancelAndJoin()"), delete.index("repository.deleteProject("))
+        self.assertLess(delete.index("jobs.forEach { it.cancel() }"), delete.index("flows.withProjectStopped("))
+        self.assertLess(delete.index("jobs.joinAll()"), delete.index("repository.deleteProject("))
         self.assertNotIn("sessions.delete", delete)
-        self.assertIn("state.workspace == workspace", delete)
+        self.assertIn("it.first == project.workspace && it.second in taskIds", delete)
+        self.assertIn("state.workspace == project.workspace", delete)
+        controller = self.read("feature/agent/domain/task/ProjectFlowController.kt")
+        stopped = controller[controller.index("suspend fun withProjectStopped("):controller.index("fun runProjectTask(")]
+        self.assertLess(stopped.index("jobs.forEach { it.cancel() }"), stopped.index("jobs.joinAll()"))
+        self.assertLess(stopped.index("jobs.joinAll()"), stopped.index("delete()"))
+        self.assertIn("singleTaskProjects.filterValues { it == key }", stopped)
 
     def test_editor_has_one_tools_entry(self):
         tools = self.read("feature/settings/presentation/component/UnifiedToolsSection.kt")

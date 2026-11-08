@@ -4004,7 +4004,7 @@
     <string name="tools_history_hint">此处仅保留上次运行的输出。要运行或导出，请从命令列表重新选择当前定义，或在创建表单试运行草稿。</string>
     <string name="project_delete">删除项目</string>
     <string name="project_delete_title">删除项目“%1$s”？</string>
-    <string name="project_delete_description">将删除该项目及其全部任务记录。运行或规划中的项目请先停止后再删除；工作区文件和历史对话会保留。</string>
+    <string name="project_delete_description">将先停止并等待该项目的运行任务结束，再删除项目及其全部任务记录。规划中的项目请等待规划结束；工作区文件和历史对话会保留。</string>
     <string name="project_delete_planning">项目正在规划，请完成或停止规划后重试删除。</string>
     <string name="project_delete_failed">项目删除失败，记录仍保留，请重试。</string>
     <string name="project_view_actions">项目视图与操作</string>

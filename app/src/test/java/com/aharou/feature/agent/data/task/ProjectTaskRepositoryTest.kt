@@ -154,15 +154,20 @@ class ProjectTaskRepositoryTest {
         return repository.load("/w").tasks.filter { it.projectId == created.project.id }.sortedBy { it.order }
     }
 
-    @Test fun deletionRejectsRunningTasksWithoutMutatingTheStore() = runBlocking {
+    @Test fun deletionRemovesResidualRunningMarkersAndRejectsLateWrites() = runBlocking {
         val store = repository()
         val task = project(store, "running").single()
-        store.save(task.copy(status = com.aharou.feature.agent.domain.task.ProjectTaskStatus.RUNNING))
+        val running = store.save(task.copy(status = com.aharou.feature.agent.domain.task.ProjectTaskStatus.RUNNING))
         val before = store.load("/w")
-        try { store.deleteProject(requireNotNull(task.projectId), "/w"); fail("running projects must remain") }
-        catch (failure: IllegalStateException) { assertEquals("PROJECT_BUSY", failure.message) }
-        assertEquals(before, store.load("/w"))
-        assertEquals(before, repository().load("/w"))
+        assertTrue(store.deleteProject(requireNotNull(task.projectId), "/w"))
+        val after = store.load("/w")
+        assertEquals(before.version + 1, after.version)
+        assertTrue(after.projects.isEmpty())
+        assertTrue(after.tasks.isEmpty())
+        assertEquals(after, repository().load("/w"))
+        try { store.save(running); fail("late writes must not resurrect a deleted project") }
+        catch (failure: IllegalArgumentException) { assertEquals("PROJECT_NOT_FOUND", failure.message) }
+        assertEquals(after, repository().load("/w"))
     }
 
     @Test fun deletionIsAtomicIdempotentAndKeepsOtherProjectsAndStandaloneTasks() = runBlocking {

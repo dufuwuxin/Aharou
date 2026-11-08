@@ -271,7 +271,7 @@ fun SettingsScreen(
     var sectionHistory by rememberSaveable {
         mutableStateOf(listOf(if (menuGroups.size == 1) menuGroups.first() else SettingsSection.Menu))
     }
-    var section by remember {
+    var section: SettingsSection by remember<kotlin.properties.ReadWriteProperty<Any?, SettingsSection>> {
         object : kotlin.properties.ReadWriteProperty<Any?, SettingsSection> {
             override fun getValue(thisRef: Any?, property: kotlin.reflect.KProperty<*>): SettingsSection = sectionHistory.last()
             override fun setValue(thisRef: Any?, property: kotlin.reflect.KProperty<*>, value: SettingsSection) {
