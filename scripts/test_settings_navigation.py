@@ -364,6 +364,22 @@ class TaskEntryAuditTest(unittest.TestCase):
         labels = source(self.component / "ProjectTaskWorkbench.kt")
         self.assertIn('"FAILED", "TASK_EXECUTION_FAILED" ->', labels)
 
+    def test_running_tasks_keep_the_edit_action_available(self):
+        text = source(self.component / "ProjectTaskDetailScreen.kt")
+        edit = text[text.index("DropdownMenuItem(text = { Text(stringResource(R.string.project_task_edit))"):]
+        edit = edit[:edit.index("DropdownMenuItem(", 1)]
+        self.assertIn("enabled = !state.loading && !state.busy", edit)
+        self.assertNotIn("!running", edit)
+        self.assertNotIn("enabled = ready", edit)
+
+    def test_acceptance_button_exposes_busy_state_instead_of_silent_noop(self):
+        detail = source(self.component / "ProjectTaskDetailScreen.kt")
+        self.assertIn("acceptEnabled = !state.loading && !state.busy", detail)
+        self.assertIn("onAccept = { viewModel.accept(task) }", detail)
+        process = source(self.component / "ProjectTaskProcess.kt")
+        self.assertIn("acceptEnabled: Boolean = true", process)
+        self.assertIn("enabled = acceptEnabled &&", process)
+
     def test_index_template_indexes_instead_of_only_initializing(self):
         text = source(SRC / "feature/agent/domain/tool/custom/PracticalToolTemplates.kt")
         entry = text.split('name = "codegraph_index"', 1)[1].split("keywords =", 1)[0]

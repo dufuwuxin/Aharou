@@ -20,7 +20,7 @@ private const val SUPPLEMENTS_SHOWN = 3
 @Composable
 internal fun ProjectTaskProcess(task: ProjectTask, tasks: List<ProjectTask>, onEdit: () -> Unit, onAccept: () -> Unit,
     conversation: @Composable (ProjectTask, String) -> Unit, modifier: Modifier = Modifier, readOnly: Boolean = false,
-    fillConversation: Boolean = true) {
+    fillConversation: Boolean = true, acceptEnabled: Boolean = true) {
     val records = (task.sessionIds + task.processSessionIds).distinct()
     var selectedSession by rememberSaveable(task.id) { mutableStateOf(records.firstOrNull()) }
     LaunchedEffect(records) { if (selectedSession !in records) selectedSession = records.firstOrNull() }
@@ -56,7 +56,7 @@ internal fun ProjectTaskProcess(task: ProjectTask, tasks: List<ProjectTask>, onE
             }
         }
         if (task.status == com.aharou.feature.agent.domain.task.ProjectTaskStatus.REVIEW) TextButton(onClick = onAccept,
-            enabled = task.acceptance.isNotBlank() && task.evidenceRefs.isNotEmpty() &&
+            enabled = acceptEnabled && task.acceptance.isNotBlank() && task.evidenceRefs.isNotEmpty() &&
                 (task.processSessionIds.isEmpty() || com.aharou.feature.agent.domain.task.ProjectWorkflowPlan.delivered(task))) { Text(stringResource(R.string.project_task_accept)) }
         HorizontalDivider()
         val sessionId = selectedSession?.takeIf { it in records }

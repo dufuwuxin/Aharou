@@ -53,7 +53,7 @@ fun ProjectTaskDetailScreen(taskId: String, viewModel: ProjectTaskViewModel, onB
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                     DropdownMenuItem(text = { Text(stringResource(R.string.project_task_overview)) },
                         onClick = { menuOpen = false; overview = true })
-                    DropdownMenuItem(text = { Text(stringResource(R.string.project_task_edit)) }, enabled = ready && !running,
+                    DropdownMenuItem(text = { Text(stringResource(R.string.project_task_edit)) }, enabled = !state.loading && !state.busy,
                         onClick = { menuOpen = false; editing = true })
                     DropdownMenuItem(text = { Text(stringResource(R.string.project_task_new_execution)) }, enabled = ready && !running,
                         onClick = { menuOpen = false; viewModel.execute(task, false, runExecution) })
@@ -79,7 +79,8 @@ fun ProjectTaskDetailScreen(taskId: String, viewModel: ProjectTaskViewModel, onB
                 Text(stringResource(R.string.project_task_start))
             }
             ProjectTaskProcess(task, state.tasks, onEdit = { editing = true },
-                onAccept = { if (ready && !running) viewModel.accept(task) }, readOnly = true, fillConversation = false,
+                onAccept = { viewModel.accept(task) }, readOnly = true, fillConversation = false,
+                acceptEnabled = !state.loading && !state.busy,
                 modifier = Modifier.fillMaxWidth().padding(Spacing.sm),
                 conversation = { _, id ->
                     TextButton(onClick = { onSelectSession(id) }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
