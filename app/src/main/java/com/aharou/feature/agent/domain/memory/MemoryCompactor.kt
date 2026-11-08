@@ -346,6 +346,7 @@ class MemoryCompactor @Inject constructor(
     internal fun compactionCandidates(projectRoot: String?, scope: MemoryScope): List<Memory> =
         memoryRepository.listMemories(projectRoot)
             .filter { it.scope == scope }
+            .filter { it.contextCategory != com.aharou.feature.agent.domain.context.ContextCategory.TEMPORARY }
             .filter {
                 it.type != MemoryType.EVENT && it.type != MemoryType.DIGEST &&
                     !it.pending && it.content.length <= MAX_ITEM_CHARS
@@ -389,9 +390,7 @@ class MemoryCompactor @Inject constructor(
         val root = group.first().file?.parentFile ?: return false
         val target = MemorySource.resolveMemoryFile(root, name)
         val parsed = MemoryParser.parse(target, group.first().scope) ?: return false
-        val payload = MemoryParser.format(
-            parsed.name, parsed.description, parsed.content, effective, parsed.keywords, parsed.expiresAt, parsed.pending
-        )
+        val payload = MemoryParser.format(parsed.copy(type = effective))
         // 刚合并完又改分类：中间若是被人插了一笔（主对话刚好在写这条），
         // 就用版本号拦下，不去把他刚写的内容盖回合并稿。
         return MemoryFileStorage.write(target, payload, expectedVersion = parsed.version)

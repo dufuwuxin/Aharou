@@ -12,14 +12,19 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.unit.dp
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.foundation.layout.imePadding
+import com.aharou.core.ui.AdaptiveModalBottomSheet
+import com.aharou.core.theme.Spacing
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -72,16 +77,19 @@ class ScriptToolsViewModel @Inject constructor(private val manager: ScriptToolMa
     fun remove(name: String) = change({ manager.remove(name) })
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun ScriptToolsSection(
     createRequested: Boolean,
     onCreateHandled: () -> Unit,
     viewModel: ScriptToolsViewModel = hiltViewModel(),
     embedded: Boolean = false,
+    onEditSettings: ((String) -> Unit)? = null,
 ) {
-    val definitions by viewModel.definitions.collectAsState()
-    val error by viewModel.error.collectAsState()
-    val busy by viewModel.busy.collectAsState()
+    val definitions by viewModel.definitions.collectAsStateWithLifecycle()
+    val error by viewModel.error.collectAsStateWithLifecycle()
+    val busy by viewModel.busy.collectAsStateWithLifecycle()
+    val busyNow by rememberUpdatedState(busy)
     var showEditor by rememberSaveable { mutableStateOf(false) }
     var oldName by rememberSaveable { mutableStateOf<String?>(null) }
     var name by rememberSaveable { mutableStateOf("") }
@@ -97,19 +105,24 @@ internal fun ScriptToolsSection(
         enabled = true
         showEditor = true
     }
-    LaunchedEffect(createRequested) {
-        if (createRequested) {
+    LaunchedEffect(createRequested, busy) {
+        if (createRequested && !busy) {
             create()
             onCreateHandled()
         }
     }
 
-    Column(Modifier.then(if (embedded) Modifier else Modifier.verticalScroll(rememberScrollState())).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(Modifier.then(if (embedded) Modifier else Modifier.verticalScroll(rememberScrollState())).padding(Spacing.lg), verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
         SettingsGroupHeader(stringResource(R.string.script_tools_title))
         if (error) Text(stringResource(R.string.script_tools_save_failed), color = MaterialTheme.colorScheme.error)
         if (showEditor) {
-            SettingsGroup {
-                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            AdaptiveModalBottomSheet(
+                onDismissRequest = { if (!busy) showEditor = false },
+                sheetGesturesEnabled = !busy,
+                sheetState = rememberModalBottomSheetState(confirmValueChange = { !busyNow }),
+            ) {
+                Column(Modifier.imePadding().verticalScroll(rememberScrollState()).padding(Spacing.lg), verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
+                    if (error) Text(stringResource(R.string.script_tools_save_failed), color = MaterialTheme.colorScheme.error)
                     AppTextField(value = name, onValueChange = { name = it }, label = stringResource(R.string.script_tools_name), enabled = !busy)
                     AppTextField(value = description, onValueChange = { description = it }, label = stringResource(R.string.script_tools_description), enabled = !busy)
                     AppTextField(value = command, onValueChange = { command = it }, label = stringResource(R.string.script_tools_command), singleLine = false, minLines = 4, enabled = !busy)
@@ -125,12 +138,15 @@ internal fun ScriptToolsSection(
                     }
                 }
             }
-        } else {
+        }
+        if (!embedded) {
             TextButton(enabled = !busy, onClick = { create() }) { Text(stringResource(R.string.script_tools_add)) }
+        }
+        run {
             if (definitions.isEmpty()) Text(stringResource(R.string.script_tools_empty))
             definitions.forEach { definition ->
                 SettingsGroup {
-                    Column(Modifier.padding(12.dp)) {
+                    Column(Modifier.padding(Spacing.md)) {
                         Text(definition.name, style = MaterialTheme.typography.titleMedium)
                         Text(definition.description, style = MaterialTheme.typography.bodySmall)
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -146,6 +162,11 @@ internal fun ScriptToolsSection(
                                 enabled = definition.enabled
                                 showEditor = true
                             }) { Text(stringResource(R.string.script_tools_edit)) }
+                            onEditSettings?.let { editSettings ->
+                                TextButton(enabled = definition.enabled && !busy, onClick = { editSettings(definition.toolName) }) {
+                                    Text(stringResource(R.string.tools_injection_settings))
+                                }
+                            }
                             TextButton(enabled = !busy, onClick = { viewModel.remove(definition.name) }) { Text(stringResource(R.string.script_tools_delete)) }
                         }
                     }

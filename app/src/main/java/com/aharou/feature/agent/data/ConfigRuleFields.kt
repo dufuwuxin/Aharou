@@ -25,11 +25,13 @@ import javax.inject.Singleton
 class ConfigRuleFields @Inject constructor(
     private val rules: RuleFileRepository,
     private val workspaceRepository: WorkspaceRepository,
-    private val promptFragments: ConfigPromptFragmentFields
+    private val promptFragments: ConfigPromptFragmentFields,
+    private val contextLibrary: ConfigContextLibraryFields,
 ) {
 
     fun registerInto(registry: ConfigRegistry) {
         promptFragments.registerInto(registry)
+        contextLibrary.registerInto(registry)
         registry.register(
             ClosureField(
                 path = "rules.global",

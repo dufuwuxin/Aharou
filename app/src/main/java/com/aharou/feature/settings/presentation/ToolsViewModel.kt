@@ -33,7 +33,7 @@ enum class ToolSource { CUSTOM, BUILTIN, MCP }
 data class ToolEditorTarget(val name: String? = null, val template: CustomToolDefinition? = null)
 
 /** 一次性反馈（界面转成 Toast 后清掉），避免失败被静默吞掉。 */
-enum class ToolsMessage { SAVE_FAILED, DELETE_FAILED, LOAD_FAILED }
+enum class ToolsMessage { SAVE_FAILED, DELETE_FAILED, LOAD_FAILED, NAME_CONFLICT }
 
 /**
  * 工具页的一行。
@@ -121,19 +121,28 @@ class ToolsViewModel @Inject constructor(
     // ---- 编辑面板 ----
 
     fun startCreate() {
-        _state.update { it.copy(editor = ToolEditorTarget(null)) }
+        if (_state.value.saving) return
+        _state.update { it.copy(editor = ToolEditorTarget(null), message = null) }
     }
 
     fun startTemplate(name: String) {
+        if (_state.value.saving) return
         val template = PracticalToolTemplates.all.firstOrNull { it.name == name } ?: return
-        _state.update { it.copy(editor = ToolEditorTarget(template = template)) }
+        _state.update { it.copy(editor = ToolEditorTarget(template = template), message = null) }
+    }
+
+    fun startDraft(definition: CustomToolDefinition) {
+        if (_state.value.saving) return
+        _state.update { it.copy(editor = ToolEditorTarget(template = definition), message = null) }
     }
 
     fun openEditor(name: String) {
-        _state.update { it.copy(editor = ToolEditorTarget(name)) }
+        if (_state.value.saving) return
+        _state.update { it.copy(editor = ToolEditorTarget(name), message = null) }
     }
 
     fun closeEditor() {
+        if (_state.value.saving) return
         _state.update { it.copy(editor = null) }
     }
 
@@ -148,20 +157,32 @@ class ToolsViewModel @Inject constructor(
         injectionMode: ToolInjectionMode,
         keywords: List<String>
     ) {
+        val creating = _state.value.editor?.name == null
+        var conflict = false
         mutate(
             failure = ToolsMessage.SAVE_FAILED,
+            failureMessage = { if (conflict) ToolsMessage.NAME_CONFLICT else ToolsMessage.SAVE_FAILED },
             write = {
-                store.saveCustomTool(
-                    CustomToolDefinition(
-                        name = name,
-                        description = description,
-                        command = command,
-                        parameters = parameters,
-                        timeoutSeconds = timeoutSeconds,
-                        injectionMode = injectionMode,
-                        keywords = keywords
-                    )
+                val definition = CustomToolDefinition(
+                    name = name, description = description, command = command, parameters = parameters,
+                    timeoutSeconds = timeoutSeconds, injectionMode = injectionMode, keywords = keywords,
                 )
+                if (creating) {
+                    store.refresh()
+                    if (registry.hasTool(name)) {
+                        conflict = true
+                        false
+                    } else {
+                        val created = store.createCustomTool(definition)
+                        if (!created) {
+                            store.refresh()
+                            conflict = store.snapshotCustomTools().any { it.name == name }
+                        }
+                        created
+                    }
+                } else {
+                    store.saveCustomTool(definition)
+                }
             }
         )
     }
@@ -226,7 +247,7 @@ class ToolsViewModel @Inject constructor(
     // ---- 内部 ----
 
     /** 写操作统一包装：IO 调度、成功才重建列表、失败给一条明确的界面反馈。 */
-    private fun mutate(failure: ToolsMessage, write: suspend () -> Boolean) {
+    private fun mutate(failure: ToolsMessage, failureMessage: () -> ToolsMessage = { failure }, write: suspend () -> Boolean) {
         if (_state.value.saving) return
         _state.update { it.copy(saving = true) }
         viewModelScope.launch {
@@ -234,7 +255,7 @@ class ToolsViewModel @Inject constructor(
                 runCatching { write() }.onFailure { if (it is CancellationException) throw it }.getOrDefault(false)
             }
             if (!result) {
-                _state.update { it.copy(saving = false, message = failure) }
+                _state.update { it.copy(saving = false, message = failureMessage()) }
                 return@launch
             }
             val entries = withContext(Dispatchers.IO) { runCatching { buildEntries() }.onFailure { if (it is CancellationException) throw it }.getOrNull() }

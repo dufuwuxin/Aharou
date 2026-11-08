@@ -16,10 +16,10 @@ data class MemoryProposal(
     val type: MemoryType,
     val merge: Boolean,
 ) {
-    val payload: String get() = MemoryParser.format(
-        name, description, content, type, inputs.flatMap { it.keywords }.distinct(),
-        inputs.first().expiresAt, inputs.first().pending
-    )
+    val payload: String get() = MemoryParser.format(inputs.first().copy(
+        name = name, description = description, content = content, type = type,
+        keywords = inputs.flatMap { it.keywords }.distinct()
+    ))
     val revision: String get() = MemoryFileStorage.versionOf(
         inputs.joinToString("\n") { "${it.file?.absolutePath}:${it.version}" } + "\n" + payload
     )

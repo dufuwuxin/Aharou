@@ -154,6 +154,40 @@ class ProjectTaskViewModel @Inject constructor(
         }
     }
 
+    fun canDeleteProject(project: ProjectPlan): Boolean = !mutable.value.busy && projectIsIdle(project)
+
+    private fun projectIsIdle(project: ProjectPlan): Boolean {
+        val state = mutable.value
+        val shared = flows.state.value
+        val tasks = repository.snapshots.value[project.workspace]?.tasks.orEmpty().filter { it.projectId == project.id }
+        return !state.loading && project.id !in state.planningProjectIds &&
+            shared.projects.none { it.workspace == project.workspace && it.projectId == project.id } &&
+            tasks.none { task -> task.status == ProjectTaskStatus.RUNNING ||
+                shared.tasks.any { it.workspace == project.workspace && it.taskId == task.id } ||
+                (project.workspace to task.id) in executing }
+    }
+
+    /** Remove project metadata and links only; owned directories and conversations are retained. */
+    fun deleteProject(projectId: String) {
+        val project = mutable.value.projects.firstOrNull { it.id == projectId } ?: return
+        if (!canDeleteProject(project)) { error("PROJECT_BUSY"); return }
+        operation {
+            sessionMutex.withLock {
+                check(projectIsIdle(project)) { "PROJECT_BUSY" }
+                repository.deleteProject(projectId, project.workspace)
+                pendingProjectSessions.remove(project.workspace to projectId)
+                mutable.update { state -> state.copy(
+                    selectedProjectId = state.selectedProjectId.takeUnless { it == projectId },
+                    selectedId = state.selectedId.takeUnless { id ->
+                        state.workspace == project.workspace && state.tasks.any { it.id == id && it.projectId == projectId }
+                    },
+                    planningProjectIds = state.planningProjectIds - projectId,
+                    ruleFallbackProjectIds = state.ruleFallbackProjectIds - projectId
+                ) }
+            }
+        }
+    }
+
     fun createProject(name: String, requirements: String) = createOwnedProject(name, requirements)
 
     fun canContinueInOwnedWorkspace(project: ProjectPlan): Boolean {

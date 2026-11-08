@@ -1,5 +1,6 @@
 package com.aharou.feature.agent.domain.memory
 
+import com.aharou.feature.agent.domain.context.*
 import com.aharou.core.util.FileLogger
 import com.aharou.feature.agent.domain.common.Frontmatter
 import java.io.File
@@ -53,9 +54,23 @@ object MemoryParser {
             expiresAt = parseExpiresAt(frontmatter["expires_at"]),
             pending = frontmatter["pending"]?.toString()?.equals("true", ignoreCase = true) == true,
             // 版本只跟内容走：同一份全文算出的版本恒定，与路径、mtime 无关。
-            version = MemoryFileStorage.versionOf(text)
+            version = MemoryFileStorage.versionOf(text),
+            contextKind = enumValue<ContextKind>(frontmatter["context_kind"]) ?: ContextKind.REFERENCE,
+            contextLoad = loadValue(frontmatter["context_load"]) ?: ContextLoad.INDEX,
+            contextCategory = enumValue<ContextCategory>(frontmatter["context_category"]) ?: ContextCategory.LONG_TERM,
+            contextFolder = frontmatter["context_folder"]?.toString().orEmpty(),
+            contextSessionId = frontmatter["context_session_id"]?.toString()?.takeIf { it.isNotBlank() },
+            hasContextMetadata = loadValue(frontmatter["context_load"]) != null &&
+                enumValue<ContextKind>(frontmatter["context_kind"]) != null &&
+                enumValue<ContextCategory>(frontmatter["context_category"]) != null
         )
     }
+
+    fun format(memory: Memory): String = format(
+        memory.name, memory.description, memory.content, memory.type, memory.keywords, memory.expiresAt,
+        memory.pending, memory.contextKind, memory.contextLoad, memory.contextCategory,
+        memory.contextFolder, memory.contextSessionId
+    )
 
     fun format(
         name: String,
@@ -64,7 +79,12 @@ object MemoryParser {
         type: MemoryType? = null,
         keywords: List<String>? = null,
         expiresAt: Long? = null,
-        pending: Boolean = false
+        pending: Boolean = false,
+        contextKind: ContextKind = ContextKind.REFERENCE,
+        contextLoad: ContextLoad = ContextLoad.INDEX,
+        contextCategory: ContextCategory = ContextCategory.LONG_TERM,
+        contextFolder: String = "",
+        contextSessionId: String? = null
     ): String {
         val safeName = yamlScalar(name)
         val safeDesc = yamlScalar(description)
@@ -73,6 +93,9 @@ object MemoryParser {
         keywords?.let { head.append("keywords: [${it.joinToString(", ") { word -> yamlScalar(word) }}]\n") }
         expiresAt?.takeIf { it > 0L }?.let { head.append("expires_at: $it\n") }
         if (pending) head.append("pending: true\n")
+        head.append("context_kind: ${contextKind.name}\ncontext_load: ${yamlScalar(contextLoad.name)}\ncontext_category: ${contextCategory.name}\n")
+        if (contextFolder.isNotBlank()) head.append("context_folder: ${yamlScalar(contextFolder)}\n")
+        contextSessionId?.let { head.append("context_session_id: ${yamlScalar(it)}\n") }
         head.append("---\n")
         return head.toString() + content
     }
@@ -81,6 +104,12 @@ object MemoryParser {
      * 解析 `expires_at`：兼容 `yyyy-MM-dd`（当天 23:59:59 到期）与 epoch 毫秒两种写法。
      * 格式不合法时返回 null（当不过期），不因一个字段把整条记忆解析失败。
      */
+    private fun loadValue(raw: Any?): ContextLoad? =
+        if (raw == false) ContextLoad.OFF else enumValue<ContextLoad>(raw)
+
+    private inline fun <reified T : Enum<T>> enumValue(raw: Any?): T? =
+        raw?.toString()?.uppercase()?.let { runCatching { enumValueOf<T>(it) }.getOrNull() }
+
     private fun parseExpiresAt(raw: Any?): Long? {
         val text = when (raw) {
             is java.util.Date -> raw.toInstant().atZone(java.time.ZoneOffset.UTC).toLocalDate().toString()

@@ -108,4 +108,60 @@ class MemoryStorageReliabilityTest {
         assertTrue(File(dir, "a2.md").exists())
         assertFalse(File(dir, "merged.md").exists())
     }
+    @Test fun renameAndEditPreserveUnicodeAndAllMetadata() {
+        val file = File(tempFolder.root, "原名.md")
+        val expiry = System.currentTimeMillis() + 86_400_000L
+        file.writeText(MemoryParser.format("原名", "原说明", "原正文", MemoryType.WORKFLOW,
+            listOf("中文", "key"), expiry, true,
+            com.aharou.feature.agent.domain.context.ContextKind.INSTRUCTION,
+            com.aharou.feature.agent.domain.context.ContextLoad.FULL,
+            com.aharou.feature.agent.domain.context.ContextCategory.TEMPORARY, "父/子", "s1"))
+        val before = MemoryParser.parse(file, MemoryScope.PROJECT)!!
+        assertTrue(MemoryFileStorage.renameChecked(before,
+            before.copy(name = "新 名称", description = "新说明🌱", content = "改名后的正文"), before.version))
+        val target = MemorySource.resolveMemoryFile(tempFolder.root, "新 名称")
+        val after = MemoryParser.parse(target, MemoryScope.PROJECT)!!
+        assertFalse(file.exists())
+        assertEquals("新 名称", after.name)
+        assertEquals("新说明🌱", after.description)
+        assertEquals("改名后的正文", after.content)
+        assertEquals(before.type, after.type)
+        assertEquals(before.keywords, after.keywords)
+        assertEquals(before.expiresAt, after.expiresAt)
+        assertEquals(before.pending, after.pending)
+        assertEquals(before.contextKind, after.contextKind)
+        assertEquals(before.contextLoad, after.contextLoad)
+        assertEquals(before.contextCategory, after.contextCategory)
+        assertEquals(before.contextFolder, after.contextFolder)
+        assertEquals(before.contextSessionId, after.contextSessionId)
+    }
+
+    @Test fun renameCollisionAndStaleVersionNeverChangeEitherFile() {
+        val source = File(tempFolder.root, "source.md")
+        source.writeText(MemoryParser.format("source", "d", "original"))
+        val original = MemoryParser.parse(source, MemoryScope.GLOBAL)!!
+        val target = File(tempFolder.root, "target.md").also { it.writeText("existing target") }
+        val before = source.readText()
+        assertFalse(MemoryFileStorage.renameChecked(original, original.copy(name = "target", content = "bad"), original.version))
+        assertEquals(before, source.readText())
+        assertEquals("existing target", target.readText())
+        source.writeText(MemoryParser.format("source", "d", "external change"))
+        val changed = source.readText()
+        assertFalse(MemoryFileStorage.renameChecked(original, original.copy(name = "unused", content = "bad"), original.version))
+        assertEquals(changed, source.readText())
+        assertFalse(File(tempFolder.root, "unused.md").exists())
+    }
+
+    @Test fun renameFailureKeepsOriginalAndDoesNotPublishTarget() {
+        val source = File(tempFolder.root, "source.md")
+        source.writeText(MemoryParser.format("source", "d", "original"))
+        val original = MemoryParser.parse(source, MemoryScope.GLOBAL)!!
+        val before = source.readText()
+        File(tempFolder.root, MemorySource.ARCHIVE_DIR).writeText("archive blocked")
+        assertFalse(MemoryFileStorage.renameChecked(original, original.copy(name = "new-name", content = "bad"), original.version))
+        assertEquals(before, source.readText())
+        assertFalse(File(tempFolder.root, "new-name.md").exists())
+        assertFalse(tempFolder.root.listFiles().orEmpty().any { it.name.startsWith(".memory-rename-") })
+    }
+
 }

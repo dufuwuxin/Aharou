@@ -146,9 +146,7 @@ class MemoryTopicOrganizer @Inject constructor(
                 proposals.propose(listOf(current), current.name, desc, current.content, current.type, merge = false)
                 continue
             }
-            val payload = MemoryParser.format(
-                current.name, desc, current.content, current.type, current.keywords, current.expiresAt, current.pending
-            )
+            val payload = MemoryParser.format(current.copy(description = desc))
             if (!MemoryFileStorage.write(file, payload, expectedVersion = current.version)) continue
             done++
             memoryTrace.record(

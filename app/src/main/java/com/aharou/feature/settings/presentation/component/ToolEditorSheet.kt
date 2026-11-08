@@ -18,11 +18,13 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -98,8 +100,11 @@ internal fun ToolEditorSheet(
     ) -> Unit,
     onSaveSettings: (name: String, description: String?, mode: ToolInjectionMode, keywords: List<String>, schemaJson: String?) -> Unit,
     template: CustomToolDefinition? = null,
-    onSelectTemplate: (String) -> Unit
+    onSelectTemplate: (String) -> Unit,
+    saveError: String? = null,
+    onRunDraft: ((CustomToolDefinition) -> Unit)? = null,
 ) {
+    val savingNow by rememberUpdatedState(saving)
     var choosingTemplate by remember { mutableStateOf(false) }
     val isNew = entry == null
     val isCustom = isNew || entry?.source == ToolSource.CUSTOM
@@ -141,7 +146,11 @@ internal fun ToolEditorSheet(
     val canSave = !saving && schemaValid &&
         (!isCustom || (name.isNotBlank() && !nameError && !parametersError && commandProblemOrNull(command, parsedParameters) == null))
 
-    AdaptiveModalBottomSheet(onDismissRequest = onDismiss) {
+    AdaptiveModalBottomSheet(
+        onDismissRequest = { if (!saving) onDismiss() },
+        sheetGesturesEnabled = !saving,
+        sheetState = rememberModalBottomSheetState(confirmValueChange = { !savingNow }),
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -163,6 +172,7 @@ internal fun ToolEditorSheet(
                 fontWeight = FontWeight.SemiBold
             )
 
+            saveError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             if (isNew) {
                 TextButton(onClick = { choosingTemplate = !choosingTemplate }, enabled = !saving) {
                     Text(stringResource(R.string.tools_templates_title))
@@ -285,6 +295,18 @@ internal fun ToolEditorSheet(
                 horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                if (isNew && onRunDraft != null) {
+                    TextButton(enabled = canSave, onClick = {
+                        onRunDraft(CustomToolDefinition(
+                            name = name.trim(), description = description, command = command,
+                            parameters = parsedParameters.orEmpty(),
+                            timeoutSeconds = timeoutText.toIntOrNull()
+                                ?.coerceIn(CustomToolDefinition.MIN_TIMEOUT_SECONDS, CustomToolDefinition.MAX_TIMEOUT_SECONDS)
+                                ?: CustomToolDefinition.DEFAULT_TIMEOUT_SECONDS,
+                            injectionMode = mode, keywords = parseKeywords(keywordsText),
+                        ))
+                    }) { Text(stringResource(R.string.tools_run_draft)) }
+                }
                 TextButton(onClick = onDismiss, enabled = !saving) {
                     Text(stringResource(R.string.common_cancel))
                 }

@@ -1,15 +1,13 @@
 package com.aharou.feature.agent.domain.prompt
 
+import com.aharou.feature.agent.domain.context.*
 import android.content.Context
 import com.aharou.core.util.FileLogger
-import com.aharou.core.util.SecretMasker
-import com.aharou.core.util.TextSanitizer
 import com.aharou.feature.agent.data.local.dao.ChatSessionDao
 import com.aharou.feature.agent.domain.container.ContainerInstaller
 import com.aharou.feature.agent.domain.context.ProjectIndex
 import com.aharou.feature.agent.domain.inbox.InboxDirectory
 import com.aharou.feature.agent.domain.inbox.SharedInbox
-import com.aharou.feature.agent.domain.memory.MemoryRepository
 import com.aharou.feature.agent.domain.model.AgentContext
 import com.aharou.feature.agent.domain.model.WorkspaceRef
 import com.aharou.feature.agent.domain.rule.RuleRepository
@@ -44,8 +42,6 @@ private data class ProjectRuleSnapshot(val signature: String, val content: Strin
 class SystemPromptProvider @Inject constructor(
     @param:ApplicationContext private val context: Context,
     private val skillRepository: SkillRepository,
-    private val memoryRepository: MemoryRepository,
-    private val aharouMemoryStore: com.aharou.core.memory.AharouMemoryStore,
     private val promptFileResolver: PromptFileResolver,
     private val containerInstaller: ContainerInstaller,
     private val agentDefinitionRepository: AgentDefinitionRepository,
@@ -56,7 +52,8 @@ class SystemPromptProvider @Inject constructor(
     private val sharedInbox: SharedInbox,
     private val containerProfileResolver: com.aharou.feature.agent.domain.container.ContainerProfileResolver, private val projectIndex: ProjectIndex,
     private val projectTaskContext: ProjectTaskContext,
-    private val injectedContextStore: InjectedContextStore
+    private val injectedContextStore: InjectedContextStore,
+    private val contextLibrary: ContextLibraryRepository
 ) {
     // 抽象独立的 Source
     interface PromptSource {
@@ -245,6 +242,7 @@ class SystemPromptProvider @Inject constructor(
                 return null
             }
 
+
             val signature = signatureOf(globalDir) + '#' + signatureOf(projectDir)
             snapshot?.takeIf { it.signature == signature }?.let { return it.content }
 
@@ -272,14 +270,13 @@ class SystemPromptProvider @Inject constructor(
                 ?.sortedBy { it.name }
                 .orEmpty()
 
-        /** 主规则与每个片段的路径 / mtime 都要进签名（片段再加长度），只盯主文件会让改片段不生效。 */
         private fun signatureOf(dir: File?): String {
             if (dir == null) return ""
             return buildString {
                 listOf(AGENTS_FILE, CLAUDE_FILE, RULES_FILE).forEach { name ->
                     val file = File(dir, name)
                     append(file.absolutePath).append(':')
-                        .append(if (file.isFile) file.lastModified() else -1L).append('|')
+                    append(if (file.isFile) file.lastModified() else -1L).append('|')
                 }
                 fragmentFiles(dir).forEach { file ->
                     append(file.name).append(':').append(file.lastModified()).append(':').append(file.length()).append('|')
@@ -487,66 +484,13 @@ class SystemPromptProvider @Inject constructor(
     }
 
     private inner class MemoryListSource : PromptSource {
-        // 会话级缓存：同一 (sessionId, projectRoot) 内只读一次盘，保持 system prompt 稳定以命中 KV 缓存；
-        // 新开会话 / 切换工作区 / 重启 App 时缓存自然失效重建。空内容用 "" 占位以区分"未缓存"。
-        // 相关性排序只在本会话首次 build 时算一次，之后沿用——每轮重排会让提示词前缀跟着变、
-        // 打断 KV 缓存，代价大于收益。但话题换掉后旧清单会长期占位、新话题相关的记忆永远进不来，
-        // 所以缓存里记下当时的提问，只在「不像同一件事」时才失效重排（判据见 MemoryRepository.isTopicDrift）。
-        private val cachedByKey = ConcurrentHashMap<SourceCacheKey, CachedList>()
-
-        override fun build(ctx: AgentContext): String? {
-            val key = SourceCacheKey(ctx.sessionId, ctx.projectRoot)
-            val query = ctx.currentUserText
-            val cached = cachedByKey[key]
-            if (cached != null && !memoryRepository.isTopicDrift(cached.query, query)) {
-                return cached.content.ifEmpty { null }
-            }
-            val memories = try {
-                memoryRepository.listMemoriesForPrompt(ctx.projectRoot, query)
-            } catch (e: Exception) {
-                FileLogger.w(TAG, "生成记忆清单失败，本轮不注入清单: ${e.message}", e)
-                return null
-            }
-            // 清单末尾附一行规模反馈：注入有 60 条硬上限，让模型知道看到的只是一部分抽样，
-            // 其余要靠 memory(action=search) 取回。总数取不到时退化为只报清单内的条数。
-            val totalInScope = try {
-                memoryRepository.countMemories(ctx.projectRoot)
-            } catch (e: Exception) { memories.size }
-            val content = MemoryPromptRenderer
-                .withScaleNotice(MemoryPromptRenderer.render(memories), memories.size, totalInScope)
-                .ifEmpty { null }
-
-            // 记忆纪律紧跟清单注入：清单告诉模型「有什么」，纪律告诉它「何时必须写」。
-            val full = listOf(content, memoryDiscipline()).mapNotNull { it }.joinToString("\n\n")
-            if (full.isEmpty()) return null
-
-            cachedByKey[key] = CachedList(query, full)
-            trimIfNeeded()
-            return full
-        }
-
-        /** 记忆纪律正文（无记忆清单时单独注入）。 */
-        private fun memoryDiscipline(): String? =
-            resolvePrompt(MEMORY_DISCIPLINE_FILE).replace(LEADING_COMMENT, "").trim().ifEmpty { null }
-
-        private fun trimIfNeeded() {
-            if (cachedByKey.size > SOURCE_CACHE_LIMIT) cachedByKey.clear()
-        }
-
-        fun invalidate(key: SourceCacheKey) {
-            cachedByKey.remove(key)
-        }
+        override fun build(ctx: AgentContext): String? = listOf(
+            contextLibrary.render(ctx.projectRoot, ctx.sessionId, ContextOrigin.MEMORY, query = ctx.currentUserText),
+            resolvePrompt(MEMORY_DISCIPLINE_FILE).replace(LEADING_COMMENT, "").trim()
+        ).filter { it.isNotBlank() }.joinToString("\n\n").ifBlank { null }
     }
 
-    /** 会话级缓存 key：同一会话同一工作区共享一份快照，避免每轮重扫磁盘导致 system prompt 变化。 */
     private data class SourceCacheKey(val sessionId: String?, val projectRoot: String)
-
-    /**
-     * 记忆清单的会话级缓存：内容 + 建立它时的提问。
-     *
-     * 放外层而不是 [MemoryListSource] 里——那是 inner class，Kotlin 不允许在它内部再声明 class。
-     */
-    private data class CachedList(val query: String, val content: String)
 
     private val staticRuleSource = StaticRuleSource()
     private val subAgentBaseSource = SubAgentBaseSource()
@@ -592,43 +536,6 @@ class SystemPromptProvider @Inject constructor(
         }
     }
 
-    private val soulSource = SoulSource()
-
-    /** 人格（SOUL.md）：外置文件、可由用户/Agent 直接修改；作为身份段注入。 */
-    private inner class SoulSource : PromptSource {
-        override fun build(ctx: AgentContext): String? =
-            com.aharou.core.soul.SystemPromptBuilder.identitySection(context)
-                .takeIf { it.isNotBlank() }
-    }
-
-    private val aharouMemorySource = AharouMemorySource()
-
-    /** 记忆（核心档案 + 今日日志尾巴）：外置文件在 filesDir/aharou-global/memory（容器内可读写）。 */
-    private inner class AharouMemorySource : PromptSource {
-        override fun build(ctx: AgentContext): String? =
-            runCatching { aharouMemoryStore.buildPromptSection() }
-                .onFailure { FileLogger.w(TAG, "读取核心档案失败，本轮不注入 CORE/GLOBAL: ${it.message}", it) }
-                .getOrNull()
-                ?.takeIf { it.isNotBlank() }
-    }
-
-    private val coreArchiveSource = CoreArchiveSource()
-
-    /**
-     * 隐身会话用的记忆段：只保留核心档案（身份与行为红线），不注入全局记忆与今日日志。
-     * 隐身会话不写记忆（见 GhostModeStore），也就不该把跨会话记忆读进来——否则用户以为
-     * 「隐身」了，模型却仍能说出之前会话里的用户信息。
-     */
-    private inner class CoreArchiveSource : PromptSource {
-        override fun build(ctx: AgentContext): String? = runCatching {
-            if (!aharouMemoryStore.isMemoryEnabled()) return@runCatching null
-            val core = aharouMemoryStore.readCore()?.trim()
-                ?.let { SecretMasker.mask(TextSanitizer.sanitize(it)) }.orEmpty()
-            if (core.isEmpty()) return@runCatching null
-            "## 记忆（持久，跨会话）\n### 核心档案\n$core"
-        }.getOrNull()
-    }
-
     /**
      * 当前会话是否隐身。
      *
@@ -669,8 +576,10 @@ class SystemPromptProvider @Inject constructor(
      * 包一层而不是在 6 条 return 前逐个插代码：漏一条面板就少一段。
      */
     fun build(agentContext: AgentContext, consumeInbox: Boolean = true): String =
-        (buildUnrecorded(agentContext, consumeInbox) + (projectTaskContext.build(agentContext.sessionId, agentContext.projectRoot, isGhostSession(agentContext))?.let { "\n\n$it" } ?: ""))
-            .also { injectedContextStore.record(agentContext.sessionId, it) }
+        contextLibrary.withPromptSnapshot(agentContext, isGhostSession(agentContext)) {
+            (buildUnrecorded(agentContext, consumeInbox) + (projectTaskContext.build(agentContext.sessionId, agentContext.projectRoot, isGhostSession(agentContext))?.let { "\n\n$it" } ?: ""))
+                .also { injectedContextStore.record(agentContext.sessionId, it) }
+        }
 
     private fun buildUnrecorded(agentContext: AgentContext, consumeInbox: Boolean): String {
         agentContext.agentDefinition?.let { return buildForSubAgent(it, agentContext) }
@@ -682,12 +591,10 @@ class SystemPromptProvider @Inject constructor(
         val ghost = isGhostSession(agentContext)
         val offBlocks = promptFragmentCatalog.disabledBlocks()
         val rawStatic = staticRuleSource.build(agentContext)
-        val soulContent = gate(InjectionBlock.SOUL, offBlocks) { soulSource.build(agentContext) }
-        val aharouMemoryContent = gate(InjectionBlock.ARCHIVE, offBlocks) { if (ghost) coreArchiveSource.build(agentContext) else aharouMemorySource.build(agentContext) }
         val skillsContent = gate(InjectionBlock.SKILLS, offBlocks) { activeSkillsSource.build(agentContext) }
         val subAgentsContent = gate(InjectionBlock.SUB_AGENTS, offBlocks) { subAgentListSource.build(agentContext) }
         val teamsContent = gate(InjectionBlock.TEAMS, offBlocks) { teamListSource.build(agentContext) }
-        val memoriesContent = gate(InjectionBlock.MEMORIES, offBlocks) { if (ghost) null else memoryListSource.build(agentContext) }
+        val memoriesContent = if (ghost) null else memoryListSource.build(agentContext)
         val projectRules = gate(InjectionBlock.PROJECT_RULES, offBlocks) { projectRuleSource.build(agentContext) }
         val rulesContent = gate(InjectionBlock.RULES, offBlocks) { availableRulesSource.build(agentContext) }
         val workspaceTypeContent = gate(InjectionBlock.WORKSPACE_TYPE, offBlocks) { workspaceTypeSource.build(agentContext) }
@@ -711,8 +618,6 @@ class SystemPromptProvider @Inject constructor(
         return staticContent + PromptTailAssembler.render(
             rawStatic,
             PromptTail(
-                soul = soulContent,
-                archive = aharouMemoryContent,
                 skills = skillsContent,
                 subAgents = subAgentsContent,
                 teams = teamsContent,
@@ -752,11 +657,9 @@ class SystemPromptProvider @Inject constructor(
         val skillsContent = gate(InjectionBlock.SKILLS, offBlocks) { activeSkillsSource.build(ctx) }
         val subAgentsContent = gate(InjectionBlock.SUB_AGENTS, offBlocks) { subAgentListSource.build(ctx) }
         val teamsContent = gate(InjectionBlock.TEAMS, offBlocks) { teamListSource.build(ctx) }
-        val memoriesContent = gate(InjectionBlock.MEMORIES, offBlocks) { if (ghost) null else memoryListSource.build(ctx) }
+        val memoriesContent = if (ghost) null else memoryListSource.build(ctx)
         val projectRules = gate(InjectionBlock.PROJECT_RULES, offBlocks) { projectRuleSource.build(ctx) }
         val rulesContent = gate(InjectionBlock.RULES, offBlocks) { availableRulesSource.build(ctx) }
-        val soulContent = gate(InjectionBlock.SOUL, offBlocks) { soulSource.build(ctx) }
-        val archiveContent = gate(InjectionBlock.ARCHIVE, offBlocks) { if (ghost) coreArchiveSource.build(ctx) else aharouMemorySource.build(ctx) }
         val workspaceContent = if (InjectionBlock.WORKSPACE.key in offBlocks) "" else workspaceSource.build(ctx)
         val workspaceTypeContent = gate(InjectionBlock.WORKSPACE_TYPE, offBlocks) { workspaceTypeSource.build(ctx) }
         val modelIdentityContent = gate(InjectionBlock.MODEL_IDENTITY, offBlocks) { modelIdentitySource.build(ctx) }
@@ -776,8 +679,6 @@ class SystemPromptProvider @Inject constructor(
         val assembled = rendered + PromptTailAssembler.render(
             content,
             PromptTail(
-                soul = soulContent,
-                archive = archiveContent,
                 skills = skillsContent,
                 subAgents = subAgentsContent,
                 teams = teamsContent,
@@ -832,9 +733,8 @@ class SystemPromptProvider @Inject constructor(
             append("专注完成本会话交给你的任务，并在最后一条回复里给出完整结论——主代理只能读到你的最后一条回复，中间过程与工具结果它看不到。\n\n")
             append(definition.prompt)
         }
-        val memories = gate(InjectionBlock.MEMORIES, offBlocks) {
-            if (isGhostSession(agentContext)) null else memoryListSource.build(agentContext)
-        }
+        val memories = if (isGhostSession(agentContext) || InjectPart.MEMORY !in definition.inject) null
+            else memoryListSource.build(agentContext)
         // 与主代理同一套区块开关：设置里关掉的区块，子代理不能照样带全（并发多个时成倍消耗）。
         val skills = gate(InjectionBlock.SKILLS, offBlocks) { activeSkillsSource.build(agentContext) }
         // 按需规则清单：子代理只在自身提示词写了 {{AICODE_RULES}} 时才看得到，同样受区块开关控制。
@@ -938,10 +838,8 @@ class SystemPromptProvider @Inject constructor(
      */
     fun resolvePrompt(name: String): String = promptFileResolver.resolve(name)
 
-    /** 失效记忆清单的会话级缓存：整理器写入新记忆后调用，让下一轮 system prompt 看到新清单。 */
-    fun invalidateMemoryCache(sessionId: String?, projectRoot: String?) {
-        memoryListSource.invalidate(SourceCacheKey(sessionId, projectRoot.orEmpty()))
-    }
+    /** 新库每个请求重建快照；保留整理器现有通知入口。 */
+    fun invalidateMemoryCache(sessionId: String?, projectRoot: String?) = Unit
 
     private companion object {
         const val TAG = "SystemPromptProvider"

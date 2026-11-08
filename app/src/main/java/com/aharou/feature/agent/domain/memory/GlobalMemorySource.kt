@@ -1,5 +1,6 @@
 package com.aharou.feature.agent.domain.memory
 
+import com.aharou.feature.agent.domain.context.*
 import com.aharou.core.memory.AharouMemoryStore
 import java.io.File
 import javax.inject.Inject
@@ -41,10 +42,15 @@ class GlobalMemorySource @Inject constructor(
 
     override fun writeMemory(
         name: String, description: String, content: String, type: MemoryType?,
-        expiresAt: Long?, pending: Boolean?, keywords: List<String>?, expectedVersion: String?
+        expiresAt: Long?, pending: Boolean?, keywords: List<String>?, expectedVersion: String?,
+        contextKind: ContextKind?,
+        contextLoad: ContextLoad?,
+        contextCategory: ContextCategory?,
+        contextFolder: String?,
+        contextSessionId: String?
     ): MemoryWriteResult = MemoryFileStorage.saveChecked(
         memoryRoot, MemoryScope.GLOBAL, name, description, content, type, expiresAt, pending,
-        keywords, expectedVersion
+        keywords, expectedVersion, contextKind, contextLoad, contextCategory, contextFolder, contextSessionId
     )
 
     override fun archiveContent(

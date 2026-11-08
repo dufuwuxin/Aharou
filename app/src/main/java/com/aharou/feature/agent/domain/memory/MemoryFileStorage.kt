@@ -1,5 +1,6 @@
 package com.aharou.feature.agent.domain.memory
 
+import com.aharou.feature.agent.domain.context.*
 import com.aharou.core.util.FileLogger
 import com.aharou.feature.agent.domain.common.Frontmatter
 import java.io.File
@@ -94,12 +95,54 @@ internal object MemoryFileStorage {
         }
     }
 
+    fun renameChecked(original: Memory, updated: Memory, expectedVersion: String): Boolean = synchronized(lock) {
+        val source = original.file ?: return@synchronized false
+        val root = source.absoluteFile.parentFile ?: return@synchronized false
+        if (updated.name.isBlank() || expectedVersion.isBlank() || !ContextFolderPath.valid(updated.contextFolder)) return@synchronized false
+        var temporary: File? = null
+        var published: File? = null
+        try {
+            val currentText = source.readText()
+            if (conflictOf(original.name, expectedVersion, currentText) != null) return@synchronized false
+            val current = MemoryParser.parse(source, original.scope) ?: return@synchronized false
+            val target = MemorySource.resolveMemoryFile(root, updated.name)
+            if (target.canonicalFile == source.canonicalFile) {
+                if (MemorySource.archiveExistingFile(root, original.name) == null) return@synchronized false
+                return@synchronized write(source, MemoryParser.format(updated.copy(
+                    type = current.type, keywords = current.keywords, expiresAt = current.expiresAt, pending = current.pending
+                )), expectedVersion)
+            }
+            if (target.exists()) return@synchronized false
+            val payload = MemoryParser.format(updated.copy(
+                type = current.type, keywords = current.keywords, expiresAt = current.expiresAt, pending = current.pending
+            ))
+            temporary = File.createTempFile(".memory-rename-", ".tmp", root)
+            FileOutputStream(temporary).use { output ->
+                output.write(payload.toByteArray(Charsets.UTF_8))
+                output.fd.sync()
+            }
+            if (MemorySource.archiveExistingFile(root, original.name) == null) return@synchronized false
+            // A hard link publishes the complete payload without ever replacing an existing target.
+            Files.createLink(target.toPath(), temporary.toPath())
+            published = target
+            if (versionOf(source.readText()) != expectedVersion || !source.delete()) return@synchronized false
+            published = null
+            true
+        } catch (e: Exception) {
+            FileLogger.w("MemoryFileStorage", "Memory rename failed", e)
+            false
+        } finally {
+            published?.delete()
+            temporary?.delete()
+        }
+    }
+
     fun merge(
         group: List<Memory>, name: String, description: String, content: String, type: MemoryType? = null
     ): Boolean = synchronized(lock) {
         if (group.size < 2 || group.any { it.pending || it.file == null }) return@synchronized false
         val first = group.first()
-        if (group.any { it.scope != first.scope || it.type != first.type || it.expiresAt != first.expiresAt }) {
+        if (group.any { it.scope != first.scope || it.type != first.type || it.expiresAt != first.expiresAt || it.contextKind != first.contextKind || it.contextLoad != first.contextLoad || it.contextCategory != first.contextCategory || it.contextFolder != first.contextFolder || it.contextSessionId != first.contextSessionId }) {
             return@synchronized false
         }
         val root = first.file?.parentFile ?: return@synchronized false
@@ -118,7 +161,8 @@ internal object MemoryFileStorage {
             if (MemorySource.archiveExistingFile(root, file.nameWithoutExtension) == null) return@synchronized false
         }
         val payload = MemoryParser.format(
-            name, description, content, type ?: first.type, group.flatMap { it.keywords }.distinct(), first.expiresAt
+            name, description, content, type ?: first.type, group.flatMap { it.keywords }.distinct(), first.expiresAt, first.pending,
+            first.contextKind, first.contextLoad, first.contextCategory, first.contextFolder, first.contextSessionId
         )
         if (!write(target, payload)) return@synchronized false
         var deleted = true
@@ -157,7 +201,12 @@ internal object MemoryFileStorage {
         expiresAt: Long?,
         pending: Boolean?,
         keywords: List<String>?,
-        expectedVersion: String?
+        expectedVersion: String?,
+        contextKind: ContextKind? = null,
+        contextLoad: ContextLoad? = null,
+        contextCategory: ContextCategory? = null,
+        contextFolder: String? = null,
+        contextSessionId: String? = null
     ): MemoryWriteResult = synchronized(lock) {
         try {
             val file = MemorySource.resolveMemoryFile(root, name)
@@ -169,6 +218,10 @@ internal object MemoryFileStorage {
             } else {
                 null
             }
+            val folder = contextFolder ?: existing?.contextFolder.orEmpty()
+            if (!ContextFolderPath.valid(folder)) return@synchronized MemoryWriteResult.Failure(
+                "INVALID_CONTEXT_FOLDER", "文件夹必须是有效的相对目录路径，不能包含空层级或上级目录"
+            )
             // 摘要（digest）是压缩留档，正文只能由 [MemoryDigestWriter] 写入；普通保存把它的 type
             // 改成别的类型，那段被压掉的历史就会以「现行知识」的身份重新进注入清单，等于把留档
             // 当知识用。改内容不改类型则放行：人工编辑、摘要二次整理走这条。
@@ -178,11 +231,16 @@ internal object MemoryFileStorage {
                 )
             }
             val payload = MemoryParser.format(
-                MemorySource.sanitizeName(name), description, content,
+                name.trim(), description, content,
                 type ?: existing?.type,
                 keywords ?: existing?.keywords,
                 expiresAt ?: existing?.expiresAt,
-                pending ?: existing?.pending ?: false
+                pending ?: existing?.pending ?: false,
+                contextKind ?: existing?.contextKind ?: ContextKind.REFERENCE,
+                contextLoad ?: existing?.contextLoad ?: ContextLoad.INDEX,
+                contextCategory ?: existing?.contextCategory ?: ContextCategory.LONG_TERM,
+                folder,
+                contextSessionId ?: existing?.contextSessionId
             )
             if (currentText == payload) return@synchronized MemoryWriteResult.Success
             if (currentText != null && MemorySource.archiveExistingFile(root, name) == null) {

@@ -29,7 +29,7 @@ import com.aharou.core.theme.semanticColors
 import com.aharou.feature.agent.domain.task.*
 import com.aharou.feature.agent.presentation.ProjectTaskViewModel
 import compose.icons.FeatherIcons
-import compose.icons.feathericons.Check
+import compose.icons.feathericons.ChevronLeft
 import compose.icons.feathericons.Layers
 import compose.icons.feathericons.MoreVertical
 import compose.icons.feathericons.Play
@@ -44,13 +44,11 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
     val project = state.projects.firstOrNull { it.id == projectId }
     val tasks = state.tasks.filter { it.projectId == projectId }
     val rootId = ProjectTaskMapLayout.rootId(projectId)
-    var viewMode by rememberSaveable(projectId) { mutableStateOf("tree") }
+    var viewMode by rememberSaveable(projectId) { mutableStateOf("map") }
+    var menuOpen by rememberSaveable(projectId) { mutableStateOf(false) }
     var expandedId by rememberSaveable(projectId) { mutableStateOf<String?>(null) }
     var collapsed by remember(projectId) { mutableStateOf(emptySet<String>()) }
     var overview by remember { mutableStateOf(false) }
-    var viewMenu by remember { mutableStateOf(false) }
-    var moreMenu by remember { mutableStateOf(false) }
-    var legend by remember { mutableStateOf(false) }
     var adding by rememberSaveable(projectId) { mutableStateOf(false) }
     var addingParentId by rememberSaveable(projectId) { mutableStateOf<String?>(null) }
     val planning = projectId in state.planningProjectIds
@@ -64,45 +62,46 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
         ProjectTaskProcess(task, tasks, onEdit = {}, onAccept = { viewModel.accept(task) }, conversation = conversation,
             modifier = Modifier.fillMaxSize().padding(Spacing.sm), readOnly = true)
     }
-    val dragConnection = rememberContentDragConnection(onContentDrag)
-    Column(Modifier.fillMaxSize().nestedScroll(dragConnection)
-        .padding(Spacing.md), verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-        Row(Modifier.fillMaxWidth().testTag("project_action_bar"), verticalAlignment = Alignment.CenterVertically) {
-            val active = projectId in state.activeProjectIds
-            IconButton(onClick = { if (active) viewModel.stopProject(projectId) else viewModel.startProject(projectId) },
-                enabled = active || (!state.loading && !state.busy && !planning && tasks.any { !ProjectWorkflowPlan.delivered(it) }),
-                modifier = Modifier.size(48.dp).testTag(if (active) "project_flow_stop" else "project_flow_start")) {
-                Icon(if (active) FeatherIcons.Square else FeatherIcons.Play,
-                    stringResource(if (active) R.string.project_flow_stop else R.string.project_flow_start), Modifier.size(Spacing.lg))
+    val sessionMenu = LocalProjectChatMenu.current
+    val header: @Composable (@Composable (() -> Unit) -> Unit) -> Unit = { mapMenu ->
+        Column(verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("project_compact_header"),
+            verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack, modifier = Modifier.size(48.dp)) {
+                Icon(FeatherIcons.ChevronLeft, stringResource(R.string.project_back))
             }
-            Text(stringResource(R.string.project_flow_progress, tasks.count { ProjectWorkflowPlan.delivered(it) }, tasks.size),
-                style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-            Box {
-                IconButton(onClick = { viewMenu = true }, modifier = Modifier.size(48.dp).testTag("project_view_menu")) {
-                    Icon(FeatherIcons.Layers, stringResource(R.string.project_view_options), Modifier.size(Spacing.lg))
-                }
-                DropdownMenu(expanded = viewMenu, onDismissRequest = { viewMenu = false }) {
-                    listOf("tree" to R.string.project_task_tree, "map" to R.string.project_task_map).forEach { (mode, label) ->
-                        DropdownMenuItem(text = { Text(stringResource(label)) }, onClick = {
-                            if (viewMode != mode) expandedId = null
-                            viewMode = mode; viewMenu = false
-                        }, leadingIcon = {
-                            if (viewMode == mode) Icon(FeatherIcons.Check, null, Modifier.size(Spacing.lg))
-                        }, modifier = Modifier.heightIn(min = 48.dp).semantics { selected = viewMode == mode }.testTag("project_mode_$mode"))
-                    }
-                    DropdownMenuItem(text = { Text(stringResource(R.string.project_map_legend)) },
-                        onClick = { legend = true; viewMenu = false })
-                }
+            Column(Modifier.weight(1f).clickable { overview = true }.padding(vertical = Spacing.xs)) {
+                Text(project?.title.orEmpty(), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.titleMedium)
+                Text(stringResource(R.string.project_flow_progress, tasks.count { ProjectWorkflowPlan.delivered(it) }, tasks.size),
+                    style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             Box {
-                IconButton(onClick = { moreMenu = true }, modifier = Modifier.size(48.dp).testTag("project_more_menu")) {
-                    Icon(FeatherIcons.MoreVertical, stringResource(R.string.project_more_options), Modifier.size(Spacing.lg))
+                IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(48.dp)) {
+                    Icon(FeatherIcons.MoreVertical, stringResource(R.string.project_view_actions))
                 }
-                DropdownMenu(expanded = moreMenu, onDismissRequest = { moreMenu = false }) {
+                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    if (projectId in state.activeProjectIds) DropdownMenuItem(
+                        text = { Text(stringResource(R.string.project_flow_stop)) },
+                        leadingIcon = { Icon(FeatherIcons.Square, null) },
+                        modifier = Modifier.testTag("project_flow_stop"),
+                        onClick = { menuOpen = false; viewModel.stopProject(projectId) })
+                    else DropdownMenuItem(text = { Text(stringResource(R.string.project_flow_start)) },
+                        leadingIcon = { Icon(FeatherIcons.Play, null) },
+                        enabled = !state.loading && !state.busy && !planning && tasks.any { !ProjectWorkflowPlan.delivered(it) },
+                        modifier = Modifier.testTag("project_flow_start"),
+                        onClick = { menuOpen = false; viewModel.startProject(projectId) })
                     DropdownMenuItem(text = { Text(stringResource(R.string.project_task_overview)) },
-                        onClick = { overview = true; moreMenu = false })
+                        onClick = { menuOpen = false; overview = true })
+                    DropdownMenuItem(
+                        text = { Text(stringResource(if (viewMode == "map") R.string.project_task_tree else R.string.project_task_map)) },
+                        modifier = Modifier.testTag("project_mode_toggle"),
+                        onClick = { expandedId = null; viewMode = if (viewMode == "map") "tree" else "map"; menuOpen = false })
                     DropdownMenuItem(text = { Text(stringResource(R.string.project_add_task)) }, enabled = !state.busy,
-                        onClick = { addingParentId = null; adding = true; moreMenu = false }, modifier = Modifier.testTag("project_add_task"))
+                        modifier = Modifier.testTag("project_add_task"),
+                        onClick = { addingParentId = null; adding = true; menuOpen = false })
+                    mapMenu { menuOpen = false }
+                    sessionMenu { menuOpen = false }
                 }
             }
         }
@@ -115,14 +114,19 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
         }
         state.error?.let { Text(stringResource(R.string.project_task_error, projectTaskExecutionReasonLabel(it)), color = MaterialTheme.colorScheme.error) }
         approvals()
-        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+        }
+    }
+    val dragConnection = rememberContentDragConnection(onContentDrag)
+    BoxWithConstraints(Modifier.fillMaxSize().statusBarsPadding().nestedScroll(dragConnection).padding(horizontal = Spacing.sm)) {
             val processHeight = (maxHeight * 0.9f).coerceIn(240.dp, 640.dp)
             if (viewMode == "map") ProjectTaskMap(projectId, project?.title.orEmpty(), tasks, processId = expandedId,
                 onOpenProcess = { id -> expandedId = id; viewModel.select(id) }, onDismissProcess = { expandedId = null },
                 onSupplement = {}, onAddChild = { task -> addingParentId = task?.id; adding = true }, onContentDrag = onContentDrag,
                 onOpenRoot = { toggle(rootId) }, rootConversation = rootConversation,
-                modifier = Modifier.fillMaxSize().testTag("project_map_body"), process = process)
-            else LazyColumn(Modifier.fillMaxSize().testTag("project_tree_body"), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+                modifier = Modifier.fillMaxSize().testTag("project_map_body"), header = header, process = process)
+            else Column(Modifier.fillMaxSize()) {
+                header {}
+                LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("project_tree_body"), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
                 item(key = "project-root") {
                     Surface(shape = RoundedCornerShape(Radius.mdLarge), color = MaterialTheme.colorScheme.primaryContainer,
                         modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
@@ -183,12 +187,12 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
             viewModel.addTaskByDescription(projectId, description, parentId = addingParentId)
             adding = false
         }, onDismiss = { adding = false })
-    if (legend) AlertDialog(onDismissRequest = { legend = false },
-        title = { Text(stringResource(R.string.project_map_legend)) },
-        text = { Text(stringResource(R.string.project_task_dependency_legend), modifier = Modifier.verticalScroll(rememberScrollState())) },
-        confirmButton = { TextButton(onClick = { legend = false }) { Text(stringResource(R.string.project_close)) } })
     if (overview && project != null) AlertDialog(onDismissRequest = { overview = false },
-        title = { Text(project.title) }, text = { Text(project.requirements, modifier = Modifier.verticalScroll(rememberScrollState())) },
+        title = { Text(project.title) }, text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                Text(project.requirements)
+            }
+        },
         confirmButton = { TextButton(onClick = { overview = false }) { Text(stringResource(R.string.project_close)) } })
 
 }
@@ -208,6 +212,8 @@ internal fun projectTaskExecutionReasonLabel(reason: String): String = when (rea
     "REQUIREMENTS_CHANGED", "UPSTREAM_CHANGED" -> stringResource(R.string.project_task_requirements_changed)
     "WAITING_DEPENDENCIES" -> stringResource(R.string.project_task_wait_dependencies)
     "STOPPED" -> stringResource(R.string.project_task_stopped)
+    "PROJECT_PLANNING" -> stringResource(R.string.project_delete_planning)
+    "PROJECT_NOT_READY" -> stringResource(R.string.project_delete_not_ready)
     "PROJECT_BUSY" -> stringResource(R.string.project_workspace_busy)
     "FAILED", "TASK_EXECUTION_FAILED" -> stringResource(R.string.project_task_failed)
     "INTERRUPTED_PREVIOUS_PROCESS" -> stringResource(R.string.project_task_interrupted)

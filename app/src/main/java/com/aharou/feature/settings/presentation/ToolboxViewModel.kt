@@ -31,6 +31,7 @@ enum class ToolboxMessage { INVALID, CONFLICT, SAVE_FAILED, SAVED, LOAD_FAILED, 
 data class ToolboxUiState(
     val saved: List<CustomToolDefinition> = emptyList(),
     val selected: CustomToolDefinition? = null,
+    val selectionReady: Boolean = false,
     val arguments: Map<String, String> = emptyMap(),
     val preview: String = "",
     val validation: String? = null,
@@ -123,11 +124,17 @@ class ToolboxViewModel @Inject constructor(
 
     fun select(tool: CustomToolDefinition) {
         invalidate()
-        _state.update { it.copy(selected = tool, arguments = emptyMap(), exportText = "") }
+        _state.update { it.copy(selected = tool, selectionReady = true, arguments = emptyMap(), exportText = "") }
         updatePreview()
     }
 
+    /** Keep the running/completed output, but require a fresh list or draft selection. */
+    fun invalidateSelection() {
+        _state.update { it.copy(selectionReady = false, exportText = "") }
+    }
+
     fun setArgument(name: String, value: String) {
+        if (!state.value.selectionReady) return
         invalidate()
         _state.update { it.copy(arguments = it.arguments + (name to value)) }
         updatePreview()
@@ -153,6 +160,7 @@ class ToolboxViewModel @Inject constructor(
     /** Only this explicit click path executes. No model, permissions mutation or installer. */
     fun run() {
         val s = state.value
+        if (!s.selectionReady) return
         val definition = s.selected ?: return
         if (s.preview.isBlank() || s.validation != null) return
         invalidate()
@@ -220,6 +228,7 @@ class ToolboxViewModel @Inject constructor(
     }
 
     fun exportSelected() {
+        if (!state.value.selectionReady) return
         state.value.selected?.let { tool -> _state.update { it.copy(exportText = ToolboxContract.export(tool)) } }
     }
 

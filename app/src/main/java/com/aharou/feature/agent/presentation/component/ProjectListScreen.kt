@@ -26,6 +26,7 @@ import com.aharou.feature.agent.presentation.ProjectTaskViewModel
 fun ProjectListScreen(viewModel: ProjectTaskViewModel, createRequested: Boolean,
     onCreateConsumed: () -> Unit, onOpenProject: (String) -> Unit, onOpenTask: (String) -> Unit) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    var deletingProject by remember { mutableStateOf<com.aharou.feature.agent.domain.task.ProjectPlan?>(null) }
     var creating by rememberSaveable { mutableStateOf(false) }
     var name by rememberSaveable { mutableStateOf("") }
     var requirements by rememberSaveable { mutableStateOf("") }
@@ -51,7 +52,13 @@ fun ProjectListScreen(viewModel: ProjectTaskViewModel, createRequested: Boolean,
                 Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceContainer,
                     modifier = Modifier.fillMaxWidth().clickable { onOpenProject(project.id) }) {
                     Column(Modifier.padding(Spacing.md)) {
-                        Text(project.title, style = MaterialTheme.typography.titleMedium)
+                        Row(Modifier.fillMaxWidth()) {
+                            Text(project.title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                            TextButton(onClick = { deletingProject = project }, enabled = viewModel.canDeleteProject(project),
+                                modifier = Modifier.heightIn(min = 48.dp).testTag("delete_project_${project.id}")) {
+                                Text(stringResource(R.string.project_delete), color = MaterialTheme.colorScheme.error)
+                            }
+                        }
                         Text(stringResource(if (project.workspaceOwnership == "owned") R.string.project_workspace_owned else R.string.project_workspace_legacy, project.workspace))
                         project.continuationSourceProjectId?.let { Text(stringResource(R.string.project_workspace_continuation_source, it)) }
                         if (project.workspaceOwnership == "legacy_shared") TextButton(
@@ -72,6 +79,19 @@ fun ProjectListScreen(viewModel: ProjectTaskViewModel, createRequested: Boolean,
                 }
             }
         }
+    }
+    deletingProject?.let { project ->
+        AlertDialog(onDismissRequest = { deletingProject = null },
+            title = { Text(stringResource(R.string.project_delete_title, project.title)) },
+            text = { Text(stringResource(R.string.project_delete_description)) },
+            confirmButton = {
+                TextButton(onClick = { viewModel.deleteProject(project.id); deletingProject = null },
+                    enabled = viewModel.canDeleteProject(project),
+                    modifier = Modifier.testTag("confirm_delete_project")) {
+                    Text(stringResource(R.string.project_delete), color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = { TextButton(onClick = { deletingProject = null }) { Text(stringResource(R.string.common_cancel)) } })
     }
     val continuation = state.projects.firstOrNull { it.id == continuationId }
     if (continuation != null) AlertDialog(onDismissRequest = { continuationId = null },

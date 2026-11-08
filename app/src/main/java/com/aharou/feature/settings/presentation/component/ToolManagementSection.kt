@@ -1,31 +1,37 @@
 package com.aharou.feature.settings.presentation.component
 
+import androidx.activity.compose.BackHandler
+import com.aharou.feature.editor.presentation.EditorSettingsScreen
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.runtime.LaunchedEffect
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.aharou.feature.settings.presentation.ToolsViewModel
+import androidx.compose.ui.res.stringResource
+import com.aharou.R
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.stringResource
-import com.aharou.R
-import com.aharou.core.theme.Spacing
-import com.aharou.core.ui.SegmentedTabs
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.aharou.core.ui.AdaptiveModalBottomSheet
 import com.aharou.feature.agent.domain.mcp.McpServerEntry
 import com.aharou.feature.agent.domain.mcp.McpServerStatus
-import com.aharou.feature.agent.domain.mcp.McpScope
+import com.aharou.feature.agent.domain.tool.custom.CustomToolDefinition
+import com.aharou.feature.settings.presentation.ToolboxMessage
+import com.aharou.feature.settings.presentation.ToolboxViewModel
+import com.aharou.feature.settings.presentation.ToolsViewModel
+import kotlinx.serialization.json.Json
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun ToolManagementSection(
     entries: List<McpServerEntry>,
@@ -38,72 +44,102 @@ internal fun ToolManagementSection(
     createRequested: Boolean,
     onCreateHandled: () -> Unit,
     onCreateMcp: () -> Unit,
-    onToggle: (String, Boolean, McpScope) -> Unit,
-    onDelete: (String, McpScope) -> Unit,
+    onToggle: (String, Boolean, com.aharou.feature.agent.domain.mcp.McpScope) -> Unit,
+    onDelete: (String, com.aharou.feature.agent.domain.mcp.McpScope) -> Unit,
     onEdit: (McpServerEntry) -> Unit,
     permissionContent: @Composable () -> Unit,
 ) {
-    var selected by rememberSaveable { mutableStateOf(0) }
-    val customViewModel: ToolsViewModel = androidx.hilt.navigation.compose.hiltViewModel()
-    val customState by customViewModel.state.collectAsStateWithLifecycle()
-    LaunchedEffect(selected) { if (selected == 3) customViewModel.refresh() }
+    var editorSettings by rememberSaveable { mutableStateOf(false) }
+    BackHandler(enabled = editorSettings) { editorSettings = false }
+    if (editorSettings) {
+        EditorSettingsScreen(onBack = { editorSettings = false })
+        return
+    }
+    var showCreate by rememberSaveable { mutableStateOf(false) }
     var createScript by rememberSaveable { mutableStateOf(false) }
-    Column(Modifier.fillMaxSize()) {
-        SegmentedTabs(
-            selected = selected,
-            labels = listOf(stringResource(R.string.toolbox_title), stringResource(R.string.settings_mcp), stringResource(R.string.script_tools_title), stringResource(R.string.tools_group_custom), stringResource(R.string.settings_scheduled_tasks), stringResource(R.string.settings_permissions)),
-            onSelect = { selected = it },
-            modifier = Modifier.padding(horizontal = Spacing.lg),
+    var createTask by rememberSaveable { mutableStateOf(false) }
+    var importTool by rememberSaveable { mutableStateOf(false) }
+    var showRunner by rememberSaveable { mutableStateOf(false) }
+    var selectedDraft by rememberSaveable { mutableStateOf(false) }
+    var showMcp by rememberSaveable { mutableStateOf(false) }
+    val customViewModel: ToolsViewModel = hiltViewModel()
+    val scriptViewModel: ScriptToolsViewModel = hiltViewModel()
+    val toolboxViewModel: ToolboxViewModel = hiltViewModel()
+    val customState by customViewModel.state.collectAsStateWithLifecycle()
+    val toolboxState by toolboxViewModel.state.collectAsStateWithLifecycle()
+    val definitions by scriptViewModel.definitions.collectAsStateWithLifecycle()
+    LaunchedEffect(createRequested) {
+        if (createRequested) {
+            showCreate = true
+            onCreateHandled()
+        }
+    }
+    LaunchedEffect(entries, statuses, definitions) { customViewModel.refresh() }
+    LaunchedEffect(customState.entries) { toolboxViewModel.invalidateSelection() }
+    LaunchedEffect(toolboxState.message) {
+        if (toolboxState.message == ToolboxMessage.SAVED) customViewModel.refresh()
+    }
+    UnifiedToolsSection(
+        state = customState, viewModel = customViewModel, scriptViewModel = scriptViewModel,
+        createScript = createScript, onScriptHandled = { createScript = false },
+        createTask = createTask, onTaskHandled = { createTask = false },
+        onRun = { entry ->
+            selectedDraft = false
+            toolboxViewModel.select(CustomToolDefinition(
+                name = entry.name, description = entry.description, command = entry.command,
+                parameters = Json.decodeFromString(entry.parametersJson), timeoutSeconds = entry.timeoutSeconds,
+                injectionMode = entry.injectionMode, keywords = entry.keywords,
+            ))
+            showRunner = true
+        },
+        onRunDraft = { draft -> selectedDraft = true; toolboxViewModel.select(draft); showRunner = true },
+        onOpenRunner = { toolboxViewModel.invalidateSelection(); showRunner = true },
+        onManageMcp = { showMcp = true },
+        onEditorSettings = { editorSettings = true },
+        permissionContent = permissionContent,
+    )
+    if (showCreate) {
+        ToolCreationSheet(
+            onDismiss = { showCreate = false },
+            onCreateCommand = { showCreate = false; customViewModel.startCreate() },
+            onCreateScript = { showCreate = false; createScript = true },
+            onCreateMcp = { showCreate = false; onCreateMcp() },
+            onCreateTask = { showCreate = false; createTask = true },
+            onImportTool = { showCreate = false; showRunner = false; importTool = true },
+            onImportMcp = { showCreate = false; onImportJson() },
         )
-        Box(Modifier.weight(1f)) {
-            if (selected == 0) {
-                ToolboxSection()
-            } else if (selected == 1) {
-                Column {
-                    TextButton(onClick = onReload, enabled = !reloading, modifier = Modifier.padding(horizontal = Spacing.lg)) {
-                        Text(stringResource(R.string.settings_reconnect))
+    }
+    ToolImportSheet(visible = importTool, viewModel = toolboxViewModel, onDismiss = { importTool = false })
+    if (showRunner) {
+        AdaptiveModalBottomSheet(onDismissRequest = { showRunner = false }) {
+            ToolboxSection(
+                viewModel = toolboxViewModel,
+                onOpenEditor = {
+                    showRunner = false
+                    toolboxViewModel.invalidateSelection()
+                    toolboxState.selected?.let {
+                        if (selectedDraft) customViewModel.startDraft(it) else customViewModel.openEditor(it.name)
                     }
-                McpSection(
-                    entries = entries, statuses = statuses, reloading = reloading, onReload = onReload,
-                    onToggle = onToggle, onDelete = onDelete, onEdit = onEdit,
-                    onBrowseDirectory = onBrowseDirectory, onImportJson = onImportJson, onExportJson = onExportJson
-                )
+                },
+            )
+        }
+    }
+    if (showMcp) {
+        AdaptiveModalBottomSheet(onDismissRequest = { showMcp = false }) {
+            Column(Modifier.fillMaxWidth().heightIn(max = (LocalConfiguration.current.screenHeightDp * 0.8f).dp)) {
+                TextButton(onClick = onReload, enabled = !reloading) {
+                    Text(stringResource(R.string.settings_reconnect))
                 }
-            } else {
-                Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-                    when (selected) {
-                        2 -> ScriptToolsSection(createRequested = createScript, onCreateHandled = { createScript = false }, embedded = true)
-                        3 -> ToolsSection(state = customState, viewModel = customViewModel, embedded = true)
-                        4 -> ScheduledTasksSection()
-                        else -> {
-                            SettingsGroupHeader(text = stringResource(R.string.settings_permissions))
-                            permissionContent()
-                        }
-                    }
+                Box(Modifier.weight(1f)) {
+                McpSection(
+                    entries = entries, statuses = statuses, reloading = reloading,
+                    onReload = onReload, onToggle = onToggle,
+                    onEdit = { showMcp = false; onEdit(it) }, onDelete = onDelete,
+                    onBrowseDirectory = { showMcp = false; onBrowseDirectory() },
+                    onImportJson = { showMcp = false; onImportJson() }, onExportJson = onExportJson,
+                )
                 }
             }
         }
-    }
-    if (createRequested) {
-        AlertDialog(
-            onDismissRequest = onCreateHandled,
-            title = { Text(stringResource(R.string.tools_add_type)) },
-            text = {
-                Column {
-                    TextButton(onClick = { selected = 1; onCreateHandled(); onCreateMcp() }) {
-                        Text(stringResource(R.string.settings_add_mcp_server))
-                    }
-                    TextButton(onClick = { selected = 3; customViewModel.startCreate(); onCreateHandled() }) {
-                        Text(stringResource(R.string.tools_add))
-                    }
-                    TextButton(onClick = { selected = 2; createScript = true; onCreateHandled() }) {
-                        Text(stringResource(R.string.script_tools_add))
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = onCreateHandled) { Text(stringResource(R.string.common_cancel)) }
-            },
-        )
     }
 }

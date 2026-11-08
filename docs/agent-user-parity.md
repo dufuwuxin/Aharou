@@ -4,6 +4,11 @@
 
 ## 本轮新增能力
 
+- 原生记忆库：`ContextLibrarySection` 仅保留内容库与注入预览；规则、临时存放、长期、注入四类支持文件夹与搜索编辑，不提供旧页面跳转或来源开关。
+- 原生条目工具：`memory` 的 `library_list/library_search/library_read/library_save/library_delete` 使用条目ID和版本；`save` 支持 `category/folder/context_kind/context_load`，临时内容绑定真实调用会话，待确认状态保留。
+- 配置同权：`context_library.entries.<hash>.category/loading/kind/folder/session_id` 与页面共用仓库，`context_library.folders` 可新增空文件夹。加载只有 FULL/INDEX/SEARCH/OFF；预览是规划结果，不是历史请求记录。
+- 使用边界：新库只读写原生记忆，不聚合其他持久来源或 sidecar；项目绑定、编辑版本、会话隔离和注入预算继续生效。不声称保存即跨设备同步。
+
 - 可执行工具箱：工具页默认提供参数表单、命令风险预览、手动运行、退出码/截断、单条原格式JSON预览导入和导出分享；保存只创建、不覆盖同名，执行复用CustomCommandTool与原权限策略，不经过模型或自动安装。编辑器设置入口复用原页面，实际LSP补全仍需编辑器上下文与已安装服务。
 - 代码结构查询：`code_structure` 经原注册器、只读权限和 `tool_search` 接入；`aharou-code` 随原 bin/lib 资源提取，提供 Kotlin/Rust/Python 的限额新鲜结构快照、符号及词法调用点候选，action=check提供三语言词法/括号和Python AST检查，明确非编译验证，不执行源码、不替代语义分析或编译。展开状态按会话与工作区隔离；CodeGraph 状态/索引仅为需保存的 ASK 命令草稿，安装及 MCP 接入由现有入口负责，不默认下载或授权。
 
@@ -34,23 +39,16 @@
 
 ## 2. 记忆
 
-| 用户能做什么 | 界面入口（file:line） | Agent 有对应工具吗 | 工具名与入口（file:line） | 差距说明 |
-|---|---|---|---|---|
-| 查看记忆清单（全局/项目切换） | `component/MemorySection.kt:348`（列表）、作用域切换 `:467` | 有 | `memory` `action=list`（`AgentModule.kt:471`；`feature/agent/domain/tool/memory/MemoryTool.kt:96`、`:305`） | 无 |
-| 读取正文 | `MemorySection.kt:348`（点行进 `MemoryEditorPane` `:575`） | 有 | `memory` `action=read`（`MemoryTool.kt:438`） | 无；read 会回 `version` 供乐观锁 |
-| 保存（新建/覆盖） | `MemorySection.kt:624`、`:632` | 有 | `memory` `action=save`（`MemoryTool.kt:497`） | 无；覆盖必须带 `version` |
-| 局部编辑 | `MemorySection.kt:575`（同一编辑器改正文） | 有 | `memory` `action=edit`（`MemoryTool.kt:606`） | 无 |
-| 删除 | `MemorySection.kt:156`、`:160` | 有 | `memory` `action=delete`（`MemoryTool.kt:648`） | 无 |
-| 合并压缩（compact） | `MemorySection.kt:282` → `SettingsViewModel.kt:304` | 无 | 未找到（`memory` 的 action 枚举 `MemoryTool.kt:135` 无 compact；config 无对应字段） | **缺口**：只能等后台 `MemoryMaintenanceWorker`，无法即时触发 |
-| 蒸馏（distill） | `MemorySection.kt:311` → `SettingsViewModel.kt:320` | 无 | 未找到 | **缺口**：同上 |
-| 自动整理开关 | `MemorySection.kt:294` | 有 | `config` `memory.auto_organize`（`feature/agent/data/ConfigMemorySyncFields.kt:42`） | 无 |
-| 立即同步 | `component/MemorySyncSection.kt:97`（`syncNow`） | 有 | `memory` `action=sync`（`MemoryTool.kt:250`） | 无；有 60 秒限频 |
-| 同步配置（仓库地址/令牌/分支/间隔/自动同步） | `MemorySyncSection.kt:81`、`:89`、`:108`、`:118` | 有 | `config` `memory.sync.repo_url` / `.token` / `.branch` / `.auto` / `.interval_minutes`（`ConfigMemorySyncFields.kt:59` 起） | 无；token 是 SENSITIVE，需确认 |
-| 看上次同步结果 / 时间 | `MemorySyncSection.kt:53` | 有 | `config` 只读 `memory.sync.last_result` / `.last_sync_at`（`ConfigMemorySyncFields.kt:128`、`:143`） | 无 |
-| 回滚到归档 | `MemorySection.kt:392`（`restoreMemoryArchive` → `SettingsViewModel.kt:302`，可选具体归档） | 部分 | `memory` `action=undo`（`MemoryTool.kt:420`） | 只能回滚“最近一次归档”，不能像 UI 那样在归档列表里挑某一份 |
-| 记忆总开关 | `MemorySection.kt:264` | 有 | `config` `memory.enabled`（`core/config/ConfigBuiltins.kt:167`） | 无 |
-| 召回测试 | `MemorySection.kt:318`（`MemoryRecallTestSheet`） | 无 | 未找到 | **缺口**：用户能验证“某句话能不能召回”，agent 只能用 `memory search` 近似 |
-| 使用统计/冷记忆清单 | 未找到独立界面（只在 `memory` 工具的 `stats` 里） | 有 | `memory` `action=stats` | 反向：agent 有、用户没有 |
+| 用户能做什么 | 界面入口 | Agent 对应能力 | 边界 |
+|---|---|---|---|
+| 分类、搜索与筛选条目 | `component/ContextLibrarySection.kt` | `memory` 的 `library_list/library_search` | 只有四类原生内容；临时条目按实际会话隔离 |
+| 读取、编辑、删除条目 | `component/ContextLibraryEditor.kt` | `memory` 的 `library_read/library_save/library_delete` | 更新必须使用最新版本；项目内容校验工作区 |
+| 新建条目 | `component/ContextLibraryEditor.kt` | `memory` 的 `save`，支持 category/folder/context_kind/context_load | 临时内容绑定调用会话；未确认信息保持参考属性 |
+| 修改分类、加载与文件夹 | `component/ContextLibraryEditor.kt` | `config` 的 `context_library.entries` | FULL/INDEX/SEARCH/OFF，与页面共用仓库 |
+| 创建空文件夹 | `component/ContextLibrarySection.kt` | `config` 的 `context_library.folders` | 文件夹不改变权限与隔离范围 |
+| 查看注入规划 | `component/ContextLibraryEditor.kt` 的 `ContextLibraryPreview` | 未提供独立工具动作 | 不是历史请求记录；不代表实际模型行为 |
+
+记忆页不再提供其他页面的来源、维护与外观入口。内置系统提示、技能和工具仍由原有运行链路使用，不是库内用户条目。
 
 ## 3. 工作区 / 文件
 
@@ -115,11 +113,11 @@
 
 | 用户能做什么 | 界面入口（file:line） | Agent 有对应工具吗 | 工具名与入口（file:line） | 差距说明 |
 |---|---|---|---|---|
-| 编辑全局规则 | `component/RulesSection.kt:56`（列表）、`:71`（保存）、`:187-193`（停笔自动保存） | 有 | `config` `rules.global`（`feature/agent/data/ConfigRuleFields.kt:33`，写回生效那份 AGENTS.md/CLAUDE.md）；或用 `writeFile` 直写 `~/.aharou/AGENTS.md` | 无 |
-| 编辑项目规则 | `RulesSection.kt:56`、作用域切换 `:96` | 有 | `config` `rules.project`（`ConfigRuleFields.kt:47`）+ `writeFile` 写 `<工作区>/AGENTS.md` | 无工作区时写入会报错（`ConfigRuleFields.kt:53`） |
-| 新建 / 编辑 `rules.d` 片段 | `RulesSection.kt:106`、`:152`（新建）、`:187`（编辑自动存） | 部分 | 无专用工具；`config rules.fragments` 是只读清单（`ConfigRuleFields.kt:57`），写入靠 `writeFile` 到 `~/.aharou/rules.d/` 或 `<工作区>/rules.d/` | 片段命名规则（`RuleFileRepository.kt:122` 正则）要自己遵守，写错不报 |
-| 删除规则片段 / 清空主规则 | `RulesSection.kt:221`（删）、`:304`（确认） | 部分 | 主规则清空可用 `config set rules.global ""`；片段删除只能 `Bash rm` | 无专用删除动作 |
-| 读取生效规则正文 | `RulesSection.kt:56`（列表展示摘要与路径） | 有 | `loadRule`（`AgentModule.kt:462`；`domain/tool/rule/LoadRuleTool.kt:29`） | 无 |
+| 编辑文件式全局规则 | 不提供旧页面；新版规则类条目在记忆库编辑，不自动改写文件式规则 | 有 | `config` `rules.global`（`feature/agent/data/ConfigRuleFields.kt:33`，写回生效那份 AGENTS.md/CLAUDE.md）；或用 `writeFile` 直写 `~/.aharou/AGENTS.md` | 无 |
+| 编辑文件式项目规则 | 不提供旧页面；项目记忆在记忆库管理 | 有 | `config` `rules.project`（`ConfigRuleFields.kt:47`）+ `writeFile` 写 `<工作区>/AGENTS.md` | 无工作区时写入会报错（`ConfigRuleFields.kt:53`） |
+| 新建 / 编辑 `rules.d` 片段 | 不提供独立旧页面 | 部分 | 无专用工具；`config rules.fragments` 是只读清单（`ConfigRuleFields.kt:57`），写入靠 `writeFile` 到 `~/.aharou/rules.d/` 或 `<工作区>/rules.d/` | 片段命名规则（`RuleFileRepository.kt:122` 正则）要自己遵守，写错不报 |
+| 删除规则片段 / 清空主规则 | 不提供独立旧页面；不删除用户既存文件 | 部分 | 主规则清空可用 `config set rules.global ""`；片段删除只能 `Bash rm` | 无专用删除动作 |
+| 读取文件式生效规则正文 | 不提供独立旧页面；记忆库预览仅展示新版条目 | 有 | `loadRule`（`AgentModule.kt:462`；`domain/tool/rule/LoadRuleTool.kt:29`） | 无 |
 
 ## 8. 远程设备（跨设备协作）
 
@@ -178,14 +176,11 @@
 
 ## 13. 缺口汇总
 
-统计（86 条能力）：**有对应工具 49 条 / 只能靠 Bash 或文件工具临时替代 8 条 / agent 完全没有 26 条 / 双方都没有 3 条**；另有 1 条反向缺口（远程设备端口，属有意不做界面）。
+以下为其他功能的既有缺口清单；记忆页能力以第 2 节为准。页面移除后不沿用历史能力总数，其他功能未在本轮重新统计。
 
-### A. 用户能做、agent 完全没有工具（26 条）
+### A. 其他功能的工具缺口
 
-1. 手动跑一次自动化任务 —— 双方都无（不计入 26，列在此处便于对照）
-2. 记忆：合并压缩（`MemorySection.kt:282`）
-3. 记忆：蒸馏（`MemorySection.kt:311`）
-4. 记忆：召回测试（`MemorySection.kt:318`）
+1. 手动跑一次自动化任务 —— 双方都无（列在此处便于对照）
 5. 工作区：切换（`WorkspacePicker.kt:128`）
 6. 工作区：新建（`WorkspacePicker.kt:179`）
 7. 工作区：重命名（`WorkspacePicker.kt:186`）
@@ -345,3 +340,7 @@ Second-pass corrections: long-session creation routes to project creation; expli
 ## 本地容器基线
 
 默认内置 Ubuntu 24.04 LTS ARM64，用户与 agent 共用同一本地执行环境。仅接受原生 ARM64 rootfs，不再安装或启动 Alpine、x86/AMD64、32 位 ARM，不使用跨指令集转译；远程 SSH 不受此本地架构限制。旧内置迁移先验证 Ubuntu 并保留 /root 与 /home，成功后才移除旧内置系统；失败保留旧数据且不回退 Alpine。工作区、全局配置与共享目录不参与清理。此处不代表所有工具或真机构建已完成兼容性验收。
+
+### Restored project and tool entry points
+
+The unified tool browser and six-action creation sheet reuse existing execution and permission paths. Project deletion removes project/task metadata only, uses the project workspace, and rejects active execution; it never deletes workspace files or conversation entities. Compact project controls are newly integrated and require device verification.

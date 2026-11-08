@@ -2,11 +2,22 @@
 
 底栏「配置」→「工具」是全部工具的统一管理页：内置工具、MCP 服务器动态注册的工具、你自己新建的工具都在这里，一处看清「模型现在能用什么」，也一处控制「哪些工具该出现在哪一轮」。
 
-自动化任务的创建、编辑、启停和删除，以及项目/全局工具授权规则，直接显示在本页下方，不再有独立页面。
+本页只有一个浏览列表和一个顶栏「＋」创建入口，不再按工具箱、MCP、脚本、自定义工具、自动任务、权限切换六个页签。自动任务在折叠分组中管理，项目/全局工具授权规则从管理操作展开；已有执行器、授权策略与任务调度方式不变。
 
 ## 页面上有什么
 
-页面默认打开「工具箱」：选择常用模板或已保存工具、填写参数，检查命令与风险后点「运行」，直接显示真实输出、退出码、工作区和截断状态，不经过聊天模型。页面同时保留 MCP、脚本、自定义工具、定时任务与权限页签。在这个页签中，按来源分三组，组内按名称排序：
+默认滚动内容同时展示自定义命令与脚本工具，不用来回切页。内置工具与 MCP 动态工具可折叠查看；已启用的脚本只在脚本列表管理，不会再作为内置工具重复显示。命令行的「运行」打开参数与输出面板，不再维护另一份保存工具列表。
+
+| 创建菜单 | 打开什么 |
+| --- | --- |
+| 自定义命令 | 命令编辑表单；可在此展开实用模板 |
+| 脚本工具 | 脚本编辑器 |
+| MCP 服务器 | 原有服务器配置表单 |
+| 自动任务 | 原有任务编辑器 |
+| 导入工具 JSON | 单条工具 JSON 的解析、预览与保存表单 |
+| 导入 MCP JSON | 原有 MCP 配置导入表单 |
+
+MCP 服务连接管理从管理操作打开，保留服务器启停、编辑、删除、目录浏览、JSON 导入/导出与重连。工具按来源保留各自的编辑能力：
 
 | 分组 | 来源 | 能改什么 |
 | --- | --- | --- |
@@ -20,7 +31,7 @@
 - **关键词注入**：只有当前这条用户消息命中关键词时才进；
 - **关闭**：不进入发给模型的工具列表（徽标置灰）。这只是注入设置，不等于撤销工具执行权限；权限仍由现有授权策略决定。
 
-点任意一行打开详情面板；顶栏「＋」先选择自定义命令工具、脚本工具或 MCP 服务器；自定义工具左滑可以删除（内置与 MCP 工具不能删，左滑按钮是灰的）。
+点命令或动态工具行打开详情面板，可继续修改注入设置与兼容的 schema 说明；脚本行保留编辑、启停与删除。顶栏「＋」统一提供上述六种创建或导入操作；自定义命令左滑可以删除，内置与 MCP 动态工具不能作为自定义命令删除。
 
 ## 编辑内置与 MCP 工具的参数说明
 
@@ -30,17 +41,17 @@
 
 保存时会校验，运行时也会重新对照原始 schema。如果 App 升级或 MCP 服务更新导致原有覆盖不再兼容，会使用工具当前的原始 schema，而不是继续给模型一份错误的参数契约。覆盖说明不会改变流式输出、执行逻辑或原有权限检查。
 
-## 工具箱直接使用与导入
+## 运行命令与导入
 
-工具箱可直接运行模板，不必先注册到 AI 工具列表。选择与填写参数只生成预览，点击「运行」才执行；取消会停止等待并丢弃旧结果，不回滚命令已产生的副作用。依赖缺失或权限拒绝会保留错误，不自动安装、不将未知退出码当成功。
+在默认列表找到已保存的命令，点该行的「运行」，填写参数并检查命令预览与风险提示，再点面板内的「运行」执行。创建命令时也可先将当前草稿送入运行面板试运行，无需先保存或注册为模型工具；模板仍只从创建表单选择，不另铺一份模板列表。面板显示真实输出、退出码、工作区及截断状态，不经过聊天模型；列表选择和参数填写本身不执行命令。取消会停止等待并丢弃旧结果，不回滚命令已产生的副作用。依赖缺失或权限拒绝会保留错误，不自动安装、不将未知退出码当成功。
 
-「导入工具 JSON」接收原有单条工具格式：先粘贴 JSON，点「解析并预览」，确认后保存。同名或与已注册工具冲突时不覆盖，请改名后重新预览。选择工具后可导出 JSON、复制或分享。导入和保存本身不执行命令。
+顶栏「＋」→「导入工具 JSON」接收原有单条工具格式：先粘贴 JSON，点「解析并预览」，确认后保存。同名或与已注册工具冲突时不覆盖，请改名后重新预览。选择工具后可导出 JSON、复制或分享。导入和保存本身不执行命令。
 
 「编辑器设置」打开既有编辑器配置；补全、诊断等仍在真实代码编辑器中使用，语言服务需已安装，设置页不是语言服务运行成功的证明。
 
 ## 从实用模板开始
 
-模板不再常驻工具列表。点顶栏「＋」选择新建自定义工具，在创建表单中展开「实用模板」后选择，再检查参数和命令；不选择模板也可以直接填写。编辑已有工具时不显示模板选择，避免意外覆盖已有配置。工具分类栏固定在同一位置，MCP 重连操作放在对应分类内容内。
+模板只在创建命令的表单中出现，不铺在默认工具列表或运行面板中。点顶栏「＋」选择新建自定义命令，在创建表单中展开「实用模板」后选择，再检查参数和命令；不选择模板也可以直接填写。编辑已有工具时不显示模板选择，避免意外覆盖已有配置。MCP 重连操作保留在服务器连接管理中。
 
 可用的可编辑模板：
 
@@ -62,7 +73,7 @@
 | `codegraph_status` | 查询当前环境已经安装的 CodeGraph 状态，不安装、不建索引 |
 | `codegraph_index` | 使用已安装的 CodeGraph 在当前工作区建立索引，会写文件并占用资源 |
 
-**管理页选择模板只填入新建编辑器，保存后才注册为模型工具；工具箱则可以预览后直接手动运行**，不会自动启用一批工具或安装依赖。模板预设为关键词注入并带有相关关键词，不会默认每轮全部注入；保存前可以修改描述、参数、命令、关键词和注入方式，命令仍走现有执行器与授权链。
+**选择模板只填入新建编辑器；草稿可直接预览和手动试运行，但不写入命令列表、不注册为模型工具。只有明确保存后才持久化并注册**，不会自动启用一批工具或安装依赖。模板预设为关键词注入并带有相关关键词，不会默认每轮全部注入；保存前可以修改描述、参数、命令、关键词和注入方式，命令仍走现有执行器与授权链。
 
 [RTK 官方说明](https://github.com/rtk-ai/rtk)介绍了 Git 状态、差异与日志、文件检索、测试输出过滤，以及回查原始输出的用法。过滤效果取决于具体命令和输出，不能保证固定的 token 节省比例。模板不会替你安装 RTK；未安装时会保留底层「找不到命令」错误，不会静默改跑其他命令。需要回查时按官方用法查看原始输出，不把过滤摘要当作完整证据。
 
@@ -244,3 +255,7 @@ Android 参数是一个任务名，必须按实际项目修改；项目的构建
 `sessions` adds `action=tool_calls` for redacted persisted tool receipts in a session belonging to the current workspace. Supply `session_id` (defaults to the current session), optional exact `tool`, `status` (`SUCCESS`, `ERROR`, `PARTIAL`), inclusive epoch-millisecond `after` / `before`, `limit` (up to 200) and nonnegative `offset`. Results include `nextOffset`; `null` means the final page. Newest-first offset pagination is live, so concurrent new calls may shift pages. Receipts are retained for the existing 30-day window; they are not a complete permanent audit history. Denied calls have an empty status and remain visible without a status filter. Full output and build-authorization bodies are not returned by this action.
 
 `action=context` returns the latest in-process final workflow request composition for the current session only, after stored-tool folding and privacy masking, subject to the same workspace ownership check as session reading. An explicit ID for another session is rejected even within the same workspace. It returns counts and fixed section identifiers, never prompt headings or injected bodies. Estimated tokens are a local character heuristic, not provider usage. Workspace boundaries remain enforced for both actions.
+
+## Project controls
+
+Project tasks open in map view. The overflow menu includes start/stop, tree/map, search, fit, and conversation actions. Delete removes project/task records only; stop running work first. Workspace files and conversations are retained.

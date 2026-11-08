@@ -491,8 +491,9 @@ object SystemPromptBuilder {
      * sentence alone is the safe fallback when SOUL.md is missing or
      * empty, matching pre-SOUL behavior.
      */
-    fun identitySection(context: Context): String {
-        val file = SoulStore.load(context)
+    fun identitySection(context: Context): String = identitySection(SoulStore.load(context))
+
+    fun identitySection(file: SoulFile?): String {
         val name = (file?.metadata?.name ?: SoulMetadata.DEFAULT.name)
             .trim()
             .ifEmpty { "Aharou" }
@@ -511,10 +512,9 @@ object SystemPromptBuilder {
         // SOUL body length limit (#356 / 1000 EN words / 1600 CN chars).
         val soulEditHint =
             "---\n" +
-            "SOUL.md fields (name / icon / style / lang / body) can be edited two ways:\n" +
-            "1. Tool: call `config` to propose changes (user must approve).\n" +
-            "2. UI: ask the user to go to Settings → Soul to edit directly.\n" +
-            "Pick whichever the user finds easier in context. Do not say you cannot change your personality."
+            "Assistant background is managed in the unified memory library, INJECTED category.\n" +
+            "Use memory library_read/library_save for the persona:global entry, preserving its version.\n" +
+            "Display name and avatar remain appearance settings; do not overwrite them when editing background."
 
         // [T-soul-style-injection 2026-05-18, port iOS 0409e24f] The `style`
         // frontmatter field (response voice / tone / formatting preference,

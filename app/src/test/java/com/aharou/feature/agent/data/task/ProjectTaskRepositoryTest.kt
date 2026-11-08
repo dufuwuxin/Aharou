@@ -154,6 +154,58 @@ class ProjectTaskRepositoryTest {
         return repository.load("/w").tasks.filter { it.projectId == created.project.id }.sortedBy { it.order }
     }
 
+    @Test fun deletionRejectsRunningTasksWithoutMutatingTheStore() = runBlocking {
+        val store = repository()
+        val task = project(store, "running").single()
+        store.save(task.copy(status = com.aharou.feature.agent.domain.task.ProjectTaskStatus.RUNNING))
+        val before = store.load("/w")
+        try { store.deleteProject(requireNotNull(task.projectId), "/w"); fail("running projects must remain") }
+        catch (failure: IllegalStateException) { assertEquals("PROJECT_BUSY", failure.message) }
+        assertEquals(before, store.load("/w"))
+        assertEquals(before, repository().load("/w"))
+    }
+
+    @Test fun deletionIsAtomicIdempotentAndKeepsOtherProjectsAndStandaloneTasks() = runBlocking {
+        val store = repository()
+        val removed = project(store, "remove me").single()
+        val retained = project(store, "keep me").single()
+        val standalone = store.save(ProjectTask(workspace = "/w", title = "standalone", requirement = "keep"))
+        val otherWorkspace = store.createProject("other", "keep", "/other").project
+        val before = store.load("/w")
+        assertTrue(store.deleteProject(requireNotNull(removed.projectId), "/w"))
+        val after = store.load("/w")
+        assertEquals(before.version + 1, after.version)
+        assertEquals(listOf(retained, standalone), after.tasks)
+        assertEquals(before.projects.filterNot { it.id == removed.projectId }, after.projects)
+        assertNull(ProjectTaskGraph.validate(after.tasks))
+        assertEquals(after, repository().load("/w"))
+        assertEquals(listOf(otherWorkspace), repository().load("/other").projects)
+        assertFalse(store.deleteProject(requireNotNull(removed.projectId), "/w"))
+        assertEquals(after, store.load("/w"))
+        try { store.save(removed); fail("late writes must not resurrect a deleted project") }
+        catch (failure: IllegalArgumentException) { assertEquals("PROJECT_NOT_FOUND", failure.message) }
+        assertEquals(after, repository().load("/w"))
+    }
+
+    @Test fun deletionWriteFailureKeepsThePublishedAndPersistedProject() = runBlocking {
+        val store = repository()
+        val removed = project(store, "remove me").single()
+        val before = store.load("/w")
+        val root = File(context.filesDir, "project-tasks")
+        val backup = File(context.filesDir, "project-tasks-delete-backup")
+        assertTrue(root.renameTo(backup))
+        root.writeText("block directory creation")
+        try {
+            try { store.deleteProject(requireNotNull(removed.projectId), "/w"); fail("write failure must propagate") }
+            catch (failure: IllegalStateException) { assertEquals("TASK_DIRECTORY_FAILED", failure.message) }
+            assertEquals(before, store.snapshots.value["/w"])
+        } finally {
+            assertTrue(root.delete())
+            assertTrue(backup.renameTo(root))
+        }
+        assertEquals(before, repository().load("/w"))
+    }
+
     @Test fun childTasksCanBeAddedThroughThirdAndFourthLevelsAndSurviveReload() = runBlocking {
         val store = repository()
         var parent = project(store, "first level").single()

@@ -62,7 +62,6 @@ import kotlin.math.abs
 
 private const val DEFAULT_ZOOM = 0.9f
 private const val MAX_ZOOM = 2f
-private const val ZOOM_STEP = 1.25f
 private const val EDGE_DP = 1.5f
 private const val PATH_EDGE_DP = 2.5f
 private const val RING_DP = 1.5f
@@ -93,6 +92,7 @@ fun ProjectTaskMap(projectId: String, projectTitle: String, tasks: List<ProjectT
     onOpenProcess: (String) -> Unit, onDismissProcess: () -> Unit, onSupplement: (ProjectTask?) -> Unit,
     onAddChild: (ProjectTask?) -> Unit, modifier: Modifier = Modifier,
     onContentDrag: () -> Unit = {}, onOpenRoot: () -> Unit = {}, rootConversation: @Composable () -> Unit = {},
+    header: @Composable (@Composable (() -> Unit) -> Unit) -> Unit = {},
     process: @Composable (ProjectTask) -> Unit = {}) {
     val onDrag by rememberUpdatedState(onContentDrag)
     val byId = remember(tasks) { tasks.associateBy { it.id } }
@@ -100,17 +100,17 @@ fun ProjectTaskMap(projectId: String, projectTitle: String, tasks: List<ProjectT
     val outer = LocalDensity.current
     val density = outer.density
     var viewportWidth by remember(projectId) { mutableFloatStateOf(Float.POSITIVE_INFINITY) }
+    var viewportHeight by remember(projectId) { mutableFloatStateOf(0f) }
+    var showSearch by rememberSaveable(projectId) { mutableStateOf(false) }
     var zoom by remember(projectId) { mutableFloatStateOf(DEFAULT_ZOOM) }
     var panX by remember(projectId) { mutableFloatStateOf(0f) }
     var panY by remember(projectId) { mutableFloatStateOf(0f) }
-    var reset by remember { mutableIntStateOf(0) }
     var expanded by rememberSaveable(projectId, stateSaver = StringSetSaver) { mutableStateOf(emptySet<String>()) }
     var openGroups by rememberSaveable(projectId, stateSaver = StringSetSaver) { mutableStateOf(emptySet<String>()) }
     var fullLines by rememberSaveable(projectId, stateSaver = StringSetSaver) { mutableStateOf(emptySet<String>()) }
     var query by rememberSaveable(projectId) { mutableStateOf("") }
-    var searchOpen by rememberSaveable(projectId) { mutableStateOf(false) }
     val keyboard = LocalSoftwareKeyboardController.current
-    BackHandler(enabled = searchOpen) { query = ""; searchOpen = false; keyboard?.hide() }
+    BackHandler(enabled = showSearch) { showSearch = false; query = ""; keyboard?.hide() }
     var focusId by rememberSaveable(projectId) { mutableStateOf<String?>(null) }
     // Search hits unfold automatically; a hit the user folds again stays folded until the query changes.
     var suppressed by remember(projectId, query) { mutableStateOf(emptySet<String>()) }
@@ -181,23 +181,46 @@ fun ProjectTaskMap(projectId: String, projectTitle: String, tasks: List<ProjectT
     val zoomed = remember(outer, zoom) { Density(density * zoom, outer.fontScale) }
     val path = remember { Path() }
     Column(modifier.onSizeChanged { viewportWidth = it.width / density }) {
-        if (searchOpen) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                val clear: (@Composable () -> Unit)? = if (query.isEmpty()) null else { {
-                    ProjectMapIcon(FeatherIcons.X, stringResource(R.string.project_map_search_clear), "map_search_clear") { query = "" }
-                } }
-                AppTextField(query, { query = it }, modifier = Modifier.weight(1f).testTag("map_search"),
-                    placeholder = stringResource(R.string.project_map_search),
-                    leadingIcon = { Icon(FeatherIcons.Search, null, modifier = Modifier.size(Spacing.lg)) }, trailingIcon = clear)
-                ProjectMapIcon(FeatherIcons.X, stringResource(R.string.project_map_search_close), "map_search_close") {
-                    query = ""; searchOpen = false; keyboard?.hide()
-                }
-            }
-            if (searching) Text(stringResource(R.string.project_map_search_count, hitIds.size, hits.size),
-                style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant,
-                modifier = Modifier.testTag("map_hint"))
+        header { dismiss ->
+            DropdownMenuItem(text = { Text(stringResource(if (showSearch) R.string.project_map_search_close else R.string.project_map_search)) },
+                modifier = Modifier.testTag("map_search_toggle"),
+                onClick = { showSearch = !showSearch; if (!showSearch) query = ""; dismiss() })
+            val allOpen = tasks.isNotEmpty() && tasks.all { it.id in expanded }
+            DropdownMenuItem(text = { Text(stringResource(if (allOpen) R.string.project_task_collapse_all else R.string.project_task_expand_all)) },
+                modifier = Modifier.testTag("map_expand_all"), onClick = {
+                    if (allOpen) { expanded = emptySet(); measured.clear() } else expanded = tasks.mapTo(HashSet()) { it.id }
+                    suppressed = emptySet(); dismiss()
+                })
+            DropdownMenuItem(text = { Text(stringResource(R.string.project_map_fit)) },
+                modifier = Modifier.testTag("map_fit"), onClick = {
+                    if (viewportWidth.isFinite() && viewportHeight > 0f) {
+                        zoom = ProjectTaskMapLayout.fitZoom(viewportWidth - Spacing.lg.value * 2,
+                            viewportHeight - Spacing.lg.value * 2, layout.width, layout.height, MAX_ZOOM)
+                        panX = (viewportWidth - layout.width * zoom) / 2f
+                        panY = (viewportHeight - layout.height * zoom) / 2f
+                    }
+                    dismiss()
+                })
+
         }
-        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth().clipToBounds().testTag("map_viewport").pointerInput(projectId, layout.width, layout.height) {
+        if (showSearch) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            val clear: (@Composable () -> Unit)? = if (query.isEmpty()) null else { {
+                IconButton(onClick = { query = "" }) {
+                    Icon(FeatherIcons.X, stringResource(R.string.project_map_search_clear), modifier = Modifier.size(Spacing.lg))
+                }
+            } }
+            AppTextField(query, { query = it }, modifier = Modifier.weight(1f).testTag("map_search"),
+                placeholder = stringResource(R.string.project_map_search),
+                leadingIcon = { Icon(FeatherIcons.Search, null, modifier = Modifier.size(Spacing.lg)) }, trailingIcon = clear)
+            IconButton(onClick = { showSearch = false; query = "" }, modifier = Modifier.testTag("map_search_close")) {
+                Icon(FeatherIcons.X, stringResource(R.string.project_map_search_close))
+            }
+        }
+        if (searching) Text(stringResource(R.string.project_map_search_count, hitIds.size, hits.size),
+            style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant, maxLines = 2,
+            overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag("map_hint"))
+        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth().clipToBounds().testTag("map_viewport")
+            .onSizeChanged { viewportHeight = it.height / density }.pointerInput(projectId, layout.width, layout.height) {
             detectTransformGestures { centroid, pan, scale, _ ->
                 onDrag()
                 if (!scale.isFinite() || scale <= 0f || !pan.x.isFinite() || !pan.y.isFinite() ||
@@ -213,15 +236,6 @@ fun ProjectTaskMap(projectId: String, projectTitle: String, tasks: List<ProjectT
         }) {
             val viewW = maxWidth.value
             val viewH = maxHeight.value
-            fun zoomAtCenter(target: Float) {
-                val minimum = ProjectTaskMapLayout.minimumZoom(ProjectTaskMapLayout.fitZoom(
-                    viewW, viewH, layout.width, layout.height, MAX_ZOOM))
-                val next = ProjectTaskMapLayout.clampZoom(target, minimum, MAX_ZOOM)
-                val ratio = next / zoom
-                panX = viewW / 2f - (viewW / 2f - panX) * ratio
-                panY = viewH / 2f - (viewH / 2f - panY) * ratio
-                zoom = next
-            }
             // Only pans when the header row is (partly) off-screen; an unfolded outline gets the lower two thirds.
             fun bringIntoView(id: String?) {
                 val node = layout.node(id) ?: return
@@ -232,7 +246,7 @@ fun ProjectTaskMap(projectId: String, projectTitle: String, tasks: List<ProjectT
                 panX = viewW / 2f - (node.x + node.headerWidth / 2f) * zoom
                 panY = viewH * FOCUS_ROW - node.dotY * zoom
             }
-            LaunchedEffect(projectId, reset, tasks.isEmpty()) {
+            LaunchedEffect(projectId, tasks.isEmpty()) {
                 val root = layout.node(ProjectTaskMapLayout.rootId(projectId)) ?: return@LaunchedEffect
                 panX = Spacing.lg.value - root.x * zoom
                 panY = viewH / 2f - root.dotY * zoom
@@ -331,36 +345,6 @@ fun ProjectTaskMap(projectId: String, projectTitle: String, tasks: List<ProjectT
                     }
                 }
             } }
-            Surface(shape = RoundedCornerShape(Radius.pill), color = colors.surfaceContainerHigh,
-                modifier = Modifier.align(Alignment.TopEnd).padding(Spacing.sm)) {
-                Column {
-                    Row {
-                        ProjectMapIcon(FeatherIcons.Search, stringResource(R.string.project_map_search), "map_search_toggle") {
-                            if (searchOpen) { query = ""; keyboard?.hide() }
-                            searchOpen = !searchOpen
-                        }
-                        val allOpen = tasks.isNotEmpty() && tasks.all { it.id in expanded }
-                        ProjectMapIcon(if (allOpen) FeatherIcons.Minimize else FeatherIcons.Maximize,
-                            stringResource(if (allOpen) R.string.project_task_collapse_all else R.string.project_task_expand_all), "map_expand_all") {
-                            if (allOpen) { expanded = emptySet(); measured.clear() } else expanded = tasks.mapTo(HashSet()) { it.id }
-                            suppressed = emptySet()
-                        }
-                    }
-                    Row {
-                        ProjectMapIcon(FeatherIcons.ZoomIn, stringResource(R.string.project_map_zoom_in), "map_zoom_in") { zoomAtCenter(zoom * ZOOM_STEP) }
-                        ProjectMapIcon(FeatherIcons.ZoomOut, stringResource(R.string.project_map_zoom_out), "map_zoom_out") { zoomAtCenter(zoom / ZOOM_STEP) }
-                    }
-                    Row {
-                        ProjectMapIcon(FeatherIcons.Maximize, stringResource(R.string.project_map_fit), "map_fit") {
-                            zoom = ProjectTaskMapLayout.fitZoom(viewW - Spacing.lg.value * 2,
-                                viewH - Spacing.lg.value * 2, layout.width, layout.height, MAX_ZOOM)
-                            panX = (viewW - layout.width * zoom) / 2f
-                            panY = (viewH - layout.height * zoom) / 2f
-                        }
-                        ProjectMapIcon(FeatherIcons.RotateCcw, stringResource(R.string.project_map_reset), "map_reset") { zoom = DEFAULT_ZOOM; reset++ }
-                    }
-                }
-            }
         }
     }
     if (processId == ProjectTaskMapLayout.rootId(projectId)) AdaptiveModalBottomSheet(onDismissRequest = onDismissProcess,
@@ -384,13 +368,6 @@ fun ProjectTaskMap(projectId: String, projectTitle: String, tasks: List<ProjectT
             }
             Box(Modifier.weight(1f).fillMaxWidth()) { process(selected) }
         }
-    }
-}
-
-@Composable
-private fun ProjectMapIcon(icon: ImageVector, label: String, tag: String, onClick: () -> Unit) {
-    IconButton(onClick = onClick, modifier = Modifier.size(48.dp).testTag(tag)) {
-        Icon(icon, label, modifier = Modifier.size(Spacing.lg))
     }
 }
 

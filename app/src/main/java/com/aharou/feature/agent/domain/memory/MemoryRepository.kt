@@ -1,5 +1,6 @@
 package com.aharou.feature.agent.domain.memory
 
+import com.aharou.feature.agent.domain.context.*
 import com.aharou.core.memory.MemoryUsageStore
 import com.aharou.core.util.FileLogger
 import com.aharou.feature.agent.domain.container.ContainerInstaller
@@ -36,7 +37,7 @@ class MemoryRepository @Inject constructor(
             MemoryScope.GLOBAL -> globalMemorySource.listMemories()
             MemoryScope.PROJECT -> projectRoot?.takeIf { it.isNotBlank() }
                 ?.let { projectSource(it).listMemories() } ?: emptyList()
-        }.filterNot { it.name.startsWith("LOG-") }
+        }.filterNot { it.name.startsWith("LOG-") && !it.hasContextMetadata }
 
     fun findMemory(name: String, projectRoot: String?, scope: MemoryScope? = null): Memory? =
         listMemories(projectRoot, scope).firstOrNull { it.name.equals(name, ignoreCase = true) }
@@ -80,6 +81,7 @@ class MemoryRepository @Inject constructor(
     ): List<Memory> {
         val normalizedQuery = query?.trim()?.lowercase().orEmpty()
         return listMemories(projectRoot)
+            .filter { it.contextLoad in setOf(ContextLoad.FULL, ContextLoad.INDEX) && it.contextCategory != ContextCategory.TEMPORARY }
             // 事件类（某次测试结果、某天的排查记录）只留档：它们不是跨会话仍成立的知识，
             // 留在清单里只会把真正该被记住的东西挤淡。需要时靠 memory(action=search/read) 取回。
             .filter { it.type.injected }
@@ -436,9 +438,8 @@ class MemoryRepository @Inject constructor(
         findMemory(name, projectRoot, scope)?.content
 
     fun saveMemory(name: String, description: String, content: String, scope: MemoryScope, projectRoot: String?, type: MemoryType? = null, expiresAt: Long? = null, pending: Boolean? = null, keywords: List<String>? = null): Boolean {
-        // SOUL.md 的 frontmatter 是人格自己的 schema，记忆格式写过去会抹掉头像与风格。
-        if (isSoulFile(name)) return false
         val existing = existingMemoryOf(name, scope, projectRoot)
+        if (isSoulFile(name) && existing?.hasContextMetadata != true) return false
         // 未显式指定的字段沿用原值：否则覆盖 / 合并一条 identity 记忆会抹掉它的 type，
         // 重写一条短期记忆也会把它变成永久（反过来同理）；「待确认」标记同理，
         // 只有调用方明确表态（比如用户在设置页保存）才清除。
@@ -472,14 +473,18 @@ class MemoryRepository @Inject constructor(
         expiresAt: Long? = null,
         pending: Boolean? = null,
         keywords: List<String>? = null,
-        expectedVersion: String? = null
+        expectedVersion: String? = null,
+        contextKind: ContextKind? = null,
+        contextLoad: ContextLoad? = null,
+        contextCategory: ContextCategory? = null,
+        contextFolder: String? = null,
+        contextSessionId: String? = null
     ): MemoryWriteResult {
-        // 人格文件必须走 SoulStore 或直接写文件，不能拿记忆条目的格式覆盖。
-        if (isSoulFile(name)) return MemoryWriteResult.Failure(
-            "PROTECTED_FILE",
-            "SOUL.md 是人格文件，frontmatter 用 icon/style/lang；用记忆格式写会抹掉头像与风格。改人格请直接写文件或在设置里改"
-        )
         val existing = existingMemoryOf(name, scope, projectRoot)
+        if (isSoulFile(name) && existing?.hasContextMetadata != true &&
+            (existing != null || contextKind == null || contextLoad == null || contextCategory == null)) {
+            return MemoryWriteResult.Failure("PROTECTED_FILE", "Existing non-library file is not a context entry")
+        }
         val effectiveType = type ?: existing?.type
         val effectiveExpiresAt = expiresAt ?: existing?.expiresAt
         val effectivePending = pending ?: existing?.pending ?: false
@@ -487,7 +492,7 @@ class MemoryRepository @Inject constructor(
         return when (scope) {
             MemoryScope.GLOBAL -> globalMemorySource.writeMemory(
                 name, description, content, effectiveType, effectiveExpiresAt, effectivePending,
-                effectiveKeywords, expectedVersion
+                effectiveKeywords, expectedVersion, contextKind, contextLoad, contextCategory, contextFolder, contextSessionId
             )
             MemoryScope.PROJECT -> {
                 if (projectRoot.isNullOrBlank()) {
@@ -495,7 +500,7 @@ class MemoryRepository @Inject constructor(
                 } else {
                     projectSource(projectRoot).writeMemory(
                         name, description, content, effectiveType, effectiveExpiresAt, effectivePending,
-                        effectiveKeywords, expectedVersion
+                        effectiveKeywords, expectedVersion, contextKind, contextLoad, contextCategory, contextFolder, contextSessionId
                     )
                 }
             }
@@ -554,7 +559,7 @@ class MemoryRepository @Inject constructor(
     }
 
     fun deleteMemory(name: String, scope: MemoryScope, projectRoot: String?): Boolean {
-        if (isSoulFile(name)) return false
+        if (isSoulFile(name) && existingMemoryOf(name, scope, projectRoot)?.hasContextMetadata != true) return false
         return when (scope) {
             MemoryScope.GLOBAL -> globalMemorySource.deleteMemory(name)
             MemoryScope.PROJECT -> {
@@ -623,7 +628,7 @@ class MemoryRepository @Inject constructor(
      * 按「同名 + 时间最新」取，调用方不用知道归档文件名。恢复成功返回被用的归档文件名；
      * 没有可用的归档时返回 null。
      */
-    fun restoreLatestArchive(name: String, scope: MemoryScope, projectRoot: String?): String? {
+    fun restoreLatestArchive(name: String, scope: MemoryScope, projectRoot: String?, sessionId: String? = null): String? = synchronized(MemoryFileStorage.lock) {
         // 归档名格式是「<名字>-<yyyyMMdd-HHmmss>[-<序号>].md」；用 startsWith 比前缀会让
         // `foo` 命中 `foo-bar-20260101-000000.md`，把别的条目回滚成 foo。要求整名严格匹配。
         val pattern = Regex(
@@ -633,8 +638,17 @@ class MemoryRepository @Inject constructor(
         val latest = listArchive(scope, projectRoot)
             .filter { pattern.matches(it.fileName) }
             .maxByOrNull { it.modifiedAt }
-            ?: return null
-        return if (restoreArchive(latest.fileName, scope, projectRoot)) latest.fileName else null
+            ?: return@synchronized null
+        val source = when (scope) {
+            MemoryScope.GLOBAL -> globalMemorySource
+            MemoryScope.PROJECT -> projectRoot?.takeIf { it.isNotBlank() }?.let(::projectSource)
+        } ?: return@synchronized null
+        val file = source.root?.let { java.io.File(java.io.File(it, MemorySource.ARCHIVE_DIR), latest.fileName) }
+            ?: return@synchronized null
+        val archived = MemoryParser.parse(file, scope) ?: return@synchronized null
+        if (archived.contextCategory == ContextCategory.TEMPORARY &&
+            (sessionId.isNullOrBlank() || archived.contextSessionId != sessionId)) return@synchronized null
+        if (restoreArchive(latest.fileName, scope, projectRoot)) latest.fileName else null
     }
 }
 

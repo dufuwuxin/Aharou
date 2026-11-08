@@ -1208,7 +1208,7 @@ fun AIChatPanel(
         containerColor = androidx.compose.ui.graphics.Color.Transparent,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
-            ChatHeader(
+            if (bodyOverride == null) ChatHeader(
                 inputTokens = sessionInputTokens,
                 outputTokens = sessionOutputTokens,
                 sessionId = currentSessionId,
@@ -1255,11 +1255,25 @@ fun AIChatPanel(
             val floatingLayerMaxHeight = maxHeight
             // 内容层：消息列表延伸到屏幕底部，输入框悬浮其上，滚动时卡片可滑入输入框后面
             Column(modifier = Modifier.fillMaxSize()) {
-            ChatSessionModelControls(ghostMode, viewModel::setGhostMode, currentSessionId?.takeIf { currentSession?.parentId == null }, currentMode, providers, modelMetadata, currentSessionId in activeAgentSessions || isCompacting, { if (viewModel.currentSessionId.value == currentSessionId) viewModel.setSessionMode(com.aharou.feature.agent.domain.model.AgentMode.PLAN) })
+            if (bodyOverride == null) ChatSessionModelControls(ghostMode, viewModel::setGhostMode, currentSessionId?.takeIf { currentSession?.parentId == null }, currentMode, providers, modelMetadata, currentSessionId in activeAgentSessions || isCompacting, { if (viewModel.currentSessionId.value == currentSessionId) viewModel.setSessionMode(com.aharou.feature.agent.domain.model.AgentMode.PLAN) })
             if (ghostMode) GhostModeBanner()
             Box(modifier = Modifier.weight(1f)) {
                 if (bodyOverride != null) {
-                    Box(Modifier.fillMaxSize().padding(bottom = with(LocalDensity.current) { floatingLayerHeightPx.toDp() })) { bodyOverride(composer::collapse) }
+                    Box(Modifier.fillMaxSize().padding(bottom = with(LocalDensity.current) { floatingLayerHeightPx.toDp() })) {
+                        ProjectChatMenuHost(
+                            sessionId = currentSessionId?.takeIf { sessionReady && currentSession?.parentId == null },
+                            mode = currentMode, providers = providers, metadata = modelMetadata,
+                            running = currentSessionId in activeAgentSessions || isCompacting,
+                            onEnterPlan = { if (viewModel.currentSessionId.value == currentSessionId) viewModel.setSessionMode(com.aharou.feature.agent.domain.model.AgentMode.PLAN) },
+                            onTerminal = onNavigateToTerminal, onGit = onNavigateToGit,
+                            onBrowser = onNavigateToBrowser, onSandbox = onNavigateToSandbox,
+                            onShared = onNavigateToShared,
+                            onObserve = { currentSessionId?.let { ObserveTargetHolder.sessionId = it }; onNavigateToObserve() },
+                            onActivity = { showActivity = true },
+                            connectionState = connectionState?.takeIf { isRemote },
+                            inputTokens = sessionInputTokens, outputTokens = sessionOutputTokens
+                        ) { bodyOverride(composer::collapse) }
+                    }
                 } else if (!messagesReady) {
                     // 远程模式连接未就绪时显示连接状态占位，避免空白或旧工作区记录闪烁
                     if (isRemote && connectionState != null && connectionState != com.aharou.feature.agent.domain.container.ConnectionState.CONNECTED) {

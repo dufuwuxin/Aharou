@@ -126,7 +126,7 @@ class ToolPermissionPolicyEngine @Inject constructor(
          * 敏感点按由 [AgentTool.isCallSensitive] 钩子单独负责（其迁移不在本次范围内）。
          */
         const val MEMORY_TOOL = "memory"
-        private val MEMORY_READ_ACTIONS = setOf("read", "list", "search", "log", "fact", "mindstream", "core")
+        private val MEMORY_READ_ACTIONS = setOf("read", "list", "search", "log", "fact", "mindstream", "core", "library_read", "library_list", "library_search")
         const val READ_FILE_TOOL = "readFile"
         private val PRIVATE_READ_ACTIONS = mapOf(
             MEMORY_TOOL to MEMORY_READ_ACTIONS

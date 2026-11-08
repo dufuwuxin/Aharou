@@ -113,17 +113,18 @@ class SettingsNavigationTest(unittest.TestCase):
         self.assertIn("onNewSession", sessions)
         self.assertIn('testTag("create_project")', projects)
 
-    def test_injection_details_are_conditional_and_switches_preserve_state(self):
-        prompt = source(SETTINGS / "PromptEditorScreen.kt")
+    def test_native_editor_has_editable_fields_and_persistent_category_draft(self):
+        editor = source(SETTINGS / "ContextLibraryEditor.kt")
+        self.assertFalse((SETTINGS / "PromptEditorScreen.kt").exists())
+        self.assertIn("ContextEditorDraftSaver", editor)
+        self.assertIn("draft.changeCategory(ContextCategory.entries[it])", editor)
+        self.assertIn('key("description")', editor)
+        self.assertIn("draft.copy(description = it)", editor)
+        self.assertIn("draft.copy(name = it)", editor)
+        self.assertNotIn("entry?.editable", editor)
         fields = source(SETTINGS / "PromptInjectionFields.kt")
-        self.assertIn("keywords = keywords.map", prompt)
-        self.assertIn("if (keywordsEnabled)", fields)
-        self.assertIn("if (membersEnabled)", fields)
-        self.assertIn("keywords.forEachIndexed", fields)
-        self.assertIn("singleLine = true", fields)
-        self.assertIn("keywords.filterIndexed", fields)
-        self.assertIn('onKeywordsChange(keywords + "")', fields)
-        self.assertNotIn("keywordsRaw", prompt)
+        for condition in ("if (keywordsEnabled)", "if (membersEnabled)", "keywords.forEachIndexed", "keywords.filterIndexed"):
+            self.assertIn(condition, fields)
         for callback in ("onKeywordsEnabledChange", "onMembersEnabledChange"):
             self.assertIn(f"onCheckedChange = {callback}", fields)
 
@@ -144,8 +145,8 @@ class SettingsNavigationTest(unittest.TestCase):
         self.assertIn("fun minimumZoom(", layout)
         self.assertIn("fun clampZoom(", layout)
         self.assertIn("target.isFinite()", layout)
-        self.assertIn('ProjectMapIcon(FeatherIcons.Maximize, stringResource(R.string.project_map_fit), "map_fit")', task_map)
-        self.assertIn('IconButton(onClick = onClick, modifier = Modifier.size(48.dp).testTag(tag))', task_map)
+        self.assertIn('modifier = Modifier.testTag("map_fit")', task_map)
+        self.assertIn("DropdownMenuItem(text = { Text(stringResource(R.string.project_map_fit)) }", task_map)
         self.assertIn("ProjectTaskMapLayout.fitZoom(", task_map)
         self.assertIn("ProjectTaskMapLayout.clampZoom(", task_map)
         self.assertIn("(r - RING_DP * density / 2f).coerceAtLeast(0f)", task_map)
@@ -155,7 +156,9 @@ class SettingsNavigationTest(unittest.TestCase):
         self.assertNotIn("AccountCenter", self.screen + self.groups)
         self.assertFalse((SRC / "feature/account/presentation/AccountScreen.kt").exists())
         self.assertFalse((SRC / "feature/account/presentation/UserIdentityCard.kt").exists())
-        for name in ("Soul", "ConfigAudit"):
+        self.assertNotIn("SettingsSection.Soul", self.screen + self.groups)
+        self.assertFalse((SETTINGS / "SoulSettingsSection.kt").exists())
+        for name in ("Memory", "ConfigAudit"):
             with self.subTest(section=name):
                 self.assertIn(f"onOpen(SettingsSection.{name})", account)
                 self.assertRegex(self.screen, rf"SettingsSection\.{name}\s*->")
@@ -183,9 +186,13 @@ class SettingsNavigationTest(unittest.TestCase):
 
     def test_existing_config_capabilities_remain_reachable(self):
         config = function(self.groups, "SettingsAiGroupScreen")
-        for name in ("Memory", "Skills", "Teams", "Tools", "Prompts", "Rules"):
+        for name in ("Memory", "Skills", "Teams", "Tools"):
             with self.subTest(section=name):
                 self.assertIn(f"onOpen(SettingsSection.{name})", config)
+        for name in ("Prompts", "Rules", "Knowledge", "Soul"):
+            self.assertNotIn(f"SettingsSection.{name}", self.screen + self.groups)
+        self.assertIn("sectionHistory.dropLast(1).lastOrNull()", self.screen)
+        self.assertIn("settingsNavigationPath(sectionHistory, value)", self.screen)
         self.assertIn("OnboardingStep.CONFIG_PROVIDER", config)
 
     def test_automation_has_one_entry_in_tools_and_keeps_existing_page(self):
@@ -193,8 +200,17 @@ class SettingsNavigationTest(unittest.TestCase):
         enum = block(self.screen, "enum class SettingsSection")
         self.assertNotRegex(enum, r"\bScheduledTasks\(")
         self.assertIn("onOpen(SettingsSection.Tools)", function(self.groups, "SettingsAiGroupScreen"))
-        self.assertEqual(1, self.tools.count("ScheduledTasksSection()"))
-        self.assertIn("R.string.settings_scheduled_tasks", self.tools)
+        unified = source(SETTINGS / "UnifiedToolsSection.kt")
+        self.assertEqual(1, len(re.findall(r"\bScheduledTasksSection\s*\(", self.tools + unified)))
+        task_args = block(unified, "ScheduledTasksSection", "(", ")")
+        self.assertIn("createRequested = createTask", task_args)
+        self.assertIn("onCreateHandled = onTaskHandled", task_args)
+        self.assertIn("embedded = true", task_args)
+        self.assertIn("R.string.settings_scheduled_tasks", unified)
+        task = source(SETTINGS / "ScheduledTasksSection.kt")
+        request = block(task, "LaunchedEffect(createRequested)")
+        self.assertIn("showEditor = true", request)
+        self.assertEqual(1, request.count("onCreateHandled()"))
 
     def test_duplicate_mcp_page_route_is_removed_not_mcp_features(self):
         self.assertNotRegex(self.screen, r"SettingsSection\.Mcp\b")
@@ -207,8 +223,10 @@ class SettingsNavigationTest(unittest.TestCase):
                 self.assertIn(capability, self.tools)
         for capability in ("McpJsonImportSheet(", "McpJsonExportSheet(", "McpServerDialogHost("):
             self.assertIn(capability, combined)
+        self.assertIn("UnifiedToolsSection(", self.tools)
+        unified = function(source(SETTINGS / "UnifiedToolsSection.kt"), "UnifiedToolsSection")
         for capability in ("ScriptToolsSection(", "ToolsSection(", "permissionContent()"):
-            self.assertIn(capability, self.tools)
+            self.assertIn(capability, unified)
 
     def connector_origin(self):
         parents = block(self.screen, "val parentSection:")

@@ -21,46 +21,39 @@ import com.aharou.R
 import com.aharou.core.theme.Spacing
 import com.aharou.core.ui.AdaptiveModalBottomSheet
 import com.aharou.core.ui.AppTextField
-import com.aharou.feature.agent.domain.tool.custom.PracticalToolTemplates
 import com.aharou.feature.editor.presentation.EditorSettingsScreen
 import com.aharou.feature.settings.presentation.ToolboxMessage
 import com.aharou.feature.settings.presentation.ToolboxUiState
 import com.aharou.feature.settings.presentation.ToolboxViewModel
 
 @Composable
-internal fun ToolboxSection(viewModel: ToolboxViewModel = androidx.hilt.navigation.compose.hiltViewModel()) {
+internal fun ToolboxSection(
+    viewModel: ToolboxViewModel = androidx.hilt.navigation.compose.hiltViewModel(),
+    onOpenEditor: (() -> Unit)? = null,
+) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    var editor by rememberSaveable { mutableStateOf(false) }
-    BackHandler(enabled = editor) { editor = false }
-    if (editor) {
-        EditorSettingsScreen(onBack = { editor = false })
-    } else {
-        ToolboxScreen(state, viewModel, onEditor = { editor = true })
-    }
+    ToolboxScreen(state, viewModel, onOpenEditor = onOpenEditor)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ToolboxScreen(state: ToolboxUiState, viewModel: ToolboxViewModel, onEditor: () -> Unit) {
-    var chooser by rememberSaveable { mutableStateOf(false) }
-    var importing by rememberSaveable { mutableStateOf(false) }
+private fun ToolboxScreen(
+    state: ToolboxUiState, viewModel: ToolboxViewModel,
+    onOpenEditor: (() -> Unit)?,
+) {
     val clipboard = LocalClipboardManager.current
     val context = LocalContext.current
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(Spacing.lg),
+        Modifier.fillMaxWidth().imePadding().verticalScroll(rememberScrollState()).padding(Spacing.lg),
         verticalArrangement = Arrangement.spacedBy(Spacing.md),
     ) {
-        Text(stringResource(R.string.toolbox_intro), style = MaterialTheme.typography.bodySmall)
-        SettingsGroup {
-            SettingsRow(title = stringResource(R.string.toolbox_choose), subtitle = state.selected?.name, onClick = { chooser = true })
-            SettingsDivider()
-            SettingsRow(title = stringResource(R.string.toolbox_import), onClick = { importing = true })
-            SettingsDivider()
-            SettingsRow(title = stringResource(R.string.editor_settings), subtitle = stringResource(R.string.toolbox_editor_hint), onClick = onEditor)
-        }
+        Text(stringResource(R.string.tools_runner_hint), style = MaterialTheme.typography.bodySmall)
         val selected = state.selected
-        if (selected != null) {
+        if (selected != null && state.selectionReady) {
             SettingsGroupHeader(text = selected.name)
+            onOpenEditor?.let { edit ->
+                TextButton(onClick = edit) { Text(stringResource(R.string.tools_edit_definition)) }
+            }
             Text(selected.description, style = MaterialTheme.typography.bodySmall)
             selected.parameters.forEach { p ->
                 AppTextField(
@@ -80,14 +73,14 @@ private fun ToolboxScreen(state: ToolboxUiState, viewModel: ToolboxViewModel, on
                 Button(onClick = viewModel::run, enabled = !state.running && state.validation == null && state.preview.isNotBlank()) {
                     Text(stringResource(R.string.toolbox_run))
                 }
-                if (state.running) {
-                    TextButton(onClick = viewModel::cancel) { Text(stringResource(R.string.common_cancel)) }
-                }
-                TextButton(onClick = viewModel::saveSelected, enabled = !state.saving) { Text(stringResource(R.string.toolbox_save_template)) }
                 TextButton(onClick = viewModel::exportSelected) { Text(stringResource(R.string.toolbox_export)) }
             }
         }
-        if (state.running) LinearProgressIndicator(Modifier.fillMaxWidth())
+        if (!state.selectionReady) Text(stringResource(R.string.tools_history_hint))
+        if (state.running) {
+            LinearProgressIndicator(Modifier.fillMaxWidth())
+            TextButton(onClick = viewModel::cancel) { Text(stringResource(R.string.common_cancel)) }
+        }
         if (state.runRoot.isNotBlank()) Text(stringResource(R.string.toolbox_root, state.runRoot), style = MaterialTheme.typography.bodySmall)
         if (state.runRoot.isNotBlank() && !state.running) {
             Text(stringResource(R.string.toolbox_exit_code, state.exitCode?.toString() ?: stringResource(R.string.toolbox_unknown)))
@@ -122,27 +115,21 @@ private fun ToolboxScreen(state: ToolboxUiState, viewModel: ToolboxViewModel, on
             }
         }
     }
-    if (chooser) {
-        AdaptiveModalBottomSheet(onDismissRequest = { chooser = false }) {
-            Column(Modifier.imePadding().verticalScroll(rememberScrollState()).padding(Spacing.lg)) {
-                SettingsGroupHeader(text = stringResource(R.string.toolbox_saved_tools))
-                SettingsGroup {
-                    state.saved.forEach { tool ->
-                        SettingsRow(title = tool.name, subtitle = tool.description, onClick = { viewModel.select(tool); chooser = false })
-                    }
-                    SettingsRow(title = stringResource(R.string.toolbox_refresh), onClick = viewModel::refresh)
-                }
-                SettingsGroupHeader(text = stringResource(R.string.toolbox_templates))
-                SettingsGroup {
-                    PracticalToolTemplates.all.forEach { tool ->
-                        SettingsRow(title = tool.name, subtitle = tool.description, onClick = { viewModel.select(tool); chooser = false })
-                    }
-                }
-            }
-        }
-    }
-    if (importing) {
-        AdaptiveModalBottomSheet(onDismissRequest = { importing = false }) {
+ }
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun ToolImportSheet(
+    visible: Boolean,
+    viewModel: ToolboxViewModel,
+    onDismiss: () -> Unit,
+) {
+    val state by viewModel.state.collectAsStateWithLifecycle()
+    val savingNow by rememberUpdatedState(state.saving)
+    if (visible) {
+        AdaptiveModalBottomSheet(onDismissRequest = { if (!state.saving) onDismiss() },
+            sheetGesturesEnabled = !state.saving,
+            sheetState = rememberModalBottomSheetState(confirmValueChange = { !savingNow })) {
             Column(
                 Modifier.imePadding().verticalScroll(rememberScrollState()).padding(Spacing.lg),
                 verticalArrangement = Arrangement.spacedBy(Spacing.md),

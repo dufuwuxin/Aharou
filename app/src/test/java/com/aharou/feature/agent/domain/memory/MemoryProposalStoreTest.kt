@@ -49,6 +49,31 @@ class MemoryProposalStoreTest {
         assertTrue(b.file.readText().endsWith("changed"))
     }
 
+    @Test fun approvedRewritePreservesLoadingFolderAndBoundSession() {
+        val original = memory("temporary")
+        val configured = original.copy(
+            contextKind = com.aharou.feature.agent.domain.context.ContextKind.INSTRUCTION,
+            contextLoad = com.aharou.feature.agent.domain.context.ContextLoad.OFF,
+            contextCategory = com.aharou.feature.agent.domain.context.ContextCategory.TEMPORARY,
+            contextFolder = "private", contextSessionId = "session-one"
+        )
+        original.file!!.writeText(MemoryParser.format(configured))
+        val input = MemoryParser.parse(original.file, original.scope)!!
+        val store = MemoryProposalStore()
+        val draft = store.propose(listOf(input), input.name, "new-summary", input.content, input.type, false)!!
+        assertEquals(MemoryProposalOutcome.APPLIED, store.approve(draft.id, draft.revision))
+        val saved = MemoryParser.parse(original.file, original.scope)!!
+        assertEquals(input.contextKind, saved.contextKind)
+        assertEquals(input.contextLoad, saved.contextLoad)
+        assertEquals(input.contextCategory, saved.contextCategory)
+        assertEquals(input.contextFolder, saved.contextFolder)
+        assertEquals(input.contextSessionId, saved.contextSessionId)
+        assertEquals("new-summary", saved.description)
+        val reclassified = MemoryParser.parse(original.file, original.scope)!!
+        original.file.writeText(MemoryParser.format(reclassified.copy(type = MemoryType.WORKFLOW)))
+        assertEquals("session-one", MemoryParser.parse(original.file, original.scope)!!.contextSessionId)
+    }
+
     @Test fun wrongDraftRevisionDoesNotWrite() {
         val a = memory("one")
         val store = MemoryProposalStore()

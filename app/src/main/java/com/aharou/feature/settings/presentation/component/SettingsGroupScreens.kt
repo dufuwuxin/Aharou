@@ -70,8 +70,8 @@ internal fun SettingsAharouRows(onOpen: (SettingsSection) -> Unit) {
         SettingsGroup {
             SettingsRow(
                 icon = FeatherIcons.Smile,
-                title = stringResource(SettingsSection.Soul.titleRes),
-                onClick = { onOpen(SettingsSection.Soul) }
+                title = stringResource(R.string.memory_settings_title),
+                onClick = { onOpen(SettingsSection.Memory) }
             )
             SettingsDivider()
             SettingsRow(
@@ -109,11 +109,6 @@ private fun rulesSummary(state: RulesUiState): String {
 
 @Composable
 internal fun SettingsAiGroupScreen(onOpen: (SettingsSection) -> Unit) {
-    // 入口行直接给字数摘要：不用点进去就能看出规则配没配（对齐简云的做法）
-    val rulesViewModel: RulesViewModel = hiltViewModel()
-    val rulesState by rulesViewModel.state.collectAsStateWithLifecycle()
-    // 配置页：只展用户直接可操作的子页面入口，不再有「AI 配置」分组标题。
-    // 规则与记忆、工具和提示词统一归配置页。
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -138,6 +133,7 @@ internal fun SettingsAiGroupScreen(onOpen: (SettingsSection) -> Unit) {
             SettingsRow(
                 icon = FeatherIcons.Smile,
                 title = stringResource(R.string.memory_settings_title),
+                subtitle = stringResource(R.string.context_navigation_summary),
                 onClick = { onOpen(SettingsSection.Memory) }
             )
             SettingsDivider()
@@ -157,29 +153,11 @@ internal fun SettingsAiGroupScreen(onOpen: (SettingsSection) -> Unit) {
             )
             SettingsDivider()
             SettingsRow(
-                icon = FeatherIcons.BookOpen,
-                title = stringResource(R.string.settings_knowledge_base),
-                onClick = { onOpen(SettingsSection.Knowledge) }
-            )
-            SettingsDivider()
-            SettingsRow(
                 icon = FeatherIcons.Tool,
                 title = stringResource(SettingsSection.Tools.titleRes),
                 onClick = { onOpen(SettingsSection.Tools) }
             )
-            SettingsDivider()
-            SettingsRow(
-                icon = FeatherIcons.FileText,
-                title = stringResource(SettingsSection.Prompts.titleRes),
-                onClick = { onOpen(SettingsSection.Prompts) }
-            )
-            SettingsDivider()
-            SettingsRow(
-                icon = FeatherIcons.FileText,
-                title = stringResource(SettingsSection.Rules.titleRes),
-                subtitle = rulesSummary(rulesState),
-                onClick = { onOpen(SettingsSection.Rules) }
-            )
+
         }
         SettingsGroup {
             SettingsRow(icon = FeatherIcons.Smartphone, title = stringResource(SettingsSection.WeixinBot.titleRes), onClick = { onOpen(SettingsSection.WeixinBot) })

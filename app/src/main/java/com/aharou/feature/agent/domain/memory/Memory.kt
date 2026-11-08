@@ -1,5 +1,6 @@
 package com.aharou.feature.agent.domain.memory
 
+import com.aharou.feature.agent.domain.context.*
 import java.io.File
 
 /**
@@ -32,7 +33,13 @@ data class Memory(
      * 设置页仅在明确选择「确认此条并保存」后清除；普通保存不代表确认。
      */
     val pending: Boolean = false,
-    val version: String = ""
+    val version: String = "",
+    val contextKind: ContextKind = ContextKind.REFERENCE,
+    val contextLoad: ContextLoad = ContextLoad.INDEX,
+    val contextCategory: ContextCategory = ContextCategory.LONG_TERM,
+    val contextFolder: String = "",
+    val contextSessionId: String? = null,
+    val hasContextMetadata: Boolean = true
 )
 
 enum class MemoryScope {

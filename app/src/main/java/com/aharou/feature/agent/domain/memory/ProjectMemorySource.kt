@@ -1,5 +1,6 @@
 package com.aharou.feature.agent.domain.memory
 
+import com.aharou.feature.agent.domain.context.*
 import com.aharou.feature.agent.domain.container.ContainerInstaller
 import com.aharou.feature.settings.data.repository.ExecutionMode
 import com.aharou.feature.settings.data.repository.ExecutionModeHolder
@@ -62,14 +63,19 @@ class ProjectMemorySource(
 
     override fun writeMemory(
         name: String, description: String, content: String, type: MemoryType?,
-        expiresAt: Long?, pending: Boolean?, keywords: List<String>?, expectedVersion: String?
+        expiresAt: Long?, pending: Boolean?, keywords: List<String>?, expectedVersion: String?,
+        contextKind: ContextKind?,
+        contextLoad: ContextLoad?,
+        contextCategory: ContextCategory?,
+        contextFolder: String?,
+        contextSessionId: String?
     ): MemoryWriteResult {
         if (projectRoot.isBlank()) {
             return MemoryWriteResult.Failure("NO_WORKSPACE", "当前未选择工作区，无法保存项目级记忆")
         }
         return MemoryFileStorage.saveChecked(
             memoryRoot, MemoryScope.PROJECT, name, description, content, type, expiresAt, pending,
-            keywords, expectedVersion
+            keywords, expectedVersion, contextKind, contextLoad, contextCategory, contextFolder, contextSessionId
         )
     }
 

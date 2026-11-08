@@ -59,6 +59,28 @@ class ProjectTaskViewModelTest {
         Dispatchers.resetMain()
     }
 
+    @Test fun deletionUsesProjectWorkspaceAndKeepsConversations() = runTest(dispatcher) {
+        val project = ProjectPlan(id = "owned", workspace = "/owned", title = "p", requirements = "r")
+        (repository.snapshots as MutableStateFlow<Map<String, ProjectTaskSnapshot>>).value = mapOf("/owned" to ProjectTaskSnapshot(projects = listOf(project)))
+        coEvery { repository.deleteProject("owned", "/owned") } returns true
+        viewModel.workspace("/other"); runCurrent()
+        viewModel.deleteProject("owned"); runCurrent()
+        coVerify(exactly = 1) { repository.deleteProject("owned", "/owned") }
+        coVerify(exactly = 0) { repository.deleteProject("owned", "/other") }
+    }
+
+    @Test fun deletionRejectsRunningProjectWithoutCancellingIt() = runTest(dispatcher) {
+        val project = ProjectPlan(id = "p", workspace = "/first", title = "p", requirements = "r")
+        (repository.snapshots as MutableStateFlow<Map<String, ProjectTaskSnapshot>>).value = mapOf("/first" to ProjectTaskSnapshot(projects = listOf(project)))
+        val finish = kotlinx.coroutines.CompletableDeferred<Unit>()
+        coEvery { workflow.run("p", "/first") } coAnswers { finish.await() }
+        viewModel.workspace("/first"); runCurrent(); viewModel.startProject("p"); runCurrent()
+        viewModel.deleteProject("p"); runCurrent()
+        coVerify(exactly = 0) { repository.deleteProject(any(), any()) }
+        org.junit.Assert.assertTrue(flows.state.value.projects.any { it.projectId == "p" })
+        finish.complete(Unit); runCurrent()
+    }
+
     @Test fun oneProjectStartIsIdempotentAndDoesNotFollowWorkspaceSwitch() = runTest(dispatcher) {
         val finish = kotlinx.coroutines.CompletableDeferred<Unit>()
         coEvery { workflow.run("p", "/first") } coAnswers { finish.await() }

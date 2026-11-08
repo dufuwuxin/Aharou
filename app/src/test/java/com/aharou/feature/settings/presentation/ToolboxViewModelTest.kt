@@ -170,4 +170,84 @@ class ToolboxViewModelTest {
         }
     }
 
+    @Test fun duplicateNewAndTemplateCreationNeverUpsertsOriginal() = runTest(dispatcher) {
+        var original: CustomToolDefinition? = null
+        every { registry.hasTool(any()) } returns false
+        every { store.snapshotCustomTools() } answers { listOfNotNull(original) }
+        coEvery { store.createCustomTool(any()) } coAnswers {
+            if (original != null) false else { original = firstArg(); true }
+        }
+        val vm = ToolsViewModel(store, registry)
+        vm.startCreate()
+        vm.saveCustomTool("git_status", "original", "echo original", emptyList(), 60,
+            ToolInjectionMode.EVERY_ROUND, emptyList())
+        vm.state.first { !it.saving }
+        val before = original
+        vm.startTemplate("git_status")
+        vm.saveCustomTool("git_status", "replacement", "echo replacement", emptyList(), 60,
+            ToolInjectionMode.EVERY_ROUND, emptyList())
+        vm.state.first { !it.saving }
+        assertEquals(before, original)
+        assertEquals(ToolsMessage.NAME_CONFLICT, vm.state.value.message)
+        assertNotNull(vm.state.value.editor)
+        coVerify(exactly = 2) { store.createCustomTool(any()) }
+        coVerify(exactly = 0) { store.saveCustomTool(any()) }
+    }
+
+    @Test fun draftReopenedAsNewPreservesContentAndCannotOverwriteSavedTool() = runTest(dispatcher) {
+        val existing = CustomToolDefinition("existing", command = "echo original")
+        val draft = CustomToolDefinition("draft", description = "draft content", command = "echo draft")
+        every { registry.hasTool(any()) } returns false
+        every { store.snapshotCustomTools() } returns listOf(existing)
+        coEvery { store.createCustomTool(any()) } returns false
+        val vm = ToolsViewModel(store, registry)
+        vm.startDraft(draft)
+        assertEquals(draft, vm.state.value.editor?.template)
+        assertNull(vm.state.value.editor?.name)
+        vm.saveCustomTool(existing.name, draft.description, draft.command, draft.parameters, 60,
+            ToolInjectionMode.EVERY_ROUND, emptyList())
+        vm.state.first { !it.saving }
+        assertEquals(ToolsMessage.NAME_CONFLICT, vm.state.value.message)
+        assertEquals(draft, vm.state.value.editor?.template)
+        assertEquals(existing, store.snapshotCustomTools().single())
+        coVerify(exactly = 1) { store.createCustomTool(any()) }
+        coVerify(exactly = 0) { store.saveCustomTool(any()) }
+    }
+
+    @Test fun editingUsesUpsertRatherThanCreateOnly() = runTest(dispatcher) {
+        coEvery { store.saveCustomTool(any()) } returns true
+        val vm = ToolsViewModel(store, registry)
+        vm.openEditor("existing")
+        vm.saveCustomTool("existing", "updated", "echo new", emptyList(), 60,
+            ToolInjectionMode.EVERY_ROUND, emptyList())
+        vm.state.first { !it.saving }
+        coVerify(exactly = 1) { store.saveCustomTool(any()) }
+        coVerify(exactly = 0) { store.createCustomTool(any()) }
+    }
+
+    @Test fun historyRetainsOutputButCannotRunOrExportUntilFreshSelection() = runTest(dispatcher) {
+        coEvery { engine.runCommandSyncWithExit(any(), any(), any()) } returns CommandResult("history", 7, true)
+        val vm = vm()
+        vm.select(CustomToolDefinition("example", command = "echo old"))
+        vm.run()
+        vm.state.first { !it.running }
+        vm.exportSelected()
+        val completed = vm.state.value
+        vm.invalidateSelection()
+        vm.run()
+        vm.exportSelected()
+        assertEquals(completed.output, vm.state.value.output)
+        assertEquals(completed.exitCode, vm.state.value.exitCode)
+        assertEquals(completed.truncated, vm.state.value.truncated)
+        assertEquals(completed.runRoot, vm.state.value.runRoot)
+        assertEquals("", vm.state.value.exportText)
+        assertFalse(vm.state.value.selectionReady)
+        coVerify(exactly = 1) { engine.runCommandSyncWithExit("echo old", any(), any()) }
+        vm.select(CustomToolDefinition("example", command = "echo new"))
+        vm.run()
+        vm.state.first { !it.running }
+        coVerify(exactly = 1) { engine.runCommandSyncWithExit("echo new", any(), any()) }
+        coVerify(exactly = 0) { store.createCustomTool(any()) }
+    }
+
 }

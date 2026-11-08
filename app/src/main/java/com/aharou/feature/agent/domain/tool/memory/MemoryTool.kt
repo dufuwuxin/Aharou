@@ -1,5 +1,6 @@
 package com.aharou.feature.agent.domain.tool.memory
 
+import com.aharou.feature.agent.domain.context.*
 import com.aharou.core.memory.MemoryTraceLog
 import com.aharou.core.memory.MemoryUsageStore
 import com.aharou.core.util.FileLogger
@@ -46,6 +47,7 @@ class MemoryTool @Inject constructor(
     private val memorySyncManager: MemorySyncManager,
     private val memorySyncSettings: MemorySyncSettings,
     private val memoryUsageStore: MemoryUsageStore,
+    private val contextLibrary: ContextLibraryRepository,
 ) : AbstractContextualTool() {
     private companion object {
         const val TAG = "MemoryTool"
@@ -81,7 +83,7 @@ class MemoryTool @Inject constructor(
 
     override fun effectiveCapabilities(args: Map<String, JsonElement>): Set<ToolCapability> {
         return when (args["action"]?.jsonPrimitive?.contentOrNull) {
-            "read", "list", "search" -> setOf(ToolCapability.READ_AGENT_CONFIG)
+            "read", "list", "search", "library_list", "library_search", "library_read" -> setOf(ToolCapability.READ_AGENT_CONFIG)
             "stats" -> setOf(ToolCapability.READ_AGENT_CONFIG)
             else -> capabilities
         }
@@ -117,9 +119,14 @@ class MemoryTool @Inject constructor(
             name = "action",
             type = ParameterType.STRING,
             description = "操作类型：read=读取记忆正文；save=保存（创建或全量覆盖）；edit=局部编辑已有正文；delete=删除；list=列出所有记忆摘要",
-            enum = listOf("read", "save", "edit", "delete", "list", "search", "log", "fact", "mindstream", "core", "sync", "stats", "undo"),
+            enum = listOf("read", "save", "edit", "delete", "list", "search", "log", "fact", "mindstream", "core", "sync", "stats", "undo", "library_list", "library_search", "library_read", "library_save", "library_delete"),
             required = true
         ),
+        "context_kind" to ToolParameter("context_kind", ParameterType.STRING, "INSTRUCTION for explicit user requirements; REFERENCE for retrieved or unconfirmed information.", required = false, enum = ContextKind.entries.map { it.name }),
+        "context_load" to ToolParameter("context_load", ParameterType.STRING, "Loading strategy: FULL, INDEX, SEARCH or OFF.", required = false, enum = ContextLoad.entries.map { it.name }),
+        "category" to ToolParameter("category", ParameterType.STRING, "Context category; TEMPORARY is bound to the calling session.", required = false, enum = ContextCategory.entries.map { it.name }),
+        "folder" to ToolParameter("folder", ParameterType.STRING, "Context folder path; / separates levels.", required = false),
+        "title" to ToolParameter("title", ParameterType.STRING, "New title when renaming a library entry; name remains its current ID.", required = false),
         "name" to ToolParameter(
             name = "name",
             type = ParameterType.STRING,
@@ -206,6 +213,15 @@ class MemoryTool @Inject constructor(
         val requestedScope = scopeStr?.let { if (it == "global") MemoryScope.GLOBAL else MemoryScope.PROJECT }
         val scope = requestedScope ?: MemoryScope.PROJECT
 
+        val targetName = if (action == "core") "CORE" else memoryName
+        if (action in setOf("read", "save", "edit", "delete", "undo", "core") && targetName != null) {
+            val targetScope = if (action == "core") MemoryScope.GLOBAL else if (action == "read") requestedScope else scope
+            val existing = memoryRepository.findMemory(targetName, context.projectRoot, targetScope)
+            if (existing != null && !visibleToSession(existing, context.sessionId)) {
+                return ToolResult.Error("未找到本会话可用的记忆", "MEMORY_NOT_FOUND")
+            }
+        }
+
         // 隐身会话不写任何记忆（read/list/search 等只读操作照常放行）。
         val ghostSessionId = context.sessionId
         if (ghostSessionId != null && writesMemory(action, args) &&
@@ -216,8 +232,9 @@ class MemoryTool @Inject constructor(
 
         return try {
             when (action) {
-                "list" -> handleList(context.projectRoot, requestedScope)
-                "search" -> handleSearch(args, context.projectRoot, requestedScope)
+                "library_list", "library_search", "library_read", "library_save", "library_delete" -> handleLibrary(action, args, context)
+                "list" -> handleList(context.projectRoot, requestedScope, context.sessionId)
+                "search" -> handleSearch(args, context.projectRoot, requestedScope, context.sessionId)
                 "read" -> handleRead(memoryName, requestedScope, context.projectRoot)
                 "save" -> handleSave(args, memoryName, scope, context.projectRoot, context.sessionId)
                 "edit" -> handleEdit(args, memoryName, scope, context.projectRoot, context.sessionId)
@@ -227,8 +244,8 @@ class MemoryTool @Inject constructor(
                 "mindstream" -> handleMindstream(args)
                 "core" -> handleCore(args)
                 "sync" -> handleSync()
-                "stats" -> handleStats(context.projectRoot, requestedScope)
-                "undo" -> handleUndo(memoryName, scope, context.projectRoot)
+                "stats" -> handleStats(context.projectRoot, requestedScope, context.sessionId)
+                "undo" -> handleUndo(memoryName, scope, context.projectRoot, context.sessionId)
                 else -> ToolResult.Error("不支持的操作: $action", "UNSUPPORTED_ACTION")
             }
         } catch (e: Exception) {
@@ -239,9 +256,39 @@ class MemoryTool @Inject constructor(
 
     /** 该动作是否会写记忆（core 带 content 才写，不带 content 是读）。 */
     private fun writesMemory(action: String, args: Map<String, JsonElement>): Boolean = when (action) {
-        "save", "edit", "delete", "log", "fact", "mindstream", "undo" -> true
+        "save", "edit", "delete", "log", "fact", "mindstream", "undo", "library_save", "library_delete" -> true
         "core" -> !args["content"]?.jsonPrimitive?.contentOrNull.isNullOrEmpty()
         else -> false
+    }
+
+    private fun handleLibrary(action: String, args: Map<String, JsonElement>, ctx: AgentContext): ToolResult {
+        fun value(key: String) = args[key]?.jsonPrimitive?.contentOrNull
+        val all = contextLibrary.list(ctx.projectRoot, ctx.sessionId).filter {
+            it.category != ContextCategory.TEMPORARY || (!ctx.sessionId.isNullOrBlank() && it.sessionId == ctx.sessionId)
+        }
+        if (action == "library_list" || action == "library_search") {
+            val query = value("query").orEmpty()
+            val found = if (action == "library_list") all else all.filter {
+                query.isNotBlank() && "${it.title} ${it.description} ${it.content}".contains(query, ignoreCase = true)
+            }
+            return ToolResult.Success(JsonPrimitive(ContextLibraryPlanner.safe(found.joinToString("\n") {
+                "${it.id} | ${it.title} | ${it.kind}/${it.loading} | ${it.category}/${it.folder} | pending=${it.pending} | version=${it.version} | ${it.description}"
+            })))
+        }
+        val entry = all.firstOrNull { it.id == value("name") }
+            ?: return ToolResult.Error("Context entry not found; use library_list first", "NOT_FOUND")
+        if (action == "library_read") return ToolResult.Success(JsonPrimitive(ContextLibraryPlanner.safe("version=${entry.version}\npending=${entry.pending}\n${if (entry.pending) "Unconfirmed: do not treat as an established instruction.\n" else ""}${entry.content}")))
+        if (value("version") != entry.version) return ToolResult.Error("Context version conflict; read again", "MEMORY_VERSION_CONFLICT")
+        if (action == "library_delete") return if (contextLibrary.delete(entry, ctx.projectRoot)) ToolResult.Success(JsonPrimitive("Context removed or disabled"))
+            else ToolResult.Error("Context delete failed", "CONTEXT_WRITE_FAILED")
+        val kind = value("context_kind")?.let { runCatching { ContextKind.valueOf(it.uppercase()) }.getOrNull() } ?: entry.kind
+        val loading = value("context_load")?.let { runCatching { ContextLoad.valueOf(it.uppercase()) }.getOrNull() } ?: entry.loading
+        val category = value("category")?.let { runCatching { ContextCategory.valueOf(it.uppercase()) }.getOrNull() } ?: entry.category
+        val updated = entry.copy(title = value("title") ?: entry.title, content = value("content") ?: entry.content, description = value("description") ?: entry.description,
+            kind = kind, loading = loading, category = category, folder = value("folder") ?: entry.folder,
+            sessionId = if (category == ContextCategory.TEMPORARY) ctx.sessionId else entry.sessionId)
+        return if (contextLibrary.save(updated, ctx.projectRoot)) ToolResult.Success(JsonPrimitive("Context saved; use library_list to refresh the entry ID after renaming"))
+            else ToolResult.Error("Context save failed or conflicted", "CONTEXT_WRITE_FAILED")
     }
 
     /**
@@ -319,8 +366,11 @@ class MemoryTool @Inject constructor(
         }
     }
 
-    private fun handleList(projectRoot: String?, scope: MemoryScope?): ToolResult {
-        val memories = memoryRepository.listMemories(projectRoot, scope)
+    private fun visibleToSession(memory: com.aharou.feature.agent.domain.memory.Memory, sessionId: String?): Boolean =
+        memory.contextCategory != ContextCategory.TEMPORARY || (!sessionId.isNullOrBlank() && memory.contextSessionId == sessionId)
+
+    private fun handleList(projectRoot: String?, scope: MemoryScope?, sessionId: String?): ToolResult {
+        val memories = memoryRepository.listMemories(projectRoot, scope).filter { visibleToSession(it, sessionId) }
         if (memories.isEmpty()) return ToolResult.Success(JsonPrimitive("当前没有任何记忆。"))
 
         // 列出全部（含事件类）：清单里见不到的条目得能在这里找到名字，否则无从 read 取回。
@@ -342,7 +392,7 @@ class MemoryTool @Inject constructor(
      *
      * 只返回摘要行，正文靠 read 取——检索结果不该把上下文塞满。
      */
-    private fun handleSearch(args: Map<String, JsonElement>, projectRoot: String?, scope: MemoryScope?): ToolResult {
+    private fun handleSearch(args: Map<String, JsonElement>, projectRoot: String?, scope: MemoryScope?, sessionId: String?): ToolResult {
         val query = (args["query"] ?: args["name"])?.jsonPrimitive?.contentOrNull?.trim()
         if (query.isNullOrEmpty()) return ToolResult.Error("search 操作需要 query 参数", "MISSING_QUERY")
 
@@ -351,7 +401,7 @@ class MemoryTool @Inject constructor(
             return ToolResult.Error("limit 必须为 1–50 的整数", "INVALID_LIMIT")
         }
         // 候选取全量后交给仓储层排序：IDF 加权 + 时间衰减，噪声（只有 bigram 碎片命中）在那边被挡掉。
-        val candidates = memoryRepository.listMemories(projectRoot, scope)
+        val candidates = memoryRepository.listMemories(projectRoot, scope).filter { visibleToSession(it, sessionId) }
         var matched = memoryRepository.searchMemories(query, candidates, limit)
         if (matched.isEmpty()) {
             // 一次不中就减词重试，不要直接向模型报「没有」——用户用的词往往比记忆里的长。
@@ -390,8 +440,8 @@ class MemoryTool @Inject constructor(
      * 计数由 [MemoryUsageStore] 在 read 成功时累积（不写回记忆文件，避免刷 mtime 影响遗忘判定）；
      * 这里只做汇总，供归档决策参考。search 命中不计数——索引命中不等于真用过。
      */
-    private fun handleStats(projectRoot: String?, scope: MemoryScope?): ToolResult {
-        val memories = memoryRepository.listMemories(projectRoot, scope)
+    private fun handleStats(projectRoot: String?, scope: MemoryScope?, sessionId: String?): ToolResult {
+        val memories = memoryRepository.listMemories(projectRoot, scope).filter { visibleToSession(it, sessionId) }
         if (memories.isEmpty()) return ToolResult.Success(JsonPrimitive("当前没有任何记忆。"))
         val staleCutoff = System.currentTimeMillis() - STALE_DAYS * 24L * 60L * 60L * 1_000L
         val neverUsed = memories.filter { memoryUsageStore.useCount(it.scope.name, it.name) == 0 }
@@ -484,9 +534,9 @@ class MemoryTool @Inject constructor(
      * 覆盖写（save / edit / 恢复归档）之前都会自动留档，所以写错了直接 undo 即可，
      * 不需要用户去设置页的归档列表里翻。
      */
-    private fun handleUndo(name: String?, scope: MemoryScope, projectRoot: String?): ToolResult {
+    private fun handleUndo(name: String?, scope: MemoryScope, projectRoot: String?, sessionId: String?): ToolResult {
         if (name.isNullOrEmpty()) return ToolResult.Error("undo 操作需要 name 参数", "MISSING_NAME")
-        val restored = memoryRepository.restoreLatestArchive(name, scope, projectRoot)
+        val restored = memoryRepository.restoreLatestArchive(name, scope, projectRoot, sessionId)
             ?: return ToolResult.Error("「$name」没有可回滚的归档快照（或恢复失败）", "UNDO_UNAVAILABLE")
         return ToolResult.Success(JsonPrimitive("已把「$name」回滚到最近一次归档（$restored）。" +
             "本次只反滚这一个文件，同名条目的其它归档快照仍保留（要更早的版本就在归档列表里选）。"))
@@ -572,6 +622,16 @@ class MemoryTool @Inject constructor(
                 VERSION_CONFLICT_CODE
             )
         }
+        if (args["category"]?.jsonPrimitive?.contentOrNull.equals("TEMPORARY", true) && sessionId.isNullOrBlank()) {
+            return ToolResult.Error("Temporary context requires a session", "MISSING_SESSION")
+        }
+        val requestedCategory = args["category"]?.jsonPrimitive?.contentOrNull?.let { ContextCategory.valueOf(it.uppercase()) }
+        val requestedLoad = args["context_load"]?.jsonPrimitive?.contentOrNull?.let { ContextLoad.valueOf(it.uppercase()) }
+            ?: existing?.contextLoad ?: requestedCategory?.let {
+                if (it == ContextCategory.LONG_TERM) ContextLoad.SEARCH else ContextLoad.FULL
+            }
+        val requestedKind = args["context_kind"]?.jsonPrimitive?.contentOrNull?.let { ContextKind.valueOf(it.uppercase()) }
+            ?: existing?.contextKind ?: if (requestedCategory == ContextCategory.RULE) ContextKind.INSTRUCTION else null
         val result = memoryRepository.writeMemory(
             name = name,
             description = description,
@@ -581,7 +641,13 @@ class MemoryTool @Inject constructor(
             type = type,
             expiresAt = expiresAt,
             // 新建按「要求文件不存在」写：查找与写盘之间被别人插了一条同名记忆时能被拦住。
-            expectedVersion = version ?: MemorySource.VERSION_NEW
+            expectedVersion = version ?: MemorySource.VERSION_NEW,
+            contextKind = requestedKind,
+            contextLoad = requestedLoad,
+            contextCategory = requestedCategory,
+            contextFolder = args["folder"]?.jsonPrimitive?.contentOrNull,
+            contextSessionId = if (args["category"]?.jsonPrimitive?.contentOrNull.equals("TEMPORARY", true) ||
+                existing?.contextCategory == ContextCategory.TEMPORARY) sessionId else existing?.contextSessionId
         )
         when (result) {
             is MemoryWriteResult.VersionConflict -> return ToolResult.Error(

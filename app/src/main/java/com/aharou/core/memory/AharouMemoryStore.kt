@@ -363,7 +363,12 @@ class AharouMemoryStore @Inject constructor(
         synchronized(FILE_LOCK) {
             runCatching {
                 dir.mkdirs()
-                File(dir, "CORE.md").writeTextSafely(text, TAG)
+                val target = File(dir, "CORE.md")
+                val existing = com.aharou.feature.agent.domain.memory.MemoryParser.parse(target, com.aharou.feature.agent.domain.memory.MemoryScope.GLOBAL)
+                val output = if (existing != null && target.readText().trimStart().startsWith("---")) {
+                    com.aharou.feature.agent.domain.memory.MemoryParser.format(existing.copy(content = text))
+                } else text
+                target.writeTextSafely(output, TAG)
             }.onFailure { FileLogger.w(TAG, "writeCore failed: ${it.message}") }
         }
     }
@@ -372,13 +377,13 @@ class AharouMemoryStore @Inject constructor(
      * 组装注入系统提示词的记忆段：核心档案 + 全局记忆 + 今天日志的尾巴。
      * 全部为空时返回 null（不注入任何东西）。
      */
-    fun buildPromptSection(): String? {
+    fun buildPromptSection(archiveText: (String, String) -> String? = { _, text -> text }): String? {
         if (!isMemoryEnabled()) return null
         ensureExists()
         val sb = StringBuilder()
-        val core = File(dir, "CORE.md").takeIf { it.exists() }?.readText()?.trim()?.let(::sanitizeForPrompt)?.let(::capArchive)
+        val core = File(dir, "CORE.md").takeIf { it.exists() }?.readText()?.let { archiveText("CORE", it) }?.trim()?.let(::sanitizeForPrompt)?.let(::capArchive)
         if (!core.isNullOrEmpty()) sb.append("### 核心档案\n").append(core).append("\n")
-        val global = File(dir, "GLOBAL.md").takeIf { it.exists() }?.readText()?.trim()?.let(::sanitizeForPrompt)?.let(::capArchive)
+        val global = File(dir, "GLOBAL.md").takeIf { it.exists() }?.readText()?.let { archiveText("GLOBAL", it) }?.trim()?.let(::sanitizeForPrompt)?.let(::capArchive)
         if (!global.isNullOrEmpty()) sb.append("\n### 全局记忆\n").append(global).append("\n")
         val log = runCatching { dailyLog() }.getOrNull()?.trim()?.let(::sanitizeForPrompt)
         if (!log.isNullOrEmpty()) {

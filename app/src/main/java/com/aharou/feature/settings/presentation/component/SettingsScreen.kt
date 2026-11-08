@@ -68,8 +68,6 @@ import com.aharou.core.theme.semanticColors
 import com.aharou.core.ui.pageEnter
 import com.aharou.core.ui.pageExit
 import com.aharou.R
-import com.aharou.feature.agent.domain.prompt.PromptFragment
-import com.aharou.feature.agent.domain.prompt.PromptFragmentSource
 import com.aharou.feature.agent.presentation.component.MarkdownContent
 import com.aharou.feature.agent.presentation.component.MarkdownRenderCache
 import com.aharou.feature.backup.presentation.BackupSection
@@ -77,7 +75,6 @@ import com.aharou.feature.connectors.presentation.ConnectorsSection
 import com.aharou.feature.remotedevice.presentation.RemoteDeviceSection
 import com.aharou.feature.vault.presentation.VaultSection
 import com.aharou.feature.settings.domain.model.AIProviderConfig
-import com.aharou.feature.settings.presentation.PromptsViewModel
 import com.aharou.feature.settings.presentation.SettingsViewModel
 import com.aharou.feature.settings.presentation.ShizukuViewModel
 import com.aharou.feature.settings.presentation.SkillExportState
@@ -122,7 +119,6 @@ private val SettingsTwoPaneMinWidth = 840.dp
 /** 设置页内部二级菜单分区。Menu 为首页菜单，其余为各自的二级页。 */
 enum class SettingsSection(@param:StringRes val titleRes: Int) {
     Menu(R.string.settings_title),
-    Soul(R.string.soul_settings_title),
     ConfigAudit(R.string.config_audit_title),
     ShadowScreen(R.string.vd_settings_title),
     EnvVars(R.string.envvars_title),
@@ -141,17 +137,12 @@ enum class SettingsSection(@param:StringRes val titleRes: Int) {
     // 详情页与市场页共用一个标题：层级靠返回箭头体现
     SkillMarketDetail(R.string.skills_market),
     Plugins(R.string.settings_plugins),
-    Knowledge(R.string.settings_knowledge_base),
     SubAgents(R.string.settings_subagents),
     SubAgentDetail(R.string.settings_subagents),
     SubAgentEditor(R.string.settings_subagents),
     Teams(R.string.settings_teams),
     Tools(R.string.settings_tools),
     Experiments(R.string.settings_experiments),
-    Prompts(R.string.prompts_title),
-    Rules(R.string.rules_title),
-    PromptDetail(R.string.prompts_title),
-    PromptEditor(R.string.prompts_title),
     Container(R.string.settings_container),
     ContainerDownloads(R.string.container_download_image),
     ContainerSources(R.string.container_sources_title),
@@ -178,15 +169,13 @@ private fun SettingsSection.depth(): Int = when (this) {
     // 技能/子代理编辑页既可从列表(1) 进也可从详情页(2) 进，必须比详情页更深：
     // 同深度会让「编辑 → 详情」也被当成前进，返回时页面从右侧滑入，方向是反的。
     SettingsSection.SkillEditor,
-    SettingsSection.SubAgentEditor,
-    SettingsSection.PromptEditor -> 3
+    SettingsSection.SubAgentEditor -> 3
     SettingsSection.ProviderEditor,
     SettingsSection.SkillDetail,
     SettingsSection.SkillMarketDetail,
     SettingsSection.SubAgentDetail,
     SettingsSection.Teams,
     SettingsSection.Experiments,
-    SettingsSection.PromptDetail,
     SettingsSection.ContainerDownloads, SettingsSection.ContainerSources,
     SettingsSection.Log -> 2
     else -> 1
@@ -275,10 +264,21 @@ fun SettingsScreen(
     var showTerminalSettingsSheet by remember { mutableStateOf(false) }
 
     val context = LocalContext.current
+    val backDispatcher = androidx.activity.compose.LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
 
 
     // 单组页（如「配置」只展 AI 组）直接落到该组内容页，不再多一层可点的分组标题行；全量设置页从菜单开始。
-    var section by remember { mutableStateOf(if (menuGroups.size == 1) menuGroups.first() else SettingsSection.Menu) }
+    var sectionHistory by rememberSaveable {
+        mutableStateOf(listOf(if (menuGroups.size == 1) menuGroups.first() else SettingsSection.Menu))
+    }
+    var section by remember {
+        object : kotlin.properties.ReadWriteProperty<Any?, SettingsSection> {
+            override fun getValue(thisRef: Any?, property: kotlin.reflect.KProperty<*>): SettingsSection = sectionHistory.last()
+            override fun setValue(thisRef: Any?, property: kotlin.reflect.KProperty<*>, value: SettingsSection) {
+                sectionHistory = com.aharou.feature.settings.presentation.settingsNavigationPath(sectionHistory, value)
+            }
+        }
+    }
     // 单组页的「主页」= 该组：组内子页返回一律回这个组，不落到其它组（全量设置页 configHome=null，行为不变）。
     val configHome = if (menuGroups.size == 1) menuGroups.first() else null
     // 市场列表的滚动位置：放在这一层，进技能详情页再返回时不会跳回第一条
@@ -373,11 +373,6 @@ fun SettingsScreen(
     val subAgentMarkdownCache = remember { MarkdownRenderCache() }
     // 技能正文 Markdown 解析缓存：详情页多次进入复用，避免重复解析卡顿
     val skillMarkdownCache = remember { MarkdownRenderCache() }
-    // 自定义提示词：顶栏「+」直达新建，这里只记编辑目标（新建/编辑）
-    var promptEditTarget by remember { mutableStateOf<PromptEditTarget?>(null) }
-    var selectedPrompt by remember { mutableStateOf<PromptFragment?>(null) }
-    // 编辑页返回目标：从详情进就回详情，从列表「+」进就回列表。
-    var promptEditorReturn by remember { mutableStateOf(SettingsSection.Prompts) }
     var showContainerAddSheet by remember { mutableStateOf(false) }
     var showContainerAnnouncement by remember { mutableStateOf(false) }
     var showImageSourceSheet by remember { mutableStateOf(false) }
@@ -389,16 +384,15 @@ fun SettingsScreen(
     // 返回目标：null 表示没有上一层，返回动作交还上层导航（退出设置页）。
     // 大屏左菜单常驻，一级分区页没有「上一层」——回菜单只会得到一个空占位。
     // 返回键与顶栏返回箭头共用这一份判定，不再各写一套（之前两处不一致，镜像下载页返回会直接跳回菜单）。
-    val parentSection: SettingsSection? = when (section) {
+    val parentSection: SettingsSection? = sectionHistory.dropLast(1).lastOrNull() ?: when (section) {
         SettingsSection.Menu -> null
         SettingsSection.AiGroup -> if (section == configHome) null else SettingsSection.Menu
-        SettingsSection.Soul,
         SettingsSection.ConfigAudit -> (configHome ?: SettingsSection.Menu)
         SettingsSection.Memory -> (configHome ?: SettingsSection.AiGroup)
         SettingsSection.Providers, SettingsSection.DefaultModels -> (configHome ?: SettingsSection.Menu)
         SettingsSection.TelegramBot, SettingsSection.WeixinBot, SettingsSection.FeishuBot, SettingsSection.QqBot -> (configHome ?: SettingsSection.AiGroup)
         SettingsSection.Connectors -> connectorsReturnSection
-        SettingsSection.Skills, SettingsSection.Plugins, SettingsSection.Knowledge -> (configHome ?: SettingsSection.Menu)
+        SettingsSection.Skills, SettingsSection.Plugins -> (configHome ?: SettingsSection.Menu)
         SettingsSection.General, SettingsSection.Theme -> (configHome ?: SettingsSection.Menu)
         SettingsSection.AppPermissions,
         SettingsSection.Accessibility,
@@ -414,7 +408,7 @@ fun SettingsScreen(
         SettingsSection.TokenStats,
         SettingsSection.Backup,
         SettingsSection.Experiments -> (configHome ?: SettingsSection.Menu)
-        SettingsSection.Tools, SettingsSection.Prompts, SettingsSection.Rules -> (configHome ?: SettingsSection.AiGroup)
+        SettingsSection.Tools -> (configHome ?: SettingsSection.AiGroup)
         SettingsSection.ProviderEditor -> SettingsSection.Providers
         SettingsSection.Log -> logReturnSection.takeUnless { expanded && it == SettingsSection.Menu }
         SettingsSection.SkillDetail, SettingsSection.SkillMarket -> SettingsSection.Skills
@@ -423,8 +417,6 @@ fun SettingsScreen(
         SettingsSection.SubAgentDetail -> subAgentDetailReturn
         SettingsSection.SubAgents -> (configHome ?: SettingsSection.AiGroup)
         SettingsSection.SubAgentEditor -> subAgentEditorReturn
-        SettingsSection.PromptDetail -> SettingsSection.Prompts
-        SettingsSection.PromptEditor -> promptEditorReturn
         SettingsSection.ContainerDownloads, SettingsSection.ContainerSources -> SettingsSection.Container
         else -> if (expanded) null else SettingsSection.Menu
     }
@@ -620,47 +612,11 @@ fun SettingsScreen(
                 }
             )
 
-            current == SettingsSection.PromptEditor -> {
-                val promptsViewModel: PromptsViewModel =
-                    androidx.hilt.navigation.compose.hiltViewModel()
-                val promptsState by promptsViewModel.state.collectAsStateWithLifecycle()
-                val number = promptEditTarget?.number
-                val fragment = number?.let { value -> promptsState.fragments.firstOrNull { it.number == value } }
-                PromptEditorScreen(
-                    isNew = number == null,
-                    initialNumber = fragment?.number ?: number ?: 0,
-                    initialTitle = fragment?.title.orEmpty(),
-                    initialDescription = fragment?.description.orEmpty(),
-                    initialContent = fragment?.body.orEmpty(),
-                    initialScope = fragment?.source ?: PromptFragmentSource.GLOBAL,
-                    initialKeywordInjections = fragment?.keywordInjections ?: emptyList(),
-                    initialInjectParts = fragment?.injectParts ?: emptySet(),
-                    initialInjection = fragment?.injection ?: com.aharou.feature.agent.domain.prompt.PromptFragmentInjection(),
-                    members = subAgents.map { it.name },
-                    hasWorkspace = promptsState.hasWorkspace,
-                    onSave = { savedNumber, title, scope, content, keywordInjections, injectParts, injection ->
-                        promptsViewModel.saveFragment(
-                            savedNumber,
-                            title,
-                            scope,
-                            content,
-                            previousNumber = number,
-                            keywordInjections = keywordInjections,
-                            injectParts = injectParts,
-                            injection = injection
-                        )
-                        section = promptEditorReturn
-                    },
-                    onNavigateBack = { section = promptEditorReturn }
-                )
-            }
-
             else -> {
             // 列表页用分区名；详情页带上条目身份，换成另一条技能 / 子代理 / 提示词进来不能继承上一条的滚动位置。
             val stateKey: String = when (current) {
                 SettingsSection.SkillDetail -> "SkillDetail:${selectedSkill?.name.orEmpty()}"
                 SettingsSection.SubAgentDetail -> "SubAgentDetail:${selectedSubAgent?.name.orEmpty()}"
-                SettingsSection.PromptDetail -> "PromptDetail:${selectedPrompt?.number ?: 0}"
                 else -> current.name
             }
             sectionStateHolder.SaveableStateProvider(stateKey) {
@@ -695,8 +651,11 @@ fun SettingsScreen(
                     // 大屏一级分区页不给返回箭头：左栏菜单随时可切，退出设置的入口在左栏顶部。
                     if (!isRoot && (!expanded || parentSection != null)) {
                         IconButton(onClick = {
-                            val parent = parentSection
-                            if (parent != null) section = parent else onNavigateBack()
+                            if (backDispatcher != null) backDispatcher.onBackPressed()
+                            else {
+                                val parent = parentSection
+                                if (parent != null) section = parent else onNavigateBack()
+                            }
                         }) {
                             Icon(FeatherIcons.ArrowLeft, contentDescription = stringResource(R.string.common_back))
                         }
@@ -827,32 +786,6 @@ fun SettingsScreen(
                                 )
                             }
                         }
-                        SettingsSection.Prompts -> IconButton(onClick = {
-                            promptEditTarget = PromptEditTarget(null)
-                            promptEditorReturn = SettingsSection.Prompts
-                            section = SettingsSection.PromptEditor
-                        }) {
-                            Icon(
-                                FeatherIcons.Plus,
-                                contentDescription = stringResource(R.string.prompts_add_prompt),
-                                tint = MaterialTheme.colorScheme.onBackground,
-                                modifier = Modifier.size(22.dp)
-                            )
-                        }
-                        SettingsSection.PromptDetail -> selectedPrompt?.let { fragment ->
-                            IconButton(onClick = {
-                                promptEditTarget = PromptEditTarget(fragment.number)
-                                promptEditorReturn = SettingsSection.PromptDetail
-                                section = SettingsSection.PromptEditor
-                            }) {
-                                Icon(
-                                    FeatherIcons.Edit2,
-                                    contentDescription = stringResource(R.string.prompts_editor_edit),
-                                    tint = MaterialTheme.colorScheme.onBackground,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                        }
                         SettingsSection.Log -> {
                             IconButton(onClick = { viewModel.refreshLogs() }) {
                                 Icon(FeatherIcons.RefreshCw, contentDescription = stringResource(R.string.settings_refresh_logs))
@@ -893,15 +826,13 @@ fun SettingsScreen(
                 // 大屏菜单已常驻左栏，右栏在没选中分区时给个占位提示
                 SettingsSection.Menu -> if (expanded) SettingsDetailPlaceholder() else menuBody()
                 SettingsSection.AiGroup -> SettingsAiGroupScreen(onOpen = openSection)
-                SettingsSection.Soul -> SoulSettingsSection()
                 SettingsSection.ConfigAudit -> ConfigAuditSection()
                 SettingsSection.ShadowScreen -> ShadowScreenSection()
                 SettingsSection.Experiments -> ExperimentsSection()
                 SettingsSection.EnvVars -> EnvVarsSection()
                 SettingsSection.Vault -> VaultSection()
                 SettingsSection.Accessibility -> AccessibilitySection()
-                SettingsSection.Memory -> MemorySection()
-                SettingsSection.Knowledge -> KnowledgeBaseSection()
+                SettingsSection.Memory -> ContextLibrarySection()
                 SettingsSection.Theme -> ThemeSettingsSection(
                     selected = themeMode,
                     backgroundImagePath = backgroundImagePath,
@@ -1111,43 +1042,6 @@ fun SettingsScreen(
                         )
                     }
                 )
-                SettingsSection.Prompts -> {
-                    val promptsViewModel: PromptsViewModel =
-                        androidx.hilt.navigation.compose.hiltViewModel()
-                    val promptsState by promptsViewModel.state.collectAsStateWithLifecycle()
-                    LaunchedEffect(Unit) { promptsViewModel.refresh() }
-                    PromptsSection(
-                        state = promptsState,
-                        onOpenFragment = { fragment ->
-                            selectedPrompt = fragment
-                            section = SettingsSection.PromptDetail
-                        },
-                        onDeleteFragment = promptsViewModel::deleteFragment,
-                        onReorder = promptsViewModel::reorderFragments,
-                        onToggleBuiltinDisabled = promptsViewModel::setBuiltinDisabled,
-                        onToggleFragment = promptsViewModel::setFragmentEnabled
-                    )
-                }
-                SettingsSection.Rules -> {
-                    val rulesViewModel: com.aharou.feature.settings.presentation.RulesViewModel =
-                        androidx.hilt.navigation.compose.hiltViewModel()
-                    val rulesState by rulesViewModel.state.collectAsStateWithLifecycle()
-                    LaunchedEffect(Unit) { rulesViewModel.refresh() }
-                    RulesSection(
-                        state = rulesState,
-                        viewModel = rulesViewModel
-                    )
-                }
-                SettingsSection.PromptDetail -> {
-                    val promptsViewModel: PromptsViewModel =
-                        androidx.hilt.navigation.compose.hiltViewModel()
-                    val promptsState by promptsViewModel.state.collectAsStateWithLifecycle()
-                    selectedPrompt?.let { sel ->
-                        promptsState.fragments.firstOrNull { it.number == sel.number }?.let { fragment ->
-                            PromptDetailSection(fragment = fragment)
-                        }
-                    }
-                }
                 SettingsSection.SubAgentDetail -> selectedSubAgent?.let { entry ->
                     SubAgentDetailSection(
                         entry = entry,
@@ -1258,7 +1152,6 @@ fun SettingsScreen(
                 SettingsSection.ProviderEditor -> {} // 已在上方 early return 处理
                 SettingsSection.SkillEditor -> {} // 已在上方 early return 处理
                 SettingsSection.SubAgentEditor -> {} // 已在上方 early return 处理
-                SettingsSection.PromptEditor -> {} // 已在上方 early return 处理
 
             }
         }

@@ -1,5 +1,6 @@
 package com.aharou.feature.agent.domain.memory
 
+import com.aharou.feature.agent.domain.context.*
 import com.aharou.core.util.FileLogger
 import com.aharou.feature.agent.domain.common.Frontmatter
 import java.io.File
@@ -102,7 +103,12 @@ interface MemorySource {
         expiresAt: Long? = null,
         pending: Boolean? = null,
         keywords: List<String>? = null,
-        expectedVersion: String? = null
+        expectedVersion: String? = null,
+        contextKind: ContextKind? = null,
+        contextLoad: ContextLoad? = null,
+        contextCategory: ContextCategory? = null,
+        contextFolder: String? = null,
+        contextSessionId: String? = null
     ): MemoryWriteResult =
         if (saveMemory(name, description, content, type, expiresAt, pending, keywords)) {
             MemoryWriteResult.Success
@@ -165,7 +171,7 @@ interface MemorySource {
             }
             val payload = MemoryParser.format(
                 memory.name, memory.description, content, memory.type, memory.keywords,
-                memory.expiresAt, memory.pending
+                memory.expiresAt, memory.pending, memory.contextKind, memory.contextLoad, memory.contextCategory, memory.contextFolder, memory.contextSessionId
             )
             if (MemoryFileStorage.write(file, payload)) MemoryEditResult.Success
             else MemoryEditResult.Error("EDIT_WRITE_FAILED", "写入记忆文件失败，原文未修改")

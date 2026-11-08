@@ -2,6 +2,7 @@ package com.aharou.feature.agent.data.task
 
 import android.content.Context
 import android.util.AtomicFile
+import com.aharou.feature.agent.domain.task.ProjectDeletion
 import com.aharou.feature.agent.domain.task.ProjectPlan
 import com.aharou.feature.agent.domain.task.ProjectPlanner
 import com.aharou.feature.agent.domain.task.ProjectRevision
@@ -75,6 +76,23 @@ class ProjectTaskRepository @Inject constructor(@ApplicationContext context: Con
     }
 
     suspend fun load(workspace: String): ProjectTaskSnapshot = withContext(Dispatchers.IO) { snapshot(workspace) }
+
+    /** Returns false for an already absent project; failures publish no in-memory deletion. */
+    suspend fun deleteProject(projectId: String, workspace: String): Boolean = withContext(Dispatchers.IO) {
+        deleteProjectLocked(projectId, workspace)
+    }
+
+    @Synchronized
+    private fun deleteProjectLocked(projectId: String, workspace: String): Boolean {
+        val current = snapshot(workspace)
+        check(current.tasks.none { it.projectId == projectId && it.status == ProjectTaskStatus.RUNNING }) { "PROJECT_BUSY" }
+        val deletion = ProjectDeletion.plan(projectId, current.projects, current.tasks)
+        if (!deletion.changed) return false
+        val next = current.copy(version = current.version + 1, projects = deletion.projects, tasks = deletion.tasks)
+        persist(workspace, next)
+        mutable.value = mutable.value + (workspace to next)
+        return true
+    }
 
     suspend fun save(task: ProjectTask): ProjectTask = withContext(Dispatchers.IO) {
         transactLocked(task.workspace) { listOf(ProjectTaskChange(task)) }.single()

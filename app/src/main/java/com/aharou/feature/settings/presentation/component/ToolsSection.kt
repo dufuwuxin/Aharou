@@ -238,18 +238,25 @@ internal fun McpToolsSection(
 internal fun ToolsSection(
     state: ToolsUiState,
     viewModel: ToolsViewModel,
-    embedded: Boolean = false
+    embedded: Boolean = false,
+    sources: Set<ToolSource> = ToolSource.entries.toSet(),
+    excludedNames: Set<String> = emptySet(),
+    onRun: ((ToolUiEntry) -> Unit)? = null,
+    onRunDraft: ((com.aharou.feature.agent.domain.tool.custom.CustomToolDefinition) -> Unit)? = null,
 ) {
     val context = LocalContext.current
     var pendingDelete by remember { mutableStateOf<ToolUiEntry?>(null) }
+    val visibleEntries = state.entries.filter { it.source in sources && it.name !in excludedNames }
 
     // 失败必须看得见：写盘失败不静默刷新，弹一次 Toast 后把事件清掉
     LaunchedEffect(state.message) {
         val message = state.message ?: return@LaunchedEffect
+        if (state.editor != null) return@LaunchedEffect
         Toast.makeText(
             context,
             context.getString(
                 when (message) {
+                    ToolsMessage.NAME_CONFLICT -> R.string.tools_name_conflict
                     ToolsMessage.SAVE_FAILED -> R.string.tools_save_failed
                     ToolsMessage.DELETE_FAILED -> R.string.tools_delete_failed
                     ToolsMessage.LOAD_FAILED -> R.string.tools_load_failed
@@ -270,7 +277,7 @@ internal fun ToolsSection(
                 modifier = Modifier.fillMaxWidth().padding(bottom = Spacing.xl),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                if (state.entries.isEmpty()) {
+                if (visibleEntries.isEmpty()) {
                     androidx.compose.runtime.key("empty") {
                         Text(
                             text = stringResource(R.string.tools_empty),
@@ -281,7 +288,7 @@ internal fun ToolsSection(
                     }
                 }
                 TOOL_GROUP_ORDER.forEach { source ->
-                    val entries = state.entries.filter { it.source == source }.sortedBy { it.name.lowercase() }
+                    val entries = visibleEntries.filter { it.source == source }.sortedBy { it.name.lowercase() }
                     if (entries.isEmpty()) return@forEach
                     androidx.compose.runtime.key("tools-header-${source.name}") {
                         SettingsGroupHeader(text = stringResource(groupTitleRes(source)))
@@ -291,7 +298,8 @@ internal fun ToolsSection(
                         ToolRow(
                             entry = entry,
                             onClick = { viewModel.openEditor(entry.name) },
-                            onDelete = { pendingDelete = entry }
+                            onDelete = { pendingDelete = entry },
+                            onRun = if (entry.source == ToolSource.CUSTOM && onRun != null) ({ onRun(entry) }) else null
                         )
                         }
                     }
@@ -325,7 +333,17 @@ internal fun ToolsSection(
                 viewModel.saveToolSettings(name, description, mode, keywords, schemaJson)
             },
             template = editor.template,
-            onSelectTemplate = viewModel::startTemplate
+            onSelectTemplate = viewModel::startTemplate,
+            saveError = state.message?.let { message -> stringResource(when (message) {
+                ToolsMessage.NAME_CONFLICT -> R.string.tools_name_conflict
+                ToolsMessage.SAVE_FAILED -> R.string.tools_save_failed
+                ToolsMessage.DELETE_FAILED -> R.string.tools_delete_failed
+                ToolsMessage.LOAD_FAILED -> R.string.tools_load_failed
+            }) },
+            onRunDraft = onRunDraft?.let { run -> { draft ->
+                viewModel.closeEditor()
+                run(draft)
+            } }
         )
     }
 }
@@ -335,7 +353,8 @@ internal fun ToolsSection(
 private fun ToolRow(
     entry: ToolUiEntry,
     onClick: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onRun: (() -> Unit)? = null,
 ) {
     SwipeToDeleteRow(
         onDelete = onDelete,
@@ -372,6 +391,9 @@ private fun ToolRow(
                 )
             }
             Spacer(modifier = Modifier.width(Spacing.sm))
+            onRun?.let { run ->
+                TextButton(onClick = run) { Text(stringResource(R.string.toolbox_run)) }
+            }
             InjectionBadge(mode = entry.injectionMode)
             Spacer(modifier = Modifier.width(Spacing.xs))
             Icon(

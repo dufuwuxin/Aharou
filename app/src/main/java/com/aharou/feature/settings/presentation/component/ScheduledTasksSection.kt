@@ -1,5 +1,4 @@
 package com.aharou.feature.settings.presentation.component
-
 import androidx.annotation.StringRes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -60,7 +59,6 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.delay
-
 /** 值得在列表里提示的 [ScheduledTaskEntity.lastOutcome] 取值；其余（如 dispatched）不打扰用户。 */
 private const val OUTCOME_SKIPPED = "skipped"
 private const val OUTCOME_SKIPPED_MISSED = "skipped_missed"
@@ -70,23 +68,32 @@ private const val OUTCOME_SKIPPED_RUNNING = "skipped_running"
 private const val OUTCOME_SKIPPED_DUPLICATE = "skipped_duplicate"
 private const val OUTCOME_SKIPPED_DEDUP_FULL = "skipped_dedup_full"
 private const val OUTCOME_FAILED = "failed"
-
 private const val MAX_SESSION_CHOICES = 30
-
 /** 新建任务时防抖窗口的默认分钟数，与 [ScheduledTaskEntity.debounceMinutes] 的默认值一致。 */
 private const val DEFAULT_DEBOUNCE_MINUTES = 10
-
 @Composable
-internal fun ScheduledTasksSection(viewModel: ScheduledTasksViewModel = hiltViewModel()) {
+internal fun ScheduledTasksSection(
+    viewModel: ScheduledTasksViewModel = hiltViewModel(),
+    createRequested: Boolean = false,
+    onCreateHandled: () -> Unit = {},
+    embedded: Boolean = false,
+    expanded: Boolean = true,
+) {
     val tasks by viewModel.tasks.collectAsStateWithLifecycle()
     val sessions by viewModel.sessions.collectAsStateWithLifecycle()
-
     var editing by remember { mutableStateOf<ScheduledTaskEntity?>(null) }
     var showEditor by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf<ScheduledTaskEntity?>(null) }
     // 从模板创建时先摊成一份实体当编辑器初始值；它只喂表单，保存时仍按「新建」处理。
     var templateSeed by remember { mutableStateOf<ScheduledTaskEntity?>(null) }
-
+    LaunchedEffect(createRequested) {
+        if (createRequested) {
+            editing = null
+            templateSeed = null
+            showEditor = true
+            onCreateHandled()
+        }
+    }
     // 下次运行文案里的倒计时需要随时间推进，不需要秒级精度，半分钟刷新一次就够。
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) {
@@ -95,14 +102,13 @@ internal fun ScheduledTasksSection(viewModel: ScheduledTasksViewModel = hiltView
             delay(30_000)
         }
     }
-
-    Column(
+    if (expanded) Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(bottom = Spacing.xl),
         verticalArrangement = Arrangement.spacedBy(Spacing.sm)
     ) {
-        SettingsGroupHeader(text = stringResource(R.string.settings_scheduled_tasks))
+        if (!embedded) SettingsGroupHeader(text = stringResource(R.string.settings_scheduled_tasks))
         SettingsGroup {
             Text(
                 text = stringResource(
@@ -114,7 +120,6 @@ internal fun ScheduledTasksSection(viewModel: ScheduledTasksViewModel = hiltView
                 modifier = Modifier.padding(horizontal = Spacing.lg, vertical = 12.dp)
             )
         }
-
         SettingsGroupHeader(text = stringResource(R.string.scheduled_tasks_list_header))
         if (tasks.isEmpty()) {
             SettingsGroup {
@@ -142,9 +147,8 @@ internal fun ScheduledTasksSection(viewModel: ScheduledTasksViewModel = hiltView
                 }
             }
         }
-
         SettingsGroup {
-            SettingsRow(
+            if (!embedded) SettingsRow(
                 icon = FeatherIcons.Plus,
                 title = stringResource(R.string.scheduled_tasks_add),
                 onClick = {
@@ -161,7 +165,6 @@ internal fun ScheduledTasksSection(viewModel: ScheduledTasksViewModel = hiltView
             )
         }
     }
-
     if (showEditor) {
         ScheduledTaskEditorSheet(
             initial = editing ?: templateSeed,
@@ -197,7 +200,6 @@ internal fun ScheduledTasksSection(viewModel: ScheduledTasksViewModel = hiltView
             }
         )
     }
-
     deleting?.let { task ->
         AlertDialog(
             onDismissRequest = { deleting = null },
@@ -219,7 +221,6 @@ internal fun ScheduledTasksSection(viewModel: ScheduledTasksViewModel = hiltView
         )
     }
 }
-
 @Composable
 private fun ScheduledTaskRow(
     task: ScheduledTaskEntity,
@@ -246,7 +247,6 @@ private fun ScheduledTaskRow(
             ((task.nextRunAt - now) / 60_000L).coerceAtLeast(1L)
         )
     }
-
     SwipeToDeleteRow(onDelete = onDelete, onClick = onClick) {
         Row(
             modifier = Modifier
