@@ -160,7 +160,7 @@ internal fun DualModelButton(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun DualModelSheet(
+internal fun DualModelSheet(
     sessionId: String,
     mode: AgentMode,
     providers: List<AIProviderConfig>,

@@ -246,7 +246,7 @@ private fun WorkbenchIconButton(
 }
 
 @Composable
-private fun ConnectionIndicator(
+internal fun ConnectionIndicator(
     state: com.aharou.feature.agent.domain.container.ConnectionState
 ) {
     val (dotColor, text) = when (state) {
@@ -280,7 +280,7 @@ private fun ConnectionIndicator(
 }
 
 @Composable
-private fun TokenStats(inputTokens: Int, outputTokens: Int) {
+internal fun TokenStats(inputTokens: Int, outputTokens: Int) {
     val inStr = formatTokenCount(inputTokens.toLong())
     val outStr = formatTokenCount(outputTokens.toLong())
     Text(
