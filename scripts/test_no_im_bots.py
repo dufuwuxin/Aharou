@@ -50,11 +50,8 @@ class NoImBotsTest(unittest.TestCase):
         manifest = ET.parse(ROOT / "app/src/main/AndroidManifest.xml")
         services = {node.attrib[ANDROID_NAME] for node in manifest.findall(".//service")}
         self.assertFalse(any(".feature.im." in name for name in services))
-        for name in (
-            ".feature.terminal.domain.TerminalKeepaliveService",
-            ".feature.remotedevice.service.RemoteDeviceService",
-        ):
-            self.assertIn(name, services)
+        self.assertIn(".feature.terminal.domain.TerminalKeepaliveService", services)
+        self.assertFalse(any(".feature.remotedevice." in name for name in services))
 
     def test_startup_has_no_bot_restore_or_config_registration(self):
         app = source(SRC / "AIEditorApp.kt")
@@ -62,8 +59,6 @@ class NoImBotsTest(unittest.TestCase):
             self.assertNotIn(removed, app)
         for retained in (
             "configMcpFields.registerInto(configRegistry)",
-            "configRemoteDeviceFields.registerInto(configRegistry)",
-            "remoteDeviceController.startIfEnabled()",
             "mcpManager.start()",
             "remoteSshConnection.superviseByExecutionMode",
         ):
@@ -90,7 +85,7 @@ class NoImBotsTest(unittest.TestCase):
             self.assertNotRegex(screen + groups, rf"\b{bot}\b")
         for section in ("Connectors", "Teams", "Tools"):
             self.assertIn(f"onOpen(SettingsSection.{section})", groups)
-        self.assertIn("SettingsSection.RemoteDevice", screen)
+        self.assertNotIn("SettingsSection.RemoteDevice", screen)
 
     def test_existing_file_to_chat_and_remote_transports_remain(self):
         self.assertIn("onSendToChat =", source(SRC / "MainActivity.kt"))
@@ -98,7 +93,6 @@ class NoImBotsTest(unittest.TestCase):
         for path in (
             "feature/agent/domain/mcp/McpManager.kt",
             "feature/agent/domain/container/RemoteSshConnection.kt",
-            "feature/remotedevice/service/RemoteDeviceService.kt",
         ):
             self.assertTrue((SRC / path).is_file(), path)
 

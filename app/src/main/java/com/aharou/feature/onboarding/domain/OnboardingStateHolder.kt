@@ -10,7 +10,7 @@ import kotlinx.coroutines.flow.asStateFlow
  */
 data class OnboardingUiState(
     val active: Boolean = false,
-    val step: OnboardingStep = OnboardingStep.OPEN_SIDEBAR,
+    val step: OnboardingStep = OnboardingStep.ENTER_SETTINGS,
     val status: OnboardingStatus = OnboardingStatus.IN_PROGRESS
 )
 
@@ -21,7 +21,7 @@ class OnboardingStateHolder {
     private val _state = MutableStateFlow(OnboardingUiState())
     val state: StateFlow<OnboardingUiState> = _state.asStateFlow()
 
-    /** 启动引导：默认从第一步 [OnboardingStep.OPEN_SIDEBAR] 开始，续跑时传入已存步骤。 */
+    /** 启动引导：默认从第一步 [OnboardingStep.ENTER_SETTINGS] 开始，续跑时传入已存步骤。 */
     fun start(startStep: OnboardingStep = OnboardingStep.all.first()) {
         _state.value = OnboardingUiState(
             active = true,

@@ -56,7 +56,7 @@ class ContextLibraryViewModel @Inject constructor(
             try {
                 val snapshot = withContext(Dispatchers.IO) {
                     Triple(library.list(root), folders.list(root), sessions.getRootSessionsByWorkspaceOnce(root.orEmpty())
-                        .filterNot { it.ghostMode }.map { it.id to it.title })
+                        .map { it.id to it.title })
                 }
                 if (generation == refreshGeneration && root == root()) {
                     _state.value = _state.value.copy(entries = snapshot.first, folders = snapshot.second,

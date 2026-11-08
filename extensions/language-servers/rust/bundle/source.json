@@ -1,0 +1,19 @@
+{
+  "id": "rust",
+  "repository": "https://github.com/rust-lang/rust-analyzer",
+  "revision": "55effabb762bbd0a21c5af530ea447bd6772881d",
+  "sourceUrl": "https://codeload.github.com/rust-lang/rust-analyzer/tar.gz/55effabb762bbd0a21c5af530ea447bd6772881d",
+  "sourceSha256": "f87709e619a186359731e2e5263ccc95ac71be7aac8ba3ab27ebe28b9ce6b3b8",
+  "snapshotTime": "2026-11-06T13:50:55Z",
+  "adaptationStatus": "source-vendored-build-unverified",
+  "version": "commit:55effabb762bbd0a21c5af530ea447bd6772881d",
+  "license": "MIT OR Apache-2.0",
+  "prerequisites": [
+    "Python >=3.11",
+    "cargo/rustc >=1.98",
+    "C linker"
+  ],
+  "licenseSha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+  "buildVerification": "not executed: source and controlled shell fixture validation only",
+  "dependencyPolicy": "Dependencies may download during explicit user installation; no global package installation; upstream source itself is the local archive."
+}

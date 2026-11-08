@@ -72,7 +72,6 @@ import com.aharou.feature.agent.presentation.component.MarkdownContent
 import com.aharou.feature.agent.presentation.component.MarkdownRenderCache
 import com.aharou.feature.backup.presentation.BackupSection
 import com.aharou.feature.connectors.presentation.ConnectorsSection
-import com.aharou.feature.remotedevice.presentation.RemoteDeviceSection
 import com.aharou.feature.vault.presentation.VaultSection
 import com.aharou.feature.settings.domain.model.AIProviderConfig
 import com.aharou.feature.settings.presentation.SettingsViewModel
@@ -150,7 +149,6 @@ enum class SettingsSection(@param:StringRes val titleRes: Int) {
     Log(R.string.settings_log),
     AppPermissions(R.string.settings_app_permissions),
     BackgroundRun(R.string.settings_category_background),
-    RemoteDevice(R.string.settings_remote_device_title),
     Storage(R.string.settings_storage),
     TokenStats(R.string.settings_token_stats_title),
     Backup(R.string.settings_backup),
@@ -399,7 +397,6 @@ fun SettingsScreen(
         SettingsSection.Proxy,
         SettingsSection.ShadowScreen,
         SettingsSection.Teams,
-        SettingsSection.RemoteDevice,
         SettingsSection.EnvVars,
         SettingsSection.Vault,
         SettingsSection.Storage,
@@ -906,7 +903,6 @@ fun SettingsScreen(
                     onClearMemoryModel = { viewModel.clearMemoryModel() },
                 )
                 SettingsSection.Connectors -> ConnectorsSection(languageTag = languageTag)
-                SettingsSection.RemoteDevice -> RemoteDeviceSection()
                 SettingsSection.Plugins -> PluginSettingsSection()
                 SettingsSection.Skills -> SkillsSection(
                     projectName = currentProjectName,
@@ -995,8 +991,7 @@ fun SettingsScreen(
                         subAgentDetailReturn = SettingsSection.SubAgents
                         selectedSubAgent = it
                         section = SettingsSection.SubAgentDetail
-                    },
-                    onOpenTeams = { section = SettingsSection.Teams }
+                    }
                 )
                 SettingsSection.Teams -> SubAgentTeamsSection(
                     onCreateRoleCard = {

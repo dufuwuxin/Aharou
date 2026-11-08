@@ -3,6 +3,7 @@ package com.aharou.core.translation
 import androidx.compose.foundation.layout.Column
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -52,15 +53,27 @@ internal fun rememberTranslatedText(text: String, enabled: Boolean = true): Stri
 
 @Composable
 internal fun TranslationPreview(text: String) {
-    val translated = rememberTranslatedText(text)
-    if (translated != text) {
-        Column {
-            Text(
-                text = stringResource(R.string.translation_preview),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(text = translated, style = MaterialTheme.typography.bodyMedium)
+    val translation = translationService()
+    val enabled by translation.enabled.collectAsStateWithLifecycle()
+    val state by translation.modelState.collectAsStateWithLifecycle()
+    var requested by remember(text) { mutableStateOf(false) }
+    TextButton(onClick = {
+        requested = true
+        if (state != TranslationModelState.READY) translation.prepareModel(retry = true)
+    }, enabled = enabled && text.isNotBlank() && state != TranslationModelState.DOWNLOADING && state != TranslationModelState.CHECKING) {
+        Text(stringResource(R.string.translation_action))
+    }
+    if (requested && enabled && state == TranslationModelState.READY) {
+        val translated = rememberTranslatedText(text, enabled = true)
+        if (translated != text) {
+            Column {
+                Text(
+                    text = stringResource(R.string.translation_preview),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(text = translated, style = MaterialTheme.typography.bodyMedium)
+            }
         }
     }
 }

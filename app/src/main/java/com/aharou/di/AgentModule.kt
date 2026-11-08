@@ -128,7 +128,6 @@ import com.aharou.feature.agent.domain.ocr.TesseractOcrEngine
 import com.aharou.feature.agent.domain.provider.ProviderFailoverCoordinator
 import com.aharou.feature.agent.domain.workflow.StatefulAgentWorkflow
 import com.aharou.feature.localmodel.runtime.LocalLlmEngine
-import com.aharou.feature.remotedevice.domain.RemoteDeviceSettings
 import com.aharou.feature.settings.data.repository.CompactionModelSettingsRepository
 import com.aharou.feature.settings.data.repository.DefaultModelSettingsRepository
 import com.aharou.feature.settings.data.repository.GeneralSettingsRepository
@@ -538,7 +537,6 @@ object AgentModule {
         localLlmEngine: LocalLlmEngine,
         promptProvider: SystemPromptProvider,
         permissionManager: ToolPermissionManager,
-        remoteDeviceSettings: RemoteDeviceSettings,
         policyEngine: ToolPermissionPolicyEngine,
         contextCompactor: ContextCompactor,
         planApprovalManager: PlanApprovalManager,
@@ -556,7 +554,6 @@ object AgentModule {
         generatedImagePersister: GeneratedImagePersister,
         failoverCoordinator: ProviderFailoverCoordinator,
         workspaceModelChain: com.aharou.feature.agent.domain.workflow.WorkspaceModelChain,
-        dualModelRouter: com.aharou.feature.agent.domain.workflow.DualModelRouter,
         agentNotificationCenter: AgentNotificationCenter,
         eventInjector: AgentEventInjector,
         memoryCurator: MemoryCurator,
@@ -578,7 +575,6 @@ object AgentModule {
             localLlmEngine,
             promptProvider,
             permissionManager,
-            remoteDeviceSettings,
             policyEngine,
             contextCompactor,
             planApprovalManager,
@@ -595,7 +591,7 @@ object AgentModule {
             keyRotator,
             generatedImagePersister,
             failoverCoordinator,
-            workspaceModelChain, dualModelRouter,
+            workspaceModelChain,
             agentNotificationCenter,
             eventInjector,
             memoryCurator,

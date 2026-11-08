@@ -1,0 +1,89 @@
+name: Build language extensions
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        id: [lua, python, typescript, shell, yaml, vue, rust]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v7
+        if: contains(fromJSON('["typescript","shell","yaml","vue"]'), matrix.id)
+        with:
+          node-version: '24'
+      - name: Verify fixed sources and isolated fixtures
+        run: |
+          python3 scripts/vendor_language_extensions.py
+          python3 -m unittest discover -s scripts -p 'test*language_extension*.py'
+      - name: Install private pinned package manager
+        if: contains(fromJSON('["typescript","shell","vue"]'), matrix.id)
+        env:
+          EXTENSION_ID: ${{ matrix.id }}
+        run: |
+          set -euo pipefail
+          version=$(python3 - "$EXTENSION_ID" <<'PY'
+          import json, sys, tarfile
+          from pathlib import Path
+          bundle = Path('extensions/language-servers') / sys.argv[1] / 'bundle/source.tar.gz'
+          with tarfile.open(bundle) as archive:
+              member = next(m for m in archive if m.name.count('/') == 1 and m.name.endswith('/package.json'))
+              print(json.load(archive.extractfile(member))['packageManager'])
+          PY
+          )
+          npm install --prefix "$RUNNER_TEMP/lsp-package-manager" --no-audit --no-fund "$version"
+          echo "$RUNNER_TEMP/lsp-package-manager/node_modules/.bin" >> "$GITHUB_PATH"
+      - name: Install native Lua build prerequisites
+        if: matrix.id == 'lua'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build build-essential
+      - name: Select the source-required Rust toolchain
+        if: matrix.id == 'rust'
+        run: |
+          rustup toolchain install 1.98.0 --profile minimal
+          echo 'RUSTUP_TOOLCHAIN=1.98.0' >> "$GITHUB_ENV"
+      - name: Build, relocate, handshake and pack
+        run: python3 scripts/build_language_extensions.py --id '${{ matrix.id }}' --output dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: language-extension-${{ matrix.id }}
+          path: dist/*
+          if-no-files-found: error
+
+  manifest:
+    needs: build
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: language-extension-*
+          path: dist
+          merge-multiple: true
+      - name: Validate all seven artifacts and generate manifest
+        run: python3 scripts/build_language_extensions.py --manifest --output dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: language-extensions-verified
+          path: dist/*
+          if-no-files-found: error

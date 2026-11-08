@@ -102,7 +102,7 @@ class IntegrationContracts(unittest.TestCase):
         self.assertNotIn("LocalLlmEngine", service)
 
     def test_each_asset_editor_has_one_translation_action(self):
-        for name in ["SkillEditorScreen.kt", "SubAgentEditorScreen.kt", "PromptEditorScreen.kt"]:
+        for name in ["SkillEditorScreen.kt", "SubAgentEditorScreen.kt", "ContextLibraryEditor.kt"]:
             ui = self.read("feature/settings/presentation/component/" + name)
             self.assertEqual(1, ui.count("TranslationPreview("), name)
         self.assertIn("TranslationPreview(project.requirements)", self.read("feature/agent/presentation/component/ProjectTaskWorkbench.kt"))

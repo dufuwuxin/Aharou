@@ -104,6 +104,20 @@ class ProjectChatComposerContract(unittest.TestCase):
         self.assertNotIn("forceInsertAgentRequest(request = text + projectChatContext", panel)
         self.assertIn("targetSessionId = composerSessionId", panel)
 
+    def test_model_selection_callback_keeps_original_session(self):
+        panel = source("AIChatPanel.kt")
+        self.assertIn("val modelSelectionSessionId = currentSessionId", panel)
+        self.assertNotIn("val modelSelectionSessionId by", panel)
+        self.assertIn("viewModel.setSessionProviderModel(provider, model, expectedSessionId = modelSelectionSessionId)", panel)
+        vm = (JAVA / "feature/agent/presentation/AIAgentViewModel.kt").read_text()
+        method = vm.split("fun setSessionProviderModel(", 1)[1].split("\n    }", 1)[0]
+        for contract in ("expectedSessionId: String? = _currentSessionId.value",
+                         "if (expectedSessionId != _currentSessionId.value) return",
+                         "val sid = expectedSessionId ?: return",
+                         "sessionUseCase.updateProviderModel(sid, providerId, model)"):
+            self.assertIn(contract, method)
+        self.assertLess(method.index("if (expectedSessionId"), method.index("viewModelScope.launch"))
+
     def test_large_file_ratchet_not_raised(self):
         for relative, maximum in (("MainActivity.kt", 1407),
                                   ("feature/agent/presentation/component/AIChatPanel.kt", 1855),

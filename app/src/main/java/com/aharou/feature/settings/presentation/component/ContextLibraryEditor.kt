@@ -49,6 +49,7 @@ internal fun ContextLibraryEditor(
     val editorKey = entry?.id ?: "new-${initialCategory.name}"
     val original = ContextEditorDraft.from(entry, initialCategory, initialFolder, state.hasWorkspace)
     var draft by rememberSaveable(editorKey, stateSaver = ContextEditorDraftSaver) { mutableStateOf(original) }
+    var showPlacement by rememberSaveable(editorKey) { mutableStateOf(false) }
     var confirmDelete by rememberSaveable(editorKey) { mutableStateOf(false) }
     var confirmBack by rememberSaveable(editorKey) { mutableStateOf(false) }
     val dirty = draft != original
@@ -78,6 +79,12 @@ internal fun ContextLibraryEditor(
         Text(stringResource(if (entry == null) R.string.context_new_title else R.string.context_edit_title), style = MaterialTheme.typography.headlineSmall)
         if (state.error) ContextNotice(stringResource(R.string.context_save_error), error = true)
         if (entry?.pending == true) ContextNotice(stringResource(R.string.context_pending_help))
+        Column(verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+            Text(stringResource(R.string.context_field_loading), style = MaterialTheme.typography.titleSmall)
+            ContextChoiceRow(ContextLoad.entries.map { stringResource(it.label()) }, draft.loading.ordinal,
+                { draft = draft.copy(loading = ContextLoad.entries[it]) }, !state.writing)
+            Text(stringResource(draft.loading.explanation()), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
         key("name") {
             AppTextField(value = draft.name, onValueChange = { draft = draft.copy(name = it) },
                 label = stringResource(R.string.context_field_title), enabled = !state.writing)
@@ -86,42 +93,41 @@ internal fun ContextLibraryEditor(
             AppTextField(value = draft.description, onValueChange = { draft = draft.copy(description = it) },
                 label = stringResource(R.string.context_field_description), enabled = !state.writing)
         }
-        Column(verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
-            Text(stringResource(R.string.context_field_category), style = MaterialTheme.typography.titleSmall)
-            ContextChoiceRow(ContextCategory.entries.map { stringResource(it.label()) }, draft.category.ordinal,
-                { draft = draft.changeCategory(ContextCategory.entries[it]) }, !state.writing)
-            Text(stringResource(draft.category.explanation()), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        AppTextField(value = draft.folder, onValueChange = { draft = draft.copy(folder = it) }, label = stringResource(R.string.context_field_folder),
-            placeholder = stringResource(R.string.context_folder_root), enabled = !state.writing)
-        val existingFolders = state.folders[draft.category].orEmpty()
-        if (existingFolders.isNotEmpty()) ContextChoiceRow(existingFolders, existingFolders.indexOf(draft.folder),
-            { draft = draft.copy(folder = existingFolders[it]) }, !state.writing)
-        if (entry == null) {
-            ContextChoiceRow(MemoryScope.entries.map { stringResource(it.label()) }, draft.scope.ordinal, { index ->
-                if (MemoryScope.entries[index] != MemoryScope.PROJECT || state.hasWorkspace) draft = draft.copy(scope = MemoryScope.entries[index])
-            }, !state.writing)
-        }
-        if (draft.category == ContextCategory.TEMPORARY) {
-            Text(stringResource(R.string.context_target_session), style = MaterialTheme.typography.titleSmall)
-            if (state.sessions.isEmpty()) ContextNotice(stringResource(R.string.context_no_sessions))
-            else ContextChoiceRow(state.sessions.map { it.second }, state.sessions.indexOfFirst { it.first == draft.sessionId },
-                { draft = draft.copy(sessionId = state.sessions[it].first) }, !state.writing)
-            ContextNotice(stringResource(R.string.context_temporary_help))
-        }
-        Column(verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
-            Text(stringResource(R.string.context_field_loading), style = MaterialTheme.typography.titleSmall)
-            ContextChoiceRow(ContextLoad.entries.map { stringResource(it.label()) }, draft.loading.ordinal,
-                { draft = draft.copy(loading = ContextLoad.entries[it]) }, !state.writing)
-            Text(stringResource(draft.loading.explanation()), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        if (draft.category != ContextCategory.RULE) ContextChoiceRow(ContextKind.entries.map { stringResource(it.label()) }, draft.kind.ordinal,
-            { draft = draft.copy(kind = ContextKind.entries[it]) }, !state.writing)
         key("content") {
             AppTextField(value = draft.content, onValueChange = { draft = draft.copy(content = it) }, label = stringResource(R.string.context_field_content),
-                singleLine = false, minLines = 10, enabled = !state.writing)
+                singleLine = false, minLines = 5, enabled = !state.writing)
         }
         com.aharou.core.translation.TranslationPreview(draft.content)
+        TextButton(enabled = !state.writing, onClick = { showPlacement = !showPlacement }) {
+            Text(stringResource(if (showPlacement) R.string.context_hide_placement else R.string.context_show_placement))
+        }
+        if (showPlacement) {
+            Column(verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+                Text(stringResource(R.string.context_field_category), style = MaterialTheme.typography.titleSmall)
+                ContextChoiceRow(ContextCategory.entries.map { stringResource(it.label()) }, draft.category.ordinal,
+                    { draft = draft.changeCategory(ContextCategory.entries[it]) }, !state.writing)
+                Text(stringResource(draft.category.explanation()), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            AppTextField(value = draft.folder, onValueChange = { draft = draft.copy(folder = it) }, label = stringResource(R.string.context_field_folder),
+                placeholder = stringResource(R.string.context_folder_root), enabled = !state.writing)
+            val existingFolders = state.folders[draft.category].orEmpty()
+            if (existingFolders.isNotEmpty()) ContextChoiceRow(existingFolders, existingFolders.indexOf(draft.folder),
+                { draft = draft.copy(folder = existingFolders[it]) }, !state.writing)
+            if (entry == null) {
+                ContextChoiceRow(MemoryScope.entries.map { stringResource(it.label()) }, draft.scope.ordinal, { index ->
+                    if (MemoryScope.entries[index] != MemoryScope.PROJECT || state.hasWorkspace) draft = draft.copy(scope = MemoryScope.entries[index])
+                }, !state.writing)
+            }
+            if (draft.category == ContextCategory.TEMPORARY) {
+                Text(stringResource(R.string.context_target_session), style = MaterialTheme.typography.titleSmall)
+                if (state.sessions.isEmpty()) ContextNotice(stringResource(R.string.context_no_sessions))
+                else ContextChoiceRow(state.sessions.map { it.second }, state.sessions.indexOfFirst { it.first == draft.sessionId },
+                    { draft = draft.copy(sessionId = state.sessions[it].first) }, !state.writing)
+                ContextNotice(stringResource(R.string.context_temporary_help))
+            }
+            if (draft.category != ContextCategory.RULE) ContextChoiceRow(ContextKind.entries.map { stringResource(it.label()) }, draft.kind.ordinal,
+                { draft = draft.copy(kind = ContextKind.entries[it]) }, !state.writing)
+        }
         Button(modifier = Modifier.fillMaxWidth(), enabled = !state.writing && draft.name.isNotBlank() && draft.content.isNotBlank() &&
             (draft.category != ContextCategory.TEMPORARY || draft.sessionId != null), onClick = {
                 onSave(draft.name, draft.description, draft.content, draft.scope, draft.kind, draft.loading,

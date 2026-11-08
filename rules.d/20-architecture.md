@@ -13,7 +13,7 @@ feature-based 分层 + DDD。入口 `AIEditorApp` 初始化 `FileLogger`、`Term
   - `browser`：内置 WebView 浏览器与网页自动化（`BrowserUseManager` / `BrowserTool`）；`sandbox`：容器文件浏览与预览（`FileBrowserScreen` / `FilePreviewScreen`）。
   - `pet`：桌面伙伴小染（`PetOverlayService`）；`onboarding`：首次启动引导。语音识别、合成、通话与唤醒已移除，不恢复旧分支中的 `voice` 模块。
   - `backup`：备份恢复与加密。`credentials`：凭据管理与注入容器。`vault`：敏感信息脱敏（`VaultRedactor`）。
-  - `im`：微信 / 飞书 / QQ / Telegram 机器人接入（凭证一律用户自填，禁止内置）；`remotedevice`：远程设备配对与控制；`connectors` / `plugin` / `extension`：外部连接器与插件。
+  - `connectors` / `plugin` / `extension`：外部连接器与插件。消息机器人与跨设备协作已移除，保留普通 SSH 和 MCP 客户端。
 - **远程 SSH 链路**：`RemoteSshConnection`（共享 sshj client）+ `RemoteSshEngine`（执行命令）+ `RemoteSftpFileAccess`（文件）+ `RemoteTerminalSessionManager`（终端）。
 - **工具系统**：`feature/agent/domain/tool/` 下各工具经 `ToolRegistry` 注册，执行权限由 `ToolPermissionManager` 与 `ToolPermissionPolicyEngine` 管控。
 - **MCP**：`feature/agent/domain/mcp/`，连接远端 server 并动态注册其工具。**DI**：Hilt，各 feature 自带 DI 模块。

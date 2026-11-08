@@ -16,17 +16,19 @@ class ContextLibraryRepository @Inject constructor(
     private val memories: MemoryRepository,
 ) {
     private class Snapshot(
-        val root: String?, val sessionId: String?, val memoryAllowed: Boolean, val ghost: Boolean,
+        val root: String?, val sessionId: String?, val memoryAllowed: Boolean,
+        val injectionCategory: ContextCategory,
     ) {
         var entries: List<ContextEntry>? = null
-        var plan: ContextPreview? = null
+        val plans = mutableMapOf<Boolean, ContextPreview>()
     }
     private val snapshot = ThreadLocal<Snapshot?>()
 
-    fun withPromptSnapshot(ctx: AgentContext, ghost: Boolean, block: () -> String): String {
+    fun withPromptSnapshot(ctx: AgentContext, roleSession: Boolean = ctx.agentDefinition != null, block: () -> String): String {
         val previous = snapshot.get()
         snapshot.set(Snapshot(ctx.projectRoot.takeIf { it.isNotBlank() }, ctx.sessionId,
-            ctx.agentDefinition?.let { InjectPart.MEMORY in it.inject } ?: true, ghost))
+            ctx.agentDefinition?.let { InjectPart.MEMORY in it.inject } ?: true,
+            if (roleSession) ContextCategory.ROLE_INJECTED else ContextCategory.MAIN_INJECTED))
         return try { block() } finally { if (previous == null) snapshot.remove() else snapshot.set(previous) }
     }
 
@@ -46,7 +48,7 @@ class ContextLibraryRepository @Inject constructor(
     }.map { memoryEntry(it, projectRoot) }
 
     fun list(projectRoot: String?, sessionId: String? = null): List<ContextEntry> {
-        val active = snapshot.get()?.takeIf { it.root == projectRoot }
+        val active = snapshot.get()?.takeIf { it.root == projectRoot?.takeIf(String::isNotBlank) }
         val entries = active?.entries ?: sources(projectRoot).also { active?.entries = it }
         return entries.filter { sessionId == null || it.category != ContextCategory.TEMPORARY || it.sessionId == sessionId }
     }
@@ -97,22 +99,25 @@ class ContextLibraryRepository @Inject constructor(
 
     fun preview(projectRoot: String?, query: String, sessionId: String? = null): ContextPreview {
         val previous = snapshot.get()
-        snapshot.set(Snapshot(projectRoot, sessionId, true, false))
+        snapshot.set(Snapshot(projectRoot?.takeIf(String::isNotBlank), sessionId, true, ContextCategory.MAIN_INJECTED))
         return try { plan(projectRoot, sessionId) } finally { if (previous == null) snapshot.remove() else snapshot.set(previous) }
     }
 
-    private fun plan(root: String?, sessionId: String?): ContextPreview {
-        val active = snapshot.get()?.takeIf { it.root == root && it.sessionId == sessionId }
-        active?.plan?.let { return it }
-        val entries = list(root).map { entry ->
-            entry.copy(enabled = entry.enabled && active?.ghost != true && active?.memoryAllowed != false)
-        }
-        return ContextLibraryPlanner.plan(entries, sessionId).also { active?.plan = it }
+    private fun plan(root: String?, sessionId: String?, ordinaryMemoryEnabled: Boolean = true,
+                     memberName: String? = null): ContextPreview {
+        val normalizedRoot = root?.takeIf(String::isNotBlank)
+        val active = snapshot.get()?.takeIf { it.root == normalizedRoot && it.sessionId == sessionId }
+        val memoryAllowed = ordinaryMemoryEnabled && active?.memoryAllowed != false
+        active?.plans?.get(memoryAllowed)?.let { return it }
+        val audience = active?.injectionCategory ?: if (memberName == null) ContextCategory.MAIN_INJECTED else ContextCategory.ROLE_INJECTED
+        return ContextLibraryPlanner.plan(list(normalizedRoot), sessionId,
+            injectionCategory = audience, memoryAllowed = memoryAllowed).also { active?.plans?.set(memoryAllowed, it) }
     }
 
     fun render(projectRoot: String?, sessionId: String?, origin: ContextOrigin, enabled: Boolean = true,
-               memberName: String? = null, inheritsMainRules: Boolean = false, query: String = ""): String {
+               memberName: String? = null, inheritsMainRules: Boolean = false, query: String = "",
+               ordinaryMemoryEnabled: Boolean = true): String {
         if (!enabled) return ""
-        return plan(projectRoot, sessionId).rendered
+        return plan(projectRoot, sessionId, ordinaryMemoryEnabled, memberName).rendered
     }
 }

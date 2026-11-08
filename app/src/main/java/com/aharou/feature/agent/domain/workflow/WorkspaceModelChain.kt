@@ -13,7 +13,7 @@ class WorkspaceModelChain @Inject constructor(
     private val settings: WorkspaceModelChainRepository,
     private val providers: AIProviderRepository
 ) {
-    private data class Plan(val workspace: String, val chain: List<FallbackTarget>, val cursor: Int)
+    private data class Plan(val workspace: String, val chain: List<FallbackTarget>, val cursor: Int, val revision: Long)
     private val plans = ConcurrentHashMap<String, Plan>()
 
     suspend fun begin(workspace: String, session: String?, mainChat: Boolean): AIProviderConfig? {
@@ -21,9 +21,10 @@ class WorkspaceModelChain @Inject constructor(
         if (!mainChat) { plans.remove(session); return null }
         val chain = settings.get(workspace)
         if (chain.isEmpty()) { plans.remove(session); return null }
+        val revision = settings.revision(workspace)
         val previous = plans[session]
-        val cursor = previous?.takeIf { it.workspace == workspace && it.chain == chain && it.cursor < chain.size }?.cursor ?: 0
-        val plan = Plan(workspace, chain, cursor)
+        val cursor = previous?.takeIf { it.workspace == workspace && it.chain == chain && it.revision == revision && it.cursor < chain.size }?.cursor ?: 0
+        val plan = Plan(workspace, chain, cursor, revision)
         plans[session] = plan
         return resolveFrom(session, plan) ?: error("工作区模型列表全部不可用，请检查供应商、模型与凭据")
     }

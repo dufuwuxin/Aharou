@@ -40,7 +40,7 @@ class ConfigContextLibraryFields @Inject constructor(
             override fun add(payload: ConfigValue): String {
                 val values = (payload as? ConfigValue.Obj)?.value ?: throw ConfigError.TypeMismatch("object")
                 val rawCategory = (values["category"] as? ConfigValue.Str)?.value
-                val category = ContextCategory.entries.firstOrNull { it.name.equals(rawCategory, true) }
+                val category = ContextCategory.from(rawCategory)
                     ?: throw ConfigError.InvalidValue("Unknown context category")
                 val name = (values["name"] as? ConfigValue.Str)?.value?.trim()
                     ?: throw ConfigError.InvalidValue("Folder name required")
@@ -63,7 +63,7 @@ class ConfigContextLibraryFields @Inject constructor(
         val updated = transform(entry)
         if (!updated.sessionId.isNullOrBlank()) {
             val session = runBlocking { sessions.getById(updated.sessionId!!) }
-            if (session == null || session.workspacePath != root().orEmpty() || session.parentId != null || session.ghostMode) {
+            if (session == null || session.workspacePath != root().orEmpty() || session.parentId != null) {
                 throw ConfigError.InvalidValue("Target session is unavailable in this workspace")
             }
         }
@@ -73,7 +73,7 @@ class ConfigContextLibraryFields @Inject constructor(
     private inner class Entries : ConfigCollection {
         override val basePath = "context_library.entries"
         override val displayName = "统一记忆库"
-        override val description = "四类记忆的分类、文件夹与加载方式；新建和删除使用 memory 的 library 动作。"
+        override val description = "记忆的分类、文件夹与加载方式；新建和删除使用 memory 的 library 动作。"
         override val addable = false
         override val removable = false
         override fun childIds(): List<String> = library.list(root()).map(::key)
@@ -98,8 +98,8 @@ class ConfigContextLibraryFields @Inject constructor(
                 },
             )
             return listOf(
-                text("category", "RULE / TEMPORARY / LONG_TERM / INJECTED；临时类必须有真实session_id", { it.category.name }, { e, v ->
-                    val category = ContextCategory.entries.firstOrNull { it.name.equals(v, true) }
+                text("category", "RULE / TEMPORARY / LONG_TERM / ROLE_INJECTED / MAIN_INJECTED；旧INJECTED仅映射主代理，临时类必须有真实session_id", { it.category.name }, { e, v ->
+                    val category = ContextCategory.from(v)
                         ?: throw ConfigError.InvalidValue("Unknown context category")
                     if (category == ContextCategory.TEMPORARY && e.sessionId.isNullOrBlank()) throw ConfigError.InvalidValue("Set session_id first")
                     e.copy(category = category)

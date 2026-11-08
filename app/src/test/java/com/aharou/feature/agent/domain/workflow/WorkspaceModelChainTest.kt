@@ -5,6 +5,7 @@ import com.aharou.feature.settings.domain.model.AIProviderConfig
 import com.aharou.feature.settings.domain.model.FallbackTarget
 import com.aharou.feature.settings.domain.model.ProviderType
 import com.aharou.feature.settings.domain.repository.AIProviderRepository
+import io.mockk.every
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
@@ -13,7 +14,7 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class WorkspaceModelChainTest {
-    private val settings = mockk<WorkspaceModelChainRepository>()
+    private val settings = mockk<WorkspaceModelChainRepository> { every { revision(any()) } returns 0L }
     private val providers = mockk<AIProviderRepository>()
     private val router = WorkspaceModelChain(settings, providers)
     private fun provider(id: String) = AIProviderConfig(id = id, name = id, type = ProviderType.OPENAI,
@@ -56,4 +57,17 @@ class WorkspaceModelChainTest {
         coEvery { providers.getProviderById("b") } returns null
         assertTrue(runCatching { router.begin("/one", "s", true) }.isFailure)
     }
+    @Test fun savingSameChainResetsNextTurnButPreservesTheRunningPlan() = runTest {
+        var revision = 0L
+        every { settings.revision("/one") } answers { revision }
+        coEvery { settings.get("/one") } returns listOf(FallbackTarget("a", "one"), FallbackTarget("a", "two"))
+        coEvery { providers.getProviderById(any()) } answers { provider(firstArg()) }
+        assertEquals("one", router.begin("/one", "s", true)?.effectiveModel)
+        assertEquals("two", router.next("s")?.effectiveModel)
+        revision++
+        assertEquals("two", router.current("s")?.effectiveModel)
+        assertEquals("one", router.begin("/one", "s", true)?.effectiveModel)
+        assertEquals("two", router.next("s")?.effectiveModel)
+    }
+
 }

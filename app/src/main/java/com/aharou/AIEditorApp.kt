@@ -150,10 +150,6 @@ class AIEditorApp : Application(), Configuration.Provider {
     @Inject
     lateinit var keepaliveSettings: KeepaliveSettingsRepository
 
-    /** 跨设备协作控制器：启动时按配置恢复前台服务（见 onCreate 的 startIfEnabled 调用）。 */
-    @Inject
-    lateinit var remoteDeviceController: com.aharou.feature.remotedevice.RemoteDeviceController
-
     /** WorkManager Worker 工厂：使 @HiltWorker（KeepaliveWorker）能注入依赖。 */
     @Inject
     lateinit var workerFactory: HiltWorkerFactory
@@ -214,7 +210,6 @@ class AIEditorApp : Application(), Configuration.Provider {
 
     @Inject
     lateinit var configStewardFields: com.aharou.feature.agent.data.ConfigStewardFields
-    @Inject lateinit var configDualModelFields: com.aharou.feature.agent.data.ConfigDualModelFields
 
     @Inject
     lateinit var configSubAgentFields: com.aharou.feature.agent.data.ConfigSubAgentFields
@@ -226,10 +221,6 @@ class AIEditorApp : Application(), Configuration.Provider {
     /** 桌面伙伴「小染」字段注册。 */
     @Inject
     lateinit var configPetFields: com.aharou.feature.pet.data.ConfigPetFields
-
-    /** 跨设备协作字段注册（开关/端口/配对码/已配对设备）。 */
-    @Inject
-    lateinit var configRemoteDeviceFields: com.aharou.feature.remotedevice.data.ConfigRemoteDeviceFields
 
     /** 记忆同步字段注册（仓库地址 / 分支 / 上次结果与时间）。 */
     @Inject
@@ -403,12 +394,11 @@ class AIEditorApp : Application(), Configuration.Provider {
         configSkillMarketFields.registerInto(configRegistry)
         configChatFields.registerInto(configRegistry)
         configBrowserFields.registerInto(configRegistry)
-        configStewardFields.registerInto(configRegistry); configDualModelFields.registerInto(configRegistry)
+        configStewardFields.registerInto(configRegistry)
         configSubAgentFields.registerInto(configRegistry)
         configExperimentFields.registerInto(configRegistry)
         configTranslationFields.registerInto(configRegistry)
         configPetFields.registerInto(configRegistry)
-        configRemoteDeviceFields.registerInto(configRegistry)
         configCredentialFields.registerInto(configRegistry)
         configBackupFields.registerInto(configRegistry)
         // 目录迁移递归扫工作区、审计初始化建目录、SOUL.md 先释放再读回缓存：都是同步磁盘活，放主线程会
@@ -565,11 +555,6 @@ class AIEditorApp : Application(), Configuration.Provider {
                     held = false
                 }
             }
-        }
-        // 跨设备协作：配置里开着就恢复前台服务，否则不拉起（关着就不该占一条常驻通知）。
-        appScope.launch {
-            runCatching { remoteDeviceController.startIfEnabled() }
-                .onFailure { FileLogger.e(TAG, "恢复跨设备协作服务失败", it) }
         }
         // 连接已配置的 MCP server，把其工具注册进 ToolRegistry（内部自有 scope，失败不影响启动）。
         mcpManager.start()

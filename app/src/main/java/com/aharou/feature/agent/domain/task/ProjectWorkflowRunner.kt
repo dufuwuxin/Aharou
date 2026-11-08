@@ -10,7 +10,7 @@ import com.aharou.feature.agent.domain.subagent.SubAgentEventBus
 import com.aharou.feature.agent.domain.subagent.SubAgentEventType
 import com.aharou.feature.agent.domain.tool.ToolResult
 import com.aharou.feature.agent.domain.tool.ToolRegistry
-import com.aharou.feature.agent.domain.tool.subagent.TaskTool
+import com.aharou.feature.agent.domain.tool.AgentTool
 import com.aharou.feature.agent.presentation.MessageRole
 import javax.inject.Inject
 import javax.inject.Provider
@@ -33,7 +33,7 @@ class ProjectWorkflowRunner @Inject constructor(
     private val messages: MessagePersistenceUseCase,
     private val coordinator: ProjectTaskExecutionCoordinator
 ) {
-    private val tasks: TaskTool get() = registry.get().getTool("task") as TaskTool
+    private val tasks: AgentTool get() = checkNotNull(registry.get().getTool("task")) { "PROJECT_TASK_TOOL_UNAVAILABLE" }
     internal var memberTimeoutMs = 30L * 60L * 1000L
 
     suspend fun members(): List<String> = withContext(Dispatchers.IO) { definitions.listEnabled().map { it.definition.name } }

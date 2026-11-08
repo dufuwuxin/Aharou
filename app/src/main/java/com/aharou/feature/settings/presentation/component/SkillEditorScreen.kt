@@ -233,8 +233,7 @@ internal fun SkillEditorScreen(
                 }
             }
 
-            com.aharou.core.translation.TranslationPreview(description)
-            com.aharou.core.translation.TranslationPreview(instructions)
+            com.aharou.core.translation.TranslationPreview(listOf(description, instructions).filter { it.isNotBlank() }.joinToString("\n\n"))
             SettingsGroupHeader(text = stringResource(R.string.skills_instructions))
             SettingsGroup {
                 AppTextField(

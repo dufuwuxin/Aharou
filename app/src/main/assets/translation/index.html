@@ -1,0 +1,28 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Offline translation</title></head>
+<body><script type="module">
+import { env, pipeline } from './runtime/transformers.min.js';
+const origin = window.location.origin;
+env.allowRemoteModels = false;
+env.allowLocalModels = true;
+env.useBrowserCache = false;
+env.localModelPath = origin + '/models/';
+env.backends.onnx.wasm.wasmPaths = origin + '/runtime/';
+env.backends.onnx.wasm.numThreads = 1;
+env.backends.onnx.wasm.proxy = false;
+let translator;
+const finish = (id, success, value) => window.TranslationResult.finish(id, success, value);
+window.translateLocal = async (id, text) => {
+  try {
+    const output = await translator(text, { max_new_tokens: 256, num_beams: 1 });
+    const value = output?.[0]?.translation_text;
+    if (typeof value !== 'string' || !value.trim()) throw new Error('Empty translation');
+    finish(id, true, value);
+  } catch (_) { finish(id, false, ''); }
+};
+const request = new URL(window.location.href).searchParams.get('request');
+try {
+  translator = await pipeline('translation', 'opus-mt-en-zh', { quantized: true, local_files_only: true });
+  finish(request, true, '');
+} catch (_) { finish(request, false, ''); }
+</script></body></html>

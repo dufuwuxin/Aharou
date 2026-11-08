@@ -1,7 +1,6 @@
 package com.aharou.feature.agent.domain.workflow
 import android.os.SystemClock
 import android.util.Base64
-import com.aharou.core.util.AILogger
 import com.aharou.core.util.FileLogger
 import com.aharou.core.util.runCancellationSafeTail
 import com.aharou.feature.agent.domain.privacy.maskIfNeeded
@@ -65,7 +64,6 @@ import com.aharou.feature.settings.data.repository.GeneralSettingsRepository
 import com.aharou.feature.settings.data.repository.ProviderKeyRotator
 import com.aharou.feature.settings.data.repository.TitleModelSettingsRepository
 import com.aharou.feature.settings.domain.model.AIProviderConfig
-import com.aharou.feature.remotedevice.domain.RemoteDeviceSettings
 import com.aharou.feature.agent.domain.provider.AnthropicAdapter
 import com.aharou.feature.agent.domain.provider.fixedTemperature
 import com.aharou.feature.agent.domain.provider.GeminiAdapter
@@ -119,7 +117,6 @@ class StatefulAgentWorkflow @Inject constructor(
     private val localLlmEngine: LocalLlmEngine,
     private val promptProvider: SystemPromptProvider,
     private val permissionManager: ToolPermissionManager,
-    private val remoteDeviceSettings: RemoteDeviceSettings,
     private val policyEngine: ToolPermissionPolicyEngine,
     private val contextCompactor: ContextCompactor,
     private val planApprovalManager: PlanApprovalManager,
@@ -136,7 +133,7 @@ class StatefulAgentWorkflow @Inject constructor(
     private val keyRotator: ProviderKeyRotator,
     private val generatedImagePersister: GeneratedImagePersister,
     private val failoverCoordinator: ProviderFailoverCoordinator,
-    private val workspaceModelChain: WorkspaceModelChain, private val dualModelRouter: DualModelRouter,
+    private val workspaceModelChain: WorkspaceModelChain,
     private val agentNotificationCenter: AgentNotificationCenter,
     private val eventInjector: AgentEventInjector,
     private val memoryCurator: MemoryCurator,
@@ -257,8 +254,8 @@ class StatefulAgentWorkflow @Inject constructor(
             val previousResults: Map<String, ToolBatchResult> = emptyMap()
         ) : AgentSideEffect
     }
-    private suspend fun getEffectiveProvider(sessionId: String?, routing: com.aharou.feature.agent.domain.session.DualModelSettings? = null): AIProvider {
-        val config = resolveProviderConfig(sessionId, routing)
+    private suspend fun getEffectiveProvider(sessionId: String?): AIProvider {
+        val config = resolveProviderConfig(sessionId)
             ?: throw IllegalStateException("尚未配置 AI 供应商，请到设置中添加并选择一个")
         if (!config.hasUsableApiKey) throw IllegalStateException("「${config.name}」未填写 API Key")
         if (config.effectiveModel.isBlank()) throw IllegalStateException("「${config.name}」未选择模型")
@@ -266,8 +263,7 @@ class StatefulAgentWorkflow @Inject constructor(
     }
 
     /** 解析当前生效的 provider 配置：优先 session 绑定的 providerId/model，回退全局 active provider；绑定失效也回退，保老会话不中断。 */
-    private suspend fun resolveProviderConfig(sessionId: String?, routing: com.aharou.feature.agent.domain.session.DualModelSettings? = null): AIProviderConfig? {
-        dualModelRouter.resolve(sessionId, routing)?.let { return it }
+    private suspend fun resolveProviderConfig(sessionId: String?): AIProviderConfig? {
         // 回退覆盖优先：主供应商已因额度/鉴权/限流失败过，不要每轮再撞一次
         failoverCoordinator.overrideConfig(sessionId)?.let { return it }
         if (sessionId != null) {
@@ -377,7 +373,7 @@ class StatefulAgentWorkflow @Inject constructor(
         provider.useFullUrl = config.useFullUrl
         provider.useResponseApi = config.useResponseApi
         provider.providerId = config.id
-        provider.logSessionId = AILogger.loggableSessionId(sessionId, messagePersistenceUseCase::isGhost)
+        provider.logSessionId = sessionId
         provider.customHeaders = config.customHeaders
         val metadata = modelMetadataService.resolve(config.id, config.type, config.effectiveModel)
         // 模型元数据的输出上限（models.dev limit.output）：不传时 Anthropic 会把输出卡在 adapter 兜底值上。
@@ -447,19 +443,16 @@ class StatefulAgentWorkflow @Inject constructor(
             )
         )
 
-        val routingSettings = if (currentContext.agentDefinition != null) com.aharou.feature.agent.domain.session.DualModelSettings() else dualModelRouter.settingsForTurn(currentContext.sessionId)
-
         // 提示词构建会读取技能/子代理/记忆等文件（远程经 SFTP），须离开收集本工作流的线程（主线程）。
         val promptStartedNs = System.nanoTime()
         FileLogger.memoryCheckpoint(TAG, "prompt.start", details = "operation=$promptStartedNs")
-        val systemPrompt = withContext(Dispatchers.IO) { promptProvider.build(if (routingSettings.enabled) currentContext.copy(modelIdentity = null) else currentContext) }
+        val systemPrompt = withContext(Dispatchers.IO) { promptProvider.build(currentContext) }
         FileLogger.memoryCheckpoint(TAG, "prompt.ready",
             elapsedMs = (System.nanoTime() - promptStartedNs) / 1_000_000,
             details = "operation=$promptStartedNs promptChars=${systemPrompt.length}")
-        val dualConfig = dualModelRouter.resolve(currentContext.sessionId, routingSettings)
-        val chainConfig = if (dualConfig != null) null else workspaceModelChain.begin(currentContext.projectRoot, currentContext.sessionId,
+        val chainConfig = workspaceModelChain.begin(currentContext.projectRoot, currentContext.sessionId,
             currentContext.agentDefinition == null && currentContext.sessionId?.let { sessionUseCase.getSessionById(it)?.parentId } == null)
-        val aiProvider = (dualConfig ?: chainConfig)?.let { createStandaloneProvider(it, currentContext.sessionId) } ?: getEffectiveProvider(currentContext.sessionId, routingSettings)
+        val aiProvider = chainConfig?.let { createStandaloneProvider(it, currentContext.sessionId) } ?: getEffectiveProvider(currentContext.sessionId)
         val metadata = modelMetadataService.configureChatModel(aiProvider)
         val inputBudget = ModelContextPolicy.effectiveInputBudget(metadata)
         val historyStartedNs = System.nanoTime()
@@ -467,10 +460,10 @@ class StatefulAgentWorkflow @Inject constructor(
         val lastAssistantIndex = currentContext.history.indexOfLast { it is AgentMessage.AssistantMessage && it.inputTokens > 0 }
         // 预算基线与两个「本轮只试一次」的开关都只在 LLM 调用分支用到，收成一个可变对象，
         // 让该分支抽成独立函数后不必在主循环里再留 4 个跨挂起点局部变量。
-        val llmBudget = LlmCallBudgetState(routingSettings = routingSettings, providerKey = "${aiProvider.providerId.length}:${aiProvider.providerId}:${aiProvider.model}",
+        val llmBudget = LlmCallBudgetState(providerKey = "${aiProvider.providerId.length}:${aiProvider.providerId}:${aiProvider.model}",
             baselineEstimate = withContext(Dispatchers.Default) { ContextTokenEstimator.estimate(systemPrompt,
                 currentContext.history.take(lastAssistantIndex.coerceAtLeast(0)), requestTools(currentTools, currentContext)) },
-            baselineUsage = if (!routingSettings.enabled && currentContext.lastInputTokens > 0 && lastAssistantIndex >= 0) {
+            baselineUsage = if (currentContext.lastInputTokens > 0 && lastAssistantIndex >= 0) {
                 (currentContext.history[lastAssistantIndex] as AgentMessage.AssistantMessage).inputTokens
             } else 0
         )
@@ -593,8 +586,7 @@ class StatefulAgentWorkflow @Inject constructor(
         telemetry: AgentTurnTelemetry
     ): AgentSessionState {
         var state = initialState.copy(messages = initialState.messages + drainInsertedUserMessages(currentContext.sessionId))
-        val dualConfig = dualModelRouter.resolve(currentContext.sessionId, budget.routingSettings)
-        val providerInUse = (dualConfig ?: workspaceModelChain.current(currentContext.sessionId))?.let { createStandaloneProvider(it, currentContext.sessionId) } ?: aiProvider
+        val providerInUse = workspaceModelChain.current(currentContext.sessionId)?.let { createStandaloneProvider(it, currentContext.sessionId) } ?: aiProvider
         budget.selectProvider("${providerInUse.providerId.length}:${providerInUse.providerId}:${providerInUse.model}")
         val callMetadata = modelMetadataService.configureChatModel(providerInUse)
         val inputBudget = ModelContextPolicy.effectiveInputBudget(callMetadata)
@@ -814,9 +806,8 @@ class StatefulAgentWorkflow @Inject constructor(
             throw e
         } catch (e: Exception) {
             if (finalResponse == null && !captureSnapshot().hasSnapshotData() &&
-                ((dualConfig == null && workspaceModelChain.configured(currentContext.sessionId)) || e.isKeySwitchFailure() || e.isQuotaExhausted())) {
-                val target = if (dualConfig != null) dualModelRouter.next(currentContext.sessionId, budget.routingSettings)
-                    else if (workspaceModelChain.configured(currentContext.sessionId)) workspaceModelChain.next(currentContext.sessionId)
+                (workspaceModelChain.configured(currentContext.sessionId) || e.isKeySwitchFailure() || e.isQuotaExhausted())) {
+                val target = if (workspaceModelChain.configured(currentContext.sessionId)) workspaceModelChain.next(currentContext.sessionId)
                     else aiProviderRepository.getProviderById(providerInUse.providerId)?.let { failoverCoordinator.next(currentContext.sessionId, it) }
                 if (target != null) {
                     callError = e.message ?: e.javaClass.simpleName
@@ -917,9 +908,7 @@ class StatefulAgentWorkflow @Inject constructor(
         actionQueue: ArrayDeque<AgentAction>,
         emit: suspend (AgentEvent) -> Unit
     ) {
-        val gate = PermissionGate(policyEngine, permissionManager, fileAccess, receiptRepository) {
-            remoteDeviceSettings.current().enabled
-        }
+        val gate = PermissionGate(policyEngine, permissionManager, fileAccess, receiptRepository)
         val approved = mutableListOf<ToolCall>()
         val rejectedResults = mutableMapOf<String, ToolBatchResult>()
         val asks = mutableListOf<Pair<ToolCall, PermissionVerdict.Ask>>()

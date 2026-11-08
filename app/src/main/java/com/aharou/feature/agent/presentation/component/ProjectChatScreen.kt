@@ -77,13 +77,13 @@ internal fun rememberProjectChatBinding(agent: AIAgentViewModel, projects: Proje
 @Composable
 fun ProjectChatScreen(projectId: String, agentViewModel: AIAgentViewModel, projectViewModel: ProjectTaskViewModel,
     settingsViewModel: SettingsViewModel, workspaceViewModel: WorkspaceViewModel,
-    onBack: () -> Unit, onOpenDrawer: () -> Unit, onToolDetail: (AgentUIMessage) -> Unit,
+    onBack: () -> Unit, onToolDetail: (AgentUIMessage) -> Unit,
     onNavigateToTerminal: () -> Unit, onNavigateToGit: () -> Unit, onNavigateToBrowser: () -> Unit,
     onNavigateToSandbox: () -> Unit, onNavigateToShared: () -> Unit, onNavigateToObserve: () -> Unit) {
     val binding = rememberProjectChatBinding(agentViewModel, projectViewModel, onBack, onToolDetail, projectId)!!
     AIChatPanel(viewModel = agentViewModel, settingsViewModel = settingsViewModel, workspaceViewModel = workspaceViewModel,
         bodyOverride = binding.body, floatingComposer = true, composerSessionId = binding.sessionId, projectChatContext = binding.context,
-        onOpenDrawer = onOpenDrawer, onBackToSessions = onBack,
+        onBackToSessions = onBack,
         onNavigateToTerminal = onNavigateToTerminal, onNavigateToGit = onNavigateToGit, onNavigateToBrowser = onNavigateToBrowser,
         onNavigateToSandbox = onNavigateToSandbox, onNavigateToShared = onNavigateToShared, onNavigateToObserve = onNavigateToObserve)
 }

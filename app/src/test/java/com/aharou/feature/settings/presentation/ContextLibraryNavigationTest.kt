@@ -53,7 +53,23 @@ class ContextLibraryNavigationTest {
         val draft = ContextEditorDraft.from(null, ContextCategory.TEMPORARY, "测试/会话", true)
             .copy(name = "待办", description = "说明", content = "正文", sessionId = "s1", loading = ContextLoad.OFF)
         assertEquals(draft, ContextEditorDraft.restore(draft.savedFields()))
-        assertNull(draft.changeCategory(ContextCategory.INJECTED).sessionId)
-        assertEquals("", draft.changeCategory(ContextCategory.INJECTED).folder)
+        assertNull(draft.changeCategory(ContextCategory.MAIN_INJECTED).sessionId)
+        assertEquals("", draft.changeCategory(ContextCategory.MAIN_INJECTED).folder)
     }
+
+    @Test fun indexDraftKeepsThreeFieldsAndLegacySaverConservativelyRestoresMain() {
+        val draft = ContextEditorDraft.from(null, ContextCategory.ROLE_INJECTED, "role-folder", true)
+            .copy(name = "标题", description = "摘要", content = "正文", loading = ContextLoad.INDEX)
+        assertEquals(draft, ContextEditorDraft.restore(draft.savedFields()))
+        assertEquals(ContextLoad.FULL, defaultContextLoad(ContextCategory.ROLE_INJECTED))
+        assertEquals(ContextLoad.FULL, defaultContextLoad(ContextCategory.MAIN_INJECTED))
+        val legacy = draft.savedFields().toMutableList().also { it[3] = "INJECTED" }
+        val restored = ContextEditorDraft.restore(legacy)
+        assertEquals(ContextCategory.MAIN_INJECTED, restored.category)
+        assertEquals("标题", restored.name)
+        assertEquals("摘要", restored.description)
+        assertEquals("正文", restored.content)
+        assertEquals(ContextLoad.INDEX, restored.loading)
+    }
+
 }

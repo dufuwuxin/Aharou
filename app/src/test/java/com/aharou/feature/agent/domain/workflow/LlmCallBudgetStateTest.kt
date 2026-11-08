@@ -1,12 +1,11 @@
 package com.aharou.feature.agent.domain.workflow
 
-import com.aharou.feature.agent.domain.session.DualModelSettings
 import org.junit.Assert.*
 import org.junit.Test
 
 class LlmCallBudgetStateTest {
     @Test fun eachModelGetsItsOwnRecoveryAndReturningDoesNotResetAttempts() {
-        val budget = LlmCallBudgetState(DualModelSettings(), "planning", 100, 200)
+        val budget = LlmCallBudgetState("planning", 100, 200)
         budget.compactionAttemptFailed = true
         budget.overflowRecoveryAttempted = true
         budget.selectProvider("execution")
@@ -24,7 +23,7 @@ class LlmCallBudgetStateTest {
     }
 
     @Test fun repeatedRequestsOnSameModelPreserveCalibrationAndRecoveryFlags() {
-        val budget = LlmCallBudgetState(DualModelSettings(), "planning", 100, 200)
+        val budget = LlmCallBudgetState("planning", 100, 200)
         budget.compactionAttemptFailed = true
         budget.selectProvider("planning")
         assertEquals(100, budget.baselineEstimate)

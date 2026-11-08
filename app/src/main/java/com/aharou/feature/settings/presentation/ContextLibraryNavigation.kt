@@ -18,7 +18,7 @@ internal fun contextFolderEntries(entries: List<ContextEntry>, category: Context
     entries.filter { it.category == category && it.folder == folder }
 
 internal fun defaultContextLoad(category: ContextCategory): ContextLoad = when (category) {
-    ContextCategory.RULE, ContextCategory.INJECTED, ContextCategory.TEMPORARY -> ContextLoad.FULL
+    ContextCategory.RULE, ContextCategory.ROLE_INJECTED, ContextCategory.MAIN_INJECTED, ContextCategory.TEMPORARY -> ContextLoad.FULL
     ContextCategory.LONG_TERM -> ContextLoad.SEARCH
 }
 
@@ -51,7 +51,24 @@ internal data class ContextEditorDraft(
                 entry?.loading ?: defaultContextLoad(category), entry?.sessionId)
 
         fun restore(fields: List<String>): ContextEditorDraft = ContextEditorDraft(fields[0], fields[1], fields[2],
-            ContextCategory.valueOf(fields[3]), fields[4], MemoryScope.valueOf(fields[5]),
+            requireNotNull(ContextCategory.from(fields[3])), fields[4], MemoryScope.valueOf(fields[5]),
             ContextKind.valueOf(fields[6]), ContextLoad.valueOf(fields[7]), fields[8].ifBlank { null })
     }
+}
+
+/** Search spans the whole library; browsing still only exposes the current folder. */
+internal fun contextVisibleEntries(entries: List<ContextEntry>, query: String,
+                                   category: ContextCategory, folder: String?,
+                                   scope: MemoryScope?, loading: ContextLoad?): List<ContextEntry> =
+    if (query.isNotBlank()) filterContextEntries(entries, query, scope, loading, null)
+    else if (folder == null) emptyList()
+    else filterContextEntries(contextFolderEntries(entries, category, folder), "", scope, loading, null)
+
+internal fun contextSearchSnippet(entry: ContextEntry, query: String): String {
+    val text = "${entry.description}\n${entry.content}".replace(Regex("\\s+"), " ").trim()
+    val terms = query.trim().split(Regex("\\s+")).filter(String::isNotBlank)
+    val hit = terms.map { text.indexOf(it, ignoreCase = true) }.filter { it >= 0 }.minOrNull() ?: 0
+    val start = (hit - 55).coerceAtLeast(0)
+    val end = (start + 180).coerceAtMost(text.length)
+    return (if (start > 0) "…" else "") + text.substring(start, end) + if (end < text.length) "…" else ""
 }

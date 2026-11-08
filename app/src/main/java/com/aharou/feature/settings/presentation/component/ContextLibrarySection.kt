@@ -36,9 +36,8 @@ import com.aharou.feature.agent.domain.context.ContextLoad
 import com.aharou.feature.agent.domain.memory.MemoryScope
 import com.aharou.feature.settings.presentation.ContextLibraryViewModel
 import com.aharou.feature.settings.presentation.contextChildFolders
-import com.aharou.feature.settings.presentation.contextFolderEntries
+import com.aharou.feature.settings.presentation.contextVisibleEntries
 import com.aharou.feature.settings.presentation.contextParentFolder
-import com.aharou.feature.settings.presentation.filterContextEntries
 import compose.icons.FeatherIcons
 import compose.icons.feathericons.Folder
 
@@ -63,7 +62,8 @@ internal fun ContextLibrarySection(viewModel: ContextLibraryViewModel = hiltView
     if (creating || editor != null) {
         val target = editor
         ContextLibraryEditor(
-            entry = target, initialCategory = category, initialFolder = folder.orEmpty(), state = state,
+            entry = target, initialCategory = category,
+            initialFolder = folder ?: if (category.isInjection) stringResource(category.label()) else "", state = state,
             onBack = { creating = false; editor = null },
             onSave = { name, description, content, entryScope, kind, entryLoad, entryCategory, entryFolder, sessionId ->
                 val done = { creating = false; editor = null; category = entryCategory; folder = entryFolder }
@@ -99,13 +99,11 @@ internal fun ContextLibrarySection(viewModel: ContextLibraryViewModel = hiltView
     )
     val currentFolder = folder
     val visible = remember(state.entries, query, scope, loading, category, currentFolder) {
-        if (currentFolder == null) emptyList() else filterContextEntries(
-            contextFolderEntries(state.entries, category, currentFolder), query, scope, loading, null)
+        contextVisibleEntries(state.entries, query, category, currentFolder, scope, loading)
     }
     val folders = remember(state.folders, state.entries, category, currentFolder, query) {
         val paths = state.folders[category].orEmpty() + state.entries.filter { it.category == category }.map { it.folder }
-        if (currentFolder == "") emptyList() else contextChildFolders(paths, currentFolder.orEmpty())
-            .filter { query.isBlank() || it.substringAfterLast('/').contains(query.trim(), ignoreCase = true) }
+        if (query.isNotBlank()) emptyList() else contextChildFolders(paths, currentFolder.orEmpty())
     }
     LazyColumn(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(Spacing.md),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(Spacing.lg)) {
@@ -123,7 +121,7 @@ internal fun ContextLibrarySection(viewModel: ContextLibraryViewModel = hiltView
                     style = MaterialTheme.typography.titleMedium)
             }
             item { AppTextField(query, { query = it }, placeholder = stringResource(R.string.context_search_placeholder)) }
-            if (currentFolder != null) {
+            if (currentFolder != null || query.isNotBlank()) {
                 item { ContextChoiceRow(listOf(stringResource(R.string.context_scope_all)) + MemoryScope.entries.map { stringResource(it.label()) },
                     (scope?.ordinal ?: -1) + 1, { scope = MemoryScope.entries.getOrNull(it - 1) }) }
                 item { ContextChoiceRow(listOf(stringResource(R.string.context_load_all)) + ContextLoad.entries.map { stringResource(it.label()) },
@@ -142,10 +140,10 @@ internal fun ContextLibrarySection(viewModel: ContextLibraryViewModel = hiltView
             items(folders, key = { "folder:$it" }) { path ->
                 ContextFolderRow(path.substringAfterLast('/')) { folder = path; query = "" }
             }
-            if (currentFolder != null) {
+            if (currentFolder != null || query.isNotBlank()) {
                 item { Text(stringResource(R.string.context_result_count, visible.size), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                 if (!state.loading && visible.isEmpty() && folders.isEmpty()) item { ContextNotice(stringResource(R.string.context_folder_empty)) }
-                items(visible, key = { it.id }) { entry -> ContextEntryCard(entry) { editorRoot = state.workspaceRoot; editor = entry } }
+                items(visible, key = { it.id }) { entry -> ContextEntryCard(entry, query) { editorRoot = state.workspaceRoot; editor = entry } }
             }
         }
     }

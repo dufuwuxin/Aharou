@@ -10,7 +10,9 @@ object ContextLibraryPlanner {
 
     internal fun safe(text: String): String = SecretMasker.mask(TextSanitizer.sanitize(text))
 
-    fun plan(entries: List<ContextEntry>, sessionId: String? = null, onlyOrigin: ContextOrigin? = null): ContextPreview {
+    fun plan(entries: List<ContextEntry>, sessionId: String? = null, onlyOrigin: ContextOrigin? = null,
+             injectionCategory: ContextCategory = ContextCategory.MAIN_INJECTED,
+             memoryAllowed: Boolean = true): ContextPreview {
         val full = mutableListOf<ContextEntry>()
         val indexed = mutableListOf<ContextEntry>()
         val omitted = mutableListOf<Pair<ContextEntry, String>>()
@@ -19,6 +21,15 @@ object ContextLibraryPlanner {
         var fullChars = 0
         var indexChars = 0
         for (entry in entries.distinctBy { it.id }) {
+            // Filter before charging budgets: another audience must not crowd out this one.
+            if (entry.category.isInjection && entry.category != injectionCategory) {
+                omitted += entry to "different injection audience"
+                continue
+            }
+            if (!entry.category.isInjection && !memoryAllowed) {
+                omitted += entry to "ordinary memory disabled"
+                continue
+            }
             if (entry.category == ContextCategory.TEMPORARY && (sessionId.isNullOrBlank() || entry.sessionId != sessionId)) {
                 omitted += entry to "temporary: different or missing session"
                 continue

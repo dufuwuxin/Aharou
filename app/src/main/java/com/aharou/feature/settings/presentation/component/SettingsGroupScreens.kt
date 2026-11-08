@@ -63,8 +63,7 @@ import compose.icons.feathericons.Users
 internal fun SettingsAharouRows(onOpen: (SettingsSection) -> Unit) {
     Column(
         modifier = Modifier
-            .fillMaxWidth()
-            .padding(bottom = Spacing.xl),
+            .fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(Spacing.sm)
     ) {
         SettingsGroup {
@@ -112,8 +111,7 @@ internal fun SettingsAiGroupScreen(onOpen: (SettingsSection) -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(bottom = Spacing.xl),
+            .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(Spacing.sm)
     ) {
         OfflineTranslationSettings()
@@ -174,8 +172,7 @@ internal fun SettingsGeneralRows(
     val autoCloseAgentTabs by cleanupViewModel.autoCloseFinishedAgentTabs.collectAsStateWithLifecycle()
     Column(
         modifier = Modifier
-            .fillMaxWidth()
-            .padding(bottom = Spacing.xl),
+            .fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(Spacing.sm)
     ) {
         SettingsGroup {
@@ -232,8 +229,7 @@ internal fun SettingsGeneralRows(
 internal fun SettingsPermissionsRows(onOpen: (SettingsSection) -> Unit) {
     Column(
         modifier = Modifier
-            .fillMaxWidth()
-            .padding(bottom = Spacing.xl),
+            .fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(Spacing.sm)
     ) {
         SettingsGroup {
@@ -262,8 +258,7 @@ internal fun SettingsPermissionsRows(onOpen: (SettingsSection) -> Unit) {
 internal fun SettingsMoreRows(onOpen: (SettingsSection) -> Unit) {
     Column(
         modifier = Modifier
-            .fillMaxWidth()
-            .padding(bottom = Spacing.xl),
+            .fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(Spacing.sm)
     ) {
         SettingsGroup {
@@ -296,12 +291,6 @@ internal fun SettingsMoreRows(onOpen: (SettingsSection) -> Unit) {
                 icon = FeatherIcons.Users,
                 title = stringResource(SettingsSection.Experiments.titleRes),
                 onClick = { onOpen(SettingsSection.Experiments) }
-            )
-            SettingsDivider()
-            SettingsRow(
-                icon = FeatherIcons.Smartphone,
-                title = stringResource(SettingsSection.RemoteDevice.titleRes),
-                onClick = { onOpen(SettingsSection.RemoteDevice) }
             )
             SettingsDivider()
             SettingsRow(

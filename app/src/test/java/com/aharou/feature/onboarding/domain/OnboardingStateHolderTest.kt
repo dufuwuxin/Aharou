@@ -11,21 +11,18 @@ class OnboardingStateHolderTest {
     private fun holder(): OnboardingStateHolder = OnboardingStateHolder()
 
     @Test
-    fun `start activates from OPEN_SIDEBAR`() {
+    fun `start activates from ENTER_SETTINGS`() {
         val h = holder()
         h.start()
         assertTrue(h.isActive)
-        assertEquals(OnboardingStep.OPEN_SIDEBAR, h.state.value.step)
+        assertEquals(OnboardingStep.ENTER_SETTINGS, h.state.value.step)
         assertEquals(OnboardingStatus.IN_PROGRESS, h.state.value.status)
     }
 
     @Test
-    fun `nextStep progresses through full ten-step flow`() {
+    fun `nextStep progresses through full nine-step flow`() {
         val h = holder()
         h.start()
-        assertEquals(OnboardingStep.OPEN_SIDEBAR, h.state.value.step)
-
-        h.nextStep()
         assertEquals(OnboardingStep.ENTER_SETTINGS, h.state.value.step)
 
         h.nextStep()

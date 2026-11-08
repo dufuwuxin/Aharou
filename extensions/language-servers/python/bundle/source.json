@@ -1,0 +1,19 @@
+{
+  "id": "python",
+  "repository": "https://github.com/python-lsp/python-lsp-server",
+  "revision": "a3620069a607a63ed52569fde188e9301feae93a",
+  "sourceUrl": "https://codeload.github.com/python-lsp/python-lsp-server/tar.gz/a3620069a607a63ed52569fde188e9301feae93a",
+  "sourceSha256": "16cce9036a2fe9d123cf8f7509dffdcc37bdbda5e70615561c8d2cc34a2cb815",
+  "snapshotTime": "2026-07-27T18:22:55Z",
+  "adaptationStatus": "source-vendored-build-unverified",
+  "version": "0.dev0+ga3620069a607",
+  "license": "MIT",
+  "prerequisites": [
+    "Python >=3.11 with venv/pip",
+    "C compiler for optional dependency builds"
+  ],
+  "versionBasis": "explicit SCM snapshot version, not an upstream release",
+  "licenseSha256": "aec02b478e57f395ae45802b2aa70fcf99bba3eabf4cd700c065cd62a7d92a1b",
+  "buildVerification": "not executed: source and controlled shell fixture validation only",
+  "dependencyPolicy": "Dependencies may download during explicit user installation; no global package installation; upstream source itself is the local archive."
+}

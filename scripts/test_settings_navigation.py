@@ -109,7 +109,9 @@ class SettingsNavigationTest(unittest.TestCase):
         sessions = source(SRC / "feature/agent/presentation/component/SessionListScreen.kt")
         projects = source(SRC / "feature/agent/presentation/component/ProjectListScreen.kt")
         self.assertNotIn("R.string.session_list_title", sessions)
-        self.assertNotIn("Text(stringResource(R.string.project_home)", projects)
+        self.assertIn("FilterChip(selected = !showSessions", projects)
+        self.assertIn("FilterChip(selected = showSessions", projects)
+        self.assertNotRegex(projects, r"Text\(stringResource\(R\.string\.project_home\),\s*style\s*=")
         self.assertIn("onNewSession", sessions)
         self.assertIn('testTag("create_project")', projects)
 
@@ -311,34 +313,31 @@ class SettingsNavigationTest(unittest.TestCase):
         self.assertIn("val RUST = Entry", self.catalog)
         rust = block(self.catalog, "val RUST = Entry", "(", ")")
         for field in ('extension = LanguageExtension.RUST', 'languageId = "rust"',
-                      'fileExtensions = listOf("rs")', 'program = "rust-analyzer"'):
+                      'fileExtensions = listOf("rs")', 'program = "${VendoredLanguageServers.ROOT}/bin/rust-analyzer"'):
             self.assertIn(field, rust)
         self.assertRegex(self.catalog, r"val ALL[^\n]*\bRUST\b")
         self.assertIn("\n    RUST(", self.installer)
         rust_spec = block(self.installer, "\n    RUST(", "(", ")")
-        self.assertIn('command = "rust-analyzer"', rust_spec)
+        self.assertIn('"rust-analyzer"', rust_spec)
         self.assertIn("InstallKind.RUSTUP", rust_spec)
 
-    def test_rust_uses_available_rustup_without_installing_a_toolchain(self):
-        install = function(self.installer, "installCommand")
-        self.assertIn("InstallKind.RUSTUP ->", install)
-        self.assertRegex(install, r'hasCommand\("rustup"\)')
-        self.assertIn("rustup component add rust-analyzer", install)
+    def test_rust_install_uses_verified_private_artifact_without_global_toolchain(self):
+        install = function(self.installer, "install")
+        self.assertIn("vendored.install(extension)", install)
+        self.assertNotIn("rustup component add", self.installer)
         self.assertNotIn("sh.rustup.rs", self.installer)
+        bundle = source(SRC / "feature/editor/lsp/VendoredLanguageServers.kt")
+        self.assertIn("EXTENSION_HASH_MISMATCH", bundle)
+        self.assertIn("EXTENSION_REQUIRES_UBUNTU_24_04", bundle)
 
-    def test_xbps_support_covers_server_and_runtime_command_generation(self):
-        server = function(self.installer, "packageManagerCommand")
-        self.assertRegex(server, r'hasCommand\("xbps-install"\)\s*->\s*"xbps-install -[A-Za-z]*y[^"\n]*\$pkg"')
-        runtime = function(self.installer, "runtimeInstallCommand")
-        for command in (server, runtime):
-            self.assertIn('hasCommand("xbps-install") ->', command)
-            self.assertIn("else -> null", command)
-            self.assertLess(command.index('hasCommand("zypper")'), command.index('hasCommand("xbps-install")'))
-        void = block(runtime, 'hasCommand("xbps-install") ->')
-        self.assertRegex(void, r'if\s*\(kind == RuntimeKind.NPM\)\s*"nodejs"\s*else\s*"python3 python3-pip"')
-        self.assertRegex(void, r'"xbps-install -[A-Za-z]*y[^"\n]*\$voidPackages"')
-        self.assertIn('val node = "nodejs npm"', runtime)
-        self.assertNotIn('"nodejs npm"', void)
+    def test_language_install_does_not_modify_xbps_or_other_global_packages(self):
+        install = function(self.installer, "install")
+        self.assertIn("vendored.install(extension)", install)
+        for command in ("xbps-install", "apk add", "apt-get install", "npm install -g", "pip3 install"):
+            self.assertNotIn(command, self.installer)
+        bundle = source(SRC / "feature/editor/lsp/VendoredLanguageServers.kt")
+        self.assertIn("installLock.withLock", bundle)
+        self.assertIn("EXTENSION_BACKEND_CHANGED", bundle)
 
     def test_no_unproven_kotlin_lsp_is_added(self):
         self.assertNotRegex(self.catalog, r"LanguageExtension\.KOTLIN\b")

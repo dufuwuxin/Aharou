@@ -91,15 +91,13 @@ fun SessionListScreen(
     ) {
         Column(
             modifier = Modifier
-                .fillMaxSize()
-                .windowInsetsPadding(WindowInsets.systemBars.only(WindowInsetsSides.Top)),
+                .fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(Spacing.xs)
         ) {
             // 当前工作区名；新建会话按钮保留在右下角。
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = Spacing.lg)
                     .padding(top = Spacing.md, bottom = Spacing.sm),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -119,11 +117,9 @@ fun SessionListScreen(
             LazyColumn(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(1f)
-                    .windowInsetsPadding(WindowInsets.systemBars.only(WindowInsetsSides.Bottom)),
+                    .weight(1f),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                    horizontal = Spacing.lg,
-                    vertical = Spacing.sm
+                    top = Spacing.sm, bottom = 80.dp
                 ),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {

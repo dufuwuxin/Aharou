@@ -41,4 +41,22 @@ class ContextLibraryFilterTest {
         assertEquals(listOf(item), filterContextEntries(listOf(item), "", null, ContextLoad.OFF, null))
         assertEquals(emptyList<ContextEntry>(), filterContextEntries(listOf(item), "", null, ContextLoad.FULL, null))
     }
+
+    @Test fun searchFindsTitleSummaryAndBodyAcrossFoldersAndCategoriesEvenAtLibraryTop() {
+        val title = entry("needle", ContextCategory.RULE, "规则/构建")
+        val summary = entry("summary", ContextCategory.MAIN_INJECTED, "主代理/偏好").copy(description = "needle-summary")
+        val body = entry("body", ContextCategory.ROLE_INJECTED, "角色/资料").copy(content = "padding ".repeat(70) + "needle-body at end")
+        val all = listOf(title, summary, body)
+        assertEquals(all, contextVisibleEntries(all, "needle", ContextCategory.LONG_TERM, null, null, null))
+        assertEquals(all, contextVisibleEntries(all, "needle", ContextCategory.LONG_TERM, "unrelated", null, null))
+        assertEquals(emptyList<ContextEntry>(), contextVisibleEntries(all, "", ContextCategory.LONG_TERM, null, null, null))
+        assertEquals(listOf(title), contextVisibleEntries(all, "", ContextCategory.RULE, "规则/构建", null, null))
+        val snippet = contextSearchSnippet(body, "needle-body")
+        org.junit.Assert.assertTrue(snippet.contains("needle-body"))
+        org.junit.Assert.assertTrue(snippet.length <= 182)
+        assertEquals("角色/资料", body.folder)
+        assertEquals("source-body", body.sourceLabel)
+        assertEquals(listOf(summary), contextVisibleEntries(all, "needle-summary", ContextCategory.RULE, null, MemoryScope.PROJECT, ContextLoad.SEARCH))
+    }
+
 }

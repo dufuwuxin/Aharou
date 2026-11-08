@@ -4,4 +4,4 @@ WeChat, Feishu, QQ and Telegram bot integrations are no longer available. Their 
 
 Existing conversations, files and saved configuration data are not deleted. Old bot settings no longer start a connection.
 
-Agent-to-agent communication, MCP connections, SSH, remote-device collaboration and sending files to local conversations remain available.
+Peer device collaboration has also been removed. Agent-to-agent communication, MCP connections, SSH and sending files to local conversations remain available.

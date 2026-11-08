@@ -1,18 +1,9 @@
 package com.aharou.core.translation
 
 import android.content.Context
-import com.google.android.gms.tasks.Task
-import com.google.mlkit.common.model.DownloadConditions
-import com.google.mlkit.common.model.RemoteModelManager
-import com.google.mlkit.nl.translate.TranslateLanguage
-import com.google.mlkit.nl.translate.Translation
-import com.google.mlkit.nl.translate.TranslateRemoteModel
-import com.google.mlkit.nl.translate.TranslatorOptions
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
-import kotlin.coroutines.resume
-import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -20,16 +11,16 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withTimeoutOrNull
 
 enum class TranslationModelState { CHECKING, MISSING, DOWNLOADING, READY, FAILED }
 
 @Singleton
 class OfflineTranslation @Inject constructor(
     @param:ApplicationContext context: Context,
+    private val models: TranslationModelFiles,
+    private val engine: TranslationWebEngine,
 ) {
     private val preferences = context.getSharedPreferences("offline_translation", Context.MODE_PRIVATE)
     private val _enabled = MutableStateFlow(preferences.getBoolean("enabled", true))
@@ -42,28 +33,22 @@ class OfflineTranslation @Inject constructor(
     private val cache = LinkedHashMap<String, String>(128, 0.75f, true)
     private var cacheChars = 0
     private var automaticDownloadAttempted = false
-    private val translator by lazy {
-        Translation.getClient(
-            TranslatorOptions.Builder()
-                .setSourceLanguage(TranslateLanguage.ENGLISH)
-                .setTargetLanguage(TranslateLanguage.CHINESE)
-                .build()
-        )
-    }
 
     init {
         scope.launch {
             modelLock.withLock {
                 _modelState.value = try {
-                    val model = TranslateRemoteModel.Builder(TranslateLanguage.CHINESE).build()
-                    if (RemoteModelManager.getInstance().isModelDownloaded(model).awaitResult()) {
+                    if (models.isInstalled()) {
+                        engine.prepare()
                         TranslationModelState.READY
                     } else {
                         TranslationModelState.MISSING
                     }
                 } catch (e: CancellationException) {
+                    _modelState.value = TranslationModelState.FAILED
                     throw e
-                } catch (_: Exception) {
+                } catch (failure: Exception) {
+                    com.aharou.core.util.FileLogger.e("OfflineTranslation", "Model preparation failed", failure)
                     TranslationModelState.FAILED
                 }
             }
@@ -83,15 +68,14 @@ class OfflineTranslation @Inject constructor(
                 automaticDownloadAttempted = true
                 _modelState.value = TranslationModelState.DOWNLOADING
                 _modelState.value = try {
-                    val prepared = withTimeoutOrNull(120_000) {
-                        translator.downloadModelIfNeeded(DownloadConditions.Builder().requireWifi().build()).awaitResult()
-                        true
-                    } == true
-                    if (prepared) TranslationModelState.READY else TranslationModelState.FAILED
+                    models.install()
+                    engine.prepare()
+                    TranslationModelState.READY
                 } catch (e: CancellationException) {
                     _modelState.value = TranslationModelState.FAILED
                     throw e
-                } catch (_: Exception) {
+                } catch (failure: Exception) {
+                    com.aharou.core.util.FileLogger.e("OfflineTranslation", "Model preparation failed", failure)
                     TranslationModelState.FAILED
                 }
             }
@@ -104,10 +88,7 @@ class OfflineTranslation @Inject constructor(
         if (!enabled.value) return text
         val parts = TranslationDocument.parts(text)
         if (parts.none { it.translate }) return text
-        if (modelState.value != TranslationModelState.READY) {
-            prepareModel()
-            return text
-        }
+        if (modelState.value != TranslationModelState.READY) return text
         return translationLock.withLock {
             try {
                 buildString {
@@ -116,16 +97,17 @@ class OfflineTranslation @Inject constructor(
                         if (!part.translate) {
                             append(part.text)
                         } else {
-                            val translated = cache[part.text] ?: withTimeoutOrNull(15_000) {
-                                translator.translate(part.text).awaitResult()
-                            }?.takeIf { it.isNotBlank() }?.also { cache(part.text, it) } ?: part.text
+                            val translated = cache[part.text] ?: engine.translate(part.text)
+                                .takeIf { it.isNotBlank() }?.also { cache(part.text, it) } ?: part.text
                             append(translated)
                         }
                     }
                 }
             } catch (e: CancellationException) {
                 throw e
-            } catch (_: Exception) {
+            } catch (failure: Exception) {
+                com.aharou.core.util.FileLogger.e("OfflineTranslation", "Local inference failed", failure)
+                _modelState.value = TranslationModelState.FAILED
                 text
             }
         }
@@ -140,10 +122,4 @@ class OfflineTranslation @Inject constructor(
             cache.remove(oldest.key)
         }
     }
-}
-
-private suspend fun <T> Task<T>.awaitResult(): T = suspendCancellableCoroutine { continuation ->
-    addOnSuccessListener { result -> if (continuation.isActive) continuation.resume(result) }
-    addOnFailureListener { error -> if (continuation.isActive) continuation.resumeWithException(error) }
-    addOnCanceledListener { continuation.cancel() }
 }

@@ -29,8 +29,8 @@ object ProjectTaskGraph {
     }
 
     data class ContextTask(val task: ProjectTask? = null, val unavailable: Boolean = false)
-    fun currentContextTask(sessionId: String?, workspace: String, ghost: Boolean, read: () -> List<ProjectTask>): ContextTask {
-        if (ghost || sessionId == null || workspace.isBlank()) return ContextTask()
+    fun currentContextTask(sessionId: String?, workspace: String, read: () -> List<ProjectTask>): ContextTask {
+        if (sessionId == null || workspace.isBlank()) return ContextTask()
         return try { ContextTask(read().singleOrNull { it.workspace == workspace && sessionId in it.sessionIds }) }
         catch (cancelled: java.util.concurrent.CancellationException) { throw cancelled }
         catch (_: Exception) { ContextTask(unavailable = true) }

@@ -41,10 +41,9 @@ class ProjectTaskContextTest {
         assertNull(context.build("root", "other"))
     }
 
-    @Test fun ghostOrMissingSessionDoesNotReadTheProjectStore() {
+    @Test fun missingSessionOrWorkspaceDoesNotReadTheProjectStore() {
         val repository = mockk<ProjectTaskRepository>()
         val context = ProjectTaskContext(repository)
-        assertNull(context.build("root", "w", ghost = true))
         assertNull(context.build(null, "w"))
         assertNull(context.build("root", ""))
         verify(exactly = 0) { repository.snapshot(any()) }

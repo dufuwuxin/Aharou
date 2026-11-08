@@ -59,7 +59,9 @@ internal fun ModelIconButton(
     modifier: Modifier = Modifier,
     forceOpenSheet: Boolean = false,
     onSelectSuccessInOnboarding: (() -> Unit)? = null,
-    onSheetDismiss: (() -> Unit)? = null
+    onSheetDismiss: (() -> Unit)? = null,
+    workspace: String = "",
+    enabled: Boolean = true
 ) {
     var showSheet by remember { mutableStateOf(false) }
     val effectiveShowSheet = showSheet || forceOpenSheet
@@ -75,12 +77,17 @@ internal fun ModelIconButton(
             ?.customIcon?.takeIf { it.isNotBlank() }
             ?: modelMetadata[modelMetadataKey(provider?.id.orEmpty(), effectiveModel)]?.customIcon.orEmpty()
     }
-    IconButton(onClick = { showSheet = true }, modifier = modifier.size(36.dp)) {
+    IconButton(enabled = enabled, onClick = { showSheet = true }, modifier = modifier.size(36.dp)) {
         ModelLogoIcon(modelName = effectiveModel, customIcon = customIcon, size = 20.dp)
     }
 
     if (effectiveShowSheet) {
-        ModelSheet(
+        if (workspace.isNotBlank() && !forceOpenSheet) WorkspaceModelChainSheet(
+            workspace = workspace, providers = providers, metadata = modelMetadata,
+            currentProviderId = provider?.id.orEmpty(), currentModel = provider?.effectiveModel.orEmpty(),
+            onSelectModel = onSelectModel,
+            onDismiss = { showSheet = false; onSheetDismiss?.invoke() }
+        ) else ModelSheet(
             providers = providers,
             currentProviderId = provider?.id ?: "",
             currentModel = provider?.effectiveModel ?: "",

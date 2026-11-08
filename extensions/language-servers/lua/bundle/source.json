@@ -1,0 +1,22 @@
+{
+  "id": "lua",
+  "repository": "https://github.com/LuaLS/lua-language-server",
+  "revision": "a58fc7b01e1746c46275c71b0e61bfed40a6296d",
+  "sourceUrl": "https://codeload.github.com/LuaLS/lua-language-server/tar.gz/a58fc7b01e1746c46275c71b0e61bfed40a6296d",
+  "sourceSha256": "de80d3804f1c18bf071f08a662fe403437064a59a6e63a07420bcebc0d5d58c4",
+  "snapshotTime": "2026-10-20T08:37:56Z",
+  "adaptationStatus": "source-vendored-build-unverified",
+  "version": "commit:a58fc7b01e1746c46275c71b0e61bfed40a6296d",
+  "license": "MIT",
+  "prerequisites": [
+    "Python >=3.11",
+    "git",
+    "C/C++ compiler",
+    "ninja",
+    "bash"
+  ],
+  "submodules": "Fetched at gitlink revisions of the pinned commit, not prebuilt releases",
+  "licenseSha256": "a0a65ffcdc8620548598ce8ac5ce1a7ec36edf3034a5df2d6593e49fcececa64",
+  "buildVerification": "not executed: source and controlled shell fixture validation only",
+  "dependencyPolicy": "Dependencies may download during explicit user installation; no global package installation; upstream source itself is the local archive."
+}

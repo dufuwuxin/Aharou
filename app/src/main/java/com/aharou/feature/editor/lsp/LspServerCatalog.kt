@@ -22,7 +22,7 @@ object LspServerCatalog {
         extension = LanguageExtension.LUA,
         languageId = "lua",
         fileExtensions = listOf("lua"),
-        program = "lua-language-server",
+        program = "${VendoredLanguageServers.ROOT}/bin/lua-language-server",
         // 中文消息：locale 只能走命令行（.luarc.json 里没有这个字段），官方支持 zh-cn。
         args = listOf("--locale=zh-cn")
     )
@@ -32,7 +32,7 @@ object LspServerCatalog {
         extension = LanguageExtension.PYTHON,
         languageId = "python",
         fileExtensions = listOf("py", "pyw", "pyi"),
-        program = "pylsp"
+        program = "${VendoredLanguageServers.ROOT}/bin/pylsp"
     )
 
     /** TypeScript / JavaScript：走 npm 装 typescript-language-server + typescript，需 `--stdio`。 */
@@ -40,7 +40,7 @@ object LspServerCatalog {
         extension = LanguageExtension.TYPESCRIPT,
         languageId = "typescript",
         fileExtensions = listOf("ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"),
-        program = "typescript-language-server",
+        program = "${VendoredLanguageServers.ROOT}/bin/typescript-language-server",
         args = listOf("--stdio")
     )
 
@@ -49,7 +49,7 @@ object LspServerCatalog {
         extension = LanguageExtension.SHELL,
         languageId = "shell",
         fileExtensions = listOf("sh", "bash", "zsh", "ksh"),
-        program = "bash-language-server",
+        program = "${VendoredLanguageServers.ROOT}/bin/bash-language-server",
         args = listOf("start")
     )
 
@@ -58,7 +58,7 @@ object LspServerCatalog {
         extension = LanguageExtension.YAML,
         languageId = "yaml",
         fileExtensions = listOf("yaml", "yml"),
-        program = "yaml-language-server",
+        program = "${VendoredLanguageServers.ROOT}/bin/yaml-language-server",
         args = listOf("--stdio")
     )
 
@@ -67,7 +67,7 @@ object LspServerCatalog {
         extension = LanguageExtension.VUE,
         languageId = "vue",
         fileExtensions = listOf("vue"),
-        program = "vue-language-server",
+        program = "${VendoredLanguageServers.ROOT}/bin/vue-language-server",
         args = listOf("--stdio")
     )
 
@@ -76,7 +76,7 @@ object LspServerCatalog {
         extension = LanguageExtension.RUST,
         languageId = "rust",
         fileExtensions = listOf("rs"),
-        program = "rust-analyzer"
+        program = "${VendoredLanguageServers.ROOT}/bin/rust-analyzer"
     )
 
     val ALL: List<Entry> = listOf(LUA, PYTHON, TYPESCRIPT, SHELL, YAML, VUE, RUST)
@@ -85,7 +85,7 @@ object LspServerCatalog {
         // 条目的 program 与枚举的 command 必须一致：前者拼进容器启动命令，后者用于探活与安装，
         // 一旦分叉就会出现「装好了却起不来」且难查。这里在类初始化时直接拦下。
         ALL.forEach { entry ->
-            require(entry.program == entry.extension.command) {
+            require(entry.program == VendoredLanguageServers.program(entry.extension)) {
                 "LspServerCatalog 条目与 LanguageExtension 不一致：${entry.languageId} " +
                     "program=${entry.program} command=${entry.extension.command}"
             }

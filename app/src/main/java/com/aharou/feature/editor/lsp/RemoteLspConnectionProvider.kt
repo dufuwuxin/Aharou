@@ -29,7 +29,10 @@ class RemoteLspConnectionProvider(
             check(stillCurrent() && connection.isCurrentBootstrap(target)) { "SSH_CONNECTION_CHANGED" }
             McpStdioChannel.acquireSlot(serverKey)
             slotHeld.set(true)
-            val child = connection.startProcess(command(projectRoot, program, args), target)
+            val resolvedProgram = if (program.startsWith("${VendoredLanguageServers.ROOT}/"))
+                target.home.trimEnd('/') + "/.aharou/language-extensions/" + program.removePrefix("${VendoredLanguageServers.ROOT}/")
+            else program
+            val child = connection.startProcess(command(projectRoot, resolvedProgram, args), target)
             process = child
             check(stillCurrent() && connection.isCurrentBootstrap(target)) { "SSH_CONNECTION_CHANGED" }
             Thread({ runCatching { child.errorStream.use { it.copyTo(object : OutputStream() {

@@ -1,9 +1,6 @@
 package com.aharou.feature.agent.domain.workflow
 
-import com.aharou.feature.agent.domain.session.DualModelSettings
-
 internal class LlmCallBudgetState(
-    val routingSettings: DualModelSettings,
     providerKey: String,
     var baselineEstimate: Int,
     var baselineUsage: Int

@@ -40,10 +40,11 @@ class ContextFolderStoreTest {
         val root = Files.createTempDirectory("context-folders-").toFile()
         try {
             val store = store(root)
-            assertTrue(store.create(ContextCategory.INJECTED, "通用", null))
-            assertTrue(store.create(ContextCategory.INJECTED, "项目A", "/workspace/a"))
-            assertEquals(listOf("通用"), store.list("/workspace/b")[ContextCategory.INJECTED])
-            assertEquals(setOf("通用", "项目A"), store.list("/workspace/a")[ContextCategory.INJECTED]?.toSet())
+            val builtin = store.list(null)[ContextCategory.MAIN_INJECTED].orEmpty()
+            assertTrue(store.create(ContextCategory.MAIN_INJECTED, "通用", null))
+            assertTrue(store.create(ContextCategory.MAIN_INJECTED, "项目A", "/workspace/a"))
+            assertEquals((builtin + "通用").sorted(), store.list("/workspace/b")[ContextCategory.MAIN_INJECTED])
+            assertEquals((builtin + listOf("通用", "项目A")).toSet(), store.list("/workspace/a")[ContextCategory.MAIN_INJECTED]?.toSet())
             assertFalse(store.create(ContextCategory.RULE, "../escape", null))
             assertFalse(store.create(ContextCategory.RULE, "   ", null))
         } finally { root.deleteRecursively() }
@@ -68,6 +69,29 @@ class ContextFolderStoreTest {
                 .forEach { assertFalse(it, store.create(ContextCategory.RULE, it, "/workspace/a")) }
             assertTrue(store.list("/workspace/a")[ContextCategory.RULE].orEmpty().isEmpty())
             assertTrue(store.create(ContextCategory.RULE, "长".repeat(80) + "/" + "名".repeat(80), "/workspace/a"))
+        } finally { root.deleteRecursively() }
+    }
+
+
+    @Test fun builtinInjectionFoldersAreIndependentAndLegacyFoldersBelongOnlyToMain() {
+        val root = Files.createTempDirectory("context-legacy-folders-").toFile()
+        try {
+            val file = File(root, "aharou-global/memory/.context-folders.json")
+            file.parentFile!!.mkdirs()
+            val legacy = """{"__global__":{"INJECTED":["legacy-folder"]}}"""
+            file.writeText(legacy)
+            val store = store(root)
+            val main = store.list("/workspace/a").getValue(ContextCategory.MAIN_INJECTED)
+            val role = store.list("/workspace/a").getValue(ContextCategory.ROLE_INJECTED)
+            assertTrue(main.contains("legacy-folder"))
+            assertFalse(role.contains("legacy-folder"))
+            assertTrue(main.size >= 2)
+            assertEquals(1, role.size)
+            assertEquals(legacy, file.readText())
+            assertTrue(store.create(ContextCategory.ROLE_INJECTED, "role-only", "/workspace/a"))
+            assertFalse(store.list("/workspace/a").getValue(ContextCategory.MAIN_INJECTED).contains("role-only"))
+            assertFalse(store.list("/workspace/b").getValue(ContextCategory.ROLE_INJECTED).contains("role-only"))
+            assertTrue(store.list(null).getValue(ContextCategory.MAIN_INJECTED).contains("legacy-folder"))
         } finally { root.deleteRecursively() }
     }
 

@@ -540,7 +540,7 @@ internal fun ChatInputBar(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.weight(1f).horizontalScroll(rememberScrollState()),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         val modeColor = when (currentMode) {
@@ -587,7 +587,7 @@ internal fun ChatInputBar(
                         Spacer(Modifier.width(Spacing.xs))
 
                         ModelIconButton(
-                            provider = activeProvider,
+                            provider = activeProvider, workspace = modelChainWorkspace, enabled = !isBusy,
                             providers = providers,
                             modelMetadata = modelMetadata,
                             onSelectModel = onSelectModel,
@@ -597,7 +597,6 @@ internal fun ChatInputBar(
                             modifier = Modifier.onboardingTarget(OnboardingStep.OPEN_MODEL_PICKER)
                         )
 
-                        WorkspaceModelChainButton(modelChainWorkspace, providers, modelMetadata)
                         if (workspaceViewModel != null) {
                             WorkspaceIconButton(
                                 viewModel = workspaceViewModel,

@@ -119,6 +119,13 @@ class ToolCallGuard @Inject constructor(
         }
     }
 
+    private fun recordResult(toolName: String, args: Map<String, JsonElement>, context: AgentContext?, result: ToolResult) {
+        // Capacity rejection never started a member; its receipt is kept without counting as a failed invocation.
+        if (toolName == "task" && args["action"] == kotlinx.serialization.json.JsonPrimitive("create") &&
+            result is ToolResult.Error && result.code == "MAX_SUBAGENTS_REACHED") return
+        record(toolName, args, context, result is ToolResult.Error, result.toString())
+    }
+
     private fun historyOf(context: AgentContext?): ArrayDeque<Attempt> =
         histories.getOrPut(context?.sessionId ?: "no-session") { ArrayDeque() }
 
@@ -252,7 +259,7 @@ class ToolCallGuard @Inject constructor(
             }
             val startedAt = System.currentTimeMillis()
             val result = run()
-            guard.record(name, args, context, result is ToolResult.Error, result.toString())
+            guard.recordResult(name, args, context, result)
             guard.recordReceipt(name, args, context, result, System.currentTimeMillis() - startedAt)
             return result
         }
@@ -315,7 +322,7 @@ class ToolCallGuard @Inject constructor(
                 emit(event)
             }
             finalResult?.let { result ->
-                guard.record(name, args, context, result is ToolResult.Error, result.toString())
+                guard.recordResult(name, args, context, result)
                 guard.recordReceipt(name, args, context, result, System.currentTimeMillis() - startedAt)
             }
         }
@@ -330,7 +337,7 @@ class ToolCallGuard @Inject constructor(
             }
             val startedAt = System.currentTimeMillis()
             val result = run()
-            guard.record(name, args, context, result is ToolResult.Error, result.toString())
+            guard.recordResult(name, args, context, result)
             guard.recordReceipt(name, args, context, result, System.currentTimeMillis() - startedAt)
             return result
         }

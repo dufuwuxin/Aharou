@@ -1,0 +1,19 @@
+{
+  "id": "shell",
+  "repository": "https://github.com/bash-lsp/bash-language-server",
+  "revision": "97f19d2d2bd01793ac98184bd2d2a3d9c9ae3fe8",
+  "sourceUrl": "https://codeload.github.com/bash-lsp/bash-language-server/tar.gz/97f19d2d2bd01793ac98184bd2d2a3d9c9ae3fe8",
+  "sourceSha256": "7d8edce2ee26d7a39343e0f9746c7b765e93d939443b397f464d7772cabed51e",
+  "snapshotTime": "2026-11-06T15:40:18Z",
+  "adaptationStatus": "source-vendored-build-unverified",
+  "version": "5.8.1",
+  "license": "MIT",
+  "prerequisites": [
+    "Python >=3.11",
+    "node {'node': '>=22.12.0', 'pnpm': '^12.4.1'}",
+    "pnpm@12.18.0"
+  ],
+  "licenseSha256": "291d324119550df1624f0af60388393fe36b02bc5e61d9a236afab1801b33042",
+  "buildVerification": "not executed: source and controlled shell fixture validation only",
+  "dependencyPolicy": "Dependencies may download during explicit user installation; no global package installation; upstream source itself is the local archive."
+}

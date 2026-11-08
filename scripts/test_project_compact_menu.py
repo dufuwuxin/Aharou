@@ -15,7 +15,7 @@ class CompactProjectMenuTest(unittest.TestCase):
     def test_project_does_not_stack_the_chat_header(self):
         panel = source("AIChatPanel.kt")
         self.assertIn("if (bodyOverride == null) ChatHeader(", panel)
-        self.assertIn("if (bodyOverride == null) DualModelButton(", panel)
+        self.assertNotIn("ChatSessionModelControls(", panel)
         self.assertIn("ProjectChatMenuHost(", panel)
         self.assertIn("bodyOverride(composer::collapse)", panel)
 
@@ -56,9 +56,9 @@ class CompactProjectMenuTest(unittest.TestCase):
         ui = source("ProjectChatMenu.kt")
         self.assertIn("CompositionLocalProvider(LocalProjectChatMenu provides menu)", ui)
         provider = ui.index("CompositionLocalProvider(LocalProjectChatMenu provides menu")
-        for sheet in ("dualModelOpen", "stewardOpen"):
+        for sheet in ("stewardOpen",):
             self.assertGreater(ui.index("if (" + sheet + " && sessionId != null)"), provider)
-        for entry in ("dual_model_title", "steward_entry_title", "chat_open_terminal", "chat_open_git",
+        for entry in ("steward_entry_title", "chat_open_terminal", "chat_open_git",
                       "chat_open_browser", "chat_open_sandbox", "chat_open_shared", "chat_open_observe", "chat_open_activity"):
             self.assertIn("R.string." + entry, ui)
         self.assertNotIn("onOpenDrawer", ui)
@@ -93,14 +93,14 @@ class CompactProjectMenuTest(unittest.TestCase):
                         'name="project_map_reset"', 'name="project_map_legend"', 'name="project_task_dependency_legend"'):
             self.assertNotIn(removed, resources)
 
-    def test_optional_routing_is_not_required_for_team_planning(self):
+    def test_stage_routing_is_retired_not_hidden(self):
         resources = (ROOT / "app/src/main/res/values/strings.xml").read_text()
-        self.assertIn('name="dual_model_title">阶段模型（可选）</string>', resources)
-        self.assertIn("团队本身可承担规划、分工和执行，无需开启此项", resources)
-        self.assertIn("只切换当前会话的模型，不创建团队或新增规划流程", resources)
-        router = (ROOT / "app/src/main/java/com/aharou/feature/agent/domain/workflow/DualModelRouter.kt").read_text()
-        self.assertIn("if (!config.enabled) return null", router)
-        self.assertIn("if (session.parentId != null) return null", router)
+        self.assertNotIn('name="dual_model_', resources)
+        agent = ROOT / "app/src/main/java/com/aharou/feature/agent"
+        for path in (agent / "domain/workflow/DualModelRouter.kt", agent / "domain/session/DualModelSettings.kt",
+                     agent / "presentation/component/DualModelButton.kt", agent / "data/ConfigDualModelFields.kt"):
+            self.assertFalse(path.exists(), str(path))
+        self.assertNotIn("dualModelRouter", (agent / "domain/workflow/StatefulAgentWorkflow.kt").read_text())
 
     def test_default_map_root_history_and_approvals_are_preserved(self):
         ui = source("ProjectTaskWorkbench.kt")

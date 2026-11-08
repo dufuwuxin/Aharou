@@ -454,6 +454,9 @@ internal fun ModelSelectionSheet(
     onDismiss: () -> Unit,
     /** 专用场景可按模型名筛选。 */
     modelFilter: ((String) -> Boolean)? = null,
+    orderedSelection: List<Pair<String, String>>? = null,
+    selectionEnabled: Boolean = true,
+    footer: (@Composable () -> Unit)? = null,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val context = LocalContext.current
@@ -599,7 +602,9 @@ internal fun ModelSelectionSheet(
                                                         ?: (meta.displayName.isNotBlank() && meta.displayName != model)
                                                     meta.displayName.takeIf { isCustom && it.isNotBlank() }
                                                 },
-                                                selected = provider.id == currentProviderId && model == currentModel,
+                                                selected = orderedSelection?.contains(provider.id to model) ?: (provider.id == currentProviderId && model == currentModel),
+                                                order = orderedSelection?.indexOf(provider.id to model)?.takeIf { it >= 0 }?.plus(1),
+                                                enabled = selectionEnabled,
                                                 metadata = mergeModelMetadata(
                                                     model,
                                                     modelMetadata[modelMetadataKey(provider.id, model)],
@@ -617,6 +622,7 @@ internal fun ModelSelectionSheet(
                     }
                 }
             }
+            footer?.invoke()
         }
     }
 }
@@ -630,16 +636,20 @@ private fun ModelSelectionRow(
     testState: ModelTestRowState?,
     onTest: () -> Unit,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    order: Int? = null,
+    enabled: Boolean = true
 ) {
     val testing = testState is ModelTestRowState.Testing
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .clickable { onClick() }
+            .clickable(enabled = enabled) { onClick() }
             .padding(vertical = Spacing.sm, horizontal = Spacing.lg),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        if (order != null) Text(order.toString(), style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(end = Spacing.sm))
         ModelLogoIcon(modelName = model, customIcon = metadata?.customIcon, size = 20.dp)
         Spacer(Modifier.width(Spacing.md))
         Column(modifier = Modifier.weight(1f)) {

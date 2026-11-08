@@ -11,7 +11,6 @@ import com.aharou.feature.agent.domain.inbox.SharedInbox
 import com.aharou.feature.agent.domain.model.AgentContext
 import com.aharou.feature.agent.domain.model.WorkspaceRef
 import com.aharou.feature.agent.domain.rule.RuleRepository
-import com.aharou.feature.agent.domain.session.GhostModeStore
 import com.aharou.feature.agent.domain.skill.SkillRepository
 import com.aharou.feature.agent.domain.subagent.AgentDefinition
 import com.aharou.feature.agent.domain.subagent.AgentDefinitionRepository
@@ -484,10 +483,17 @@ class SystemPromptProvider @Inject constructor(
     }
 
     private inner class MemoryListSource : PromptSource {
-        override fun build(ctx: AgentContext): String? = listOf(
-            contextLibrary.render(ctx.projectRoot, ctx.sessionId, ContextOrigin.MEMORY, query = ctx.currentUserText),
-            resolvePrompt(MEMORY_DISCIPLINE_FILE).replace(LEADING_COMMENT, "").trim()
-        ).filter { it.isNotBlank() }.joinToString("\n\n").ifBlank { null }
+        override fun build(ctx: AgentContext): String? {
+            // The ordinary-memory switch does not suppress explicitly scoped injection.
+            val ordinaryMemoryEnabled = InjectionBlock.MEMORIES.key !in promptFragmentCatalog.disabledBlocks() &&
+                (ctx.agentDefinition?.let { InjectPart.MEMORY in it.inject } ?: true)
+            return listOf(
+                contextLibrary.render(ctx.projectRoot, ctx.sessionId, ContextOrigin.MEMORY,
+                    memberName = ctx.agentDefinition?.name, query = ctx.currentUserText,
+                    ordinaryMemoryEnabled = ordinaryMemoryEnabled),
+                if (ordinaryMemoryEnabled) resolvePrompt(MEMORY_DISCIPLINE_FILE).replace(LEADING_COMMENT, "").trim() else ""
+            ).filter { it.isNotBlank() }.joinToString("\n\n").ifBlank { null }
+        }
     }
 
     private data class SourceCacheKey(val sessionId: String?, val projectRoot: String)
@@ -537,20 +543,6 @@ class SystemPromptProvider @Inject constructor(
     }
 
     /**
-     * 当前会话是否隐身。
-     *
-     * [build] 是非 suspend 函数（调用方在用 withContext(Dispatchers.IO) 包着跑），而隐身标记既可能在
-     * GhostModeStore 的内存集合里、也可能只在会话行上，所以这里只能阻塞查一次。
-     * 不缓存结果：用户可能在会话中途开关隐身，缓存会让「刚打开隐身」的那一轮仍然注入记忆。
-     */
-    private fun isGhostSession(ctx: AgentContext): Boolean {
-        val sessionId = ctx.sessionId?.takeIf { it.isNotBlank() } ?: return false
-        return runCatching { runBlocking { GhostModeStore.isGhost(chatSessionDao, sessionId) } }
-            .onFailure { FileLogger.w(TAG, "读取会话隐身标记失败: ${it.message}", it) }
-            .getOrDefault(false)
-    }
-
-    /**
      * 当前会话是否是子代理会话。
      *
      * 子代理不读也不消费信箱：它和父会话同属一个工作区，在这里消费会让父会话再也收不到这些消息。
@@ -576,8 +568,8 @@ class SystemPromptProvider @Inject constructor(
      * 包一层而不是在 6 条 return 前逐个插代码：漏一条面板就少一段。
      */
     fun build(agentContext: AgentContext, consumeInbox: Boolean = true): String =
-        contextLibrary.withPromptSnapshot(agentContext, isGhostSession(agentContext)) {
-            (buildUnrecorded(agentContext, consumeInbox) + (projectTaskContext.build(agentContext.sessionId, agentContext.projectRoot, isGhostSession(agentContext))?.let { "\n\n$it" } ?: ""))
+        contextLibrary.withPromptSnapshot(agentContext, roleSession = isSubAgentSession(agentContext)) {
+            (buildUnrecorded(agentContext, consumeInbox) + (projectTaskContext.build(agentContext.sessionId, agentContext.projectRoot)?.let { "\n\n$it" } ?: ""))
                 .also { injectedContextStore.record(agentContext.sessionId, it) }
         }
 
@@ -588,18 +580,17 @@ class SystemPromptProvider @Inject constructor(
             return buildCustomOnly(agentContext, consumeInbox)
         }
 
-        val ghost = isGhostSession(agentContext)
         val offBlocks = promptFragmentCatalog.disabledBlocks()
         val rawStatic = staticRuleSource.build(agentContext)
         val skillsContent = gate(InjectionBlock.SKILLS, offBlocks) { activeSkillsSource.build(agentContext) }
         val subAgentsContent = gate(InjectionBlock.SUB_AGENTS, offBlocks) { subAgentListSource.build(agentContext) }
         val teamsContent = gate(InjectionBlock.TEAMS, offBlocks) { teamListSource.build(agentContext) }
-        val memoriesContent = if (ghost) null else memoryListSource.build(agentContext)
+        val memoriesContent = memoryListSource.build(agentContext)
         val projectRules = gate(InjectionBlock.PROJECT_RULES, offBlocks) { projectRuleSource.build(agentContext) }
         val rulesContent = gate(InjectionBlock.RULES, offBlocks) { availableRulesSource.build(agentContext) }
         val workspaceTypeContent = gate(InjectionBlock.WORKSPACE_TYPE, offBlocks) { workspaceTypeSource.build(agentContext) }
         val modelIdentityContent = gate(InjectionBlock.MODEL_IDENTITY, offBlocks) { modelIdentitySource.build(agentContext) }
-        val inboxContent = gate(InjectionBlock.INBOX, offBlocks) { if (ghost) null else sharedInboxSource.build(agentContext, consumeInbox) }
+        val inboxContent = gate(InjectionBlock.INBOX, offBlocks) { sharedInboxSource.build(agentContext, consumeInbox) }
 
         val effectiveWorkspaceContent = if (InjectionBlock.WORKSPACE.key in offBlocks) "" else workspaceSource.build(agentContext)
         val timeContent = if (InjectionBlock.TIME.key in offBlocks) null else currentTimeSource.build(agentContext)
@@ -649,7 +640,6 @@ class SystemPromptProvider @Inject constructor(
      */
     private fun buildCustomOnly(ctx: AgentContext, consumeInbox: Boolean): String {
         val content = promptFragmentCatalog.renderCustomOnly(ctx.projectRoot, ctx.currentUserText)
-        val ghost = isGhostSession(ctx)
         // 与内置路径同一套开关：关掉的动态区块在「只用自定义片段」模式下也不追加。
         val offBlocks = promptFragmentCatalog.disabledBlocks()
 
@@ -657,13 +647,13 @@ class SystemPromptProvider @Inject constructor(
         val skillsContent = gate(InjectionBlock.SKILLS, offBlocks) { activeSkillsSource.build(ctx) }
         val subAgentsContent = gate(InjectionBlock.SUB_AGENTS, offBlocks) { subAgentListSource.build(ctx) }
         val teamsContent = gate(InjectionBlock.TEAMS, offBlocks) { teamListSource.build(ctx) }
-        val memoriesContent = if (ghost) null else memoryListSource.build(ctx)
+        val memoriesContent = memoryListSource.build(ctx)
         val projectRules = gate(InjectionBlock.PROJECT_RULES, offBlocks) { projectRuleSource.build(ctx) }
         val rulesContent = gate(InjectionBlock.RULES, offBlocks) { availableRulesSource.build(ctx) }
         val workspaceContent = if (InjectionBlock.WORKSPACE.key in offBlocks) "" else workspaceSource.build(ctx)
         val workspaceTypeContent = gate(InjectionBlock.WORKSPACE_TYPE, offBlocks) { workspaceTypeSource.build(ctx) }
         val modelIdentityContent = gate(InjectionBlock.MODEL_IDENTITY, offBlocks) { modelIdentitySource.build(ctx) }
-        val inboxContent = gate(InjectionBlock.INBOX, offBlocks) { if (ghost) null else sharedInboxSource.build(ctx, consumeInbox) }
+        val inboxContent = gate(InjectionBlock.INBOX, offBlocks) { sharedInboxSource.build(ctx, consumeInbox) }
         val timeContent = if (InjectionBlock.TIME.key in offBlocks) null else currentTimeSource.build(ctx)
 
         val rendered = renderVariables(
@@ -733,8 +723,7 @@ class SystemPromptProvider @Inject constructor(
             append("专注完成本会话交给你的任务，并在最后一条回复里给出完整结论——主代理只能读到你的最后一条回复，中间过程与工具结果它看不到。\n\n")
             append(definition.prompt)
         }
-        val memories = if (isGhostSession(agentContext) || InjectPart.MEMORY !in definition.inject) null
-            else memoryListSource.build(agentContext)
+        val memories = memoryListSource.build(agentContext)
         // 与主代理同一套区块开关：设置里关掉的区块，子代理不能照样带全（并发多个时成倍消耗）。
         val skills = gate(InjectionBlock.SKILLS, offBlocks) { activeSkillsSource.build(agentContext) }
         // 按需规则清单：子代理只在自身提示词写了 {{AICODE_RULES}} 时才看得到，同样受区块开关控制。
@@ -759,7 +748,7 @@ class SystemPromptProvider @Inject constructor(
                     append(it)
                 }
             }
-            if (InjectPart.MEMORY in definition.inject && MEMORY_VAR !in raw) {
+            if (MEMORY_VAR !in raw) {
                 memories?.let {
                     append("\n\n")
                     append(it)

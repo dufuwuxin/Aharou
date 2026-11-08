@@ -396,6 +396,7 @@ class ProjectTaskViewModel @Inject constructor(
             var succeeded = false
             try { block(workspace); succeeded = true } catch (failure: Exception) {
                 if (failure is CancellationException) throw failure
+                com.aharou.core.util.FileLogger.e("ProjectTasks", "Project operation failed", failure)
                 error(failure.message ?: "TASK_OPERATION_FAILED", workspace)
             } finally { if (busyOwner === owner) releaseSetup() }
             if (succeeded) onSuccess?.invoke(workspace)

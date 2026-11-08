@@ -3,14 +3,6 @@ package com.aharou.feature.agent.domain.tool.mode
 import com.aharou.core.util.FileLogger
 import com.aharou.feature.agent.data.local.dao.ChatSessionDao
 import com.aharou.feature.agent.data.local.entity.ChatSessionEntity
-import com.aharou.feature.agent.data.repository.DualModelSettingsRepository
-import com.aharou.feature.agent.domain.session.DualModelSettings
-import com.aharou.feature.agent.domain.session.SessionUseCase
-import com.aharou.feature.agent.domain.workflow.DualModelRouter
-import com.aharou.feature.settings.domain.model.AIProviderConfig
-import com.aharou.feature.settings.domain.model.FallbackTarget
-import com.aharou.feature.settings.domain.model.ProviderType
-import com.aharou.feature.settings.domain.repository.AIProviderRepository
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -40,7 +32,7 @@ class PlanApprovalManagerTest {
 
     @After fun tearDown() { unmockkObject(FileLogger) }
 
-    @Test fun refineWaitsForDatabaseRollbackBeforeRoutingNextRequest() = runTest {
+    @Test fun refineWaitsForDatabaseRollbackBeforeNextRequest() = runTest {
         var stored = session
         val entered = CompletableDeferred<Unit>()
         val release = CompletableDeferred<Unit>()
@@ -50,19 +42,9 @@ class PlanApprovalManagerTest {
             release.await()
             stored = firstArg()
         }
-        val settings = mockk<DualModelSettingsRepository>()
-        val sessions = mockk<SessionUseCase>()
-        val providers = mockk<AIProviderRepository>()
-        coEvery { sessions.getSessionById("s") } answers { stored }
-        coEvery { settings.get("s") } returns DualModelSettings(true,
-            FallbackTarget("p", "plan"), FallbackTarget("p", "exec"))
-        coEvery { providers.getProviderById("p") } returns AIProviderConfig("p", "provider",
-            ProviderType.OPENAI, "", baseUrl = "https://example.invalid", defaultModel = "plan",
-            models = listOf("plan", "exec"))
-        val router = DualModelRouter(settings, sessions, providers)
         val decision = async { manager.awaitApproval("plan", "s") }
         runCurrent()
-        assertEquals("exec", router.resolve("s")?.effectiveModel)
+        assertEquals("AUTO", stored.mode)
         manager.resolve(manager.pendingApproval.value!!.id, PlanApprovalChoice.REFINE)
         runCurrent()
         entered.await()
@@ -70,7 +52,7 @@ class PlanApprovalManagerTest {
         release.complete(Unit)
         assertEquals(PlanApprovalChoice.REFINE, decision.await())
         assertEquals("PLAN", stored.mode)
-        assertEquals("plan", router.resolve("s")?.effectiveModel)
+        assertEquals("PLAN", stored.mode)
         assertNull(manager.pendingApproval.value)
         coVerify(exactly = 1) { dao.upsert(any()) }
     }

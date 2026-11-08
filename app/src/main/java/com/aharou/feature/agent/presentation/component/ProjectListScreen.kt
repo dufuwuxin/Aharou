@@ -9,9 +9,13 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aharou.R
@@ -24,30 +28,37 @@ import com.aharou.feature.agent.presentation.ProjectTaskViewModel
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProjectListScreen(viewModel: ProjectTaskViewModel, createRequested: Boolean,
-    onCreateConsumed: () -> Unit, onOpenProject: (String) -> Unit, onOpenTask: (String) -> Unit) {
+    onCreateConsumed: () -> Unit, onOpenProject: (String) -> Unit, onOpenTask: (String) -> Unit,
+    onNewSession: () -> Unit, sessionsContent: @Composable () -> Unit) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     var deletingProject by remember { mutableStateOf<com.aharou.feature.agent.domain.task.ProjectPlan?>(null) }
     var creating by rememberSaveable { mutableStateOf(false) }
+    var showSessions by rememberSaveable { mutableStateOf(false) }
+    var createMenu by remember { mutableStateOf(false) }
     var name by rememberSaveable { mutableStateOf("") }
     var requirements by rememberSaveable { mutableStateOf("") }
     var submitted by remember { mutableStateOf(false) }
     var previousProject by remember { mutableStateOf<String?>(null) }
     var continuationId by rememberSaveable { mutableStateOf<String?>(null) }
     var unassigned by rememberSaveable { mutableStateOf(false) }
-    LaunchedEffect(createRequested) { if (createRequested) { creating = true; onCreateConsumed() } }
+    LaunchedEffect(createRequested) { if (createRequested) { creating = true; showSessions = false; onCreateConsumed() } }
     LaunchedEffect(state.busy, state.createdProjectId) {
         if (submitted && !state.busy && state.error == null && state.createdProjectId != null && state.createdProjectId != previousProject && state.selectedProjectId == state.createdProjectId) {
             submitted = false; creating = false; name = ""; requirements = ""
             state.selectedProjectId?.let(onOpenProject)
         }
     }
-    Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top))
+    Box(Modifier.fillMaxSize()) {
+    Column(Modifier.fillMaxSize()
         .padding(Spacing.lg), verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
-        Button(onClick = { creating = true }, enabled = !state.loading && !state.busy && state.workspace.isNotBlank(),
-            modifier = Modifier.heightIn(min = 48.dp).testTag("create_project")) { Text(stringResource(R.string.project_create)) }
+        Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+            FilterChip(selected = !showSessions, onClick = { showSessions = false }, label = { Text(stringResource(R.string.project_home)) })
+            FilterChip(selected = showSessions, onClick = { showSessions = true }, label = { Text(stringResource(R.string.project_sessions)) })
+        }
+        if (showSessions) Box(Modifier.weight(1f)) { sessionsContent() }
+        else {
         state.error?.let { Text(stringResource(R.string.project_task_error, projectTaskExecutionReasonLabel(it)), color = MaterialTheme.colorScheme.error) }
-        Text(stringResource(R.string.project_workspace_continue_notice), style = MaterialTheme.typography.bodySmall)
-        LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
+        LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 80.dp), verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
             items(state.projects, key = { it.id }) { project ->
                 Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceContainer,
                     modifier = Modifier.fillMaxWidth().clickable { onOpenProject(project.id) }) {
@@ -79,6 +90,23 @@ fun ProjectListScreen(viewModel: ProjectTaskViewModel, createRequested: Boolean,
                 }
             }
         }
+        }
+    }
+    val createLabel = stringResource(R.string.project_create_menu)
+    Box(Modifier.align(Alignment.BottomEnd).padding(Spacing.lg)) {
+        FloatingActionButton(onClick = { createMenu = true }, shape = CircleShape,
+            modifier = Modifier.width(80.dp).height(52.dp).semantics { contentDescription = createLabel }.testTag("create_project_or_session")) {
+            Text("+", style = MaterialTheme.typography.headlineMedium)
+        }
+        DropdownMenu(expanded = createMenu, onDismissRequest = { createMenu = false }) {
+            DropdownMenuItem(text = { Text(stringResource(R.string.chat_new_session)) },
+                enabled = state.workspace.isNotBlank(), onClick = { createMenu = false; onNewSession() })
+            DropdownMenuItem(text = { Text(stringResource(R.string.project_create)) },
+                enabled = !state.loading && !state.busy && state.workspace.isNotBlank(),
+                modifier = Modifier.testTag("create_project"),
+                onClick = { createMenu = false; creating = true; showSessions = false })
+        }
+    }
     }
     deletingProject?.let { project ->
         AlertDialog(onDismissRequest = { deletingProject = null },

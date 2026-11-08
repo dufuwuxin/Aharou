@@ -57,12 +57,12 @@ object MemoryParser {
             version = MemoryFileStorage.versionOf(text),
             contextKind = enumValue<ContextKind>(frontmatter["context_kind"]) ?: ContextKind.REFERENCE,
             contextLoad = loadValue(frontmatter["context_load"]) ?: ContextLoad.INDEX,
-            contextCategory = enumValue<ContextCategory>(frontmatter["context_category"]) ?: ContextCategory.LONG_TERM,
+            contextCategory = ContextCategory.from(frontmatter["context_category"]?.toString()) ?: ContextCategory.LONG_TERM,
             contextFolder = frontmatter["context_folder"]?.toString().orEmpty(),
             contextSessionId = frontmatter["context_session_id"]?.toString()?.takeIf { it.isNotBlank() },
             hasContextMetadata = loadValue(frontmatter["context_load"]) != null &&
                 enumValue<ContextKind>(frontmatter["context_kind"]) != null &&
-                enumValue<ContextCategory>(frontmatter["context_category"]) != null
+                ContextCategory.from(frontmatter["context_category"]?.toString()) != null
         )
     }
 

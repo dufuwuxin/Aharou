@@ -46,7 +46,7 @@ class ContextLibraryRepositoryTest {
             contextLoad = mode, contextCategory = category, contextSessionId = session))
     }
     private fun ctx(session: String = "s1") = AgentContext(null, null, project.path, null, sessionId = session)
-    private fun rendered(session: String = "s1", ghost: Boolean = false): String = library.withPromptSnapshot(ctx(session), ghost) {
+    private fun rendered(session: String = "s1"): String = library.withPromptSnapshot(ctx(session)) {
         library.render(project.path, session, ContextOrigin.MEMORY)
     }
 
@@ -98,16 +98,15 @@ class ContextLibraryRepositoryTest {
         assertFalse(text.contains("context_load"))
     }
 
-    @Test fun ghostAndMemberWithoutMemoryCannotReadNativeEntries() {
+    @Test fun memberWithoutMemoryCannotReadOrdinaryEntries() {
         memory("context", "private-native-body", ContextLoad.FULL)
-        assertFalse(rendered(ghost = true).contains("private-native-body"))
         val member = mockk<AgentDefinition>()
         every { member.inject } returns emptySet()
         val memberContext = ctx().copy(agentDefinition = member)
-        val denied = library.withPromptSnapshot(memberContext, false) { library.render(project.path, "s1", ContextOrigin.MEMORY) }
+        val denied = library.withPromptSnapshot(memberContext) { library.render(project.path, "s1", ContextOrigin.MEMORY) }
         assertEquals("", denied)
         every { member.inject } returns setOf(InjectPart.MEMORY)
-        val allowed = library.withPromptSnapshot(memberContext, false) { library.render(project.path, "s1", ContextOrigin.MEMORY) }
+        val allowed = library.withPromptSnapshot(memberContext) { library.render(project.path, "s1", ContextOrigin.MEMORY) }
         assertTrue(allowed.contains("private-native-body"))
         assertTrue(rendered().contains("private-native-body"))
     }
@@ -147,6 +146,141 @@ class ContextLibraryRepositoryTest {
         assertFalse(library.save(after.copy(title = "stale-rename", content = "bad"), project.path))
         assertFalse(File(project, ".aharou/memory/stale-rename.md").exists())
         assertFalse(library.save(before.copy(title = "old-id-rename"), project.path))
+    }
+
+
+    @Test fun everyRoleReceivesOnlyRoleInjectionEvenWithoutMemoryAndMainOnlyReceivesMain() {
+        memory("role", "role-private-body", ContextLoad.FULL, category = ContextCategory.ROLE_INJECTED)
+        memory("main", "main-private-body", ContextLoad.FULL, category = ContextCategory.MAIN_INJECTED)
+        memory("normal", "ordinary-private-body", ContextLoad.FULL)
+        listOf("builder", "reviewer").forEach { name ->
+            val member = mockk<AgentDefinition>()
+            every { member.name } returns name
+            every { member.inject } returns emptySet()
+            val result = library.withPromptSnapshot(ctx().copy(agentDefinition = member)) {
+                library.render(project.path, "s1", ContextOrigin.MEMORY, memberName = name)
+            }
+            assertTrue(result.contains("role-private-body"))
+            assertFalse(result.contains("main-private-body"))
+            assertFalse(result.contains("ordinary-private-body"))
+            every { member.inject } returns setOf(InjectPart.MEMORY)
+            val enabled = library.withPromptSnapshot(ctx().copy(agentDefinition = member)) {
+                library.render(project.path, "s1", ContextOrigin.MEMORY, memberName = name)
+            }
+            assertTrue(enabled.contains("ordinary-private-body"))
+            assertFalse(enabled.contains("main-private-body"))
+        }
+        assertTrue(rendered().contains("main-private-body"))
+        assertFalse(rendered().contains("role-private-body"))
+    }
+
+    @Test fun ordinaryBlockSwitchAndSnapshotPlanCacheDoNotDisableExplicitInjection() {
+        memory("role", "role-payload", ContextLoad.FULL, category = ContextCategory.ROLE_INJECTED)
+        memory("main", "main-payload", ContextLoad.FULL, category = ContextCategory.MAIN_INJECTED)
+        memory("ordinary", "ordinary-payload", ContextLoad.FULL)
+        library.withPromptSnapshot(ctx()) {
+            val disabled = library.render(project.path, "s1", ContextOrigin.MEMORY, ordinaryMemoryEnabled = false)
+            assertTrue(disabled.contains("main-payload"))
+            assertFalse(disabled.contains("role-payload"))
+            assertFalse(disabled.contains("ordinary-payload"))
+            assertTrue(library.render(project.path, "s1", ContextOrigin.MEMORY).contains("ordinary-payload"))
+            assertEquals(disabled, library.render(project.path, "s1", ContextOrigin.MEMORY, ordinaryMemoryEnabled = false))
+            ""
+        }
+    }
+
+    @Test fun nestedPreviewRoleAndFailureRestoreMainSnapshotWithoutVersionPollution() {
+        memory("main", "first-main-payload", ContextLoad.FULL, category = ContextCategory.MAIN_INJECTED)
+        memory("role", "first-role-payload", ContextLoad.FULL, category = ContextCategory.ROLE_INJECTED)
+        val member = mockk<AgentDefinition>()
+        every { member.inject } returns emptySet()
+        library.withPromptSnapshot(ctx()) {
+            val initial = library.render(project.path, "s1", ContextOrigin.MEMORY)
+            val before = library.list(project.path).first { it.title == "main" }.version
+            memory("main", "next-main-payload", ContextLoad.FULL, category = ContextCategory.MAIN_INJECTED)
+            try {
+                library.withPromptSnapshot(ctx().copy(agentDefinition = member)) {
+                    assertTrue(library.render(project.path, "s1", ContextOrigin.MEMORY).contains("first-role-payload"))
+                    val preview = library.preview(project.path, "", "s1").rendered
+                    assertTrue(preview.contains("next-main-payload"))
+                    assertFalse(preview.contains("first-role-payload"))
+                    assertTrue(library.render(project.path, "s1", ContextOrigin.MEMORY).contains("first-role-payload"))
+                    throw IllegalStateException("test-snapshot-restoration")
+                }
+            } catch (e: IllegalStateException) { assertEquals("test-snapshot-restoration", e.message) }
+            assertEquals(initial, library.render(project.path, "s1", ContextOrigin.MEMORY))
+            assertEquals(before, library.list(project.path).first { it.title == "main" }.version)
+            ""
+        }
+        assertTrue(rendered().contains("next-main-payload"))
+        assertFalse(rendered().contains("first-role-payload"))
+    }
+
+    @Test fun injectionOffExpiryAndProjectScopeRemainEffectiveAndLegacyStaysMainOnly() {
+        memory("off-role", "off-private", ContextLoad.OFF, category = ContextCategory.ROLE_INJECTED)
+        File(global, "expired.md").writeText(MemoryParser.format("expired", "expired", "expired-private",
+            expiresAt = 1L, contextLoad = ContextLoad.FULL, contextCategory = ContextCategory.ROLE_INJECTED))
+        memory("project-main", "project-main-private", ContextLoad.FULL, MemoryScope.PROJECT, ContextCategory.MAIN_INJECTED)
+        File(global, "legacy.md").writeText(MemoryParser.format("legacy", "legacy", "legacy-main-private",
+            contextLoad = ContextLoad.FULL, contextCategory = ContextCategory.MAIN_INJECTED)
+            .replace("context_category: MAIN_INJECTED", "context_category: INJECTED"))
+        val role = library.render(project.path, "s1", ContextOrigin.MEMORY, memberName = "any-role")
+        assertEquals("", role)
+        val main = rendered()
+        assertTrue(main.contains("legacy-main-private"))
+        assertTrue(main.contains("project-main-private"))
+        val other = temp.newFolder("injection-other")
+        every { memories.listMemoriesInScope(MemoryScope.PROJECT, other.path) } returns emptyList()
+        val otherMain = library.withPromptSnapshot(ctx().copy(projectRoot = other.path)) {
+            library.render(other.path, "s1", ContextOrigin.MEMORY)
+        }
+        assertFalse(otherMain.contains("project-main-private"))
+        assertTrue(otherMain.contains("legacy-main-private"))
+    }
+
+
+    @Test fun roleInjectionDoesNotUnlockAnotherSessionsTemporaryMemory() {
+        memory("role", "role-shared-payload", ContextLoad.FULL, category = ContextCategory.ROLE_INJECTED)
+        memory("temporary", "session-one-only", ContextLoad.FULL, category = ContextCategory.TEMPORARY, session = "s1")
+        val member = mockk<AgentDefinition>()
+        every { member.inject } returns setOf(InjectPart.MEMORY)
+        listOf("s1", "s2").forEach { session ->
+            val text = library.withPromptSnapshot(ctx(session).copy(agentDefinition = member)) {
+                library.render(project.path, session, ContextOrigin.MEMORY)
+            }
+            assertTrue(text.contains("role-shared-payload"))
+            assertEquals(session == "s1", text.contains("session-one-only"))
+        }
+    }
+
+    @Test fun failedTopLevelRoleSnapshotIsRemovedBeforeFollowingMainRender() {
+        memory("role", "role-only-payload", ContextLoad.FULL, category = ContextCategory.ROLE_INJECTED)
+        memory("main", "main-only-payload", ContextLoad.FULL, category = ContextCategory.MAIN_INJECTED)
+        val member = mockk<AgentDefinition>()
+        every { member.inject } returns emptySet()
+        try {
+            library.withPromptSnapshot(ctx().copy(agentDefinition = member)) {
+                assertTrue(library.render(project.path, "s1", ContextOrigin.MEMORY).contains("role-only-payload"))
+                throw IllegalStateException("top-level-snapshot-test")
+            }
+        } catch (e: IllegalStateException) { assertEquals("top-level-snapshot-test", e.message) }
+        val direct = library.render(project.path, "s1", ContextOrigin.MEMORY)
+        assertTrue(direct.contains("main-only-payload"))
+        assertFalse(direct.contains("role-only-payload"))
+    }
+
+    @Test fun defaultChildWithoutDefinitionStillUsesRoleAudience() {
+        memory("role", "role-only-body", ContextLoad.FULL, category = ContextCategory.ROLE_INJECTED)
+        memory("main", "main-only-body", ContextLoad.FULL, category = ContextCategory.MAIN_INJECTED)
+        assertNull(ctx().agentDefinition)
+        val child = library.withPromptSnapshot(ctx(), roleSession = true) {
+            library.render(project.path, "s1", ContextOrigin.MEMORY)
+        }
+        assertTrue(child.contains("role-only-body"))
+        assertFalse(child.contains("main-only-body"))
+        val main = rendered()
+        assertTrue(main.contains("main-only-body"))
+        assertFalse(main.contains("role-only-body"))
     }
 
 }

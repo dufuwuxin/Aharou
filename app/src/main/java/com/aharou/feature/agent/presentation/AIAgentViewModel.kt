@@ -122,7 +122,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -202,7 +201,6 @@ class AIAgentViewModel @Inject constructor(
     private val sessionPanels: SessionPanelController,
     private val scheduledTaskDao: ScheduledTaskDao,
     val fileAccess: FileAccessProvider,
-    private val fileBrowse: FileBrowseController,
     /** Aharou：浏览器池 —— 聊天页“自动围观”面板与 browser 工具共用同一池。 */
     val browserTabPool: com.aharou.feature.browser.BrowserTabPool,
     /** Aharou：影子屏控制器 —— 聊天页小屏幕实时预览与 vscreen 工具共用。 */
@@ -346,9 +344,6 @@ class AIAgentViewModel @Inject constructor(
     private val loadedMessageLimits = java.util.concurrent.ConcurrentHashMap<String, Int>()
 
     /** 聊天记录搜索：命中条数上限、输入防抖、片段上下文宽度、定位时预留的分页余量。 */
-    private val chatSearchLimit = 50
-    private val chatSearchDebounceMs = 300L
-    private val messageLimitMargin = 5
 
     /**
      * 各会话各自的输入草稿，按会话区分持久化到磁盘：进程重启后草稿依然保留。
@@ -862,10 +857,6 @@ class AIAgentViewModel @Inject constructor(
         if (path.isBlank() || _currentWorkspace.value == path) return
         _currentWorkspace.value = path
         fileMentionController.dismiss()  // 切工作区：@ 候选菜单先收起（清单按工作区惰性失效）
-        // 切到新工作区：恢复该工作区上次持久化的展开状态（无记录则只展开根）。
-        fileBrowse.onWorkspaceChanged(path)
-        // 搜索限定当前工作区，切区后旧结果无意义，一并清空。
-        _chatSearchQuery.value = ""
     }
 
     /**
@@ -900,11 +891,7 @@ class AIAgentViewModel @Inject constructor(
         .map { list -> list.map { it.toDomain() }.groupBy { it.workspacePath } }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
 
-    /**
-     * 所有根会话的子代理，按父会话 id 分组，供侧边栏会话行就地展开。
-     * 用全量查询而非逐行惰加载：同一张表一次读完，避开每展开一行开一个 Flow 的订阅风暴。
-     */
-    val subSessionsByParent: StateFlow<Map<String, List<ChatSession>>> = _currentWorkspace
+    private val childSessionsByParent: StateFlow<Map<String, List<ChatSession>>> = _currentWorkspace
         .flatMapLatest { path ->
             if (path.isBlank()) flowOf(emptyMap())
             else chatSessionDao.getAllSessionsByWorkspace(path).map { list ->
@@ -913,123 +900,6 @@ class AIAgentViewModel @Inject constructor(
             }
         }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
-
-    // ── 聊天记录全局搜索（限当前工作区）──
-    private val _chatSearchQuery = MutableStateFlow("")
-    val chatSearchQuery: StateFlow<String> = _chatSearchQuery.asStateFlow()
-
-    /** 待定位的消息（会话 id to 消息 id）；聊天页滚动到位或确认无法定位后消费清除。 */
-    private val _pendingScrollMessage = MutableStateFlow<Pair<String, String>?>(null)
-    val pendingScrollMessage: StateFlow<Pair<String, String>?> = _pendingScrollMessage.asStateFlow()
-
-    /**
-     * 搜索状态：工作区与关键词变化时防抖后查询，命中映射为带片段的 UI 模型。
-     * 查询走 IO 调度器，避免 LIKE 全表扫描卡住主线程。
-     */
-    val chatSearchState: StateFlow<ChatSearchState> =
-        combine(_currentWorkspace, _chatSearchQuery) { ws, q -> ws to q }
-            .debounce(chatSearchDebounceMs)
-            .flatMapLatest { (workspace, query) ->
-                val keyword = query.trim()
-                if (workspace.isBlank() || keyword.isEmpty()) {
-                    flowOf(ChatSearchState(query = query))
-                } else {
-                    flow {
-                        emit(ChatSearchState(query = query, loading = true))
-                        val hits = withContext(Dispatchers.IO) {
-                            messagePersistenceUseCase.searchInWorkspace(
-                                workspace,
-                                keyword,
-                                chatSearchLimit
-                            ).map { m ->
-                                ChatSearchHit(
-                                    sessionId = m.sessionId,
-                                    sessionTitle = m.sessionTitle,
-                                    messageId = m.messageId,
-                                    snippet = m.content,
-                                    timestamp = m.timestamp
-                                )
-                            }
-                        }
-                        emit(ChatSearchState(query = query, hits = hits))
-                    }
-                }
-            }
-            .stateIn(viewModelScope, SharingStarted.Eagerly, ChatSearchState())
-
-    fun updateChatSearchQuery(query: String) {
-        _chatSearchQuery.value = query
-    }
-
-    fun clearChatSearch() {
-        _chatSearchQuery.value = ""
-        _pendingScrollMessage.value = null
-    }
-
-    /**
-     * 打开一条搜索命中：切到对应会话，把该会话分页上限抬到足够包含目标消息，并登记待定位消息。
-     * 实际滚动由聊天页在消息就绪后完成。搜索词与结果保留，重开侧边栏仍停在结果列表。
-     */
-    fun openChatSearchHit(hit: ChatSearchHit) {
-        selectSession(hit.sessionId)
-        viewModelScope.launch {
-            val timestamp = withContext(Dispatchers.IO) {
-                agentMessageDao.getMessageById(hit.messageId)?.timestamp
-            }
-            if (timestamp != null) {
-                val needed = withContext(Dispatchers.IO) {
-                    agentMessageDao.countMessagesFromTimestamp(hit.sessionId, timestamp)
-                } + messageLimitMargin
-                val current = _messageLimit.value[hit.sessionId] ?: defaultLimit
-                if (needed > current) {
-                    _messageLimit.value = _messageLimit.value + (hit.sessionId to needed)
-                }
-            }
-            _pendingScrollMessage.value = hit.sessionId to hit.messageId
-        }
-    }
-
-    // ── 文件浏览（侧边栏「文件」Tab）：状态与操作整块在 [FileBrowseController] ──
-    val expandedPaths: StateFlow<Set<String>> get() = fileBrowse.expandedPaths
-    val expandingPath: StateFlow<String?> get() = fileBrowse.expandingPath
-    val fileOpPaths: StateFlow<Set<String>> get() = fileBrowse.fileOpPaths
-    val browseState: StateFlow<FileBrowseState> get() = fileBrowse.browseState
-    val browseClipboard: StateFlow<BrowseClipboard?> get() = fileBrowse.browseClipboard
-    val pasteConflict: StateFlow<Pair<String, String>?> get() = fileBrowse.pasteConflict
-
-    fun refreshBrowse() = fileBrowse.refreshBrowse()
-
-    fun toggleExpand(path: String) = fileBrowse.toggleExpand(path)
-
-    fun createBrowseFile(parent: String, name: String, onResult: (Boolean) -> Unit) =
-        fileBrowse.createBrowseFile(parent, name, onResult)
-
-    fun createBrowseFolder(parent: String, name: String, onResult: (Boolean) -> Unit) =
-        fileBrowse.createBrowseFolder(parent, name, onResult)
-
-    fun renameBrowseEntry(path: String, newName: String, onResult: (Boolean) -> Unit) =
-        fileBrowse.renameBrowseEntry(path, newName, onResult)
-
-    fun deleteBrowseEntry(path: String, onResult: (Boolean) -> Unit) =
-        fileBrowse.deleteBrowseEntry(path, onResult)
-
-    fun copyBrowseEntry(path: String, name: String) = fileBrowse.copyBrowseEntry(path, name)
-
-    fun cutBrowseEntry(path: String, name: String) = fileBrowse.cutBrowseEntry(path, name)
-
-    fun clearBrowseClipboard() = fileBrowse.clearBrowseClipboard()
-
-    fun pasteBrowseEntry(targetDir: String, onResult: (Boolean) -> Unit) =
-        fileBrowse.pasteBrowseEntry(targetDir, onResult)
-
-    fun pasteBrowseEntryOverwrite() = fileBrowse.pasteBrowseEntryOverwrite()
-
-    fun clearPasteConflict() = fileBrowse.clearPasteConflict()
-
-    fun consumePendingScroll() {
-        _pendingScrollMessage.value = null
-    }
-
 
     val currentSessionState: StateFlow<ChatSession?> = _currentSessionId
         .flatMapLatest { id ->
@@ -1040,10 +910,6 @@ class AIAgentViewModel @Inject constructor(
 
     val currentSessionMode: StateFlow<AgentMode> = currentSessionState.map { it?.mode ?: AgentMode.BUILD }
         .stateIn(viewModelScope, SharingStarted.Eagerly, AgentMode.BUILD)
-
-    /** 当前会话是否处于隐身模式（不写历史、不写记忆，见 GhostModeStore）。 */
-    val currentSessionGhostMode: StateFlow<Boolean> = currentSessionState.map { it?.ghostMode ?: false }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     init {
         // 轮 key 表只服务当前会话：切走就丢，否则长会话切来切去会一直往上积（每条消息一条）。
@@ -1316,7 +1182,7 @@ class AIAgentViewModel @Inject constructor(
         toolPermissionManager.pendingRequest,
         toolPermissionManager.pendingBatch,
         sessions,
-        subSessionsByParent
+        childSessionsByParent
     ) { req, batch, roots, subs ->
         val sid = (req?.sessionId ?: batch?.sessionId).orEmpty()
         if (sid.isBlank()) return@combine ""
@@ -1348,7 +1214,7 @@ class AIAgentViewModel @Inject constructor(
     val pendingPlanApprovalSessionTitle: StateFlow<String> = combine(
         planApprovalManager.pendingApproval,
         sessions,
-        subSessionsByParent
+        childSessionsByParent
     ) { req, roots, subs ->
         val sid = req?.sessionId.orEmpty()
         if (sid.isBlank()) return@combine ""
@@ -1371,7 +1237,7 @@ class AIAgentViewModel @Inject constructor(
         if (sessions.value.any { sessionJobs[it.id]?.isActive == true }) return true
         // 子代理会话不在 sessions（只含根会话）里：漏掉它们会在父代理这一轮结束时
         // 提前释放唤醒锁与前台服务，仍在跑的子代理会被系统挂起。
-        return subSessionsByParent.value.values.any { subs ->
+        return childSessionsByParent.value.values.any { subs ->
             subs.any { sessionJobs[it.id]?.isActive == true }
         }
     }
@@ -2674,31 +2540,6 @@ class AIAgentViewModel @Inject constructor(
         _currentSessionId.value = id
     }
 
-    /**
-     * 切换当前会话的隐身模式。空会话（还没建 session）点「开启」时先等当前工作区就绪，再走 [newSession] 建会话
-     * 并开启（工作区为空时 newSession 会直接返回）；远程未连接等场景等不到就弹提示，不静默。关闭时无会话可关。
-     */
-    fun setGhostMode(enabled: Boolean) {
-        val id = _currentSessionId.value
-        if (id != null) {
-            viewModelScope.launch { sessionUseCase.updateGhostMode(id, enabled) }
-            return
-        }
-        if (!enabled) return
-        viewModelScope.launch {
-            withTimeoutOrNull(3_000L) {
-                // 工作区为空时 newSession 会直接返回：先等它就绪再走既有入口建会话，随后等会话落定。
-                _currentWorkspace.first { it.isNotBlank() }
-                newSession()
-                _currentSessionId.filterNotNull().first()
-            }
-            // 取最新值而非等待结果：期间若有别的链路落定会话，也据它开启，避免对过期 id 操作。
-            val sid = _currentSessionId.value
-            if (sid == null) Toast.makeText(context, R.string.ghost_mode_session_not_ready, Toast.LENGTH_SHORT).show()
-            else sessionUseCase.updateGhostMode(sid, true)
-        }
-    }
-
     fun setSessionMode(mode: AgentMode) {
         val sid = _currentSessionId.value ?: return
         viewModelScope.launch {
@@ -2734,8 +2575,9 @@ class AIAgentViewModel @Inject constructor(
         }
     }
 
-    fun setSessionProviderModel(providerId: String, model: String) {
-        val sid = _currentSessionId.value ?: return
+    fun setSessionProviderModel(providerId: String, model: String, expectedSessionId: String? = _currentSessionId.value) {
+        if (expectedSessionId != _currentSessionId.value) return
+        val sid = expectedSessionId ?: return
         viewModelScope.launch {
             sessionUseCase.updateProviderModel(sid, providerId, model)
             _contextUsages.value = _contextUsages.value - sid
@@ -3278,7 +3120,7 @@ class AIAgentViewModel @Inject constructor(
      * 助手行专门承载它——它不渲染气泡、也不参与上下文回放，只用于重载后恢复错误横幅与重试入口。
      */
     private suspend fun persistFailureMessage(sessionId: String, error: String) {
-        if (error.isBlank() || sessionUseCase.isGhostSession(sessionId)) return
+        if (error.isBlank()) return
         runCatching {
             val last = agentMessageDao.getMessagesBySessionOnce(sessionId).lastOrNull()
             if (last != null && last.role == MessageRole.ASSISTANT.name) {
@@ -3366,9 +3208,6 @@ class AIAgentViewModel @Inject constructor(
         try {
             val sourceId = _currentSessionId.value ?: return@launch
             val source = sessionUseCase.getSessionById(sourceId) ?: return@launch
-            // 隐身会话的消息只在内存、不落库；分叉必然把内容写进磁盘，等于给隐身内容留痕。
-            // 界面已隐藏该入口，这里再兜一层，防切换会话期间的竞态。
-            if (source.ghostMode) return@launch
             val all = agentMessageDao.getMessagesBySessionOnce(sourceId)
             val cut = all.indexOfFirst { it.id == messageId }
             if (cut < 0) return@launch

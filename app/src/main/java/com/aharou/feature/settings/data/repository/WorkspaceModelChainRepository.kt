@@ -21,6 +21,10 @@ private val Context.workspaceModelChains by preferencesDataStore(
 class WorkspaceModelChainRepository @Inject constructor(
     @param:ApplicationContext private val context: Context
 ) {
+    private val revisions = java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.atomic.AtomicLong>()
+
+    fun revision(workspace: String): Long = revisions[workspace]?.get() ?: 0L
+
     suspend fun get(workspace: String): List<FallbackTarget> {
         if (workspace.isBlank()) return emptyList()
         return parseFallbackChain(context.workspaceModelChains.data.first()[stringPreferencesKey(workspace)].orEmpty())
@@ -36,5 +40,6 @@ class WorkspaceModelChainRepository @Inject constructor(
             val key = stringPreferencesKey(workspace)
             if (normalized.isEmpty()) it.remove(key) else it[key] = encodeFallbackChain(normalized)
         }
+        revisions.getOrPut(workspace) { java.util.concurrent.atomic.AtomicLong() }.incrementAndGet()
     }
 }

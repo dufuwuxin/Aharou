@@ -36,7 +36,6 @@
 - `feature/browser/` — 内置 WebView 与网页自动化 — `docs/FILE_INDEX.md`
 - `feature/sandbox/` — 容器文件浏览与预览 — `docs/FILE_INDEX.md`
 - `feature/pet/` — 桌面伙伴：悬浮窗、形象、日常 — `docs/FILE_INDEX.md`
-- `feature/remotedevice/` — 远程设备配对与控制 — `docs/FILE_INDEX.md`
 - `feature/backup/`、`feature/credentials/`、`feature/vault/` — 备份恢复、凭据注入、敏感信息脱敏 — `docs/FILE_INDEX.md`
 - `feature/connectors/`、`feature/plugin/`、`feature/extension/` — 外部连接器与插件扩展 — `docs/FILE_INDEX.md`
 - `feature/onboarding/`、`feature/account/`、`feature/widget/` — 首启引导、账号、桌面小组件 — `docs/FILE_INDEX.md`

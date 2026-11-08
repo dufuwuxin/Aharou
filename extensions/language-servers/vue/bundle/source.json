@@ -1,0 +1,19 @@
+{
+  "id": "vue",
+  "repository": "https://github.com/vuejs/language-tools",
+  "revision": "c59f9908b4912ee20141b53a99b1ce485bff0dc7",
+  "sourceUrl": "https://codeload.github.com/vuejs/language-tools/tar.gz/c59f9908b4912ee20141b53a99b1ce485bff0dc7",
+  "sourceSha256": "8bad157f016e3b41a546c995852496f3822c66ffb517d04c9a35b9bb214ba9eb",
+  "snapshotTime": "2026-10-29T20:32:28Z",
+  "adaptationStatus": "source-vendored-build-unverified",
+  "version": "3.3.14",
+  "license": "MIT",
+  "prerequisites": [
+    "Python >=3.11",
+    "node {}",
+    "pnpm@11.9.0"
+  ],
+  "licenseSha256": "a56351045b45475385a9479d7310208ff0be9489babdb4e635fcea5d7dc1fb02",
+  "buildVerification": "not executed: source and controlled shell fixture validation only",
+  "dependencyPolicy": "Dependencies may download during explicit user installation; no global package installation; upstream source itself is the local archive."
+}

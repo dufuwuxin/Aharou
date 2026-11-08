@@ -84,7 +84,9 @@ class StatefulAgentWorkflowTest {
     // 回退协调器：用例不覆盖跨供应商回退，relaxed 下 isActive=false、activate 返回 null
     private val failoverCoordinator = mockk<ProviderFailoverCoordinator>(relaxed = true)
     private val notifications = mockk<AgentNotificationCenter>()
-    private val chainSettings = mockk<com.aharou.feature.settings.data.repository.WorkspaceModelChainRepository>()
+    private val chainSettings = mockk<com.aharou.feature.settings.data.repository.WorkspaceModelChainRepository> {
+        every { revision(any()) } returns 0L
+    }
     private val workspaceModels = WorkspaceModelChain(chainSettings, providers)
     private val config = AIProviderConfig("provider", "Provider", ProviderType.OPENAI, "test-key",
         baseUrl = "https://example.invalid", defaultModel = "model", models = listOf("model"))
@@ -97,10 +99,7 @@ class StatefulAgentWorkflowTest {
         cachedInputTokens = 40, images = listOf(image))
     private val eventInjector = mockk<com.aharou.feature.agent.domain.notification.AgentEventInjector>()
     private val approvals = mockk<PlanApprovalManager>()
-    private val dualRouter = mockk<DualModelRouter> {
-        coEvery { resolve(any(), any()) } returns null
-        coEvery { settingsForTurn(any()) } returns com.aharou.feature.agent.domain.session.DualModelSettings()
-    }
+
     private val workflow = spyk(StatefulAgentWorkflow(
         toolRegistry = registry,
         aiProviderRepository = providers,
@@ -126,7 +125,6 @@ class StatefulAgentWorkflowTest {
         generatedImagePersister = imagePersister,
         failoverCoordinator = failoverCoordinator,
         workspaceModelChain = workspaceModels,
-        dualModelRouter = dualRouter,
         agentNotificationCenter = notifications,
         eventInjector = eventInjector,
         memoryCurator = mockk(),
@@ -142,8 +140,6 @@ class StatefulAgentWorkflowTest {
         },
         // 规则提醒：保持工具结果不变，与未接提醒时一致。
         reminderEngine = reminderEngine,
-        // 协作开关：这些用例不碰跨设备协作，relaxed mock 下 current().enabled 为 false（等价关闭）。
-        remoteDeviceSettings = mockk(relaxed = true),
         // 记忆整理入口：这些用例不会走到自动整理，Lazy 里放个 relaxed mock 即可（注入形式是 dagger.Lazy 为了断环）。
         memoryCompactor = Lazy { mockk<MemoryCompactor>(relaxed = true) },
         toolInjectionGate = mockk {
@@ -267,15 +263,10 @@ class StatefulAgentWorkflowTest {
     }
 
     @Test
-    fun approvedDualModelPlanGetsIndependentCompactionAfterPlanningFailure() = runTest {
+    fun approvedPlanKeepsCompactionAttemptsForTheSameModel() = runTest {
         var executing = false
-        var approved = false
         var planningAttempts = 0
         var executionAttempts = 0
-        val executionConfig = config.copy(selectedModel = "execution")
-        val choices = com.aharou.feature.agent.domain.session.DualModelSettings(true,
-            com.aharou.feature.settings.domain.model.FallbackTarget(config.id, "model"),
-            com.aharou.feature.settings.domain.model.FallbackTarget(config.id, "execution"))
         val tool = object : AgentTool() {
             override val name = "planMode"
             override val description = "plan exit fixture"
@@ -288,14 +279,7 @@ class StatefulAgentWorkflowTest {
         val turn = runToolBatchTurn(tool,
             listOf(ToolCall("exit-plan", tool.name, mapOf("action" to JsonPrimitive("exit")))),
             runContext = context.copy(mode = AgentMode.PLAN, modeBeforePlan = AgentMode.AUTO), configure = {
-                coEvery { dualRouter.settingsForTurn(any()) } returns choices
-                coEvery { dualRouter.resolve(any(), any()) } answers { if (executing) executionConfig else config }
-                coEvery { workflow["createStandaloneProvider"](executionConfig, "session") } answers {
-                    assertTrue("Execution model cannot run before approval returns", approved)
-                    provider
-                }
-                every { provider.model } answers { if (executing) "execution" else "model" }
-                coEvery { approvals.awaitApproval(any(), any()) } answers { approved = true; PlanApprovalChoice.APPROVE }
+                coEvery { approvals.awaitApproval(any(), any()) } returns PlanApprovalChoice.APPROVE
                 coEvery { compactor.compactIfNeeded(any(), any(), any(), any(), any(), any(), any(), any(), any()) } coAnswers {
                     if (executing) executionAttempts++ else {
                         planningAttempts++
@@ -306,7 +290,7 @@ class StatefulAgentWorkflowTest {
             })
         assertFalse(turn.finished.single().isError)
         assertEquals(1, planningAttempts)
-        assertEquals(1, executionAttempts)
+        assertEquals(0, executionAttempts)
         coVerify(exactly = 1) { approvals.awaitApproval(any(), "session") }
         assertTrue(turn.secondRoundMessages.filterIsInstance<AgentMessage.ToolResultMessage>().isNotEmpty())
     }

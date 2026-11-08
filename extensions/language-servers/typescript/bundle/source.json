@@ -1,0 +1,19 @@
+{
+  "id": "typescript",
+  "repository": "https://github.com/typescript-language-server/typescript-language-server",
+  "revision": "44952c02e4818bed3fe79ab6b848626aac91e479",
+  "sourceUrl": "https://codeload.github.com/typescript-language-server/typescript-language-server/tar.gz/44952c02e4818bed3fe79ab6b848626aac91e479",
+  "sourceSha256": "fea347cda8587b8a1a2fa61c4008f5f4e802f6e7e1fad5bd6a6f5e2cf190f255",
+  "snapshotTime": "2026-11-04T05:31:51Z",
+  "adaptationStatus": "source-vendored-build-unverified",
+  "version": "6.0.3",
+  "license": "Apache-2.0",
+  "prerequisites": [
+    "Python >=3.11",
+    "node {'node': '>=22.22.2'}",
+    "pnpm@12.16.0"
+  ],
+  "licenseSha256": "899d21038f87dd6243dd33b7ee82a078e639d4325a427c01e64d8116315b9680",
+  "buildVerification": "not executed: source and controlled shell fixture validation only",
+  "dependencyPolicy": "Dependencies may download during explicit user installation; no global package installation; upstream source itself is the local archive."
+}

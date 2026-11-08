@@ -137,8 +137,6 @@ fun AIChatPanel(
     onNavigateToObserve: () -> Unit = {},
     settingsViewModel: SettingsViewModel? = null,
     workspaceViewModel: WorkspaceViewModel? = null,
-    onOpenDrawer: () -> Unit,
-    showMenuButton: Boolean = true,
     /** 从会话详情页顶部返回到会话列表页；null 表示当前没有该入口（如大屏常驻侧栏场景）。 */
     onBackToSessions: (() -> Unit)? = null,
     onCreateTask: (() -> Unit)? = null,
@@ -156,7 +154,6 @@ fun AIChatPanel(
     val agentState by viewModel.agentState.collectAsStateWithLifecycle()
     val messagesState by viewModel.messagesState.collectAsStateWithLifecycle()
     val messages = messagesState.messages
-    val ghostMode by viewModel.currentSessionGhostMode.collectAsStateWithLifecycle()
     // [Aharou] Aharou Computer：点工具行掀开"电脑"详情面板
     val computerOpenTarget by ToolComputerSignal.target.collectAsStateWithLifecycle()
     var computerSheetMessageId by remember { mutableStateOf<String?>(null) }
@@ -185,8 +182,8 @@ fun AIChatPanel(
             onReject = { com.aharou.core.config.confirm.ConfigConfirmationGate.userReject() },
         )
     }
-    val pendingScroll by viewModel.pendingScrollMessage.collectAsStateWithLifecycle()
     val currentSessionId by viewModel.currentSessionId.collectAsStateWithLifecycle()
+    val modelSelectionSessionId = currentSessionId
     // 顶栏中轴展示的会话标题：取当前会话在会话列表里的标题，未命中（新会话未命名）则不显示。
     val allSessions by viewModel.sessions.collectAsStateWithLifecycle()
     // 软打断后 agentState 立即回到 Idle，但协程仍在后台跑当前这一步；长按强打断的入口要靠它保底。
@@ -252,7 +249,7 @@ fun AIChatPanel(
     // 会话绑定的工作区：手打对话也按会话走，不跟界面上选中的工作区
     val projectRoot by viewModel.currentSessionWorkspace.collectAsStateWithLifecycle()
     val currentMode by viewModel.currentSessionMode.collectAsStateWithLifecycle()
-    val activeProvider = dualModelProvider(currentSessionId?.takeIf { currentSession?.parentId == null }, currentMode, providers, boundProvider)
+    val activeProvider = boundProvider
     val slashCommands by viewModel.slashCommands.collectAsStateWithLifecycle()
     // 输入草稿只认 ViewModel 这一份：本地 remember 活不过切页，双份必然对不上。
     val inputText by viewModel.inputDraft.collectAsStateWithLifecycle()
@@ -1028,32 +1025,8 @@ fun AIChatPanel(
         }
     }
 
-    // 切换会话 / 打开搜索命中：优先定位到目标消息，否则贴底并恢复跟随。
-    LaunchedEffect(currentSessionId, messagesReady, pendingScroll, chatItems, bodyOverride != null) {
+    LaunchedEffect(currentSessionId, messagesReady, chatItems, bodyOverride != null) {
         if (!messagesReady || bodyOverride != null) return@LaunchedEffect
-        val pending = pendingScroll
-        if (pending != null && pending.first == currentSessionId) {
-            // 不能只按 message.id 找：超长正文被拆成 `${id}#chunk$idx` 多条 item。
-            val index = findChatMessageIndex(chatItems, pending.second)
-            if (index >= 0) {
-                // 等一帧让 LazyColumn 按新会话完成重组，再瞬移到目标消息。
-                withFrameNanos { }
-                followBottom = false
-                listState.scrollToItem(index)
-                positionedSession = currentSessionId
-                viewModel.consumePendingScroll()
-            } else if (!messagesState.hasMore) {
-                // 目标在收起的整轮里：收起时不产出过程子项，先把那一轮展开，重组后下一帧再定位。
-                // 展开态已记录仍找不到（消息可能已被删除）就放弃，避免卡在待定位态。
-                val turnKey = turnKeys[pending.second]
-                if (turnKey != null && viewModel.turnExpansionOverrides[turnKey] != true) {
-                    viewModel.setTurnExpanded(turnKey, true)
-                } else {
-                    viewModel.consumePendingScroll()
-                }
-            }
-            return@LaunchedEffect
-        }
         if (positionedSession != currentSessionId) {
             // 等一帧让 LazyColumn 按新会话完成重组，再滚到锚点（maxScroll）。
             withFrameNanos { }
@@ -1213,10 +1186,6 @@ fun AIChatPanel(
                 outputTokens = sessionOutputTokens,
                 sessionId = currentSessionId,
                 onBackToSessions = onBackToSessions,
-                onOpenDrawer = {
-                    keyboardController?.hide()
-                    onOpenDrawer()
-                },
                 onNavigateToTerminal = onNavigateToTerminal,
                 onNavigateToGit = onNavigateToGit,
                 onNavigateToBrowser = onNavigateToBrowser,
@@ -1229,7 +1198,6 @@ fun AIChatPanel(
                 },
                 onOpenActivity = { showActivity = true },
                 connectionState = connectionState?.takeIf { isRemote },
-                showMenuButton = showMenuButton && sessionReady,
                 terminalActive = terminalActive,
                 gitActive = gitActive,
                 browserActive = browserActive
@@ -1255,12 +1223,10 @@ fun AIChatPanel(
             val floatingLayerMaxHeight = maxHeight
             // 内容层：消息列表延伸到屏幕底部，输入框悬浮其上，滚动时卡片可滑入输入框后面
             Column(modifier = Modifier.fillMaxSize()) {
-            if (bodyOverride == null) ChatSessionModelControls(ghostMode, viewModel::setGhostMode, currentSessionId?.takeIf { currentSession?.parentId == null }, currentMode, providers, modelMetadata, currentSessionId in activeAgentSessions || isCompacting, { if (viewModel.currentSessionId.value == currentSessionId) viewModel.setSessionMode(com.aharou.feature.agent.domain.model.AgentMode.PLAN) })
-            if (ghostMode) GhostModeBanner()
             Box(modifier = Modifier.weight(1f)) {
                 if (bodyOverride != null) {
                     Box(Modifier.fillMaxSize().padding(bottom = with(LocalDensity.current) { floatingLayerHeightPx.toDp() })) {
-                        ProjectChatMenuHost(sessionId = currentSessionId?.takeIf { sessionReady && currentSession?.parentId == null }, mode = currentMode, providers = providers, metadata = modelMetadata, running = currentSessionId in activeAgentSessions || isCompacting, onEnterPlan = { if (viewModel.currentSessionId.value == currentSessionId) viewModel.setSessionMode(com.aharou.feature.agent.domain.model.AgentMode.PLAN) }, onTerminal = onNavigateToTerminal, onGit = onNavigateToGit, onBrowser = onNavigateToBrowser, onSandbox = onNavigateToSandbox, onShared = onNavigateToShared, onObserve = { currentSessionId?.let { ObserveTargetHolder.sessionId = it }; onNavigateToObserve() }, onActivity = { showActivity = true }, connectionState = connectionState?.takeIf { isRemote }, inputTokens = sessionInputTokens, outputTokens = sessionOutputTokens) { bodyOverride(composer::collapse) }
+                        ProjectChatMenuHost(sessionId = currentSessionId?.takeIf { sessionReady && currentSession?.parentId == null }, onTerminal = onNavigateToTerminal, onGit = onNavigateToGit, onBrowser = onNavigateToBrowser, onSandbox = onNavigateToSandbox, onShared = onNavigateToShared, onObserve = { currentSessionId?.let { ObserveTargetHolder.sessionId = it }; onNavigateToObserve() }, onActivity = { showActivity = true }, connectionState = connectionState?.takeIf { isRemote }, inputTokens = sessionInputTokens, outputTokens = sessionOutputTokens) { bodyOverride(composer::collapse) }
                     }
                 } else if (!messagesReady) {
                     // 远程模式连接未就绪时显示连接状态占位，避免空白或旧工作区记录闪烁
@@ -1522,7 +1488,9 @@ fun AIChatPanel(
                     activeProvider = activeProvider,
                     providers = providers,
                     modelMetadata = modelMetadata, modelChainWorkspace = projectRoot,
-                    onSelectModel = dualModelSelectionHandler(currentSessionId?.takeIf { currentSession?.parentId == null }, currentMode, currentSessionId in activeAgentSessions || isCompacting, viewModel::setSessionProviderModel),
+                    onSelectModel = { provider, model ->
+                        viewModel.setSessionProviderModel(provider, model, expectedSessionId = modelSelectionSessionId)
+                    },
                     currentMode = currentMode,
                     onToggleMode = { viewModel.setSessionMode(it) },
                     reasoningEffort = reasoningEffort,
@@ -1806,7 +1774,7 @@ fun AIChatPanel(
                     onDismiss = { messageForMenu = null },
                     onEditClick = { editingMessage = message },
                     onRegenerateClick = { viewModel.regenerateMessage(message.id) },
-                    onForkClick = if (ghostMode) null else ({ viewModel.forkSessionFromMessage(message.id) }),
+                    onForkClick = { viewModel.forkSessionFromMessage(message.id) },
                     onCopyClick = {
                         copyScope.launch { clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("message", message.content))) }
                     },

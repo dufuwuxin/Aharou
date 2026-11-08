@@ -191,6 +191,7 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
         title = { Text(project.title) }, text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 Text(project.requirements)
+                com.aharou.core.translation.TranslationPreview(project.requirements)
             }
         },
         confirmButton = { TextButton(onClick = { overview = false }) { Text(stringResource(R.string.project_close)) } })

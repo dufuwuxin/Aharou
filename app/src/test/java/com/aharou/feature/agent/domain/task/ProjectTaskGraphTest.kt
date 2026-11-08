@@ -81,14 +81,14 @@ class ProjectTaskGraphTest {
         assertEquals(recovered, ProjectTaskGraph.recoverInterrupted(recovered))
         assertEquals(task("b"), ProjectTaskGraph.recoverInterrupted(task("b")))
     }
-    @Test fun optionalContextReadErrorReportsUnavailableAndGhostNeverReadsTaskStore() {
+    @Test fun optionalContextReadErrorReportsUnavailableAndMissingSessionNeverReadsTaskStore() {
         var reads = 0
-        val unavailable = ProjectTaskGraph.currentContextTask("s", "w", false) { reads++; error("corrupt") }
+        val unavailable = ProjectTaskGraph.currentContextTask("s", "w") { reads++; error("corrupt") }
         assertTrue(unavailable.unavailable)
         assertNull(unavailable.task)
-        val ghost = ProjectTaskGraph.currentContextTask("s", "w", true) { reads++; error("must not read") }
-        assertFalse(ghost.unavailable)
-        assertNull(ghost.task)
+        val missingSession = ProjectTaskGraph.currentContextTask(null, "w") { reads++; error("must not read") }
+        assertFalse(missingSession.unavailable)
+        assertNull(missingSession.task)
         assertEquals(1, reads)
     }
     @Test fun dependenciesRejectMissingCrossWorkspaceAndCyclesAndWaitForAcceptedTasks() {

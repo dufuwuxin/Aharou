@@ -17,7 +17,7 @@ import org.junit.Test
 class ContextMemoryToolTest {
     private val memories = mockk<MemoryRepository>(relaxed = true)
     private val library = mockk<ContextLibraryRepository>()
-    private val tool = MemoryTool(memories, mockk(), mockk(), mockk(), mockk(), mockk(), mockk(), library)
+    private val tool = MemoryTool(memories, mockk(), mockk(), mockk(), mockk(), mockk(), library)
     private val temporary = Memory("temp", "private-summary", MemoryScope.PROJECT, content = "private-session-body",
         contextCategory = ContextCategory.TEMPORARY, contextLoad = ContextLoad.FULL, contextSessionId = "s1", version = "v1")
     private fun ctx(session: String?) = AgentContext(null, null, "/workspace/a", null, sessionId = session)

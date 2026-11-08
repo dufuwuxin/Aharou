@@ -4,12 +4,12 @@ import com.aharou.feature.agent.data.task.ProjectTaskRepository
 import javax.inject.Inject
 
 class ProjectTaskContext @Inject constructor(private val repository: ProjectTaskRepository) {
-    fun build(sessionId: String?, workspace: String, ghost: Boolean = false): String? {
-        val lookup = com.aharou.feature.agent.domain.task.ProjectTaskGraph.currentContextTask(sessionId, workspace, ghost) { repository.snapshot(workspace).tasks }
+    fun build(sessionId: String?, workspace: String): String? {
+        val lookup = com.aharou.feature.agent.domain.task.ProjectTaskGraph.currentContextTask(sessionId, workspace) { repository.snapshot(workspace).tasks }
         if (lookup.unavailable) return "## Project task context unavailable\nTask store could not be read. Legacy conversation history remains usable; task creation/execution must wait for storage recovery."
         val task = lookup.task
         if (task == null) {
-            if (ghost || sessionId == null || workspace.isBlank()) return null
+            if (sessionId == null || workspace.isBlank()) return null
             val snapshot = repository.snapshot(workspace)
             val project = snapshot.projects.singleOrNull { sessionId in it.flowSessionIds } ?: return null
             return buildString {

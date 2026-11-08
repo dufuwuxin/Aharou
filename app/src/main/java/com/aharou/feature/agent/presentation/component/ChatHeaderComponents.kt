@@ -55,7 +55,6 @@ import compose.icons.feathericons.Eye
 import compose.icons.feathericons.GitBranch
 import compose.icons.feathericons.Globe
 import compose.icons.feathericons.HardDrive
-import compose.icons.feathericons.Menu
 import compose.icons.feathericons.Terminal
 
 @Composable
@@ -66,7 +65,6 @@ internal fun ChatHeader(
     sessionId: String? = null,
     /** 从会话详情页顶部返回到会话列表页；仅在小屏入口场景下传非空。 */
     onBackToSessions: (() -> Unit)? = null,
-    onOpenDrawer: () -> Unit,
     onNavigateToTerminal: () -> Unit,
     onNavigateToGit: () -> Unit,
     onNavigateToBrowser: () -> Unit = {},
@@ -76,7 +74,6 @@ internal fun ChatHeader(
     onNavigateToObserve: () -> Unit = {},
     onOpenActivity: () -> Unit = {},
     connectionState: com.aharou.feature.agent.domain.container.ConnectionState? = null,
-    showMenuButton: Boolean = true,
     terminalActive: Boolean = false,
     gitActive: Boolean = false,
     browserActive: Boolean = false
@@ -98,27 +95,14 @@ internal fun ChatHeader(
                     .padding(horizontal = Spacing.sm, vertical = Spacing.sm),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // 大屏常驻侧栏时隐掉汉堡键：侧栏已经摆在左边，再给个开关反而困惑。
-                // 当提供了回会话列表回调（小屏从列表进会话的场景）时显示左箭头；
-                // 否则保留汉堡键（打开侧边栏）。
                 if (onBackToSessions != null) {
                     IconButton(
                         onClick = onBackToSessions,
-                        modifier = Modifier.onboardingTarget(OnboardingStep.OPEN_SIDEBAR)
+                        modifier = Modifier
                     ) {
                         Icon(
                             FeatherIcons.ChevronLeft,
                             contentDescription = stringResource(R.string.chat_back_to_session_list),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                } else if (showMenuButton) {
-                    IconButton(
-                        onClick = onOpenDrawer,
-                        modifier = Modifier.onboardingTarget(OnboardingStep.OPEN_SIDEBAR)
-                    ) {
-                        Icon(
-                            FeatherIcons.Menu,
-                            contentDescription = stringResource(R.string.chat_open_sidebar),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 } else {

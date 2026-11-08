@@ -119,20 +119,13 @@
 | 删除规则片段 / 清空主规则 | 不提供独立旧页面；不删除用户既存文件 | 部分 | 主规则清空可用 `config set rules.global ""`；片段删除只能 `Bash rm` | 无专用删除动作 |
 | 读取文件式生效规则正文 | 不提供独立旧页面；记忆库预览仅展示新版条目 | 有 | `loadRule`（`AgentModule.kt:462`；`domain/tool/rule/LoadRuleTool.kt:29`） | 无 |
 
-## 8. 远程设备（跨设备协作）
+## 8. Peer collaboration removed
 
-| 用户能做什么 | 界面入口（file:line） | Agent 有对应工具吗 | 工具名与入口（file:line） | 差距说明 |
-|---|---|---|---|---|
-| 开/关本机 MCP 服务 | `feature/remotedevice/presentation/RemoteDeviceSection.kt:105` | 有 | `config` `remote.device.enabled`（`feature/remotedevice/data/ConfigRemoteDeviceFields.kt:36`） | 无 |
-| 查看配对码 | `RemoteDeviceSection.kt:119`（配对码面板 `:188`） | 有 | `config` `action=get path=remote.device.pair_code`（只读，`ConfigRemoteDeviceFields.kt:153`） | 只读；要换码得等对端配对成功后自动轮换 |
-| 接受协助（主动连到别人） | `RemoteDeviceSection.kt:131`、`:139`（`acceptAssistance`） | 无 | 未找到（config 只有只读 state/pair_code） | **缺口**：agent 不能代用户发起一次协助连接 |
-| 改端口 | 有意不做界面：设置页没有端口输入，需要时由 agent 走 `config` | 有 | `config` `remote.device.port`（`ConfigRemoteDeviceFields.kt:53`） | 只有端口撞车才需要改，不做入口（2026-11-03 定） |
-| 查看已配对设备 | `RemoteDeviceSection.kt:135`（`devices.forEachIndexed` 列表） | 有 | `config` `action=get path=remote.devices.<设备id>`（`ConfigRemoteDeviceFields.kt:211`） | 有 |
-| 撤销某台设备授权 | `RemoteDeviceSection.kt:144`（`viewModel.revoke`） | 有 | `config` `action=remove path=remote.devices id=<设备id>`（`ConfigRemoteDeviceFields.kt:246`） | 有 |
+Peer pairing, remote-device services, settings and configuration endpoints have been removed. Existing saved user data is retained. Ordinary SSH, MCP clients and memory synchronization remain available.
 
 ## 9. Messaging bots removed
 
-WeChat, Feishu, QQ and Telegram bot settings, services, startup restoration, configuration fields and the bot file-sending tool have been removed. Existing conversations, files and saved configuration data are retained. Agent communication, MCP, SSH and remote-device collaboration are unchanged.
+WeChat, Feishu, QQ and Telegram bot settings, services, startup restoration, configuration fields and the bot file-sending tool have been removed. Existing conversations, files and saved configuration data are retained. Agent communication, MCP and SSH are unchanged.
 
 ## 10. 会话
 
@@ -187,7 +180,6 @@ WeChat, Feishu, QQ and Telegram bot settings, services, startup restoration, con
 13. 技能：从市场搜索/安装（`SettingsScreen.kt:1121`）
 14. 技能：导出（`SkillDetailSection.kt:121`）
 15. MCP：重连接/刷新（`SettingsScreen.kt:755`）
-16. 远程设备：接受协助（`RemoteDeviceSection.kt:139`）
 18. 项目：创建及批量草稿（项目首页）
 19. 会话：切换（`MainActivity.kt:838`）
 20. 会话：重命名（`ChatDrawer.kt:508`）
@@ -209,10 +201,8 @@ WeChat, Feishu, QQ and Telegram bot settings, services, startup restoration, con
 
 共同问题：这些动作**没有专用工具，所以不在工具名层面可发现**——agent 得先知道“可以用 shell 凑”，才做得出来；也没有 UI 那层的合法性校验（片段命名、技能目录必须含 SKILL.md）。
 
-### C. 反向缺口：agent 有 `config` 字段，用户却没有界面入口（1 条，且属有意设计）
+### C. 反向缺口：agent 有 `config` 字段，用户却没有界面入口（0 条）
 
-- 远程设备端口：`ConfigRemoteDeviceFields.kt:53` 可写；设置页没有端口输入——**有意不做界面**（只有端口撞车才需要改，不做入口），不算缺口。
-- （已消）已配对设备列表与撤销设备授权均已接入设置页：`RemoteDeviceSection.kt:135` 列表、`:144` 撤销按钮（提交 `201e3c60`）。
 
 ### D. 双方都没有（3 条）
 
@@ -340,3 +330,5 @@ Second-pass corrections: long-session creation routes to project creation; expli
 ### Restored project and tool entry points
 
 The unified tool browser and six-action creation sheet reuse existing execution and permission paths. Project deletion removes project/task metadata only, uses the project workspace, and rejects active execution; it never deletes workspace files or conversation entities. Compact project controls are newly integrated and require device verification.
+
+本轮入口整合：项目页统一会话/项目创建，模型列表统一工作区模型顺序，思考强度保留；阶段模型及其配置通道已退役。记忆库的角色注入/主代理注入、摘要与正文仍通过原生 context_library 配置与 memory 工具读写。Beta 工作流已移除，发布仅使用 CI 与正式 Release。

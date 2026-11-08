@@ -63,7 +63,8 @@ internal fun ContextCategory.label(): Int = when (this) {
     ContextCategory.RULE -> R.string.context_category_rule
     ContextCategory.TEMPORARY -> R.string.context_category_temporary
     ContextCategory.LONG_TERM -> R.string.context_category_long_term
-    ContextCategory.INJECTED -> R.string.context_category_injected
+    ContextCategory.ROLE_INJECTED -> R.string.context_category_role_injected
+    ContextCategory.MAIN_INJECTED -> R.string.context_category_main_injected
 }
 
 @StringRes
@@ -71,7 +72,8 @@ internal fun ContextCategory.explanation(): Int = when (this) {
     ContextCategory.RULE -> R.string.context_category_rule_help
     ContextCategory.TEMPORARY -> R.string.context_category_temporary_help
     ContextCategory.LONG_TERM -> R.string.context_category_long_term_help
-    ContextCategory.INJECTED -> R.string.context_category_injected_help
+    ContextCategory.ROLE_INJECTED -> R.string.context_category_role_injected_help
+    ContextCategory.MAIN_INJECTED -> R.string.context_category_main_injected_help
 }
 
 @StringRes
@@ -137,7 +139,7 @@ internal fun ContextChoiceRow(labels: List<String>, selected: Int, onSelect: (In
 }
 
 @Composable
-internal fun ContextEntryCard(entry: ContextEntry, onClick: () -> Unit) {
+internal fun ContextEntryCard(entry: ContextEntry, query: String = "", onClick: () -> Unit) {
     Card(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
@@ -150,7 +152,8 @@ internal fun ContextEntryCard(entry: ContextEntry, onClick: () -> Unit) {
                     contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
                 Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
                     Text(com.aharou.core.translation.rememberTranslatedText(entry.title), style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    Text(com.aharou.core.translation.rememberTranslatedText(entry.description.ifBlank { entry.content.lineSequence().firstOrNull().orEmpty() }),
+                    Text(com.aharou.core.translation.rememberTranslatedText(if (query.isNotBlank()) com.aharou.feature.settings.presentation.contextSearchSnippet(entry, query)
+                        else entry.description.ifBlank { entry.content.lineSequence().firstOrNull().orEmpty() }),
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
@@ -160,6 +163,9 @@ internal fun ContextEntryCard(entry: ContextEntry, onClick: () -> Unit) {
                 }
             }
             Text(stringResource(R.string.context_entry_metadata, stringResource(entry.scope.label()), stringResource(entry.kind.label())),
+                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (query.isNotBlank()) Text(stringResource(R.string.context_search_location,
+                stringResource(entry.category.label()), entry.folder.ifEmpty { stringResource(R.string.context_folder_root_title) }, entry.sourceLabel),
                 style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (entry.pending) Text(stringResource(R.string.context_pending), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
         }

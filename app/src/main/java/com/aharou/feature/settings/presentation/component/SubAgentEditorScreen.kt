@@ -386,8 +386,7 @@ internal fun SubAgentEditorScreen(
                 }
             }
 
-            com.aharou.core.translation.TranslationPreview(description)
-            com.aharou.core.translation.TranslationPreview(prompt)
+            com.aharou.core.translation.TranslationPreview(listOf(description, prompt).filter { it.isNotBlank() }.joinToString("\n\n"))
             SettingsGroupHeader(text = stringResource(R.string.subagent_prompt))
             SettingsGroup {
                 AppTextField(

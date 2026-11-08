@@ -9,8 +9,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -24,13 +22,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalDrawerSheet
-import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Surface
-import androidx.compose.material3.VerticalDivider
-import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -43,7 +36,6 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -82,23 +74,14 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.aharou.core.ui.BetaWatermark
-import com.aharou.core.ui.ImageSource
-import com.aharou.core.ui.ImageViewerHost
-import com.aharou.core.ui.ImageViewerRequest
-import com.aharou.core.ui.LocalImageViewer
-import com.aharou.core.ui.PAGE_MOTION_MS
 import com.aharou.core.ui.RootBackHandler
 import com.aharou.core.ui.SplitPaneLayout
-import com.aharou.core.ui.drawerWidth
 import com.aharou.core.ui.isExpandedWidth
 import com.aharou.core.ui.pageEnter
 import com.aharou.core.ui.FloatingTabBar
 import com.aharou.core.ui.FloatingTabItem
 import com.aharou.core.ui.pageExit
-import com.aharou.core.ui.rememberImageViewerState
-import com.aharou.core.ui.rememberViewerDecodeSpec
 import com.aharou.feature.agent.presentation.AIAgentViewModel
-import com.aharou.feature.agent.presentation.AgentAttachment
 import com.aharou.feature.agent.presentation.component.AIChatPanel
 import com.aharou.feature.agent.presentation.component.ProjectChatScreen
 import com.aharou.feature.agent.presentation.component.rememberProjectChatBinding
@@ -107,10 +90,6 @@ import com.aharou.feature.agent.presentation.component.ProjectTaskDetailScreen
 import com.aharou.feature.agent.presentation.component.SessionListScreen
 import com.aharou.feature.agent.presentation.ProjectTaskViewModel
 import kotlinx.coroutines.flow.collect
-import com.aharou.feature.agent.presentation.component.ChatDrawerContent
-import com.aharou.feature.agent.presentation.component.DrawerSearchOpenRequest
-import com.aharou.feature.agent.presentation.component.chatImageLoader
-import com.aharou.feature.agent.presentation.component.openSentAttachment
 import com.aharou.feature.editor.presentation.CodeEditorScreen
 import com.aharou.feature.editor.presentation.EditorLeaveGuard
 import com.aharou.feature.browser.presentation.BrowserScreen
@@ -124,6 +103,7 @@ import com.aharou.feature.onboarding.domain.OnboardingStep
 import com.aharou.feature.onboarding.presentation.LocalOnboardingTargetRegistry
 import com.aharou.feature.onboarding.presentation.OnboardingOverlay
 import com.aharou.feature.onboarding.presentation.OnboardingTargetRegistry
+import com.aharou.feature.onboarding.presentation.onboardingTarget
 import com.aharou.feature.settings.data.repository.KeepaliveSettingsRepository
 import com.aharou.feature.settings.data.repository.BackgroundSettingsRepository
 import com.aharou.feature.settings.data.repository.ScreenOnSettingsRepository
@@ -430,33 +410,18 @@ private const val DEFAULT_PANE_SPLIT = 0.5f
 private const val MIN_PANE_SPLIT = 0.3f
 private const val MAX_PANE_SPLIT = 0.7f
 
-/**
- * 根导航容器。
- *
- * [ModalNavigationDrawer] 放在 [NavHost] **外面**，使 Drawer 的生命周期独立于页面切换。
- *
- * 页面过渡统一走 [pageEnter] / [pageExit]。
- *
- * **注意**：终端页承载的是原生 TerminalView，历史上启用过渡曾导致「退出终端后立即点侧边栏白屏」——
- * 当时过渡期间新旧页面共存，旧页 dispose 把 softInputMode 切回 adjustResize 触发窗口重布局，
- * 与 Drawer 打开动画叠加后渲染管线中断。该路径已由 onCreate 统一设置 softInputMode 与
- * `rememberImeBottomInset` 的空 onDispose 兜住；若白屏复现，先把终端路由的过渡降级为 None 排除嫌疑。
- *
- * ViewModel 提升到这一层创建，以便 Drawer 内容和 AIChatPanel 共享同一实例。
- */
 @Composable
 fun AppNavigation(
     onboardingRepository: com.aharou.feature.onboarding.data.OnboardingRepository,
     pendingExternalIntent: MutableStateFlow<Intent?>
 ) {
     val navController = rememberNavController()
-    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     var taskCreateRequested by remember { mutableStateOf(false) }
 
     val currentBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = currentBackStackEntry?.destination?.route
-    val isPrimaryPage = currentRoute == "projects" || currentRoute == "sessions" || currentRoute == "config" || currentRoute == "settings"
+    val isPrimaryPage = currentRoute == "projects" || currentRoute == "config" || currentRoute == "settings"
     var bottomBarHeightPx by remember { mutableIntStateOf(0) }
     val bottomBarHeight = with(LocalDensity.current) { bottomBarHeightPx.toDp() }
 
@@ -505,10 +470,9 @@ fun AppNavigation(
         }
     }
 
-    // 返回键：抽屉开着先收起；否则退到后台而不是结束任务（理由见 RootBackHandler）。
-    RootBackHandler(drawerOpen = drawerState.isOpen) { scope.launch { drawerState.close() } }
+    RootBackHandler()
 
-    // 侧边栏需要的数据。
+    // 工作区与会话页面共用数据。
     val currentWorkspace by workspaceViewModel.current.collectAsStateWithLifecycle()
     LaunchedEffect(currentWorkspace?.path) { projectTaskViewModel.workspace(currentWorkspace?.path.orEmpty()) }
     androidx.compose.runtime.LaunchedEffect(currentWorkspace) {
@@ -559,70 +523,16 @@ fun AppNavigation(
         }
     }
 
-    // 侧边栏按文件夹（工作区）分成两层，要跨工作区的会话，不能只取当前工作区那份。
+    // 项目会话索引覆盖工作区列表。
     val sessionsByWorkspace by agentViewModel.sessionsByWorkspace.collectAsStateWithLifecycle()
-    val sessions = remember(sessionsByWorkspace, projectTaskState.projectSessionIds, projectTaskState.indexedSessionWorkspaces) {
-        sessionsByWorkspace.filterKeys { it in projectTaskState.indexedSessionWorkspaces }.values.flatten()
-            .filterNot { it.id in projectTaskState.projectSessionIds }
-    }
     LaunchedEffect(sessionsByWorkspace.keys) { projectTaskViewModel.indexSessions(sessionsByWorkspace.keys.toList()) }
-    val allWorkspaces by workspaceViewModel.workspaces.collectAsStateWithLifecycle()
     val currentSessionId by agentViewModel.currentSessionId.collectAsStateWithLifecycle()
     val agentStates by agentViewModel.agentStates.collectAsStateWithLifecycle()
     val awaitingPermissionSessionIds by agentViewModel.awaitingPermissionSessionIds.collectAsStateWithLifecycle()
-    val subSessionsByParent by agentViewModel.subSessionsByParent.collectAsStateWithLifecycle()
-    val expandedPaths by agentViewModel.expandedPaths.collectAsStateWithLifecycle()
-    val expandingPath by agentViewModel.expandingPath.collectAsStateWithLifecycle()
-    val fileOpPaths by agentViewModel.fileOpPaths.collectAsStateWithLifecycle()
-    val browseState by agentViewModel.browseState.collectAsStateWithLifecycle()
-    val browseClipboard by agentViewModel.browseClipboard.collectAsStateWithLifecycle()
-    val pasteConflict by agentViewModel.pasteConflict.collectAsStateWithLifecycle()
-    val chatSearchQuery by agentViewModel.chatSearchQuery.collectAsStateWithLifecycle()
-    val chatSearchState by agentViewModel.chatSearchState.collectAsStateWithLifecycle()
-
-    // ── 导出会话：SAF 保存文件 ──
-    var pendingExportSessionId by remember { mutableStateOf<String?>(null) }
     val context = androidx.compose.ui.platform.LocalContext.current
-    val sessionExportLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("application/octet-stream")
-    ) { uri ->
-        val sessionId = pendingExportSessionId
-        if (uri != null && sessionId != null) {
-            scope.launch {
-                val os = withContext(Dispatchers.IO) { context.contentResolver.openOutputStream(uri) }
-                if (os != null) {
-                    agentViewModel.exportSession(sessionId, os) { success ->
-                        Toast.makeText(
-                            context,
-                            context.getString(if (success) R.string.chat_export_session_done else R.string.chat_export_session_failed),
-                            if (success) Toast.LENGTH_SHORT else Toast.LENGTH_LONG
-                        ).show()
-                    }
-                } else {
-                    Toast.makeText(context, context.getString(R.string.chat_export_session_failed), Toast.LENGTH_LONG).show()
-                }
-                pendingExportSessionId = null
-            }
-        } else {
-            pendingExportSessionId = null
-        }
-    }
 
     // ── 大屏（平板横屏及以上）布局 ──
     val expanded = isExpandedWidth()
-    // 常驻侧栏只在聊天页开：终端 / 编辑器 / 设置都是全屏页，被侧栏挤窄反而难用。
-    // 常驻侧栏只看窗口宽度：它只在聊天页展开，切到其他页会滑回去（见下方 sidebarWidth）。
-    val permanentDrawer = expanded
-
-    // 侧栏出现时刷一次文件列表：本地模式兼顾 inotify 漏事件，远程模式无 inotify 则完全靠它。
-    // 不能直接盯 drawerState.isOpen：大屏常驻侧栏不走 ModalNavigationDrawer，drawerState 永远是 Closed，
-    // 那样大屏远程模式下文件树只能靠手动刷新按钮。改取「侧栏可见」：窄窗看抽屉开没开，
-    // 大屏看是否停在聊天页（侧栏只在聊天页展开）。
-    val sidebarVisible = if (permanentDrawer) currentRoute == "chat" else drawerState.isOpen
-    LaunchedEffect(sidebarVisible) {
-        if (sidebarVisible) agentViewModel.refreshBrowse()
-    }
-
     // 右栏工作台：大屏下编辑器 / 终端 / Git 与聊天并排，窄窗仍走全屏路由。
     var paneKind by rememberSaveable { mutableStateOf(WorkbenchPaneKind.NONE) }
     var paneEditorPath by rememberSaveable { mutableStateOf("") }
@@ -639,13 +549,13 @@ fun AppNavigation(
     // 右栏打开时返回键先收起它。限定聊天页：其他页面右栏不渲染，不能在那里吞掉返回事件。
     BackHandler(
         enabled = expanded && currentRoute == "chat" &&
-            paneKind != WorkbenchPaneKind.NONE && !drawerState.isOpen
+            paneKind != WorkbenchPaneKind.NONE
     ) {
         paneKind = WorkbenchPaneKind.NONE
     }
 
     // 打开文件：大屏进右栏，窄窗跳全屏编辑器页。
-    val openFile: (String, Int, Boolean) -> Unit = { filePath, line, fromDrawer ->
+    val openFile: (String, Int) -> Unit = { filePath, line ->
         if (expanded) {
             val apply = {
                 paneEditorPath = filePath
@@ -660,44 +570,10 @@ fun AppNavigation(
                 // 编辑器里有未保存修改时，由编辑器先弹保存提示，确认后再换。
                 editorLeaveGuard.requestLeave(apply)
             }
-            // 常驻侧栏不需要关；平板竖屏等仍用 modal 抽屉的情况下选完文件要收起。
-            if (!permanentDrawer) scope.launch { drawerState.close() }
         } else {
-            scope.launch { drawerState.close() }
             navController.navigate(
-                "editor?path=${android.net.Uri.encode(filePath)}&line=$line&drawer=$fromDrawer"
+                "editor?path=${android.net.Uri.encode(filePath)}&line=$line"
             )
-        }
-    }
-
-    // 文件树里点文件：图片进内置全屏查看器、APK 走系统安装器，其余仍进编辑器。
-    val drawerImageViewerState = rememberImageViewerState()
-    val drawerDecodeSpec = rememberViewerDecodeSpec()
-    val drawerImageLoad = remember(agentViewModel.fileAccess, drawerDecodeSpec) {
-        chatImageLoader(agentViewModel.fileAccess, drawerDecodeSpec.maxEdge, drawerDecodeSpec.maxPixels)
-    }
-    val openTreeEntry: (String) -> Unit = { path ->
-        val name = path.trimEnd('/').substringAfterLast('/')
-        val ext = name.substringAfterLast('.', "").lowercase()
-        when {
-            ext in PREVIEWABLE_IMAGE_EXTS -> drawerImageViewerState.show(
-                ImageViewerRequest(listOf(ImageSource.ContainerPath(path)), name)
-            )
-            ext in INSTALLABLE_APK_EXTS -> scope.launch {
-                openSentAttachment(
-                    context,
-                    AgentAttachment(
-                        fileName = name,
-                        containerPath = path,
-                        localPath = "",
-                        mimeType = APK_MIME_TYPE,
-                        sizeBytes = 0L,
-                        isImage = false
-                    ),
-                    agentViewModel.fileAccess
-                )
-            }
-            else -> openFile(path, DrawerSearchOpenRequest.lineFor(path), true)
         }
     }
 
@@ -745,93 +621,11 @@ fun AppNavigation(
         openWorkbench(WorkbenchPaneKind.TERMINAL)
     }
 
-    // 侧栏内容：modal 抽屉与大屏常驻栏共用同一份，不在两处重复几十行参数。
-    val drawerBody: @Composable () -> Unit = {
-        ChatDrawerContent(
-            sessions = sessions,
-            workspaces = allWorkspaces,
-            currentWorkspacePath = currentWorkspace?.path ?: "",
-            currentSessionId = currentSessionId,
-            agentStates = agentStates,
-            awaitingPermissionSessionIds = awaitingPermissionSessionIds,
-            subSessionsByParent = subSessionsByParent,
-            browseState = browseState,
-            expandedPaths = expandedPaths,
-            expandingPath = expandingPath,
-            fileOpPaths = fileOpPaths,
-            clipboard = browseClipboard,
-            pasteConflict = pasteConflict,
-            onToggleExpand = { agentViewModel.toggleExpand(it) },
-            onOpenFile = openTreeEntry,
-            onRefreshBrowse = { agentViewModel.refreshBrowse() },
-            onCreateFile = { parent, name ->
-                agentViewModel.createBrowseFile(parent, name) { ok ->
-                    if (!ok) toastFileOpFailed(context, R.string.file_browser_create_failed)
-                }
-            },
-            onCreateFolder = { parent, name ->
-                agentViewModel.createBrowseFolder(parent, name) { ok ->
-                    if (!ok) toastFileOpFailed(context, R.string.file_browser_create_failed)
-                }
-            },
-            onRenameEntry = { path, newName ->
-                agentViewModel.renameBrowseEntry(path, newName) { ok ->
-                    if (!ok) toastFileOpFailed(context, R.string.file_browser_rename_failed)
-                }
-            },
-            onDeleteEntry = { path ->
-                agentViewModel.deleteBrowseEntry(path) { ok ->
-                    if (!ok) toastFileOpFailed(context, R.string.file_browser_delete_failed)
-                }
-            },
-            onCopyEntry = { path, name ->
-                agentViewModel.copyBrowseEntry(path, name)
-            },
-            onCutEntry = { path, name ->
-                agentViewModel.cutBrowseEntry(path, name)
-            },
-            onAddToInput = { path ->
-                agentViewModel.attachWorkspaceEntryToInput(path)
-            },
-            onPasteEntry = { targetDir, onResult ->
-                agentViewModel.pasteBrowseEntry(targetDir, onResult)
-            },
-            onClearClipboard = { agentViewModel.clearBrowseClipboard() },
-            onPasteOverwrite = { agentViewModel.pasteBrowseEntryOverwrite() },
-            onCancelPasteOverwrite = { agentViewModel.clearPasteConflict() },
-            onSelect = {
-                agentViewModel.selectSession(it.id)
-                if (!permanentDrawer) scope.launch { drawerState.close() }
-            },
-            onDelete = { agentViewModel.deleteSession(it.id) },
-            onDeleteSessions = { agentViewModel.deleteSessions(it) },
-            onRename = { session, title -> agentViewModel.renameSession(session.id, title) },
-            onTogglePin = { agentViewModel.togglePinSession(it.id) },
-            onExport = { session ->
-                pendingExportSessionId = session.id
-                val safeTitle = session.title.replace(Regex("[^\\w\\u4e00-\\u9fa5\\-]"), "_")
-                sessionExportLauncher.launch("aharou-session-$safeTitle-${System.currentTimeMillis()}.tar.gz")
-            },
-            onNavigateToSettings = {
-                navController.navigate("settings")
-                if (!permanentDrawer) scope.launch { drawerState.snapTo(DrawerValue.Closed) }
-            },
-            searchQuery = chatSearchQuery,
-            searchState = chatSearchState,
-            onSearchQueryChange = { agentViewModel.updateChatSearchQuery(it) },
-            onClearSearch = { agentViewModel.clearChatSearch() },
-            onOpenSearchHit = { hit ->
-                agentViewModel.openChatSearchHit(hit)
-                if (!permanentDrawer) scope.launch { drawerState.close() }
-            }
-        )
-    }
-
     val navBody: @Composable () -> Unit = {
         NavHost(
             navController = navController,
             startDestination = "projects",
-            // 过渡期间退场页会向左移出自身区域，大屏下不夹住会画到左侧常驻会话侧栏上。
+            // 限制过渡动画在导航正文内。
             modifier = Modifier.fillMaxSize().clipToBounds()
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
                 .padding(bottom = if (isPrimaryPage) bottomBarHeight else 0.dp),
@@ -842,7 +636,7 @@ fun AppNavigation(
         ) {
             composable("chat") {
                 // 从会话详情页按返回键回到会话列表页（不再是退出 App）。
-                BackHandler(enabled = true) { navController.navigate("sessions") { popUpTo("chat") { inclusive = true } } }
+                BackHandler(enabled = true) { navController.navigate("projects") { popUpTo("chat") { inclusive = true } } }
                 // 聊天区内覆盖 LocalUriHandler：Markdown 链接点击默认经此 handler 派发。
                 // http/https 链接与本地 .html 文件都送内置浏览器预览；其它文件路径跳编辑器；
                 // mailto/tel 等非 http 网址仍走系统外部处理。
@@ -857,7 +651,7 @@ fun AppNavigation(
                                 if (f.isFile) android.net.Uri.fromFile(f).toString() else null
                             }.getOrNull()
                         },
-                        onOpenFile = { filePath, line -> openFile(filePath, line, false) },
+                        onOpenFile = { filePath, line -> openFile(filePath, line) },
                     )
                 }
                 val paneOpen = expanded && paneKind != WorkbenchPaneKind.NONE
@@ -873,7 +667,7 @@ fun AppNavigation(
                             editorPath = paneEditorPath,
                             editorLine = paneEditorLine,
                             onClose = { paneKind = WorkbenchPaneKind.NONE },
-                            onOpenFile = { path -> openFile(path, 0, false) },
+                            onOpenFile = { path -> openFile(path, 0) },
                             editorLeaveGuard = editorLeaveGuard,
                             onAddSelectionToInput = { text ->
                                 agentViewModel.attachEditorSelectionToInput(paneEditorPath, text)
@@ -915,9 +709,7 @@ fun AppNavigation(
                                 viewModel = agentViewModel,
                                 settingsViewModel = settingsViewModel,
                                 workspaceViewModel = workspaceViewModel,
-                                onOpenDrawer = { scope.launch { drawerState.open() } },
-                                showMenuButton = !permanentDrawer,
-                                onBackToSessions = { navController.navigate("sessions") { popUpTo(navController.graph.startDestinationId) { inclusive = true } } },
+                                onBackToSessions = { navController.navigate("projects") { popUpTo(navController.graph.startDestinationId) { inclusive = true } } },
                                 onCreateTask = { taskCreateRequested = true; navController.navigate("projects") { popUpTo("projects"); launchSingleTop = true } },
                                 onNavigateToTerminal = { openWorkbench(WorkbenchPaneKind.TERMINAL) },
                                 onNavigateToGit = { openWorkbench(WorkbenchPaneKind.GIT) },
@@ -956,12 +748,30 @@ fun AppNavigation(
             composable("projects") {
                 ProjectListScreen(projectTaskViewModel, taskCreateRequested, { taskCreateRequested = false },
                     onOpenProject = { id -> projectTaskViewModel.openProject(id) { navController.navigate("projects/$id") } },
-                    onOpenTask = { id -> projectTaskViewModel.select(id); navController.navigate("tasks/$id") })
+                    onOpenTask = { id -> projectTaskViewModel.select(id); navController.navigate("tasks/$id") },
+                    onNewSession = { scope.launch { agentViewModel.newSession().join(); navController.navigate("chat") { launchSingleTop = true } } },
+                    sessionsContent = {
+                val currentWsPath = currentWorkspace?.path.orEmpty()
+                if (currentWsPath !in projectTaskState.indexedSessionWorkspaces) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
+                        androidx.compose.material3.Text(stringResource(if (currentWsPath in projectTaskState.failedSessionWorkspaces)
+                            R.string.project_session_index_failed else R.string.project_session_index_loading))
+                    }
+                } else SessionListScreen(
+                    sessions = sessionsByWorkspace[currentWsPath].orEmpty().filterNot { it.id in projectTaskState.projectSessionIds },
+                    currentSessionId = currentSessionId, agentStates = agentStates,
+                    awaitingPermissionSessionIds = awaitingPermissionSessionIds,
+                    workspaceName = currentWsPath.substringAfterLast('/'),
+                    onSelect = { session -> agentViewModel.selectSession(session.id); navController.navigate("chat") { launchSingleTop = true } },
+                    onDelete = { session -> agentViewModel.deleteSession(session.id) },
+                    onNewSession = {}, showNewSession = false
+                )
+                    })
             }
             composable("projects/{projectId}") { entry ->
                 ProjectChatScreen(projectId = entry.arguments?.getString("projectId").orEmpty(), agentViewModel, projectTaskViewModel,
                     settingsViewModel, workspaceViewModel, onBack = { navController.popBackStack() },
-                    onOpenDrawer = { scope.launch { drawerState.open() } }, onToolDetail = { msg ->
+                    onToolDetail = { msg ->
                         com.aharou.feature.agent.presentation.component.ToolCallPreviewHolder.current = msg; navController.navigate("toolDetail") },
                     onNavigateToTerminal = { navController.navigate("terminal") }, onNavigateToGit = { navController.navigate("git") },
                     onNavigateToBrowser = { navController.navigate("browser") }, onNavigateToSandbox = { navController.navigate("sandbox") },
@@ -982,23 +792,6 @@ fun AppNavigation(
                         }
                         agentViewModel.executionOutcome(sessionId, turnId)
                     }
-                )
-            }
-            composable("sessions") {
-                val currentWsPath = currentWorkspace?.path.orEmpty()
-                if (currentWsPath !in projectTaskState.indexedSessionWorkspaces) {
-                    Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
-                        androidx.compose.material3.Text(stringResource(if (currentWsPath in projectTaskState.failedSessionWorkspaces)
-                            R.string.project_session_index_failed else R.string.project_session_index_loading))
-                    }
-                } else SessionListScreen(
-                    sessions = sessionsByWorkspace[currentWsPath].orEmpty().filterNot { it.id in projectTaskState.projectSessionIds },
-                    currentSessionId = currentSessionId, agentStates = agentStates,
-                    awaitingPermissionSessionIds = awaitingPermissionSessionIds,
-                    workspaceName = currentWsPath.substringAfterLast('/'),
-                    onSelect = { session -> agentViewModel.selectSession(session.id); navController.navigate("chat") { launchSingleTop = true } },
-                    onDelete = { session -> agentViewModel.deleteSession(session.id) },
-                    onNewSession = {}, showNewSession = false
                 )
             }
             composable("config") {
@@ -1024,14 +817,11 @@ fun AppNavigation(
             }
             composable("settings") {
                 // 复用 Activity 级 settingsViewModel（MainActivity 顶部已创建并 init），
-                // 避免进入设置页时再建一个 NavBackStackEntry 级实例、重复跑 init 与 9 路 flow 订阅，
-                // 这是侧边栏点设置「卡一下」的主因。
+                // 避免进入设置页时重复创建实例与订阅。
                 SettingsScreen(
                     viewModel = settingsViewModel,
                     onNavigateBack = {
                         navController.popBackStack()
-                        // 大屏返回聊天页后侧栏本就常驻，不再弹 modal 抽屉。
-                        if (!expanded) scope.launch { drawerState.open() }
                     },
                     onStopAllAndCloseTerminal = { agentViewModel.stopAllAndCloseTerminal() }
                 )
@@ -1131,7 +921,7 @@ fun AppNavigation(
                     viewModel = gitViewModel,
                     onNavigateToCredentials = { navController.navigate("credentials") },
                     onNavigateBack = { navController.popBackStack() },
-                    onOpenFile = { path -> openFile(path, 0, false) },
+                    onOpenFile = { path -> openFile(path, 0) },
                     onAnalyzeWithAi = { text -> agentViewModel.updateInputDraft(text) }
                 )
             }
@@ -1143,7 +933,7 @@ fun AppNavigation(
                 )
             }
             composable(
-                route = "editor?path={path}&line={line}&drawer={drawer}",
+                route = "editor?path={path}&line={line}",
                 arguments = listOf(
                     navArgument("path") {
                         type = NavType.StringType
@@ -1152,22 +942,14 @@ fun AppNavigation(
                     navArgument("line") {
                         type = NavType.IntType
                         defaultValue = 0
-                    },
-                    navArgument("drawer") {
-                        type = NavType.BoolType
-                        defaultValue = false
                     }
                 )
             ) { entry ->
-                // 从侧边栏文件页进入时返回要重新弹出抽屉（否则看完一个文件就得重新拉开抽屉进目录）；
-                // 从聊天区链接进入时返回应回到聊天，不弹抽屉。
-                val openDrawerOnBack = entry.arguments?.getBoolean("drawer") ?: false
                 CodeEditorScreen(
                     path = entry.arguments?.getString("path").orEmpty(),
                     initialLine = entry.arguments?.getInt("line") ?: 0,
                     onBack = {
                         navController.popBackStack()
-                        if (openDrawerOnBack && !expanded) scope.launch { drawerState.open() }
                     },
                     onAddSelectionToInput = { text ->
                         agentViewModel.attachEditorSelectionToInput(
@@ -1181,75 +963,15 @@ fun AppNavigation(
     }
 
     CompositionLocalProvider(
-        LocalOnboardingTargetRegistry provides onboardingRegistry,
-        LocalImageViewer provides drawerImageViewerState
+        LocalOnboardingTargetRegistry provides onboardingRegistry
     ) {
     Box(modifier = Modifier.fillMaxSize()) {
-    // 文件树里点开的图片走这个查看器；聊天面板自带一个，两层互不影响。
-    ImageViewerHost(state = drawerImageViewerState, load = drawerImageLoad)
-    if (expanded) {
-        // 大屏不套 ModalNavigationDrawer：侧栏常驻在左，抽屉那套 scrim / 手势 / 锚点在这里完全用不上。
-        // 侧栏只在聊天页展开：设置页自己就是「菜单 + 详情」两栏，外面再套一层会话侧栏就成了三栏。
-        // 宽度走补间而不是直接增删，否则右侧区域宽度突变，切页时会明显闪一下；
-        // 时长与页面过渡取同一个值，两段动画同时收尾。
-        val sidebarWidth by animateDpAsState(
-            targetValue = if (currentRoute == "chat") drawerWidth() else 0.dp,
-            animationSpec = tween(durationMillis = PAGE_MOTION_MS),
-            label = "sidebar-width"
-        )
-        // 侧栏完全收起后整棵子树离开组合，要拿 SaveableStateHolder 接住内部状态，
-        // 否则每次从设置页回来 tab 都跳回「会话」、文件树滚动位置也丢。
-        val sidebarStateHolder = rememberSaveableStateHolder()
-        Row(modifier = Modifier.fillMaxSize()) {
-            if (sidebarWidth > 0.dp) {
-                Box(
-                    modifier = Modifier
-                        .width(sidebarWidth)
-                        .fillMaxHeight()
-                        .clipToBounds()
-                ) {
-                    // 内容按完整宽度渲染再裁剪：收起过程中不去重排侧栏内部布局。
-                    Box(
-                        modifier = Modifier
-                            .width(drawerWidth())
-                            .fillMaxHeight()
-                    ) {
-                        sidebarStateHolder.SaveableStateProvider("chat-sidebar") {
-                            drawerBody()
-                        }
-                    }
-                }
-                VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            }
-            Box(modifier = Modifier.weight(1f)) {
-                navBody()
-            }
-        }
-    } else {
-        ModalNavigationDrawer(
-            drawerState = drawerState,
-            // 仅在聊天页启用手势滑出；其他页面禁止（但已打开时始终可关闭）。
-            gesturesEnabled = currentRoute == "chat" || drawerState.isOpen,
-            drawerContent = {
-                ModalDrawerSheet(
-                    drawerShape = RectangleShape,
-                    drawerContainerColor = settingsPageBackground(),
-                    drawerTonalElevation = 0.dp,
-                    modifier = Modifier.width(drawerWidth())
-                ) {
-                    drawerBody()
-                }
-            }
-        ) {
-            navBody()
-        }
-    }
+    navBody()
 
     // 四个一级页共享底栏实测高度（含底边距），聊天等子路由不留空白。
     val activeTab = when (currentRoute) {
-        "sessions" -> 1
-        "config" -> 2
-        "settings" -> 3
+        "config" -> 1
+        "settings" -> 2
         else -> 0
     }
     if (isPrimaryPage) {
@@ -1264,8 +986,7 @@ fun AppNavigation(
                     if (i != activeTab) {
                         val route = when (i) {
                             0 -> "projects"
-                            1 -> "sessions"
-                            2 -> "config"
+                            1 -> "config"
                             else -> "settings"
                         }
                         navController.navigate(route) {
@@ -1277,13 +998,13 @@ fun AppNavigation(
                 },
                 items = listOf(
                     FloatingTabItem(FeatherIcons.Home, stringResource(R.string.project_home)),
-                    FloatingTabItem(FeatherIcons.MessageSquare, stringResource(R.string.project_sessions)),
                     FloatingTabItem(FeatherIcons.Sliders, stringResource(R.string.bottom_tab_config)),
                     FloatingTabItem(FeatherIcons.Settings, stringResource(R.string.bottom_tab_settings)),
                 ),
                 maskColor = settingsPageBackground(),
                 modifier = Modifier
                     .align(androidx.compose.ui.Alignment.BottomCenter)
+                    .onboardingTarget(OnboardingStep.ENTER_SETTINGS)
                     .onSizeChanged { bottomBarHeightPx = it.height }
                     .padding(bottom = 8.dp),
             )
@@ -1302,7 +1023,7 @@ fun AppNavigation(
         ShareIntakeDialog(
             items = awaitingShareItems,
             onPreview = { item ->
-                openFile(item.containerPath, 0, false)
+                openFile(item.containerPath, 0)
                 intakeHolder.clearAwaitingConfirm()
             },
             onInsert = {
@@ -1322,13 +1043,8 @@ fun AppNavigation(
             onNextStep = {
                 val step = onboardingStateHolder.state.value.step
                 when (step) {
-                    OnboardingStep.OPEN_SIDEBAR -> {
-                        scope.launch { drawerState.open() }
-                        onboardingCoordinator.nextStep()
-                    }
                     OnboardingStep.ENTER_SETTINGS -> {
                         navController.navigate("config")
-                        scope.launch { drawerState.snapTo(DrawerValue.Closed) }
                         onboardingCoordinator.nextStep()
                     }
                     OnboardingStep.CONFIG_PROVIDER,
@@ -1356,13 +1072,8 @@ fun AppNavigation(
             onTargetClick = {
                 val step = onboardingStateHolder.state.value.step
                 when (step) {
-                    OnboardingStep.OPEN_SIDEBAR -> {
-                        scope.launch { drawerState.open() }
-                        onboardingCoordinator.nextStep()
-                    }
                     OnboardingStep.ENTER_SETTINGS -> {
                         navController.navigate("config")
-                        scope.launch { drawerState.snapTo(DrawerValue.Closed) }
                         onboardingCoordinator.nextStep()
                     }
                     OnboardingStep.CONFIG_PROVIDER,
@@ -1392,16 +1103,3 @@ fun AppNavigation(
     }
     }
 }
-
-/** 侧边栏文件页写操作失败提示（新建 / 重命名 / 删除共用）。 */
-private fun toastFileOpFailed(context: android.content.Context, messageRes: Int) {
-    Toast.makeText(context, context.getString(messageRes), Toast.LENGTH_SHORT).show()
-}
-
-/** 文件树里点击即在内置查看器预览的图片格式（与 sendFile 的图片判定一致）。 */
-private val PREVIEWABLE_IMAGE_EXTS = setOf("png", "jpg", "jpeg", "gif", "webp", "bmp")
-
-/** 文件树里点击即调系统安装器的安装包格式。 */
-private val INSTALLABLE_APK_EXTS = setOf("apk", "apks", "xapk")
-
-private const val APK_MIME_TYPE = "application/vnd.android.package-archive"

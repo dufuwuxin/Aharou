@@ -187,7 +187,6 @@ export default defineConfig({
             { text: '自定义提示词', link: '/guide/custom-prompts' },
             { text: '记忆与项目规则', link: '/guide/memory' },
             { text: '共享知识库', link: '/guide/knowledge-base' },
-            { text: '跨设备协作', link: '/guide/cross-device' },
             { text: '依赖版本检查', link: '/guide/dependency-check' },
             { text: '人格（Soul）', link: '/guide/soul' }
           ]

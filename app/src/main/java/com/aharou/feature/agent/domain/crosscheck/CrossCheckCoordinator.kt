@@ -1,6 +1,5 @@
 package com.aharou.feature.agent.domain.crosscheck
 
-import com.aharou.core.util.AILogger
 import com.aharou.core.util.FileLogger
 import com.aharou.feature.agent.data.remote.anthropic.AnthropicApi
 import com.aharou.feature.agent.data.remote.gemini.GeminiApi
@@ -128,8 +127,7 @@ class CrossCheckCoordinator @Inject constructor(
         provider.useFullUrl = target.useFullUrl
         provider.useResponseApi = target.useResponseApi
         provider.providerId = target.id
-        // 复审同样是模型请求，隐身会话不能留 AI 日志（主链路、手机子代理、视觉调用同走一份判定）。
-        provider.logSessionId = AILogger.loggableSessionId(sessionId, sessionUseCase::isGhostSession)
+        provider.logSessionId = sessionId
         provider.customHeaders = target.customHeaders
         val metadata = modelMetadataService.resolve(target.id, target.type, target.effectiveModel)
         provider.maxOutputTokens = metadata.outputTokens

@@ -74,7 +74,7 @@ class ProjectWorkflowRunnerTest {
         val tasks = mockk<TaskTool>()
         val created = mutableMapOf<String, Int>()
         var firstTaskCreates = 0
-        var capacityRace = capacityWait
+        var capacityRaces = if (capacityWait) 3 else 0
         coEvery { tasks.executeWithContext(any(), any()) } answers {
             val args = firstArg<Map<String, JsonElement>>()
             assertEquals(rootId, secondArg<com.aharou.feature.agent.domain.model.AgentContext>().sessionId)
@@ -84,8 +84,8 @@ class ProjectWorkflowRunnerTest {
             } else {
                 assertEquals("create", args["action"]?.jsonPrimitive?.content)
                 val id = args.getValue("description").jsonPrimitive.content
-                if (capacityRace) {
-                    capacityRace = false
+                if (capacityRaces > 0) {
+                    capacityRaces--
                     return@answers ToolResult.Error("busy", "MAX_SUBAGENTS_REACHED")
                 }
                 val index = if (id == "a") ++firstTaskCreates else 1
@@ -118,8 +118,11 @@ class ProjectWorkflowRunnerTest {
         val messages = mockk<MessagePersistenceUseCase>(relaxed = true)
         coEvery { messages.getMessagesOnce(any()) } returns emptyList()
         coEvery { messages.restoreAll(any()) } returns emptyList()
-        val registry = mockk<com.aharou.feature.agent.domain.tool.ToolRegistry>()
-        every { registry.getTool("task") } returns tasks
+        every { tasks.name } returns "task"
+        val toolGuard = com.aharou.feature.agent.domain.tool.ToolCallGuard(mockk(relaxed = true), mockk(relaxed = true))
+        val registry = com.aharou.feature.agent.domain.tool.ToolRegistry(toolGuard)
+        registry.register("task", tasks)
+        assertFalse(registry.getTool("task") is TaskTool)
         val runner = ProjectWorkflowRunner(repository, sessions, turns, javax.inject.Provider { registry }, events, mockk(), messages, ProjectTaskExecutionCoordinator())
         return Triple(runner, { synchronized(guard) { snapshot } }, { change -> synchronized(guard) { snapshot = change(snapshot) } })
     }

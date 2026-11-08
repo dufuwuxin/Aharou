@@ -24,7 +24,7 @@ class OnboardingCoordinatorTest {
 
         coordinator.initialize(OnboardingStatus.IN_PROGRESS)
         assertTrue(stateHolder.isActive)
-        assertEquals(OnboardingStep.OPEN_SIDEBAR, stateHolder.state.value.step)
+        assertEquals(OnboardingStep.ENTER_SETTINGS, stateHolder.state.value.step)
     }
 
     @Test
@@ -93,7 +93,39 @@ class OnboardingCoordinatorTest {
         coordinator.resetAndStart()
 
         assertTrue(stateHolder.isActive)
-        assertEquals(OnboardingStep.OPEN_SIDEBAR, stateHolder.state.value.step)
+        assertEquals(OnboardingStep.ENTER_SETTINGS, stateHolder.state.value.step)
         assertEquals(listOf(OnboardingStatus.IN_PROGRESS), persisted)
     }
+
+    @Test fun savedProgressRetainsThePreviousStableStepIds() {
+        val expected = listOf(OnboardingStep.ENTER_SETTINGS, OnboardingStep.CONFIG_PROVIDER,
+            OnboardingStep.PROVIDER_ADD, OnboardingStep.PROVIDER_CONFIG_INFO,
+            OnboardingStep.PROVIDER_FETCH_MODELS, OnboardingStep.SIMULATE_FETCH_DIALOG,
+            OnboardingStep.OPEN_MODEL_PICKER, OnboardingStep.SIMULATE_CHOOSE_MODEL, OnboardingStep.SEND_MESSAGE)
+        expected.forEachIndexed { offset, step ->
+            val state = OnboardingStateHolder()
+            OnboardingCoordinator(state, {}, testScope).initialize(OnboardingStatus.IN_PROGRESS, offset + 2)
+            assertEquals(step, state.state.value.step)
+        }
+    }
+
+    @Test fun removedFirstStepAndUnknownProgressStartAtTheConfigurationEntry() {
+        for (saved in listOf(0, 1, Int.MAX_VALUE)) {
+            val state = OnboardingStateHolder()
+            OnboardingCoordinator(state, {}, testScope).initialize(OnboardingStatus.IN_PROGRESS, saved)
+            assertEquals(OnboardingStep.ENTER_SETTINGS, state.state.value.step)
+        }
+    }
+
+    @Test fun progressPersistenceDoesNotUseTheNewDisplayOrdinal() {
+        val state = OnboardingStateHolder()
+        val steps = mutableListOf<Int>()
+        val coordinator = OnboardingCoordinator(state, {}, testScope, { steps += it })
+        coordinator.initialize(OnboardingStatus.IN_PROGRESS, 2)
+        coordinator.nextStep()
+        assertEquals(OnboardingStep.CONFIG_PROVIDER, state.state.value.step)
+        assertEquals(2, state.state.value.step.stepIndex)
+        assertEquals(listOf(3), steps)
+    }
+
 }

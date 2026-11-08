@@ -6,7 +6,19 @@ import java.security.MessageDigest
 enum class ContextKind { INSTRUCTION, REFERENCE }
 enum class ContextLoad { FULL, INDEX, SEARCH, OFF }
 enum class ContextOrigin { MEMORY }
-enum class ContextCategory { RULE, TEMPORARY, LONG_TERM, INJECTED }
+enum class ContextCategory {
+    RULE, TEMPORARY, LONG_TERM, ROLE_INJECTED, MAIN_INJECTED;
+
+    val isInjection: Boolean get() = this == ROLE_INJECTED || this == MAIN_INJECTED
+
+    companion object {
+        /** Old undifferentiated injection belongs to the main agent, never to every role. */
+        fun from(raw: String?): ContextCategory? = when (val value = raw?.trim()?.uppercase()) {
+            "INJECTED" -> MAIN_INJECTED
+            else -> entries.firstOrNull { it.name == value }
+        }
+    }
+}
 
 data class ContextEntry(
     val id: String,

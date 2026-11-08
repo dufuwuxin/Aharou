@@ -59,11 +59,15 @@ def violations(root: Path) -> list[str]:
     require(SECTION, r"\.copy\s*\([^)]*\btitle\s*=\s*name\b", "renamed title must reach repository save")
     for name in ("contextChildFolders", "contextParentFolder", "contextFolderEntries"):
         require(NAVIGATION, rf"\bfun\s+{name}\s*\(", f"navigation helper missing: {name}")
-        require(SECTION, rf"\b{name}\s*\(", f"navigation helper not wired: {name}")
+        if name == "contextFolderEntries":
+            require(SECTION, r"\bcontextVisibleEntries\s*\(", "visible entry consumer missing")
+            require(NAVIGATION, r"else\s+filterContextEntries\(contextFolderEntries\(", "folder filter must feed browse results")
+        else:
+            require(SECTION, rf"\b{name}\s*\(", f"navigation helper not wired: {name}")
     for name in ("ContextFolderRow", "context_folder_up"):
         require(SECTION, rf"\b{name}\b", f"hierarchical folder UI missing: {name}")
     forbid(SECTION, r"\bcontext_folder_all\b|folder\s*==\s*null\s*\|\|", "folder browser must not flatten all folders")
-    require(SECTION, r"if\s*\(\s*currentFolder\s*==\s*null\s*\)\s*emptyList\s*\(",
+    require(NAVIGATION, r"else\s+if\s*\(\s*folder\s*==\s*null\s*\)\s*emptyList\s*\(",
             "folder overview must not include document bodies")
     forbid(NAVIGATION, r"folder\s*==\s*null\s*\|\|",
            "folder entry selection must stay at one level")
@@ -76,8 +80,8 @@ def violations(root: Path) -> list[str]:
             "category explanation must resolve current category resource")
     for path in (SECTION, EDITOR):
         require(path, r"\bBackHandler\s*\(", "nested page must consume its own back navigation")
-    require(ENTRY, r"enum\s+class\s+ContextCategory\s*\{\s*RULE\s*,\s*TEMPORARY\s*,\s*LONG_TERM\s*,\s*INJECTED\s*\}",
-            "four native categories must remain")
+    require(ENTRY, r"enum\s+class\s+ContextCategory\s*\{\s*RULE\s*,\s*TEMPORARY\s*,\s*LONG_TERM\s*,\s*ROLE_INJECTED\s*,\s*MAIN_INJECTED\s*;",
+            "five native categories must remain")
     require(ENTRY, r"enum\s+class\s+ContextLoad\s*\{\s*FULL\s*,\s*INDEX\s*,\s*SEARCH\s*,\s*OFF\s*\}",
             "only FULL/INDEX/SEARCH/OFF loading is allowed")
     require(ENTRY, r"enum\s+class\s+ContextOrigin\s*\{\s*MEMORY\s*\}",
@@ -92,7 +96,7 @@ def violations(root: Path) -> list[str]:
     for name in ("withPromptSnapshot", "list", "save", "create", "delete", "search", "preview", "render"):
         require(REPOSITORY, rf"\bfun\s+{name}\s*\(", f"native API missing: {name}")
     for path in (UI / "ContextLibraryComponents.kt", UI / "ContextLibraryEditor.kt"):
-        forbid(path, r"\bsourceLabel\b|context_(?:source_detail|origin_\w+)|ContextLoad\.LEGACY|"
+        forbid(path, r"context_(?:source_detail|origin_\w+)|ContextLoad\.LEGACY|"
                r"ContextOrigin\.(?:RULE|PROMPT|KNOWLEDGE|PERSONA)", "legacy source label or loading")
     for name in ("entries", "folders"):
         require(CONFIG, rf'"context_library\.{name}"', f"config channel missing: {name}")
@@ -107,9 +111,11 @@ def violations(root: Path) -> list[str]:
     require(PROVIDER, r"class\s+MemoryListSource\b", "shared memory consumer missing")
     require(PROVIDER, r"\bresolvePrompt\s*\(\s*MEMORY_DISCIPLINE_FILE\s*\)", "memory discipline asset consumption missing")
     require(PROVIDER, r"\bwithPromptSnapshot\s*\(", "prompt snapshot privacy boundary missing")
-    require(PROVIDER, r"InjectPart\.MEMORY\s+in\s+definition\.inject", "subagent memory opt-in missing")
-    require(PROVIDER, r"\bif\s*\(\s*(?:isGhostSession\(agentContext\)|ghost)\s*\)\s*null\s*else\s*memoryListSource\.build",
-            "ghost memory privacy gate missing")
+    require(PROVIDER, r"InjectPart\.MEMORY\s+in\s+(?:definition|it)\.inject", "subagent memory opt-in missing")
+    forbid(PROVIDER, r"\b(?:GhostModeStore|isGhostSession)\b", "retired ghost consumer")
+    require(Path("app/src/main/java/com/aharou/feature/agent/domain/context/ContextLibraryRepository.kt"),
+            r"ordinaryMemoryEnabled\s*&&\s*active\?\.memoryAllowed\s*!=\s*false",
+            "native member memory permission gate missing")
     forbid(CATALOG, r"\b(?:contextPolicies|ContextPolicyStore)\b", "prompt sidecar adapter")
     for path in (DOMAIN / "context/ContextPolicyStore.kt",
                  Path("app/src/test/java/com/aharou/feature/agent/domain/context/ContextPolicyStoreTest.kt")):

@@ -72,7 +72,6 @@ internal fun SubAgentsSection(
     entries: List<SubAgentUiEntry>,
     onDelete: (SubAgentUiEntry) -> Unit,
     onOpenDetail: (SubAgentUiEntry) -> Unit,
-    onOpenTeams: () -> Unit,
     limitViewModel: SubAgentSettingsViewModel = hiltViewModel()
 ) {
     val maxRunning by limitViewModel.maxRunning.collectAsStateWithLifecycle()
@@ -86,7 +85,6 @@ internal fun SubAgentsSection(
             enabled = communicationEnabled,
             onToggle = { limitViewModel.setCommunicationEnabled(it) }
         )
-        TeamsEntryGroup(onClick = onOpenTeams)
         Box(modifier = Modifier.weight(1f)) {
             SubAgentsList(
                 projectName = projectName,
@@ -452,21 +450,6 @@ private fun MaxRunningGroup(maxRunning: Int, onClick: () -> Unit) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-            )
-        }
-    }
-}
-
-/** 团队预设入口：点进去看 teams 目录下的预设；编排写在预设里，对话里一条 team_run 就能跑完整流程。 */
-@Composable
-private fun TeamsEntryGroup(onClick: () -> Unit) {
-    Column(modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.sm)) {
-        SettingsGroup {
-            SettingsRow(
-                icon = FeatherIcons.Users,
-                title = stringResource(R.string.settings_teams),
-                subtitle = stringResource(R.string.subagent_teams_entry_desc),
-                onClick = onClick
             )
         }
     }

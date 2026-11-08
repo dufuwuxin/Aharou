@@ -18,7 +18,7 @@
 - 真正的执行 handler 必须自己再查一遍：路径祖先关系与越界、附件归属、工具风险、事务身份、参数语义。
 - 不要在粗筛层做细粒度判定——它拿不到执行期的上下文；也不要指望粗筛能兜住所有边界。
 
-本仓对应位置：`ToolPermissionPolicyEngine` 粗筛 → 各工具 `execute` 复查；`remotedevice` 的 `RemoteActionCatalog` 粗筛 → 工具实现复查。
+本仓对应位置：`ToolPermissionPolicyEngine` 粗筛 → 各工具 `execute` 复查。
 
 ## 记忆写作纪律
 

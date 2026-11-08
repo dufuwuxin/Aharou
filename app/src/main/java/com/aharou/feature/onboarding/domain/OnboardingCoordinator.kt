@@ -61,7 +61,7 @@ class OnboardingCoordinator(
         val current = stateHolder.state.value
         persist(current.status)
         if (current.active) {
-            val step = current.step.stepIndex
+            val step = current.step.persistedIndex
             scope.launch { onPersistStep(step) }
         }
     }
@@ -74,9 +74,9 @@ class OnboardingCoordinator(
     }
 
     private fun stepAt(index: Int): OnboardingStep =
-        OnboardingStep.all.getOrElse(index - 1) { OnboardingStep.all.first() }
+        OnboardingStep.all.firstOrNull { it.persistedIndex == index } ?: OnboardingStep.all.first()
 
     private companion object {
-        const val FIRST_STEP = 1
+        const val FIRST_STEP = 2
     }
 }

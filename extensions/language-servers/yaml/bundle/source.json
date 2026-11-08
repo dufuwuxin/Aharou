@@ -1,0 +1,19 @@
+{
+  "id": "yaml",
+  "repository": "https://github.com/redhat-developer/yaml-language-server",
+  "revision": "4bf9c818850bf9751696d24848fdeaececb4203c",
+  "sourceUrl": "https://codeload.github.com/redhat-developer/yaml-language-server/tar.gz/4bf9c818850bf9751696d24848fdeaececb4203c",
+  "sourceSha256": "f8dc0dc187662c8f58764f0a72fbdb7e920862bb6511933172d3bb7ebf5a5ff0",
+  "snapshotTime": "2026-11-05T21:21:11Z",
+  "adaptationStatus": "source-vendored-build-unverified",
+  "version": "2.1.0",
+  "license": "MIT",
+  "prerequisites": [
+    "Python >=3.11",
+    "node {'node': '>=22.13.0'}",
+    "npm with package-lock.json"
+  ],
+  "licenseSha256": "2a6ebc3c5b441f0aef19c5190d17f5bfc1ab4f729db49fabb2db7d10bd9a6146",
+  "buildVerification": "not executed: source and controlled shell fixture validation only",
+  "dependencyPolicy": "Dependencies may download during explicit user installation; no global package installation; upstream source itself is the local archive."
+}

@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "platform": "linux-arm64-ubuntu24.04",
+  "sourceSetSha256": "9e5195bea586cf0f269a571e5ef8c31f6bc7d45cfc51e0614129c74837434f8d",
+  "releaseTag": "language-extensions-9e5195bea586cf0f269a571e5ef8c31f6bc7d45cfc51e0614129c74837434f8d",
+  "extensions": [
+    {
+      "id": "lua",
+      "command": "lua-language-server",
+      "repository": "https://github.com/LuaLS/lua-language-server",
+      "revision": "a58fc7b01e1746c46275c71b0e61bfed40a6296d",
+      "version": "commit:a58fc7b01e1746c46275c71b0e61bfed40a6296d",
+      "sourceSha256": "de80d3804f1c18bf071f08a662fe403437064a59a6e63a07420bcebc0d5d58c4",
+      "adapterSha256": "382be87a32b95288d607a615abedd1d42db7fa19ae746dc5ee0c34e28e39ab58"
+    },
+    {
+      "id": "python",
+      "command": "pylsp",
+      "repository": "https://github.com/python-lsp/python-lsp-server",
+      "revision": "a3620069a607a63ed52569fde188e9301feae93a",
+      "version": "0.dev0+ga3620069a607",
+      "sourceSha256": "16cce9036a2fe9d123cf8f7509dffdcc37bdbda5e70615561c8d2cc34a2cb815",
+      "adapterSha256": "a00386bc745d8565e0a2a85fe49bffd99cac589eb288f444069e88edbbb1845d"
+    },
+    {
+      "id": "typescript",
+      "command": "typescript-language-server",
+      "repository": "https://github.com/typescript-language-server/typescript-language-server",
+      "revision": "44952c02e4818bed3fe79ab6b848626aac91e479",
+      "version": "6.0.3",
+      "sourceSha256": "fea347cda8587b8a1a2fa61c4008f5f4e802f6e7e1fad5bd6a6f5e2cf190f255",
+      "adapterSha256": "03f9b95a034d0cdd31cb3fc89d9d758add2fe52e0f780f75dcbfc96ef9867c27"
+    },
+    {
+      "id": "shell",
+      "command": "bash-language-server",
+      "repository": "https://github.com/bash-lsp/bash-language-server",
+      "revision": "97f19d2d2bd01793ac98184bd2d2a3d9c9ae3fe8",
+      "version": "5.8.1",
+      "sourceSha256": "7d8edce2ee26d7a39343e0f9746c7b765e93d939443b397f464d7772cabed51e",
+      "adapterSha256": "1995d9589ddfa01d61b43289f7fa6388727275e9d897c90c08f54de1c77e37d2"
+    },
+    {
+      "id": "yaml",
+      "command": "yaml-language-server",
+      "repository": "https://github.com/redhat-developer/yaml-language-server",
+      "revision": "4bf9c818850bf9751696d24848fdeaececb4203c",
+      "version": "2.1.0",
+      "sourceSha256": "f8dc0dc187662c8f58764f0a72fbdb7e920862bb6511933172d3bb7ebf5a5ff0",
+      "adapterSha256": "0e97ed5975997961a7d8130d1edb2879549710f6a2c8204f4a7f9028dc092fff"
+    },
+    {
+      "id": "vue",
+      "command": "vue-language-server",
+      "repository": "https://github.com/vuejs/language-tools",
+      "revision": "c59f9908b4912ee20141b53a99b1ce485bff0dc7",
+      "version": "3.3.14",
+      "sourceSha256": "8bad157f016e3b41a546c995852496f3822c66ffb517d04c9a35b9bb214ba9eb",
+      "adapterSha256": "ec7870a337427ce60ce91a4a46025162cc3ce167a89deaa8f9180383955df99c"
+    },
+    {
+      "id": "rust",
+      "command": "rust-analyzer",
+      "repository": "https://github.com/rust-lang/rust-analyzer",
+      "revision": "55effabb762bbd0a21c5af530ea447bd6772881d",
+      "version": "commit:55effabb762bbd0a21c5af530ea447bd6772881d",
+      "sourceSha256": "f87709e619a186359731e2e5263ccc95ac71be7aac8ba3ab27ebe28b9ce6b3b8",
+      "adapterSha256": "edfe51d210a56fb4618bc0e3c404dc2293232e20ef64edff5c1abf145b4a8a17"
+    }
+  ]
+}

@@ -48,7 +48,8 @@ class LspServerCatalogTest {
         assertEquals(LanguageExtension.LUA, lua.extension)
         assertEquals("lua", lua.languageId)
         assertEquals(listOf("lua"), lua.fileExtensions)
-        assertEquals("lua-language-server", lua.program)
+        assertEquals(VendoredLanguageServers.program(LanguageExtension.LUA), lua.program)
+        assertTrue(LspServerCatalog.ALL.all { it.program == VendoredLanguageServers.program(it.extension) })
         assertEquals(listOf("--locale=zh-cn"), lua.args)
         assertTrue(LspServerCatalog.ALL.contains(lua))
     }

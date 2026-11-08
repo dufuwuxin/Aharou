@@ -100,4 +100,39 @@ class ContextLibraryPlannerTest {
         assertTrue(MemoryParser.parse(file, MemoryScope.GLOBAL)!!.hasContextMetadata)
     }
 
+
+    @Test fun injectionAudiencesAreExclusiveAndDoNotRequireOrdinaryMemory() {
+        val role = entry("role", ContextLoad.FULL).copy(category = ContextCategory.ROLE_INJECTED)
+        val main = entry("main", ContextLoad.FULL).copy(category = ContextCategory.MAIN_INJECTED)
+        val ordinary = entry("ordinary", ContextLoad.FULL)
+        val all = listOf(main, ordinary, role)
+        assertEquals(listOf(main, ordinary), ContextLibraryPlanner.plan(all).full)
+        assertEquals(listOf(role), ContextLibraryPlanner.plan(all,
+            injectionCategory = ContextCategory.ROLE_INJECTED, memoryAllowed = false).full)
+        assertEquals(listOf(main), ContextLibraryPlanner.plan(all, memoryAllowed = false).full)
+    }
+
+    @Test fun injectionStillHonorsOffUnavailableSearchPendingAndWholeEntryBudgets() {
+        val role = entry("role", ContextLoad.FULL).copy(category = ContextCategory.ROLE_INJECTED)
+        val hidden = listOf(role.copy(id = "off", loading = ContextLoad.OFF),
+            role.copy(id = "expired", enabled = false), role.copy(id = "search", loading = ContextLoad.SEARCH))
+        val pending = role.copy(id = "pending", pending = true, content = "pending-private-body")
+        val large = role.copy(id = "large", content = "z".repeat(901))
+        val wrong = (1..30).map { role.copy(id = "main-$it", category = ContextCategory.MAIN_INJECTED, content = "x".repeat(800)) }
+        val plan = ContextLibraryPlanner.plan(wrong + hidden + listOf(pending, large, role),
+            injectionCategory = ContextCategory.ROLE_INJECTED, memoryAllowed = false)
+        assertEquals(listOf(role), plan.full)
+        assertEquals(listOf(pending, large), plan.indexed)
+        assertFalse(plan.rendered.contains("pending-private-body"))
+        assertFalse(plan.rendered.contains("z".repeat(900)))
+        assertTrue(hidden.all { h -> plan.omitted.any { it.first.id == h.id } })
+        val many = (1..100).map { role.copy(id = "r-$it", content = "x".repeat(800), description = "s".repeat(240)) }
+        val bounded = ContextLibraryPlanner.plan(many, injectionCategory = ContextCategory.ROLE_INJECTED)
+        assertTrue(bounded.full.sumOf { bounded.renderedEntries.getValue(it.id).length } <= ContextLibraryPlanner.FULL_TOTAL_CHARS)
+        assertTrue(bounded.indexed.sumOf { bounded.renderedEntries.getValue(it.id).length } <= ContextLibraryPlanner.INDEX_TOTAL_CHARS)
+        assertEquals(900, ContextLibraryPlanner.FULL_ENTRY_CHARS)
+        assertEquals(3000, ContextLibraryPlanner.FULL_TOTAL_CHARS)
+        assertEquals(6000, ContextLibraryPlanner.INDEX_TOTAL_CHARS)
+    }
+
 }

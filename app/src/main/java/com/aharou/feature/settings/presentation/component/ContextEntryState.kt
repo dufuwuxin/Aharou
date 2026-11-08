@@ -19,7 +19,7 @@ internal val ContextEntryStateSaver = Saver<ContextEntry?, ArrayList<String>>(
         ContextEntry(value[0], value[1], value[2], value[3], MemoryScope.valueOf(value[4]),
             ContextKind.valueOf(value[5]), ContextLoad.valueOf(value[6]), ContextOrigin.valueOf(value[7]),
             value[8], value[9], value[10].toBoolean(), value[11].toBoolean(), value[12].toBoolean(),
-            ContextCategory.valueOf(value[13]), value[14], value[15].ifBlank { null }, value[16].ifBlank { null })
+            requireNotNull(ContextCategory.from(value[13])), value[14], value[15].ifBlank { null }, value[16].ifBlank { null })
     }.getOrNull() },
 )
 

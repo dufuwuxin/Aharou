@@ -4,7 +4,6 @@ import com.aharou.feature.agent.domain.context.*
 import com.aharou.core.memory.MemoryTraceLog
 import com.aharou.core.memory.MemoryUsageStore
 import com.aharou.core.util.FileLogger
-import com.aharou.feature.agent.data.local.dao.ChatSessionDao
 import com.aharou.feature.agent.domain.memory.Memory
 import com.aharou.feature.agent.domain.memory.MemoryEdit
 import com.aharou.feature.agent.domain.memory.MemoryEditResult
@@ -18,7 +17,6 @@ import com.aharou.feature.agent.domain.memory.MemoryType
 import com.aharou.feature.agent.domain.memory.MemoryWriteResult
 import com.aharou.feature.agent.domain.model.AgentContext
 import com.aharou.feature.agent.domain.prompt.MemoryPromptRenderer
-import com.aharou.feature.agent.domain.session.GhostModeStore
 import com.aharou.feature.agent.domain.tool.AbstractContextualTool
 import com.aharou.feature.agent.domain.tool.ParameterType
 import com.aharou.feature.agent.domain.tool.ToolCapability
@@ -43,7 +41,6 @@ class MemoryTool @Inject constructor(
     private val memoryRepository: MemoryRepository,
     private val aharouMemory: com.aharou.core.memory.AharouMemoryStore,
     private val memoryTrace: MemoryTraceLog,
-    private val chatSessionDao: ChatSessionDao,
     private val memorySyncManager: MemorySyncManager,
     private val memorySyncSettings: MemorySyncSettings,
     private val memoryUsageStore: MemoryUsageStore,
@@ -222,14 +219,6 @@ class MemoryTool @Inject constructor(
             }
         }
 
-        // 隐身会话不写任何记忆（read/list/search 等只读操作照常放行）。
-        val ghostSessionId = context.sessionId
-        if (ghostSessionId != null && writesMemory(action, args) &&
-            GhostModeStore.isGhost(chatSessionDao, ghostSessionId)
-        ) {
-            return ToolResult.Error("当前会话处于隐身模式，本会话的任何内容都不会写入记忆。", "GHOST_MODE")
-        }
-
         return try {
             when (action) {
                 "library_list", "library_search", "library_read", "library_save", "library_delete" -> handleLibrary(action, args, context)
@@ -254,13 +243,6 @@ class MemoryTool @Inject constructor(
         }
     }
 
-    /** 该动作是否会写记忆（core 带 content 才写，不带 content 是读）。 */
-    private fun writesMemory(action: String, args: Map<String, JsonElement>): Boolean = when (action) {
-        "save", "edit", "delete", "log", "fact", "mindstream", "undo", "library_save", "library_delete" -> true
-        "core" -> !args["content"]?.jsonPrimitive?.contentOrNull.isNullOrEmpty()
-        else -> false
-    }
-
     private fun handleLibrary(action: String, args: Map<String, JsonElement>, ctx: AgentContext): ToolResult {
         fun value(key: String) = args[key]?.jsonPrimitive?.contentOrNull
         val all = contextLibrary.list(ctx.projectRoot, ctx.sessionId).filter {
@@ -283,7 +265,7 @@ class MemoryTool @Inject constructor(
             else ToolResult.Error("Context delete failed", "CONTEXT_WRITE_FAILED")
         val kind = value("context_kind")?.let { runCatching { ContextKind.valueOf(it.uppercase()) }.getOrNull() } ?: entry.kind
         val loading = value("context_load")?.let { runCatching { ContextLoad.valueOf(it.uppercase()) }.getOrNull() } ?: entry.loading
-        val category = value("category")?.let { runCatching { ContextCategory.valueOf(it.uppercase()) }.getOrNull() } ?: entry.category
+        val category = value("category")?.let { runCatching { ContextCategory.from(it) }.getOrNull() } ?: entry.category
         val updated = entry.copy(title = value("title") ?: entry.title, content = value("content") ?: entry.content, description = value("description") ?: entry.description,
             kind = kind, loading = loading, category = category, folder = value("folder") ?: entry.folder,
             sessionId = if (category == ContextCategory.TEMPORARY) ctx.sessionId else entry.sessionId)
@@ -625,7 +607,7 @@ class MemoryTool @Inject constructor(
         if (args["category"]?.jsonPrimitive?.contentOrNull.equals("TEMPORARY", true) && sessionId.isNullOrBlank()) {
             return ToolResult.Error("Temporary context requires a session", "MISSING_SESSION")
         }
-        val requestedCategory = args["category"]?.jsonPrimitive?.contentOrNull?.let { ContextCategory.valueOf(it.uppercase()) }
+        val requestedCategory = args["category"]?.jsonPrimitive?.contentOrNull?.let { ContextCategory.from(it) }
         val requestedLoad = args["context_load"]?.jsonPrimitive?.contentOrNull?.let { ContextLoad.valueOf(it.uppercase()) }
             ?: existing?.contextLoad ?: requestedCategory?.let {
                 if (it == ContextCategory.LONG_TERM) ContextLoad.SEARCH else ContextLoad.FULL
