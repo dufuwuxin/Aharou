@@ -209,7 +209,7 @@ internal fun projectTaskExecutionReasonLabel(reason: String): String = when (rea
     "WAITING_DEPENDENCIES" -> stringResource(R.string.project_task_wait_dependencies)
     "STOPPED" -> stringResource(R.string.project_task_stopped)
     "PROJECT_BUSY" -> stringResource(R.string.project_workspace_busy)
-    "FAILED" -> stringResource(R.string.project_task_failed)
+    "FAILED", "TASK_EXECUTION_FAILED" -> stringResource(R.string.project_task_failed)
     "INTERRUPTED_PREVIOUS_PROCESS" -> stringResource(R.string.project_task_interrupted)
     "SUCCEEDED" -> stringResource(R.string.project_task_execution_finished)
     else -> reason

@@ -34,7 +34,7 @@ object PracticalToolTemplates {
         ),
         CustomToolDefinition(
             name = "codegraph_index", description = "Build a CodeGraph index in the current workspace using an explicitly installed executable. Writes .codegraph; may consume significant CPU, memory and disk. Does not install anything or auto-configure other agents.",
-            command = "codegraph init", timeoutSeconds = 600, injectionMode = ToolInjectionMode.KEYWORD,
+            command = "codegraph index", timeoutSeconds = 600, injectionMode = ToolInjectionMode.KEYWORD,
             keywords = listOf("CodeGraph", "建立代码图")
         ),
         CustomToolDefinition(

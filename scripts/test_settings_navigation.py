@@ -328,5 +328,47 @@ class SettingsNavigationTest(unittest.TestCase):
         self.assertNotIn('program = "kotlin-language-server"', self.catalog)
 
 
+class TaskEntryAuditTest(unittest.TestCase):
+    component = SRC / "feature/agent/presentation/component"
+
+    def test_unassigned_entry_is_a_compact_workbench(self):
+        text = source(self.component / "ProjectTaskDetailScreen.kt")
+        for contract in ('testTag("task_compact_header")', "DropdownMenu(",
+                         "ProjectTaskProcess(", "rememberSaveable(taskId)"):
+            self.assertIn(contract, text)
+        self.assertNotIn("task.sessionIds.forEachIndexed", text)
+        self.assertNotIn("R.string.project_task_execution_hint", text)
+
+    def test_preserves_execution_history_and_explicit_actions(self):
+        text = source(self.component / "ProjectTaskDetailScreen.kt")
+        for action in ("viewModel.execute(task, true, runExecution)",
+                       "viewModel.execute(task, false, runExecution)",
+                       "viewModel.cancelExecution(task.id)", "viewModel.accept(task)",
+                       "onSelectSession(id)", "ProjectTaskEditor("):
+            self.assertIn(action, text)
+        self.assertIn("!state.loading && !state.busy", text)
+        self.assertIn('testTag("task_start")', text)
+        self.assertIn('testTag("task_stop")', text)
+
+    def test_history_is_scrollable_without_weighted_content(self):
+        text = source(self.component / "ProjectTaskDetailScreen.kt")
+        body = text[text.index("if (task != null) Column("):text.index("if (overview && task != null)")]
+        self.assertIn("verticalScroll(rememberScrollState())", body)
+        self.assertIn("fillConversation = false", body)
+        process = source(self.component / "ProjectTaskProcess.kt")
+        self.assertIn("if (fillConversation) Modifier.weight(1f).fillMaxWidth() else Modifier.fillMaxWidth()", process)
+
+    def test_errors_are_presented_through_shared_labels(self):
+        text = source(self.component / "ProjectTaskDetailScreen.kt")
+        self.assertIn("projectTaskExecutionReasonLabel(it)", text)
+        labels = source(self.component / "ProjectTaskWorkbench.kt")
+        self.assertIn('"FAILED", "TASK_EXECUTION_FAILED" ->', labels)
+
+    def test_index_template_indexes_instead_of_only_initializing(self):
+        text = source(SRC / "feature/agent/domain/tool/custom/PracticalToolTemplates.kt")
+        entry = text.split('name = "codegraph_index"', 1)[1].split("keywords =", 1)[0]
+        self.assertIn('command = "codegraph index"', entry)
+
+
 if __name__ == "__main__":
     unittest.main()
