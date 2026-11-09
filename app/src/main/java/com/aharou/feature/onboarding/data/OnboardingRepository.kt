@@ -8,6 +8,8 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.aharou.core.datastore.preferencesCorruptionHandler
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
@@ -48,6 +50,9 @@ class OnboardingRepository @Inject constructor(
         /** 引导首步的序号（1-based，未写过时按这个算）。 */
         const val FIRST_STEP = 1
     }
+
+    private val restartEvents = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val restartRequests = restartEvents.asSharedFlow()
 
     /** 当前引导状态；首次安装（从未写过）时为 null，由调用方当作 IN_PROGRESS 处理。 */
     val statusFlow: Flow<OnboardingStatus?> =
@@ -90,5 +95,6 @@ class OnboardingRepository @Inject constructor(
         saveStep(FIRST_STEP)
         val current = status()
         if (current != OnboardingStatus.IN_PROGRESS) markStatus(OnboardingStatus.IN_PROGRESS)
+        restartEvents.emit(Unit)
     }
 }

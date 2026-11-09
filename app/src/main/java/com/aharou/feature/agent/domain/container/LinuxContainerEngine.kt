@@ -1,5 +1,4 @@
 package com.aharou.feature.agent.domain.container
-
 import com.aharou.core.util.BoundedLineReader
 import com.aharou.core.util.FileLogger
 import com.aharou.core.util.LINE_TRUNCATED_NOTE
@@ -799,10 +798,11 @@ class LinuxContainerEngine @Inject constructor(
         val argv = buildBaseProotArgv(projectPath, profile)
         argv.add("/bin/sh")
         argv.add("-c")
-        argv.add("exec \"\$0\" \"\$@\"")
+        val overrides = envVarRepository.asMap() + profile.env + extraEnv
+        argv.add(ContainerDevelopmentEnvironment.wrap("exec \"\$0\" \"\$@\"", overrides))
         argv.add(program)
         argv.addAll(programArgs)
-        return ProotInvocation(argv, buildContainerEnv(profile, projectPath) + profile.env + extraEnv)
+        return ProotInvocation(argv, buildContainerEnv(profile, projectPath) + overrides)
     }
 
     /**
@@ -822,8 +822,9 @@ class LinuxContainerEngine @Inject constructor(
         NativeArm64Rootfs.requireSupported(containerInstaller.rootfsDirFor(profile), shell)
         argv.add(shell)
         argv.add("-c")
-        argv.add(command)
-        return ProotInvocation(argv, buildContainerEnv(profile, projectPath) + profile.env)
+        val overrides = envVarRepository.asMap() + profile.env
+        argv.add(ContainerDevelopmentEnvironment.wrap(command, overrides))
+        return ProotInvocation(argv, buildContainerEnv(profile, projectPath) + overrides)
     }
 
     /**
@@ -948,9 +949,8 @@ class LinuxContainerEngine @Inject constructor(
             "TZ" to containerTimeZone(profile)
             // 全局 HTTP 代理：开启时注入 HTTP_PROXY/HTTPS_PROXY/ALL_PROXY/NO_PROXY，
             // 容器内 curl/git/npm/pip 等一律走代理；关闭或配置不完整时为空 map 不影响直连。
-        ) + ContainerLogMount.environment(profile, projectPath) + com.aharou.core.net.AppProxy.proxyEnv(context) + envVarRepository.asMap() // asMap 只含已启用的变量：停用的保留在设置里但不注入
+        ) + ContainerLogMount.environment(profile, projectPath) + com.aharou.core.net.AppProxy.proxyEnv(context)
     }
-
     /**
      * 容器内时区（TZ 环境变量值），跟随手机当前系统时区。
      *

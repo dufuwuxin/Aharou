@@ -38,16 +38,19 @@ fun ProjectListScreen(viewModel: ProjectTaskViewModel, createRequested: Boolean,
     var showSessions by rememberSaveable { mutableStateOf(false) }
     var createMenu by remember { mutableStateOf(false) }
     var name by rememberSaveable { mutableStateOf("") }
-    var requirements by rememberSaveable { mutableStateOf("") }
-    var submitted by remember { mutableStateOf(false) }
-    var previousProject by remember { mutableStateOf<String?>(null) }
+    var purpose by rememberSaveable { mutableStateOf("") }
+    var submitted by rememberSaveable { mutableStateOf(false) }
+    var previousProject by rememberSaveable { mutableStateOf<String?>(null) }
     var continuationId by rememberSaveable { mutableStateOf<String?>(null) }
     var unassigned by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(createRequested) { if (createRequested) { creating = true; showSessions = false; onCreateConsumed() } }
-    LaunchedEffect(state.busy, state.createdProjectId) {
-        if (submitted && !state.busy && state.error == null && state.createdProjectId != null && state.createdProjectId != previousProject && state.selectedProjectId == state.createdProjectId) {
-            submitted = false; creating = false; name = ""; requirements = ""
-            state.selectedProjectId?.let(onOpenProject)
+    LaunchedEffect(submitted, state.busy, state.creating, state.createdProjectId, state.selectedProjectId, state.error) {
+        if (submitted && !state.creating && !state.busy) {
+            if (state.createdProjectId != null && state.createdProjectId != previousProject) {
+                creating = false; name = ""; purpose = ""
+                if (state.selectedProjectId == state.createdProjectId) state.selectedProjectId?.let(onOpenProject)
+            }
+            submitted = false
         }
     }
     Box(Modifier.fillMaxSize()) {
@@ -79,7 +82,11 @@ fun ProjectListScreen(viewModel: ProjectTaskViewModel, createRequested: Boolean,
                             modifier = Modifier.testTag("project_continue_owned_${project.id}")) {
                             Text(stringResource(R.string.project_workspace_continue))
                         }
-                        Text(project.requirements, maxLines = 2, style = MaterialTheme.typography.bodySmall)
+                        if (project.purpose.isNotBlank()) {
+                            Text(stringResource(R.string.project_purpose), style = MaterialTheme.typography.labelMedium)
+                            Text(project.purpose, maxLines = 2, style = MaterialTheme.typography.bodySmall)
+                        }
+                        if (project.requirements.isNotBlank()) Text(project.requirements, maxLines = 2, style = MaterialTheme.typography.bodySmall)
                         Text(stringResource(R.string.project_task_count, state.projectTaskCounts[project.id] ?: 0))
                     }
                 }
@@ -140,21 +147,32 @@ fun ProjectListScreen(viewModel: ProjectTaskViewModel, createRequested: Boolean,
             viewModel.continueInOwnedWorkspace(continuation.id, onOpenProject)
         }) { Text(stringResource(R.string.project_workspace_continue)) } },
         dismissButton = { TextButton(onClick = { continuationId = null }) { Text(stringResource(R.string.project_close)) } })
-    if (creating) AdaptiveModalBottomSheet(onDismissRequest = { if (!state.busy) creating = false },
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-        val count = remember(name, requirements, state.workspace) {
-            if (name.isBlank() || requirements.isBlank()) 0 else ProjectPlanDraft.build(ProjectPlan(workspace = state.workspace, title = name, requirements = requirements)).size
-        }
+    val submitting = submitted || state.creating
+    val dismissBlocked by rememberUpdatedState(submitting || state.busy)
+    if (creating) AdaptiveModalBottomSheet(onDismissRequest = { if (!dismissBlocked) creating = false },
+        sheetGesturesEnabled = !dismissBlocked,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true,
+            confirmValueChange = { it != SheetValue.Hidden || !dismissBlocked })) {
         Column(Modifier.fillMaxWidth().imePadding().verticalScroll(rememberScrollState()).padding(Spacing.lg),
             verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
             Text(stringResource(R.string.project_create), style = MaterialTheme.typography.titleLarge)
-            AppTextField(name, { name = it }, label = stringResource(R.string.project_name), singleLine = true)
-            AppTextField(requirements, { requirements = it }, label = stringResource(R.string.project_requirements), minLines = 5, singleLine = false)
-            Text(stringResource(R.string.project_draft_preview, count))
+            AppTextField(name, { name = it }, label = stringResource(R.string.project_name), singleLine = true,
+                enabled = !submitting && !state.busy)
+            AppTextField(purpose, { purpose = it }, label = stringResource(R.string.project_purpose), minLines = 5, singleLine = false,
+                enabled = !submitting && !state.busy)
+            if (submitting) {
+                Text(stringResource(R.string.project_creating), style = MaterialTheme.typography.labelMedium)
+                LinearProgressIndicator(Modifier.fillMaxWidth())
+            }
             state.error?.let { Text(stringResource(R.string.project_task_error, projectTaskExecutionReasonLabel(it)), color = MaterialTheme.colorScheme.error) }
-            Button(onClick = { previousProject = state.createdProjectId; submitted = true; viewModel.createProject(name, requirements) },
-                enabled = count > 0 && !state.busy, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("save_project_drafts")) {
-                Text(stringResource(R.string.project_create_generate))
+            Button(onClick = {
+                if (!submitted && !viewModel.state.value.creating) {
+                    previousProject = viewModel.state.value.createdProjectId; submitted = true
+                    viewModel.createProject(name, purpose)
+                }
+            }, enabled = !submitting && !state.busy && !state.loading && state.workspace.isNotBlank() && name.isNotBlank() && purpose.isNotBlank(),
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("save_project_drafts")) {
+                Text(stringResource(if (submitting) R.string.project_creating else R.string.project_create))
             }
         }
     }

@@ -39,7 +39,8 @@ data class ProjectTaskUiState(
     /** Projects whose tasks the planner is splitting or revising right now. */
     val planningProjectIds: Set<String> = emptySet(),
     /** Projects whose latest planning fell back to line rules because the model was unavailable or invalid. */
-    val ruleFallbackProjectIds: Set<String> = emptySet()
+    val ruleFallbackProjectIds: Set<String> = emptySet(),
+    val creating: Boolean = false
 )
 
 @HiltViewModel
@@ -63,12 +64,15 @@ class ProjectTaskViewModel @Inject constructor(
     private var knownWorkspacePaths: Set<String>? = null
     private var anticipatedWorkspace: String? = null
     private var busyOwner: Any? = null
+    private var creatingOwner: Any? = null
+    private val createdWorkspacePaths = mutableSetOf<String>()
     private var flowErrors = emptyMap<String, String>()
 
     init {
         viewModelScope.launch {
             workspaces.get().workspaces.collect { known ->
                 if (known.isNotEmpty()) knownWorkspacePaths = known.filter { it.available }.map { it.path }.toSet()
+                createdWorkspacePaths.removeAll { path -> known.any { it.path == path } }
                 refreshProjects()
                 indexSessions(known.filter { it.available }.map { it.path })
             }
@@ -82,7 +86,7 @@ class ProjectTaskViewModel @Inject constructor(
         viewModelScope.launch { repository.snapshots.collect { stores ->
             val workspace = mutable.value.workspace
             val snapshot = stores[workspace]
-            mutable.update { it.copy(tasks = snapshot?.tasks ?: it.tasks, projects = stores.filterKeys { knownWorkspacePaths?.contains(it) != false }.values.flatMap { store -> store.projects }.sortedByDescending { project -> project.createdAt },
+            mutable.update { it.copy(tasks = snapshot?.tasks ?: it.tasks, projects = stores.filterKeys { it in createdWorkspacePaths || knownWorkspacePaths?.contains(it) != false }.values.flatMap { store -> store.projects }.sortedByDescending { project -> project.createdAt },
                 projectTaskCounts = stores.values.flatMap { store -> store.tasks }.groupingBy { task -> task.projectId.orEmpty() }.eachCount(),
                 projectSessionIds = stores.values.flatMap { store -> store.projects.flatMap { it.flowSessionIds } + store.tasks.flatMap { task -> task.sessionIds + task.processSessionIds } }.toSet(),
                 indexedSessionWorkspaces = stores.keys) }
@@ -90,14 +94,14 @@ class ProjectTaskViewModel @Inject constructor(
     }
 
     private fun refreshProjects() {
-        val stores = repository.snapshots.value.filterKeys { knownWorkspacePaths?.contains(it) != false }
+        val stores = repository.snapshots.value.filterKeys { it in createdWorkspacePaths || knownWorkspacePaths?.contains(it) != false }
         mutable.update { it.copy(projects = stores.values.flatMap { store -> store.projects }.sortedByDescending { it.createdAt }) }
     }
 
     fun workspace(path: String) {
         if (path == mutable.value.workspace && !mutable.value.loading) return
         if (path != anticipatedWorkspace) selectionEpoch++
-        mutable.value = ProjectTaskUiState(workspace = path,
+        mutable.value = ProjectTaskUiState(workspace = path, busy = creatingOwner != null, creating = creatingOwner != null,
             createdProjectId = mutable.value.createdProjectId, projects = mutable.value.projects, projectTaskCounts = mutable.value.projectTaskCounts,
             availableMembers = mutable.value.availableMembers, projectSessionIds = mutable.value.projectSessionIds,
             indexedSessionWorkspaces = mutable.value.indexedSessionWorkspaces, failedSessionWorkspaces = mutable.value.failedSessionWorkspaces,
@@ -188,7 +192,7 @@ class ProjectTaskViewModel @Inject constructor(
         }
     }
 
-    fun createProject(name: String, requirements: String) = createOwnedProject(name, requirements)
+    fun createProject(name: String, purpose: String) = createOwnedProject(name, purpose)
 
     fun canContinueInOwnedWorkspace(project: ProjectPlan): Boolean {
         val current = mutable.value
@@ -208,18 +212,30 @@ class ProjectTaskViewModel @Inject constructor(
         createOwnedProject(project.title, project.requirements, project, onCreated)
     }
 
-    private fun createOwnedProject(name: String, requirements: String, original: ProjectPlan? = null,
+    private fun createOwnedProject(name: String, purpose: String, original: ProjectPlan? = null,
         onCreated: ((String) -> Unit)? = null) {
+        val current = mutable.value
+        if (creatingOwner != null || busyOwner != null || current.loading || current.busy || current.workspace.isBlank()) return
+        val owner = Any()
+        creatingOwner = owner
+        val source = current.workspace
         val projectId = java.util.UUID.randomUUID().toString()
         val epoch = selectionEpoch
-        operation { source ->
-            mutable.update { it.copy(planningProjectIds = it.planningProjectIds + projectId) }
+        mutable.update { it.copy(creating = true, busy = true, error = null) }
+        viewModelScope.launch {
+            if (original != null) mutable.update { it.copy(planningProjectIds = it.planningProjectIds + projectId) }
             try {
-                val outcome = if (original == null) repository.createOwnedProject(name, requirements, source, projectId)
+                val outcome = if (original == null) repository.createOwnedProject(name, purpose, source, projectId)
                     else repository.continueInOwnedWorkspace(original.id, original.workspace, projectId)
-                val target = outcome.project.workspace
-                mutable.update { it.copy(ruleFallbackProjectIds = if (outcome.ruleFallback) it.ruleFallbackProjectIds + projectId else it.ruleFallbackProjectIds - projectId) }
-                flows.continueProject(projectId, target, 0L)
+                val project = outcome.project
+                val target = project.workspace
+                if (knownWorkspacePaths?.contains(target) != true) createdWorkspacePaths += target
+                mutable.update { it.copy(createdProjectId = project.id,
+                    projects = (it.projects.filterNot { prior -> prior.id == project.id } + project).sortedByDescending { item -> item.createdAt }) }
+                if (original != null) {
+                    mutable.update { it.copy(ruleFallbackProjectIds = if (outcome.ruleFallback) it.ruleFallbackProjectIds + project.id else it.ruleFallbackProjectIds - project.id) }
+                    flows.continueProject(project.id, target, 0L)
+                }
                 if (selectionEpoch == epoch && mutable.value.workspace == source) {
                     anticipatedWorkspace = target
                     val activated = try { workspaces.get().activateProjectWorkspace(target, source) { selectionEpoch == epoch } }
@@ -227,15 +243,26 @@ class ProjectTaskViewModel @Inject constructor(
                     if (activated && selectionEpoch == epoch) {
                         anticipatedWorkspace = target
                         try { workspace(target) } finally { anticipatedWorkspace = null }
-                        val snapshot = repository.load(target)
+                        val snapshot = if (original == null) repository.snapshots.value[target]
+                            else repository.load(target)
                         if (selectionEpoch == epoch && mutable.value.workspace == target) {
-                            mutable.update { it.copy(tasks = snapshot.tasks, loading = false,
-                                selectedProjectId = projectId, createdProjectId = projectId) }
-                            onCreated?.invoke(projectId)
+                            mutable.update { it.copy(tasks = snapshot?.tasks.orEmpty(), loading = false,
+                                selectedProjectId = project.id) }
+                            onCreated?.invoke(project.id)
                         }
                     }
                 }
-            } finally { mutable.update { it.copy(planningProjectIds = it.planningProjectIds - projectId) } }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Exception) {
+                com.aharou.core.util.FileLogger.e("ProjectTasks", "Project creation failed", failure)
+                mutable.update { it.copy(error = failure.message ?: "TASK_OPERATION_FAILED") }
+            } finally {
+                if (original != null) mutable.update { it.copy(planningProjectIds = it.planningProjectIds - projectId) }
+                if (creatingOwner === owner) {
+                    creatingOwner = null
+                    mutable.update { it.copy(creating = false, busy = busyOwner != null) }
+                }
+            }
         }
     }
 
@@ -388,7 +415,7 @@ class ProjectTaskViewModel @Inject constructor(
         mutable.update { it.copy(busy = false) }
     }
     private fun operation(onSuccess: ((String) -> Unit)? = null, block: suspend (String) -> Unit) {
-        if (mutable.value.loading || mutable.value.busy || mutable.value.workspace.isBlank()) return
+        if (mutable.value.loading || mutable.value.busy || creatingOwner != null || mutable.value.workspace.isBlank()) return
         val workspace = mutable.value.workspace
         val owner = Any(); busyOwner = owner
         mutable.update { it.copy(busy = true, error = null) }

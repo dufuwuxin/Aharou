@@ -19,6 +19,22 @@ class ProjectPlannerTest {
     private fun task(id: String, parent: String? = null) = ProjectTask(id = id, workspace = "w", projectId = "p", title = id,
         requirement = id, parentId = parent, version = 1, order = 1, createdAt = 1)
 
+    @Test fun planningAndRevisionReceivePurposeAsBackgroundWithoutTurningItIntoWork() = runBlocking {
+        val meaningful = project.copy(purpose = "Research archive", requirements = "")
+        answer(null)
+        val result = planner.plan(meaningful, "Add offline search", emptyList(), emptyList())
+        assertEquals(listOf("Add offline search"), result.tasks.map { it.requirement })
+        io.mockk.coVerify(exactly = 1) { workflow.completeOnce(any(), match {
+            it.contains("Project purpose (background only, not executable requirements): Research archive") &&
+                it.endsWith("Requirements:\nAdd offline search")
+        }, any()) }
+        planner.revise(meaningful, task("t"), listOf(task("t")), "Keep search offline", emptyList())
+        io.mockk.coVerify(exactly = 1) { workflow.completeOnce(any(), match {
+            it.contains("Project purpose (background only, not executable requirements): Research archive") &&
+                it.endsWith("User supplement:\nKeep search offline")
+        }, any()) }
+    }
+
     @Test fun invalidJsonOrNoModelFallsBackToLineRules() = runBlocking {
         for (raw in listOf("not json at all", "{\"tasks\": \"none\"}", "{\"tasks\":[{\"title\":\"\"}]}", null)) {
             answer(raw)

@@ -25,4 +25,16 @@ class PromptVariableExpanderTest {
     @Test fun plainTextAndUnknownMarkersDoNotTriggerImplicitContent() {
         assertEquals("a  b", PromptVariableExpander.expandNative("a {{AICODE_UNKNOWN}} b") { "" })
     }
+
+    @Test fun bothLiteralBracesAreRequiredAndInvalidMarkersRemainUntouched() {
+        val text = "{AICODE_DATE} {{AICODE_DATE} {{AICODE_date}} {{OTHER_DATE}}"
+        var calls = 0
+        assertEquals(text, PromptVariableExpander.expandNative(text) { calls++; "unexpected" })
+        assertEquals(0, calls)
+    }
+
+    @Test fun adjacentMarkersPreserveLiteralReplacementCharacters() {
+        val value = "\$1 \\ path {value}"
+        assertEquals(value + value, PromptVariableExpander.expandNative("{{AICODE_DATE}}{{AICODE_TEAMS}}") { value })
+    }
 }

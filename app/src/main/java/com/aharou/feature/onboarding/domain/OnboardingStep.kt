@@ -10,7 +10,7 @@ enum class OnboardingStep(
     @param:StringRes val descRes: Int
 ) {
     ENTER_SETTINGS(
-        route = "chat",
+        route = "projects",
         persistedIndex = 2,
         titleRes = R.string.onboarding_enter_settings_title,
         descRes = R.string.onboarding_enter_settings_desc

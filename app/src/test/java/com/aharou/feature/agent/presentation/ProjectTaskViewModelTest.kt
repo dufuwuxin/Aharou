@@ -42,7 +42,7 @@ class ProjectTaskViewModelTest {
         every { repository.snapshots } returns MutableStateFlow(emptyMap())
         coEvery { repository.load(any()) } returns ProjectTaskSnapshot()
         coEvery { repository.createOwnedProject(any(), any(), any(), any()) } answers {
-            ProjectPlanOutcome(ProjectPlan(id = arg(3), workspace = "/owned/${arg<String>(3)}", title = firstArg(), requirements = secondArg()), ruleFallback = true)
+            ProjectPlanOutcome(ProjectPlan(id = arg(3), workspace = "/owned/${arg<String>(3)}", title = firstArg(), purpose = secondArg(), workspaceOwnership = "owned"), ruleFallback = false)
         }
         coEvery { repository.appendRequirements(any(), any(), any()) } answers {
             ProjectPlanOutcome(ProjectPlan(id = firstArg(), workspace = thirdArg(), title = "p", requirements = secondArg()), ruleFallback = false)
@@ -182,33 +182,138 @@ class ProjectTaskViewModelTest {
         coVerify(exactly = 0) { repository.createOwnedProject(any(), any(), "/second", any()) }
     }
 
-    @Test fun aPlannedProjectStartsItsFlowOnceSetupIsReleasedAndRecordsTheFallback() = runTest(dispatcher) {
-        val finish = kotlinx.coroutines.CompletableDeferred<Unit>()
-        coEvery { workflow.run(any(), match { it.startsWith("/owned/") }) } coAnswers { finish.await() }
+    @Test fun localCreationPublishesCompletionAndSelectionWithoutStartingAFlow() = runTest(dispatcher) {
         viewModel.workspace("/first"); runCurrent()
-        viewModel.createProject("project", "requirement"); runCurrent()
+        viewModel.createProject("project", "purpose")
+        org.junit.Assert.assertTrue(viewModel.state.value.creating)
+        org.junit.Assert.assertTrue(viewModel.state.value.busy)
+        runCurrent()
         val state = viewModel.state.value
         val id = requireNotNull(state.selectedProjectId)
         org.junit.Assert.assertFalse(state.busy)
+        org.junit.Assert.assertFalse(state.creating)
+        org.junit.Assert.assertFalse(state.loading)
+        org.junit.Assert.assertEquals(id, state.createdProjectId)
+        org.junit.Assert.assertEquals(id, state.projects.single().id)
+        org.junit.Assert.assertEquals("purpose", state.projects.single().purpose)
+        org.junit.Assert.assertTrue(state.tasks.isEmpty())
         org.junit.Assert.assertTrue(state.planningProjectIds.isEmpty())
-        org.junit.Assert.assertEquals(setOf(id), state.ruleFallbackProjectIds)
-        org.junit.Assert.assertEquals(setOf(id), state.activeProjectIds)
-        coVerify(exactly = 1) { workflow.run(id, "/owned/$id") }
-        viewModel.stopProject(id); runCurrent()
+        org.junit.Assert.assertTrue(state.ruleFallbackProjectIds.isEmpty())
+        org.junit.Assert.assertTrue(state.activeProjectIds.isEmpty())
+        coVerify(exactly = 0) { workflow.run(any(), any()) }
     }
 
-    @Test fun lateCreationContinuesInOwnedWorkspaceWithoutTakingNewSelection() = runTest(dispatcher) {
+    @Test fun sameFrameAndCrossWorkspaceClicksCannotAllocateTwiceAndBusyLastsThroughActivation() = runTest(dispatcher) {
+        val activation = kotlinx.coroutines.CompletableDeferred<Boolean>()
+        coEvery { workspaces.activateProjectWorkspace(any(), any(), any()) } coAnswers { activation.await() }
+        viewModel.workspace("/first"); runCurrent()
+        viewModel.createProject("project", "purpose")
+        viewModel.createProject("duplicate", "purpose")
+        org.junit.Assert.assertTrue(viewModel.state.value.creating)
+        runCurrent()
+        org.junit.Assert.assertTrue(viewModel.state.value.busy)
+        org.junit.Assert.assertTrue(viewModel.state.value.creating)
+        org.junit.Assert.assertEquals("project", viewModel.state.value.projects.single().title)
+        viewModel.workspace("/second"); runCurrent()
+        org.junit.Assert.assertTrue(viewModel.state.value.creating)
+        org.junit.Assert.assertTrue(viewModel.state.value.busy)
+        viewModel.createProject("duplicate after switch", "purpose"); runCurrent()
+        activation.complete(true); runCurrent()
+        coVerify(exactly = 1) { repository.createOwnedProject(any(), any(), any(), any()) }
+        org.junit.Assert.assertEquals("/second", viewModel.state.value.workspace)
+        org.junit.Assert.assertNull(viewModel.state.value.selectedProjectId)
+        org.junit.Assert.assertNotNull(viewModel.state.value.createdProjectId)
+        org.junit.Assert.assertFalse(viewModel.state.value.creating)
+        org.junit.Assert.assertFalse(viewModel.state.value.busy)
+    }
+
+    @Test fun savedProjectIsVisibleBeforeWorkspaceDiscoveryAndHiddenWhenLaterUnavailable() = runTest(dispatcher) {
+        val source = com.aharou.feature.workspace.domain.model.Workspace("source", "/first")
+        val target = com.aharou.feature.workspace.domain.model.Workspace("owned", "/owned/new")
+        val known = MutableStateFlow(listOf(source))
+        val stores = MutableStateFlow(mapOf("/first" to ProjectTaskSnapshot()))
+        val activation = kotlinx.coroutines.CompletableDeferred<Boolean>()
+        every { workspaces.workspaces } returns known
+        every { repository.snapshots } returns stores
+        coEvery { repository.createOwnedProject(any(), any(), any(), any()) } coAnswers {
+            val project = ProjectPlan(id = arg(3), workspace = target.path, title = firstArg(), purpose = secondArg(), workspaceOwnership = "owned")
+            stores.value = stores.value + (target.path to ProjectTaskSnapshot(projects = listOf(project)))
+            ProjectPlanOutcome(project, false)
+        }
+        coEvery { workspaces.activateProjectWorkspace(any(), any(), any()) } coAnswers { activation.await() }
+        viewModel = ProjectTaskViewModel(repository, sessions, runner, workflow, flows, javax.inject.Provider { workspaces })
+        viewModel.workspace(source.path); runCurrent()
+        viewModel.createProject("project", "purpose"); runCurrent()
+        val id = requireNotNull(viewModel.state.value.createdProjectId)
+        org.junit.Assert.assertTrue(viewModel.state.value.creating)
+        org.junit.Assert.assertTrue(viewModel.state.value.busy)
+        org.junit.Assert.assertEquals(id, viewModel.state.value.projects.single().id)
+        stores.value = stores.value + ("/unrelated" to ProjectTaskSnapshot())
+        runCurrent()
+        org.junit.Assert.assertEquals(id, viewModel.state.value.projects.single().id)
+        known.value = listOf(source, target); runCurrent()
+        org.junit.Assert.assertEquals(id, viewModel.state.value.projects.single().id)
+        activation.complete(true); runCurrent()
+        org.junit.Assert.assertEquals(id, viewModel.state.value.selectedProjectId)
+        org.junit.Assert.assertFalse(viewModel.state.value.busy)
+        known.value = listOf(source, target.copy(available = false)); runCurrent()
+        org.junit.Assert.assertTrue(viewModel.state.value.projects.isEmpty())
+        coVerify(exactly = 1) { repository.createOwnedProject(any(), any(), source.path, any()) }
+        coVerify(exactly = 0) { workflow.run(any(), any()) }
+    }
+
+    @Test fun activationFailureDoesNotLoseTheSavedCompletionOrItsListEntry() = runTest(dispatcher) {
+        viewModel.workspace("/first"); runCurrent()
+        coEvery { workspaces.activateProjectWorkspace(any(), any(), any()) } throws IllegalStateException("activation failed")
+        viewModel.createProject("project", "purpose"); runCurrent()
+        val state = viewModel.state.value
+        org.junit.Assert.assertNotNull(state.createdProjectId)
+        org.junit.Assert.assertEquals(state.createdProjectId, state.projects.single().id)
+        org.junit.Assert.assertNull(state.selectedProjectId)
+        org.junit.Assert.assertEquals("activation failed", state.error)
+        org.junit.Assert.assertFalse(state.creating)
+        org.junit.Assert.assertFalse(state.busy)
+        coVerify(exactly = 1) { repository.createOwnedProject(any(), any(), any(), any()) }
+        coVerify(exactly = 0) { workflow.run(any(), any()) }
+    }
+
+    @Test fun creationFailureAndCancellationBothReleaseTheOwnerForRetry() = runTest(dispatcher) {
+        viewModel.workspace("/first"); runCurrent()
+        coEvery { repository.createOwnedProject(any(), any(), any(), any()) } throws IllegalStateException("allocation failed")
+        viewModel.createProject("project", "purpose"); runCurrent()
+        org.junit.Assert.assertFalse(viewModel.state.value.creating)
+        org.junit.Assert.assertFalse(viewModel.state.value.busy)
+        org.junit.Assert.assertEquals("allocation failed", viewModel.state.value.error)
+        coEvery { repository.createOwnedProject(any(), any(), any(), any()) } throws kotlinx.coroutines.CancellationException("cancelled")
+        viewModel.createProject("project", "purpose")
+        org.junit.Assert.assertTrue(viewModel.state.value.creating)
+        org.junit.Assert.assertNull(viewModel.state.value.error)
+        runCurrent()
+        org.junit.Assert.assertFalse(viewModel.state.value.creating)
+        org.junit.Assert.assertFalse(viewModel.state.value.busy)
+        coEvery { repository.createOwnedProject(any(), any(), any(), any()) } answers {
+            ProjectPlanOutcome(ProjectPlan(id = arg(3), workspace = "/retry", title = firstArg(), purpose = secondArg()), false)
+        }
+        viewModel.createProject("project", "purpose"); runCurrent()
+        org.junit.Assert.assertEquals("/retry", viewModel.state.value.workspace)
+        org.junit.Assert.assertEquals(viewModel.state.value.selectedProjectId, viewModel.state.value.createdProjectId)
+        coVerify(exactly = 3) { repository.createOwnedProject(any(), any(), any(), any()) }
+    }
+
+    @Test fun lateCreationRemainsDiscoverableWithoutTakingNewSelectionOrStartingAFlow() = runTest(dispatcher) {
         val result = kotlinx.coroutines.CompletableDeferred<ProjectPlanOutcome>()
         coEvery { repository.createOwnedProject(any(), any(), any(), any()) } coAnswers { result.await() }
         coEvery { workflow.run(any(), "/owned/new") } coAnswers { kotlinx.coroutines.awaitCancellation() }
         viewModel.workspace("/first"); runCurrent()
         viewModel.createProject("same", "requirements"); runCurrent()
         viewModel.workspace("/second"); viewModel.selectProject("other"); runCurrent()
-        result.complete(ProjectPlanOutcome(ProjectPlan("new", "/owned/new", "same", "requirements", workspaceOwnership = "owned"), false)); runCurrent()
+        result.complete(ProjectPlanOutcome(ProjectPlan("new", "/owned/new", "same", purpose = "purpose", workspaceOwnership = "owned"), false)); runCurrent()
         org.junit.Assert.assertEquals("/second", viewModel.state.value.workspace)
         org.junit.Assert.assertEquals("other", viewModel.state.value.selectedProjectId)
         coVerify(exactly = 0) { workspaces.activateProjectWorkspace(any(), any(), any()) }
-        coVerify(exactly = 1) { workflow.run(any(), "/owned/new") }
+        org.junit.Assert.assertEquals("new", viewModel.state.value.createdProjectId)
+        org.junit.Assert.assertTrue(viewModel.state.value.projects.any { it.id == "new" })
+        coVerify(exactly = 0) { workflow.run(any(), "/owned/new") }
     }
 
     @Test fun aggregatedProjectOpenLoadsTheActualWorkspaceBeforeNavigation() = runTest(dispatcher) {
@@ -238,8 +343,15 @@ class ProjectTaskViewModelTest {
         viewModel = ProjectTaskViewModel(repository, sessions, runner, workflow, flows, javax.inject.Provider { workspaces })
         viewModel.workspace("/other"); runCurrent()
         var opened: String? = null
-        viewModel.continueInOwnedWorkspace("legacy") { opened = it }; runCurrent()
+        viewModel.continueInOwnedWorkspace("legacy") {
+            org.junit.Assert.assertTrue(viewModel.state.value.creating)
+            org.junit.Assert.assertTrue(viewModel.state.value.busy)
+            org.junit.Assert.assertEquals(it, viewModel.state.value.createdProjectId)
+            org.junit.Assert.assertEquals(it, viewModel.state.value.selectedProjectId)
+            opened = it
+        }; runCurrent()
         org.junit.Assert.assertNotNull(opened)
+        coVerify(exactly = 1) { workflow.run(any(), "/continued") }
         org.junit.Assert.assertTrue(opened != original.id)
         org.junit.Assert.assertEquals(opened, viewModel.state.value.selectedProjectId)
         org.junit.Assert.assertEquals("/continued", viewModel.state.value.workspace)

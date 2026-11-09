@@ -31,6 +31,22 @@ class ProjectTaskContextTest {
         assertFalse(prompt.contains("PRIVATE OTHER"))
     }
 
+    @Test fun purposeIsBackgroundInBothRootAndTaskContextsAndNeverBecomesRequirements() {
+        val repository = mockk<ProjectTaskRepository>()
+        val project = ProjectPlan(id = "p", workspace = "w", title = "Project", purpose = "Research archive", flowSessionIds = listOf("root"))
+        val task = ProjectTask(id = "t", workspace = "w", projectId = "p", title = "Search", requirement = "Add search", sessionIds = listOf("member"))
+        every { repository.snapshot("w") } returns ProjectTaskSnapshot(projects = listOf(project), tasks = listOf(task))
+        val context = ProjectTaskContext(repository)
+        for (session in listOf("root", "member")) {
+            val prompt = context.build(session, "w").orEmpty()
+            assertTrue(prompt.contains("Project purpose (background only, not executable requirements): Research archive"))
+            assertFalse(prompt.contains("Project requirements: Research archive"))
+            assertFalse(prompt.contains("Project requirements (budget-limited): Research archive"))
+        }
+        assertTrue(context.build("root", "w").orEmpty().contains("Project requirements: \n"))
+        assertTrue(context.build("member", "w").orEmpty().contains("Requirement: Add search"))
+    }
+
     @Test fun unrelatedAndDifferentWorkspaceSessionsDoNotReceiveRootContext() {
         val repository = mockk<ProjectTaskRepository>()
         val project = ProjectPlan(id = "p", workspace = "w", title = "Project", requirements = "Build", flowSessionIds = listOf("root"))

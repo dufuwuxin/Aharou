@@ -112,6 +112,8 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
             contentColor = MaterialTheme.semanticColors.onWarningContainer, modifier = Modifier.fillMaxWidth().testTag("project_rule_fallback")) {
             Text(stringResource(R.string.project_rule_fallback), style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(Spacing.sm))
         }
+        if (tasks.isEmpty() && !planning) Text(stringResource(R.string.project_created_next_step),
+            style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag("project_empty_next_step"))
         state.error?.let { Text(stringResource(R.string.project_task_error, projectTaskExecutionReasonLabel(it)), color = MaterialTheme.colorScheme.error) }
         approvals()
         }
@@ -190,8 +192,15 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
     if (overview && project != null) AlertDialog(onDismissRequest = { overview = false },
         title = { Text(project.title) }, text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
-                Text(project.requirements)
-                com.aharou.core.translation.TranslationPreview(project.requirements)
+                if (project.purpose.isNotBlank()) {
+                    Text(stringResource(R.string.project_purpose), style = MaterialTheme.typography.labelLarge)
+                    Text(project.purpose)
+                }
+                if (project.requirements.isNotBlank()) {
+                    Text(stringResource(R.string.project_requirements), style = MaterialTheme.typography.labelLarge)
+                    Text(project.requirements)
+                    com.aharou.core.translation.TranslationPreview(project.requirements)
+                }
             }
         },
         confirmButton = { TextButton(onClick = { overview = false }) { Text(stringResource(R.string.project_close)) } })

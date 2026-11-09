@@ -97,6 +97,23 @@ class TaskTool @Inject constructor(
         }
     }
 
+    internal suspend fun createProjectMember(
+        description: String, prompt: String, agent: String?, context: AgentContext
+    ): ToolResult = createSubagent(buildJsonObject {
+        put("description", description)
+        put("prompt", prompt)
+        agent?.takeIf { it.isNotBlank() }?.let { put("agent", it) }
+    }, context)
+
+    internal suspend fun stopProjectMember(id: String, context: AgentContext): ToolResult {
+        val parentId = context.sessionId ?: return ToolResult.Error("NO_SESSION", "NO_SESSION")
+        val sub = sessionUseCase.getSessionById(id)
+            ?: return ToolResult.Error("SESSION_NOT_FOUND", "SESSION_NOT_FOUND")
+        if (sub.parentId != parentId) return ToolResult.Error("NOT_YOUR_SUBAGENT", "NOT_YOUR_SUBAGENT")
+        eventBus.emit(SubAgentEvent(id, parentId, SubAgentEventType.STOPPED))
+        return ToolResult.Success(buildJsonObject { put("id", id); put("state", "stopped") })
+    }
+
     private suspend fun conflictError(conflictId: String, mine: Set<String>, next: String, root: String?): ToolResult.Error {
         val title = sessionUseCase.getSessionById(conflictId)?.title
         val theirs = subAgentWriteLease.pathsFor(conflictId)

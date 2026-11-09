@@ -279,10 +279,7 @@ class MainActivity : ComponentActivity() {
      */
     private fun handleLaunchIntent(intent: Intent?) {
         if (intent == null) return
-        when (intent.action) {
-            Intent.ACTION_PROCESS_TEXT, ACTION_NEW_CHAT,
-            WidgetActions.ACTION_OPEN_CHAT -> pendingExternalIntent.value = intent
-        }
+        if (AppLaunchPolicy.accepts(intent)) pendingExternalIntent.value = intent
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -437,6 +434,7 @@ fun AppNavigation(
     val workspaceViewModel: WorkspaceViewModel = hiltViewModel()
 
     // ── 首次启动引导 ──
+    val launchPolicy = rememberSaveable(saver = AppLaunchPolicy.StateSaver) { AppLaunchPolicy(pendingExternalIntent.value) }
     val onboardingStateHolder = remember { OnboardingStateHolder() }
     val onboardingUiState by onboardingStateHolder.state.collectAsStateWithLifecycle()
     val onboardingRegistry = remember { OnboardingTargetRegistry() }
@@ -453,16 +451,18 @@ fun AppNavigation(
             }
         )
     }
-    // 启动与「设置里重新运行引导」共用一条通道：状态一旦是 IN_PROGRESS 就从已存步骤续跑
+    LaunchedEffect(Unit) { onboardingRepository.restartRequests.collect {
+        onboardingCoordinator.initialize(OnboardingStatus.IN_PROGRESS, launchPolicy.restart())
+    } }
     LaunchedEffect(Unit) {
         onboardingRepository.statusFlow.collect { status ->
-            if ((status == null || status == OnboardingStatus.IN_PROGRESS) && !onboardingStateHolder.isActive) {
-                onboardingCoordinator.initialize(OnboardingStatus.IN_PROGRESS, onboardingRepository.step())
+            val savedStep = onboardingRepository.step()
+            launchPolicy.onboardingStep(status, onboardingStateHolder.isActive, savedStep)?.let {
+                onboardingCoordinator.initialize(OnboardingStatus.IN_PROGRESS, it)
             }
         }
     }
 
-    // 续跑 / 重置后当前页可能不是该步所在页面：激活时先跳到该步路由，否则聚光圈找不到目标
     LaunchedEffect(onboardingUiState.active) {
         val route = onboardingUiState.step.route
         if (onboardingUiState.active && currentRoute != null && currentRoute != route) {
@@ -481,12 +481,12 @@ fun AppNavigation(
         agentViewModel.setWorkspace(path)
     }
 
-    // 外部入口（划词 / 桌面快捷方式）投递过来的一次性 Intent：这里才有 NavController 与
-    // Activity 级 agentViewModel，把请求落到具体界面。
     LaunchedEffect(Unit) {
         pendingExternalIntent.collect { intent ->
             pendingExternalIntent.value = null
             if (intent == null) return@collect
+            launchPolicy.consume(intent, onboardingStateHolder.state.value.step.route, { onboardingStateHolder.skip() },
+                { if (navController.currentDestination?.route != "projects") navController.navigate("projects") { launchSingleTop = true; popUpTo("projects") { inclusive = false } } })
             when (intent.action) {
                 Intent.ACTION_PROCESS_TEXT -> {
                     val text = intent.getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT)?.toString().orEmpty()

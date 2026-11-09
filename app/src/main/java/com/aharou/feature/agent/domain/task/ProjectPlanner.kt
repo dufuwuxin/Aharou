@@ -61,6 +61,7 @@ class ProjectPlanner @Inject constructor(
         val scope = existing.filter { it.projectId == project.id }
         val input = buildString {
             append("Project: ").append(project.title)
+            append("\nProject purpose (background only, not executable requirements): ").append(project.purpose.take(REQUIREMENT_MAX))
             append("\nEnabled members: ").append(members.joinToString(", ").ifBlank { "(none)" })
             parentId?.let { append("\nFixed parent task id: ").append(it).append(" (every new top-level task hangs under it)") }
             append("\nExisting tasks:")
@@ -91,6 +92,7 @@ class ProjectPlanner @Inject constructor(
         val branch = ProjectTaskGraph.subtree(anchor.id, projectTasks).take(MAX_CONTEXT_TASKS)
         val input = buildString {
             append("Project: ").append(project.title)
+            append("\nProject purpose (background only, not executable requirements): ").append(project.purpose.take(REQUIREMENT_MAX))
             append("\nEnabled members: ").append(members.joinToString(", ").ifBlank { "(none)" })
             append("\nAnchor task id: ").append(anchor.id)
             append("\nBranch tasks (anchor first):")

@@ -9,9 +9,10 @@ data class ProjectPlan(
     val id: String = UUID.randomUUID().toString(),
     val workspace: String,
     val title: String,
-    val requirements: String,
+    val requirements: String = "",
     val createdAt: Long = System.currentTimeMillis(),
     val flowSessionIds: List<String> = emptyList(),
     val workspaceOwnership: String = "legacy_shared",
-    val continuationSourceProjectId: String? = null
+    val continuationSourceProjectId: String? = null,
+    val purpose: String = ""
 )

@@ -104,6 +104,61 @@ class ProjectTaskRepositoryTest {
         catch (_: IllegalArgumentException) { }
     }
 
+    @Test fun ownedCreationPersistsAnEmptyProjectWithoutResolvingThePlanner() = runBlocking {
+        val id = java.util.UUID.randomUUID().toString()
+        coEvery { workspaces.allocateProjectWorkspace(id, "/source") } returns
+            com.aharou.feature.workspace.domain.model.Workspace("owned", "/owned/$id")
+        val noModel = ProjectTaskRepository(context, Provider { error("planner must not be resolved") }, Provider { workspaces })
+        val result = noModel.createOwnedProject("  Local project  ", "  Support offline work  ", "/source", id)
+        assertFalse(result.ruleFallback)
+        assertEquals("Local project", result.project.title)
+        assertEquals("Support offline work", result.project.purpose)
+        assertEquals("", result.project.requirements)
+        val reopened = ProjectTaskRepository(context, Provider { error("no supplier configured") }, Provider { workspaces })
+            .load(result.project.workspace)
+        assertEquals(result.project, reopened.projects.single())
+        assertTrue(reopened.tasks.isEmpty())
+        io.mockk.coVerify(exactly = 1) { workspaces.allocateProjectWorkspace(id, "/source") }
+        io.mockk.coVerify(exactly = 0) { workflow.completeOnce(any(), any(), any()) }
+    }
+
+    @Test fun theFirstRequirementPlansOnlyNewWorkAndKeepsThePurpose() = runBlocking {
+        val id = java.util.UUID.randomUUID().toString()
+        coEvery { workspaces.allocateProjectWorkspace(id, "/source") } returns
+            com.aharou.feature.workspace.domain.model.Workspace("owned", "/owned/$id")
+        val store = repository()
+        val project = store.createOwnedProject("app", "Keep research organized", "/source", id).project
+        val result = store.appendRequirements(id, "Add offline search", project.workspace)
+        assertEquals("Keep research organized", result.project.purpose)
+        assertEquals("Add offline search", result.project.requirements)
+        val reloaded = repository().load(project.workspace)
+        assertEquals(result.project, reloaded.projects.single())
+        assertEquals(listOf("Add offline search"), reloaded.tasks.map { it.requirement })
+        io.mockk.coVerify(exactly = 1) { workflow.completeOnce(any(), match {
+            it.contains("Project purpose (background only, not executable requirements): Keep research organized") &&
+                it.endsWith("Requirements:\nAdd offline search")
+        }, any()) }
+    }
+
+    @Test fun legacySnapshotsWithoutPurposeStillLoadButEmptyAndWhitespaceRequirementsAreRejected() = runBlocking {
+        val old = repository().createProject("legacy", "Keep this requirement", "/legacy-json").project
+        val key = java.security.MessageDigest.getInstance("SHA-256").digest(old.workspace.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it.toInt() and 255) }
+        val disk = File(context.filesDir, "project-tasks/$key.json")
+        val legacy = disk.readText().replace(",\"purpose\":\"\"", "")
+        disk.writeText(legacy)
+        assertEquals("", repository().load(old.workspace).projects.single().purpose)
+        assertEquals(old.requirements, repository().load(old.workspace).projects.single().requirements)
+        for (requirements in listOf("", "   ")) {
+            disk.writeText("""{"projects":[{"id":"bad","workspace":"/legacy-json","title":"bad","requirements":"$requirements"}]}""")
+            try { repository().load(old.workspace); fail("invalid empty legacy project accepted") }
+            catch (failure: IllegalStateException) { assertEquals("INVALID_PROJECT_STORE", failure.message) }
+        }
+        disk.writeText("""{"projects":[{"id":"bad","workspace":"/legacy-json","title":"bad","requirements":"   ","purpose":"context","workspaceOwnership":"owned"}]}""")
+        try { repository().load(old.workspace); fail("whitespace requirements accepted") }
+        catch (failure: IllegalStateException) { assertEquals("INVALID_PROJECT_STORE", failure.message) }
+    }
+
     @Test fun allocationFailureDoesNotCallThePlannerOrWriteAProject() = runBlocking {
         val planner = mockk<ProjectPlanner>()
         coEvery { workspaces.allocateProjectWorkspace(any(), any()) } throws IllegalStateException("mkdir failed")
@@ -115,6 +170,7 @@ class ProjectTaskRepositoryTest {
 
     @Test fun historicalProjectJsonDefaultsToLegacyWithoutMovingItsWorkspace() {
         val project = kotlinx.serialization.json.Json.decodeFromString<ProjectPlan>("""{"id":"old","workspace":"/original","title":"old","requirements":"task"}""")
+        assertEquals("", project.purpose)
         assertEquals("legacy_shared", project.workspaceOwnership)
         assertEquals("/original", project.workspace)
     }

@@ -157,12 +157,12 @@ class TerminalSessionManager @Inject constructor(
 
     /**
      * 交互 shell 启动命令。-w 已把 cwd 设为 /root/workspace，cd 仅作兜底；裸 sh/bash 在 tty 上自动进交互模式，
-     * 靠 ENV=/etc/profile 加载登录环境；exec 让 shell 取代外层 sh -c 成为前台交互 shell。
+     * 受控开发环境由容器执行入口加载；exec 让 shell 取代外层 sh -c 成为前台交互 shell。
      * 启动时跑首次初始化菜单（脚本自行判断已完成/已跳过则秒退）；用 `;` 分隔保证脚本任何失败都不阻塞进入 shell。
      */
     private fun buildInteractiveCommand(profile: ContainerProfile): String {
         val startup = "[ -f /root/.aicode/provision.sh ] && sh /root/.aicode/provision.sh; "
-        return "cd ~/workspace 2>/dev/null; export ENV=/etc/profile; " +
+        return "cd ~/workspace 2>/dev/null; " +
             startup +
             "export PS1='\\[\\033[01;32m\\]\\u@\\h\\[\\033[00m\\]:\\[\\033[01;34m\\]\\w\\[\\033[00m\\]\\$ '; " +
             "alias ls='ls --color=auto' 2>/dev/null; alias grep='grep --color=auto' 2>/dev/null; alias ll='ls -la --color=auto' 2>/dev/null; " +
@@ -210,7 +210,7 @@ class TerminalSessionManager @Inject constructor(
         //   此时进程不退出、不回调，退出码无意义，符合 dev server 场景设计。
         val afterCommand = if (notify) "; exit \$ec" else "; exec ${containerEngine.defaultShellFor(profile)}"
         // 用大括号包住命令再接退出标记：命令末行若是 heredoc 结束符、注释或 `&`，直接接分号会让标记被吞掉或报语法错误。
-        val shellCommand = "cd ~/workspace 2>/dev/null; export ENV=/etc/profile; " +
+        val shellCommand = "cd ~/workspace 2>/dev/null; " +
             "{ $command\n}; ec=\$?; printf '\\n[command exited: %s]\\n' \"\$ec\"$afterCommand"
         val (session, client) = buildSession(shellCommand, workspace)
         addTab(
@@ -487,7 +487,7 @@ class TerminalSessionManager @Inject constructor(
         FileLogger.i(
             TAG,
             "PTY 启动：workspace=$workspace 可执行=${invocation.executable}" +
-                "（存在=${java.io.File(invocation.executable).exists()}）argv=${invocation.argv.joinToString(" ")}"
+                "（存在=${java.io.File(invocation.executable).exists()}）参数数=${invocation.argv.size}"
         )
         FileLogger.d(TAG, "PTY 环境变量键：${invocation.env.keys.joinToString(",")}")
         lateinit var session: TerminalSession

@@ -9,8 +9,7 @@ import com.aharou.feature.agent.domain.subagent.AgentDefinitionRepository
 import com.aharou.feature.agent.domain.subagent.SubAgentEventBus
 import com.aharou.feature.agent.domain.subagent.SubAgentEventType
 import com.aharou.feature.agent.domain.tool.ToolResult
-import com.aharou.feature.agent.domain.tool.ToolRegistry
-import com.aharou.feature.agent.domain.tool.AgentTool
+import com.aharou.feature.agent.domain.tool.subagent.TaskTool
 import com.aharou.feature.agent.presentation.MessageRole
 import javax.inject.Inject
 import javax.inject.Provider
@@ -27,13 +26,13 @@ class ProjectWorkflowRunner @Inject constructor(
     private val repository: ProjectTaskRepository,
     private val sessions: SessionUseCase,
     private val turns: AgentTurnRunner,
-    private val registry: Provider<ToolRegistry>,
+    private val taskTool: Provider<TaskTool>,
     private val events: SubAgentEventBus,
     private val definitions: AgentDefinitionRepository,
     private val messages: MessagePersistenceUseCase,
     private val coordinator: ProjectTaskExecutionCoordinator
 ) {
-    private val tasks: AgentTool get() = checkNotNull(registry.get().getTool("task")) { "PROJECT_TASK_TOOL_UNAVAILABLE" }
+    private val tasks: TaskTool get() = taskTool.get()
     internal var memberTimeoutMs = 30L * 60L * 1000L
 
     suspend fun members(): List<String> = withContext(Dispatchers.IO) { definitions.listEnabled().map { it.definition.name } }
@@ -82,12 +81,9 @@ class ProjectWorkflowRunner @Inject constructor(
                             requireCurrent(workspace, next, participants)
                             // Cancellation must not strand a created child between creation and durable linking.
                             withContext(NonCancellable) {
-                                val args = buildJsonObject {
-                                    put("action", "create"); put("description", next.title)
-                                    put("prompt", ProjectWorkflowPlan.prompt(next, projectTasks, currentProject.requirements, member, index + 1, outputs.toList(), projectTools))
-                                    if (member.isNotBlank()) put("agent", member)
-                                }
-                                val result = tasks.executeWithContext(args, context)
+                                val result = tasks.createProjectMember(next.title,
+                                    ProjectWorkflowPlan.prompt(next, projectTasks, currentProject.requirements, member, index + 1, outputs.toList(), projectTools),
+                                    member.takeIf { it.isNotBlank() }, context)
                                 if (result is ToolResult.Error && result.code == "MAX_SUBAGENTS_REACHED") return@withContext
                                 check(result is ToolResult.Success) { (result as? ToolResult.Error)?.message ?: "PROJECT_MEMBER_START_FAILED" }
                                 val id = result.data.jsonObject["id"]?.jsonPrimitive?.contentOrNull ?: error("PROJECT_MEMBER_ID_MISSING")
@@ -146,7 +142,7 @@ class ProjectWorkflowRunner @Inject constructor(
                 }
                 child?.let { id ->
                     try {
-                        val stopped = tasks.executeWithContext(buildJsonObject { put("action", "stop"); put("id", id) }, context)
+                        val stopped = tasks.stopProjectMember(id, context)
                         if (stopped is ToolResult.Error) failure.addSuppressed(IllegalStateException(stopped.message))
                     } catch (stopFailure: Exception) { failure.addSuppressed(stopFailure) }
                 }
@@ -183,7 +179,7 @@ class ProjectWorkflowRunner @Inject constructor(
     /** Same stop path as a failed attempt, but the member record is SUPERSEDED and the task returns to the queue. */
     private suspend fun supersede(workspace: String, taskId: String, child: String?, context: AgentContext) {
         child?.let { id ->
-            try { tasks.executeWithContext(buildJsonObject { put("action", "stop"); put("id", id) }, context) }
+            try { tasks.stopProjectMember(id, context) }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { } // A member that already ended needs no stop; its record is still superseded below.
         }

@@ -60,7 +60,8 @@ class ProjectTaskRepository @Inject constructor(@ApplicationContext context: Con
         check(loaded.formatVersion == 1) { "UNSUPPORTED_TASK_FORMAT" }
         check(loaded.version >= 0 && loaded.tasks.all { it.version in 1..loaded.version }) { "INVALID_TASK_VERSION" }
         check(loaded.tasks.all { it.workspace == workspace }) { "CROSS_WORKSPACE" }
-        check(loaded.projects.all { it.workspace == workspace && it.id.isNotBlank() && it.title.isNotBlank() && it.requirements.isNotBlank() } &&
+        check(loaded.projects.all { it.workspace == workspace && it.id.isNotBlank() && it.title.isNotBlank() &&
+            (it.requirements.isNotBlank() || (it.workspaceOwnership == "owned" && it.purpose.isNotBlank() && it.requirements.isEmpty())) } &&
             loaded.projects.map { it.id }.distinct().size == loaded.projects.size) { "INVALID_PROJECT_STORE" }
         check(loaded.tasks.all { task -> task.projectId == null || loaded.projects.any { it.id == task.projectId } }) { "PROJECT_NOT_FOUND" }
         check(ProjectTaskGraph.validate(loaded.tasks) == null) { "INVALID_TASK_STORE" }
@@ -134,12 +135,16 @@ class ProjectTaskRepository @Inject constructor(@ApplicationContext context: Con
         return current.copy(version = tasks.maxOfOrNull { it.version } ?: updated.version, tasks = tasks) to updated
     }
 
-    suspend fun createOwnedProject(name: String, requirements: String, sourceWorkspace: String,
+    suspend fun createOwnedProject(name: String, purpose: String, sourceWorkspace: String,
         projectId: String): ProjectPlanOutcome {
-        require(name.isNotBlank() && requirements.isNotBlank() && sourceWorkspace.isNotBlank()) { "REQUIRED_FIELDS" }
+        require(name.isNotBlank() && purpose.isNotBlank() && sourceWorkspace.isNotBlank()) { "REQUIRED_FIELDS" }
         val workspace = workspaces.get().allocateProjectWorkspace(projectId, sourceWorkspace)
-        return planProject(ProjectPlan(id = projectId, workspace = workspace.path, title = name.trim(),
-            requirements = requirements, workspaceOwnership = "owned"))
+        val project = ProjectPlan(id = projectId, workspace = workspace.path, title = name.trim(),
+            purpose = purpose.trim(), workspaceOwnership = "owned")
+        return withContext(Dispatchers.IO) {
+            createProjectLocked(project, emptyList())
+            ProjectPlanOutcome(project, ruleFallback = false)
+        }
     }
 
     suspend fun continueInOwnedWorkspace(sourceProjectId: String, sourceWorkspace: String,
@@ -152,7 +157,7 @@ class ProjectTaskRepository @Inject constructor(@ApplicationContext context: Con
         require(projectId != sourceProjectId) { "PROJECT_EXISTS" }
         val workspace = workspaces.get().allocateProjectWorkspace(projectId, sourceWorkspace)
         return planProject(ProjectPlan(id = projectId, workspace = workspace.path, title = original.title,
-            requirements = original.requirements, workspaceOwnership = "owned", continuationSourceProjectId = original.id))
+            requirements = original.requirements, workspaceOwnership = "owned", continuationSourceProjectId = original.id, purpose = original.purpose))
     }
 
     suspend fun createProject(name: String, requirements: String, workspace: String,
@@ -219,7 +224,8 @@ class ProjectTaskRepository @Inject constructor(@ApplicationContext context: Con
         val project = current.projects.first { it.id == projectId }
         val startOrder = nextOrder(current)
         val tasks = planned.mapIndexed { index, task -> task.copy(version = current.version + index + 1, order = startOrder + index) }
-        val updated = if (appendText == null) project else project.copy(requirements = project.requirements + "\n\n" + appendText)
+        val updated = if (appendText == null) project else project.copy(requirements =
+            if (project.requirements.isEmpty()) appendText else project.requirements + "\n\n" + appendText)
         val next = current.copy(version = current.version + tasks.size,
             projects = current.projects.map { if (it.id == projectId) updated else it }, tasks = current.tasks + tasks)
         require(ProjectTaskGraph.validate(next.tasks) == null) { "INVALID_TASK_GRAPH" }
