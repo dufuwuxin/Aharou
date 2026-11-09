@@ -110,10 +110,17 @@ class TeamControlIntegrationTest {
         val task = plan.pipeline.first().jsonObject
         assertEquals("parent_only", task.getValue("_teamCommunication").jsonPrimitive.content)
         assertEquals(3, task.getValue("_teamMessageLimit").jsonPrimitive.int)
-        assertTrue(task.getValue("prompt").jsonPrimitive.content.contains("Only blockers"))
+        val prompt = Json.parseToJsonElement(task.getValue("prompt").jsonPrimitive.content.substringBefore("\n## logicalTaskIds")).jsonObject
+        assertEquals("Only blockers", prompt.getValue("communicationGuide").jsonPrimitive.content)
+        assertEquals("parent_only", prompt.getValue("communication").jsonPrimitive.content)
+        assertEquals(3, prompt.getValue("messageLimit").jsonPrimitive.int)
         val ref = com.aharou.feature.agent.domain.teamworkflow.WorkflowTeamRef(teamName = team.name)
         val workflow = com.aharou.feature.agent.domain.teamworkflow.TeamWorkflow("workflow", "", listOf(ref), "")
         val workflowPlan = TeamRunner.buildWorkflowLayer(workflow, 1, ref, team, "goal", "", listOf(definition), 2) as TeamRunner.Plan.Ready
-        assertEquals("parent_only", workflowPlan.pipeline.first().jsonObject.getValue("_teamCommunication").jsonPrimitive.content)
+        val workflowTask = workflowPlan.pipeline.first().jsonObject
+        assertEquals("parent_only", workflowTask.getValue("_teamCommunication").jsonPrimitive.content)
+        val workflowPrompt = Json.parseToJsonElement(workflowTask.getValue("prompt").jsonPrimitive.content.substringBefore("\n## logicalTaskIds")).jsonObject
+        assertEquals("Only blockers", workflowPrompt.getValue("communicationGuide").jsonPrimitive.content)
+        assertEquals(3, workflowPrompt.getValue("messageLimit").jsonPrimitive.int)
     }
 }

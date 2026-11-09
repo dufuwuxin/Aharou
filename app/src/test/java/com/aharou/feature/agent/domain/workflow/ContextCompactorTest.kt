@@ -196,6 +196,7 @@ class ContextCompactorTest {
         compactor.trimDispatcher = StandardTestDispatcher(testScheduler)
         prepare()
         val requests = mutableListOf<List<AgentMessage>>()
+        every { prompts.resolvePrompt("agent/compact-summary.md") } returns "<previous-summary>\n{{INSTRUCTION}}\n</previous-summary>"
         coEvery { provider.complete(any(), capture(requests), any(), any()) } returns AIResponse("Concise handoff", stopReason = "stop")
         val original = history()
         val result = compactor.compactIfNeeded(original, provider, force = true)

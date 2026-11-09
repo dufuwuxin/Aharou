@@ -406,6 +406,7 @@ object TeamRunner {
             put("review", stage.isReview)
             put("communication", stage.communication.token)
             put("messageLimit", stage.messageLimit.coerceIn(1, 100))
+            put("communicationGuide", stage.communicationGuide)
             put("goal", goal)
             put("charter", team.charter)
             put("task", task.prompt)

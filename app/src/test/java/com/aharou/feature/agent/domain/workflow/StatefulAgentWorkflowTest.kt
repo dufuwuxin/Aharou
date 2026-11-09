@@ -165,18 +165,32 @@ class StatefulAgentWorkflowTest {
 
     @Test
     fun modeRulesUseTheirOwnBoundAssetForAllSwitchPaths() {
-        every { prompts.resolvePrompt("agent/auto-mode.md") } returns "<!-- comment -->AUTO_BOUND_BODY"
-        every { prompts.resolvePrompt("agent/allow-mode.md") } returns "<!-- comment -->ALLOW_BOUND_BODY"
-        for (methodName in listOf("buildModeReminder", "buildModeSwitchNotice", "buildExternalModeSwitchNotice")) {
+        val bodies = mapOf(
+            "agent/auto-mode.md" to "<!-- comment -->AUTO_BOUND_BODY",
+            "agent/allow-mode.md" to "<!-- comment -->ALLOW_BOUND_BODY",
+            "agent/mode-switch-auto.md" to "AUTO_SWITCH_BODY",
+            "agent/mode-switch-allow.md" to "ALLOW_SWITCH_BODY"
+        )
+        every { prompts.resolvePrompt(any()) } answers { bodies[firstArg<String>()].orEmpty() }
+        val methods = listOf("buildModeReminder", "buildModeSwitchNotice", "buildExternalModeSwitchNotice")
+        for (methodName in methods) {
             val method = StatefulAgentWorkflow::class.java.getDeclaredMethod(methodName, AgentMode::class.java).apply { isAccessible = true }
             for ((mode, expected, other) in listOf(
-                Triple(AgentMode.AUTO, "AUTO_BOUND_BODY", "ALLOW_BOUND_BODY"),
-                Triple(AgentMode.ALLOW, "ALLOW_BOUND_BODY", "AUTO_BOUND_BODY")
+                Triple(AgentMode.AUTO, "AUTO", "ALLOW"),
+                Triple(AgentMode.ALLOW, "ALLOW", "AUTO")
             )) {
                 val notice = method.invoke(workflow, mode) as String
-                assertTrue("$methodName must inject $mode body", notice.contains(expected))
+                val body = if (methodName == "buildModeReminder") "<!-- comment -->${expected}_BOUND_BODY" else "\n\n${expected}_SWITCH_BODY"
+                assertEquals("$methodName must use its own native entry", body, notice)
                 assertFalse("$methodName must not inject another mode", notice.contains(other))
-                assertFalse(notice.contains("<!--"))
+            }
+        }
+        every { prompts.resolvePrompt(any()) } returns ""
+        for (methodName in methods) {
+            val method = StatefulAgentWorkflow::class.java.getDeclaredMethod(methodName, AgentMode::class.java).apply { isAccessible = true }
+            for (mode in listOf(AgentMode.AUTO, AgentMode.ALLOW)) {
+                val notice = method.invoke(workflow, mode)
+                if (methodName == "buildModeReminder") assertNull(notice) else assertEquals("", notice)
             }
         }
     }
@@ -231,7 +245,7 @@ class StatefulAgentWorkflowTest {
             }
         }
         val turn = runToolBatchTurn(tool, listOf(ToolCall("mode-change", tool.name, emptyMap())), configure = {
-            every { prompts.resolvePrompt("agent/allow-mode.md") } returns "ALLOW_BOUND_BODY"
+            every { prompts.resolvePrompt("agent/mode-switch-allow.md") } returns "ALLOW_BOUND_BODY"
             every { eventInjector.inject(any(), any()) } answers { firstArg() }
             every { notifications.peek(any()) } answers {
                 if (ready) listOf(com.aharou.feature.agent.domain.notification.PendingNotification(
@@ -255,7 +269,7 @@ class StatefulAgentWorkflowTest {
         }
         val turn = runToolBatchTurn(tool, listOf(ToolCall("exit-plan", tool.name, mapOf("action" to JsonPrimitive("exit")))),
             runContext = context.copy(mode = AgentMode.PLAN, modeBeforePlan = AgentMode.ALLOW), configure = {
-                every { prompts.resolvePrompt("agent/allow-mode.md") } returns "ALLOW_BOUND_BODY"
+                every { prompts.resolvePrompt("agent/mode-switch-allow.md") } returns "ALLOW_BOUND_BODY"
                 coEvery { approvals.awaitApproval(any(), any()) } returns PlanApprovalChoice.APPROVE
             })
         assertTrue(turn.finished.single().result.contains("ALLOW_BOUND_BODY"))
