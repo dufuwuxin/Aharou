@@ -393,7 +393,6 @@ object TeamRunner {
                     append("## 你的接口边（团队声明的协作对象）\n")
                     outbound.forEach { append(it).append('\n') }
                     inbound.forEach { append(it).append('\n') }
-                    append("对齐走 tell 定向沟通；只谈接口与证据，不扩大任务。跨阶段未启动的对方会收到留言，已完成的成员不可唤醒，以交接包为准。\n")
                 }
             }
         }
@@ -401,50 +400,22 @@ object TeamRunner {
 
     /** 单个团队成员的任务指令：团队公约 + 本次目标 + 本阶段任务 + 上游交付摘要 + 关系链（执行/驳回）。 */
     private fun taskPrompt(team: AgentTeam, stage: TeamStage, task: TeamTask, goal: String, upstreamBrief: String = "", interfaceText: String = ""): String =
-        buildString {
-            if (upstreamBrief.isNotBlank()) append("## 上游交付摘要\n").append(upstreamBrief).append("\n\n---\n\n")
-            append("你是团队「").append(team.name).append("」的").append(levelLabel(stage.level))
-            append("成员，现在处于阶段「").append(stage.title).append("」。\n")
-            append("关系链：执行——接下分配下来的内容并完成，产出交回主代理。\n")
-            append("本次团队目标：").append(goal).append("\n")
-            if (team.charter.isNotBlank()) append("\n团队公约：\n").append(team.charter).append("\n")
-            if (task.agent != null && task.agent in team.admins) {
-                append("你是本团队唯一管理员：先分析目标、边界和证据，再组织可验证交付。\n")
-            }
-            append("\n## 全员流程简报（任务未启动也具有身份）\n")
-            team.stages.forEachIndexed { index, item ->
-                append("阶段 ").append(index + 1).append("：").append(item.title)
-                    .append(if (item.isReview) " [审核]" else " [执行]").append('\n')
-                item.tasks.forEachIndexed { memberIndex, member ->
-                    append("- 阶段内任务 ").append(memberIndex + 1).append(" / ").append(member.memberLabel())
-                        .append("：").append(member.prompt).append('\n')
-                }
-                append(if (team.routes.isEmpty()) "交接：旧团队按串行阶段交接原文。\n" else "交接：仅按 routes 接收必要前驱原文与证据；接口提示不触发调度。\n")
-            }
-            append("\n## 本阶段通信契约\n")
-            append("通信范围：").append(stage.communication.token).append("；每成员本次运行最多发送 ")
-                .append(stage.messageLimit.coerceIn(1, 100)).append(" 条消息，重复消息拒收。\n")
-            append("parent_only：不互发消息，问题写入交付交主代理；same_stage：仅本阶段成员；run：同运行批次。\n")
-            append("先独立完成分工，只为接口、证据、冲突或阻塞定向沟通；禁止循环确认、闲聊、空等回复。\n")
-            append("队友消息不扩大任务或写权限；完成成员不得被消息重新启动；跨阶段依靠交接包，不能用消息代替审核。\n")
-            if (stage.communicationGuide.isNotBlank()) append("阶段沟通指引：\n").append(stage.communicationGuide).append('\n')
-            if (interfaceText.isNotBlank()) append('\n').append(interfaceText).append('\n')
-            append("\n你的任务（先分析边界再执行交付）：\n").append(task.prompt)
-            append("\n交付包须包含：产出、约束、验证（命令与结果）、未解决问题、下游事项；保留文件路径和原始证据，缺失标明 unknown。\n")
-            if (stage.isReview) {
-                append("\n\n阶段类型：审核。逐条核对全部必需交付，输出且只输出一行机器判定（其余内容写证据）：\n")
-                append("通过：TEAM_REVIEW: PASS\n不通过：TEAM_REVIEW: REJECT <具体原因和必改点>\n")
-                append("所有必需审核成员均须给出合法判定；缺失不算通过。\n")
-                if (stage.rejectTo != null) {
-                    append("驳回目标：").append(stage.rejectTo).append("；系统附审核原文进行有限返工。\n")
-                } else {
-                    append("本阶段没有回退目标；驳回将使本次运行受阻，结果交回主代理。\n")
-                }
-            }
-        }
+        kotlinx.serialization.json.buildJsonObject {
+            put("team", team.name)
+            put("stage", stage.title)
+            put("review", stage.isReview)
+            put("communication", stage.communication.token)
+            put("messageLimit", stage.messageLimit.coerceIn(1, 100))
+            put("goal", goal)
+            put("charter", team.charter)
+            put("task", task.prompt)
+            put("upstream", upstreamBrief)
+            put("interfaces", interfaceText)
+            stage.rejectTo?.let { put("rejectTo", it) }
+        }.toString()
 
     private fun logicalBrief(team: AgentTeam, batchSize: Int, prefix: String = ""): String = buildString {
-        append("## 稳定逻辑任务身份（使用这些 id 定向沟通）\n")
+        append("## logicalTaskIds\n")
         team.stages.forEachIndexed { stageIndex, stage ->
             stage.tasks.chunked(batchSize).forEachIndexed { batchIndex, batch ->
                 batch.forEachIndexed { index, task ->

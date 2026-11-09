@@ -3007,7 +3007,7 @@
     <string name="prompts_block_soul">人格（SOUL.md）</string>
     <string name="prompts_block_archive">核心档案与记忆正文</string>
     <string name="prompts_block_skills">可用技能清单</string>
-    <string name="prompts_block_sub_agents">子代理索引</string>
+    <string name="prompts_block_sub_agents">成员索引</string>
     <string name="prompts_block_teams">团队预设清单</string>
     <string name="prompts_block_memories">记忆索引</string>
     <string name="prompts_block_project_rules">项目规则（AGENTS.md）</string>
@@ -3309,7 +3309,7 @@
     <string name="rules_runtime_trigger_plan">绑定 PLAN：模式变化后由执行器自动附加正文，无需 AI 读取</string>
     <string name="rules_runtime_trigger_auto">绑定 AUTO：模式变化后由执行器自动附加正文，无需 AI 读取</string>
     <string name="rules_runtime_trigger_allow">绑定 ALLOW：模式变化后由执行器自动附加正文，无需 AI 读取</string>
-    <string name="rules_runtime_trigger_subagent">创建子会话时注入子代理基线</string>
+    <string name="rules_runtime_trigger_subagent">创建子会话时注入成员基线</string>
     <string name="rules_runtime_trigger_memory">构建记忆上下文时注入，受注入开关控制</string>
     <string name="rules_runtime_trigger_stuck">检测到重复操作或执行卡住时注入提醒</string>
     <string name="rules_runtime_trigger_workspace">根据项目类型识别结果注入对应工程规则</string>
@@ -3770,6 +3770,9 @@
     <string name="context_folder_up">返回上一级</string>
     <string name="context_folder_path">当前位置：%1$s</string>
     <string name="context_folder_empty">当前文件夹还没有内容，可以新建条目或子文件夹。</string>
+    <string name="context_delete_folder">删除文件夹</string>
+    <string name="context_delete_folder_title">删除这个文件夹？</string>
+    <string name="context_delete_folder_body">删除「%1$s」及其子文件夹。仅处理下方选择的范围和当前类别，其中的全部条目会移到该文件夹的上一级，正文、停用状态及请求用途保持不变。其他范围与工作区不受影响；若同名目录仍有其他范围的内容，它会继续显示。</string>
     <string name="context_folder_root_title">根目录</string>
     <string name="context_folder_name_help">在当前文件夹内新建子文件夹；名称只填写这一层，不包含斜杠。</string>
     <string name="tools_create_command">自定义命令（可选模板）</string>

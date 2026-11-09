@@ -12,6 +12,7 @@ import javax.inject.Singleton
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.put
@@ -38,24 +39,25 @@ class TeamTasks @Inject constructor(
                 ?: return ToolResult.Error(notFoundMessage(entries, target), "TEAM_NOT_FOUND")
             return ToolResult.Success(
                 buildJsonObject {
-                    put("content", TeamRunner.renderDetail(entry))
                     put("name", entry.team.name)
-                    put("stages", entry.team.stages.size)
-                    put("tasks", entry.team.taskCount)
+                    put("description", entry.team.description)
                 }
             )
         }
         if (entries.isEmpty()) {
             return ToolResult.Error(
-                "当前没有团队预设。在 ${teamRepository.globalRoot}（全局）或 " +
-                    "${teamRepository.projectRoot}（当前工作区）下新建 <名>.md：frontmatter 写 stages、" +
-                    "正文写团队公约，格式见文档「子代理 → 团队预设」一节。",
+                "当前没有可用团队，请先在配置页面创建团队。",
                 "TEAM_LIST_EMPTY"
             )
         }
         return ToolResult.Success(
             buildJsonObject {
-                put("content", TeamRunner.renderList(entries))
+                put("teams", buildJsonArray {
+                    entries.forEach { entry -> add(buildJsonObject {
+                        put("name", entry.team.name)
+                        put("description", entry.team.description)
+                    }) }
+                })
                 put("count", entries.size)
             }
         )

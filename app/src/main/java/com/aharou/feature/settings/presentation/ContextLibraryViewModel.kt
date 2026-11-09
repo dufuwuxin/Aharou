@@ -34,6 +34,7 @@ data class ContextLibraryState(
     val folders: Map<ContextCategory, List<String>> = emptyMap(),
     val sessions: List<Pair<String, String>> = emptyList(),
     val workspaceRoot: String? = null,
+    val folderVersion: String = "",
 )
 
 @HiltViewModel
@@ -55,12 +56,14 @@ class ContextLibraryViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 val snapshot = withContext(Dispatchers.IO) {
-                    Triple(library.list(root), folders.list(root), sessions.getRootSessionsByWorkspaceOnce(root.orEmpty())
+                    Triple(library.list(root), folders.snapshot(root), sessions.getRootSessionsByWorkspaceOnce(root.orEmpty())
                         .map { it.id to it.title })
                 }
                 if (generation == refreshGeneration && root == root()) {
-                    _state.value = _state.value.copy(entries = snapshot.first, folders = snapshot.second,
-                        sessions = snapshot.third, loading = false)
+                    val folderSnapshot = snapshot.second
+                    _state.value = if (folderSnapshot == null) _state.value.copy(loading = false, error = true)
+                    else _state.value.copy(entries = snapshot.first, folders = folderSnapshot.first,
+                        folderVersion = folderSnapshot.second, sessions = snapshot.third, loading = false)
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -123,6 +126,16 @@ class ContextLibraryViewModel @Inject constructor(
 
     fun createFolder(category: ContextCategory, name: String, onCreated: () -> Unit) = write(onCreated) { root ->
         folders.create(category, name, root)
+    }
+
+    fun canDeleteFolder(category: ContextCategory, path: String): Boolean = folders.canDelete(category, path)
+
+    fun deleteFolder(category: ContextCategory, path: String, scope: MemoryScope,
+                     expected: ContextLibraryState, onDeleted: () -> Unit) = write(onDeleted) { root ->
+        root == expected.workspaceRoot && !expected.loading && expected.folderVersion.isNotBlank() &&
+            folders.canDelete(category, path) && library.deleteFolder(category, path, scope, root, expected.entries) {
+                folders.delete(category, path, scope, root, expected.folderVersion)
+            }
     }
 
     fun clearPreview() {

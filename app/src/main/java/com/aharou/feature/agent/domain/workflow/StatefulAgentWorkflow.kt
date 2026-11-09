@@ -145,7 +145,7 @@ class StatefulAgentWorkflow @Inject constructor(
     private val memoryCompactor: Lazy<MemoryCompactor>, private val toolInjectionGate: ToolInjectionGate // Lazy breaks compactor cycle
 ) : AgentWorkflow {
     /** 卡死提示文案：从 prompts 文件读一次并缓存，用户可编辑该文件定制。 */
-    private val stuckNudgeText: String by lazy { promptProvider.resolvePrompt(STUCK_NUDGE_FILE) }
+    private val stuckNudgeText: String get() = promptProvider.resolvePrompt(STUCK_NUDGE_FILE)
     internal companion object {
         const val TAG = "StatefulAgentWorkflow"
         const val LIVE_TAIL_CHARS = 20_000
@@ -182,7 +182,7 @@ class StatefulAgentWorkflow @Inject constructor(
      * 重复拼到最新用户消息上——那样下一轮重建历史时该位置（Anthropic 缓存断点）内容不一致，
      * 会白白丢掉一段前缀缓存。进程内缓存，重启后首轮再注入一次（无害）。
      */
-    private val lastInjectedMode = java.util.concurrent.ConcurrentHashMap<String, AgentMode>()
+    private val lastInjectedMode = java.util.concurrent.ConcurrentHashMap<String, Pair<AgentMode, String>>()
 
     /** 不可变状态树 */
     data class AgentSessionState(
@@ -480,7 +480,10 @@ class StatefulAgentWorkflow @Inject constructor(
                 break
             }
             val action = actionQueue.removeFirst()
-            val (newState, effects) = reduce(state, action, stuckNudgeText, reminderEngine.turnEndReminder(state.messages, currentContext.projectRoot, action))
+            val turnEnd = reminderEngine.turnEndReminder(state.messages, currentContext.projectRoot, action)
+                ?.let { promptProvider.resolvePrompt("agent/turn-end-reminder.md") }
+                ?.takeIf { text -> text.isNotBlank() && state.messages.none { it is AgentMessage.UserMessage && it.content == text } }
+            val (newState, effects) = reduce(state, action, stuckNudgeText, turnEnd)
             state = newState
 
             for (effect in effects) {
@@ -1152,7 +1155,7 @@ class StatefulAgentWorkflow @Inject constructor(
                 val images = if (result is ToolResult.Success) result.images else emptyList()
                 val transportResult = if (attachments.isNotEmpty()) stripAttachments(result) else result
                 val processed = toolOutputStore.process(name, toolCall.id, transportResult.redactWith(vault))
-                ToolRunResult(reminderEngine.decorate(name, toolCall.arguments, processed, context.projectRoot), processed is ToolResult.Error, attachments, images)
+                ToolRunResult(processed.toTransportString(), processed is ToolResult.Error, attachments, images)
             }
         } catch (e: CancellationException) {
             throw e
@@ -1252,7 +1255,7 @@ class StatefulAgentWorkflow @Inject constructor(
     override suspend fun generateTitle(sessionId: String, request: String): String? = runCatching {
         val provider = resolveTitleFallbackProvider(sessionId) ?: getEffectiveProvider(sessionId)
         val prompt = promptProvider.resolvePrompt(TITLE_GENERATOR_FILE)
-            .replace(LEADING_COMMENT, "")
+            .replace(LEADING_COMMENT, "").takeIf { it.isNotBlank() } ?: return@runCatching null
         val callStartWall = System.currentTimeMillis()
         val callStartElapsed = SystemClock.elapsedRealtime()
         var callCompleted = false
@@ -1326,7 +1329,7 @@ class StatefulAgentWorkflow @Inject constructor(
         if (diff.isBlank()) return@runCatching null
         val provider = getEffectiveProvider(sessionId = null)
         val prompt = promptProvider.resolvePrompt(COMMIT_GENERATOR_FILE)
-            .replace(LEADING_COMMENT, "")
+            .replace(LEADING_COMMENT, "").takeIf { it.isNotBlank() } ?: return@runCatching null
         val truncatedDiff = diff.take(12000)
         val masker = outboundMaskerOrNull(generalSettingsRepository.privacyMaskingEnabled())
         val resp = provider.complete(
@@ -1394,7 +1397,7 @@ class StatefulAgentWorkflow @Inject constructor(
                 val result = finalResult ?: ToolResult.Error("流式工具未返回结果", "MISSING_STREAM_RESULT")
                 val processed = toolOutputStore.process(toolCall.name, toolCall.id, result.redactWith(vault))
                 val images = if (result is ToolResult.Success) result.images else emptyList()
-                ToolRunResult(reminderEngine.decorate(toolCall.name, toolCall.arguments, processed, context.projectRoot), processed is ToolResult.Error, images = images)
+                ToolRunResult(processed.toTransportString(), processed is ToolResult.Error, images = images)
             }
         } catch (e: CancellationException) {
             throw e
@@ -1427,16 +1430,10 @@ class StatefulAgentWorkflow @Inject constructor(
      */
     private fun buildModeReminder(mode: AgentMode): String? = when (mode) {
         AgentMode.PLAN -> promptProvider.resolvePrompt(MODE_REMINDER_PLAN_FILE)
-            .replace(LEADING_COMMENT, "")
-            .trim()
-            .let { "【模式提醒】$it" }
         AgentMode.AUTO -> promptProvider.resolvePrompt(MODE_REMINDER_AUTO_FILE)
-            .replace(LEADING_COMMENT, "")
-            .trim()
-            .let { "【模式提醒】$it" }
-        AgentMode.ALLOW -> promptProvider.resolvePrompt("agent/allow-mode.md").replace(LEADING_COMMENT, "").trim().let { "【模式提醒】$it" }
+        AgentMode.ALLOW -> promptProvider.resolvePrompt("agent/allow-mode.md")
         AgentMode.BUILD -> null
-    }
+    }?.trim()?.takeIf { it.isNotBlank() }
 
     /**
      * 把待送通知注入工具结果：优先作为 transport JSON 顶层的 `notifications` 字段，结果仍是合法 JSON，
@@ -1447,31 +1444,20 @@ class StatefulAgentWorkflow @Inject constructor(
      * 取本次应注入的模式提醒：仅当模式与上次注入时不同（含首次）才返回文本并记录，否则为 null。
      */
     private fun takeModeReminderIfChanged(sessionId: String?, mode: AgentMode): String? {
-        if (sessionId == null) return buildModeReminder(mode)
-        if (lastInjectedMode[sessionId] == mode) return null
-        lastInjectedMode[sessionId] = mode
-        return buildModeReminder(mode)
+        val text = buildModeReminder(mode)
+        if (sessionId == null) return text
+        val current = mode to com.aharou.feature.agent.domain.context.ContextIdentity.version(text.orEmpty())
+        if (lastInjectedMode.put(sessionId, current) == current) return null
+        return text
     }
 
     /** 工具调用成功后拼进 planMode 工具结果的模式状态通知（当轮即可见，无需等下一条用户消息）。 */
-    private fun buildModeSwitchNotice(mode: AgentMode): String = when (mode) {
-        AgentMode.PLAN -> "\n\n" + promptProvider.resolvePrompt(MODE_REMINDER_PLAN_FILE)
-            .replace(LEADING_COMMENT, "")
-            .trim()
-        AgentMode.BUILD -> "\n\n【模式切换】计划已获用户批准，你已切换到 BUILD（构建）模式，可以开始执行计划。"
-        AgentMode.AUTO -> "\n\n【模式切换】计划已获用户批准，恢复 AUTO。" + buildModeReminder(mode).orEmpty()
-        AgentMode.ALLOW -> "\n\n【模式切换】计划已获用户批准，恢复 ALLOW。" + buildModeReminder(mode).orEmpty()
-    }
+    private fun buildModeSwitchNotice(mode: AgentMode): String = promptProvider
+        .resolvePrompt("agent/mode-switch-${mode.name.lowercase(java.util.Locale.ROOT)}.md")
+        .takeIf { it.isNotBlank() }?.let { "\n\n$it" }.orEmpty()
 
     /** 用户在外部（界面）手动切换模式时拼进工具结果的提示；与 AI 自切的 [buildModeSwitchNotice] 区分，避免误称「计划已获批准」。 */
-    private fun buildExternalModeSwitchNotice(mode: AgentMode): String = when (mode) {
-        AgentMode.PLAN -> "\n\n" + promptProvider.resolvePrompt(MODE_REMINDER_PLAN_FILE)
-            .replace(LEADING_COMMENT, "")
-            .trim()
-        AgentMode.BUILD -> "\n\n【模式切换】用户已将模式切换为 BUILD（构建）模式，可以正常执行写操作。"
-        AgentMode.AUTO -> "\n\n【模式切换】用户已切换为 AUTO。" + buildModeReminder(mode).orEmpty()
-        AgentMode.ALLOW -> "\n\n【模式切换】用户已切换为 ALLOW。" + buildModeReminder(mode).orEmpty()
-    }
+    private fun buildExternalModeSwitchNotice(mode: AgentMode): String = buildModeSwitchNotice(mode)
 
     /**
      * 从 sendFile 工具结果的 `files` 数组提取文件卡片元数据（含宿主本地路径，供 UI 打开文件用）。

@@ -60,6 +60,7 @@ object MemoryParser {
             contextCategory = ContextCategory.from(frontmatter["context_category"]?.toString()) ?: ContextCategory.LONG_TERM,
             contextFolder = frontmatter["context_folder"]?.toString().orEmpty(),
             contextSessionId = frontmatter["context_session_id"]?.toString()?.takeIf { it.isNotBlank() },
+            contextRequest = frontmatter["context_request"]?.toString()?.takeIf { it.isNotBlank() },
             hasContextMetadata = loadValue(frontmatter["context_load"]) != null &&
                 enumValue<ContextKind>(frontmatter["context_kind"]) != null &&
                 ContextCategory.from(frontmatter["context_category"]?.toString()) != null
@@ -69,7 +70,7 @@ object MemoryParser {
     fun format(memory: Memory): String = format(
         memory.name, memory.description, memory.content, memory.type, memory.keywords, memory.expiresAt,
         memory.pending, memory.contextKind, memory.contextLoad, memory.contextCategory,
-        memory.contextFolder, memory.contextSessionId
+        memory.contextFolder, memory.contextSessionId, memory.contextRequest
     )
 
     fun format(
@@ -84,7 +85,8 @@ object MemoryParser {
         contextLoad: ContextLoad = ContextLoad.INDEX,
         contextCategory: ContextCategory = ContextCategory.LONG_TERM,
         contextFolder: String = "",
-        contextSessionId: String? = null
+        contextSessionId: String? = null,
+        contextRequest: String? = null
     ): String {
         val safeName = yamlScalar(name)
         val safeDesc = yamlScalar(description)
@@ -96,6 +98,7 @@ object MemoryParser {
         head.append("context_kind: ${contextKind.name}\ncontext_load: ${yamlScalar(contextLoad.name)}\ncontext_category: ${contextCategory.name}\n")
         if (contextFolder.isNotBlank()) head.append("context_folder: ${yamlScalar(contextFolder)}\n")
         contextSessionId?.let { head.append("context_session_id: ${yamlScalar(it)}\n") }
+        contextRequest?.let { head.append("context_request: ${yamlScalar(it)}\n") }
         head.append("---\n")
         return head.toString() + content
     }

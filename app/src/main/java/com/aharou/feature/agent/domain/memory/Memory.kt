@@ -39,7 +39,8 @@ data class Memory(
     val contextCategory: ContextCategory = ContextCategory.LONG_TERM,
     val contextFolder: String = "",
     val contextSessionId: String? = null,
-    val hasContextMetadata: Boolean = true
+    val hasContextMetadata: Boolean = true,
+    val contextRequest: String? = null
 )
 
 enum class MemoryScope {

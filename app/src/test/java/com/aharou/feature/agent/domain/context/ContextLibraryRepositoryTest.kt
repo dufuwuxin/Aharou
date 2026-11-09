@@ -32,9 +32,9 @@ class ContextLibraryRepositoryTest {
             directory(scope).listFiles().orEmpty().filter { it.extension == "md" }.mapNotNull { MemoryParser.parse(it, scope) }
         }
         every { memories.writeMemory(any(), any(), any(), any(), any(), expectedVersion = any(),
-            contextKind = any(), contextLoad = any(), contextCategory = any(), contextFolder = any(), contextSessionId = any()) } answers {
+            contextKind = any(), contextLoad = any(), contextCategory = any(), contextFolder = any(), contextSessionId = any(), contextRequest = any()) } answers {
             MemoryFileStorage.saveChecked(directory(arg(3)), arg(3), arg(0), arg(1), arg(2),
-                arg(5), arg(6), arg(7), arg(8), arg(9), arg(10), arg(11), arg(12), arg(13), arg(14))
+                arg(5), arg(6), arg(7), arg(8), arg(9), arg(10), arg(11), arg(12), arg(13), arg(14), arg(15))
         }
         library = ContextLibraryRepository(memories)
     }
@@ -281,6 +281,43 @@ class ContextLibraryRepositoryTest {
         val main = rendered()
         assertTrue(main.contains("main-only-body"))
         assertFalse(main.contains("role-only-body"))
+    }
+
+
+    @Test fun folderDeleteRejectsStaleSnapshotAndMovesOnlySelectedScopeAndCategory() {
+        fun put(name: String, scope: MemoryScope, category: ContextCategory, folder: String) {
+            File(directory(scope), "$name.md").writeText(MemoryParser.format(name, "说明", "$name-body",
+                contextCategory = category, contextFolder = folder, contextRequest = "agent/$name.md"))
+        }
+        put("nested", MemoryScope.PROJECT, ContextCategory.RULE, "资料/子/孙")
+        put("global", MemoryScope.GLOBAL, ContextCategory.RULE, "资料/子")
+        put("prefix", MemoryScope.PROJECT, ContextCategory.RULE, "资料/子库")
+        put("category", MemoryScope.PROJECT, ContextCategory.LONG_TERM, "资料/子")
+        val before = library.list(project.path)
+        var markerRemoved = false
+        put("nested", MemoryScope.PROJECT, ContextCategory.RULE, "资料/子/孙/新")
+        assertFalse(library.deleteFolder(ContextCategory.RULE, "资料/子", MemoryScope.PROJECT, project.path, before) { markerRemoved = true; true })
+        assertFalse(markerRemoved)
+        assertTrue(library.deleteFolder(ContextCategory.RULE, "资料/子", MemoryScope.PROJECT, project.path, library.list(project.path)) { markerRemoved = true; true })
+        assertTrue(markerRemoved)
+        val after = library.list(project.path)
+        assertEquals("资料", after.single { it.title == "nested" }.folder)
+        assertEquals("nested-body", after.single { it.title == "nested" }.content)
+        assertEquals("agent/nested.md", after.single { it.title == "nested" }.requestKey)
+        assertEquals("资料/子", after.single { it.title == "global" }.folder)
+        assertEquals("资料/子库", after.single { it.title == "prefix" }.folder)
+        assertEquals("资料/子", after.single { it.title == "category" }.folder)
+        assertFalse(library.deleteFolder(ContextCategory.RULE, "资料", MemoryScope.PROJECT, "/other", after) { true })
+    }
+
+    @Test fun failedMarkerDeletionRestoresOriginalBytesAndEmptyFolderCanDelete() {
+        memory("entry", "body", ContextLoad.OFF)
+        val file = File(global, "entry.md")
+        file.writeText(file.readText().replace("---\nbody", "context_folder: \"目录/子\"\n---\nbody"))
+        val before = file.readText()
+        assertFalse(library.deleteFolder(ContextCategory.LONG_TERM, "目录", MemoryScope.GLOBAL, project.path, library.list(project.path)) { false })
+        assertEquals(before, file.readText())
+        assertTrue(library.deleteFolder(ContextCategory.RULE, "空目录", MemoryScope.GLOBAL, project.path, library.list(project.path)) { true })
     }
 
 }

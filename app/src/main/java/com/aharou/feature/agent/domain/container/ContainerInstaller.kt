@@ -108,19 +108,12 @@ class ContainerInstaller @Inject constructor(
             extractBuiltinAssets(context, "docs")
         }
 
-        /**
-         * 从 assets 提取内置提示词到 ~/.aharou/prompts/，仅替换内容变化的文件，使升级后的提示词及时更新。
-         *
-         * 用户自定义覆盖放在 ~/.aharou/prompts.custom/（同名即覆盖），本方法不触碰该目录，
-         * 故用户重写的片段不会被升级覆盖。参见 [com.aharou.feature.agent.domain.prompt.SystemPromptProvider]。
-         */
-        fun extractPrompts(context: Context) {
-            extractBuiltinAssets(context, "prompts")
+        fun extractSkills(context: Context) {
             extractBuiltinAssets(context, "skills")
         }
 
         /**
-         * 从 assets 提取内置子代理定义（如 Explore）到 ~/.aharou/agents/。
+         * 从 assets 提取内置成员定义到 ~/.aharou/agents/。
          * 仅内容指纹确认的旧内置可升级；保留用户修改，退役内置移入 builtin-archive 可恢复归档。
          */
         fun extractAgents(context: Context) {

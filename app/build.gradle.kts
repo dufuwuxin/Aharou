@@ -450,6 +450,7 @@ dependencies {
 
     // Testing
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
     // 迁移测试：MigrationTestHelper + Robolectric（在 JVM 上跑 Room 迁移，需真实 resources）
     testImplementation("androidx.room:room-testing:2.7.1")
     testImplementation("org.robolectric:robolectric:4.15.1")

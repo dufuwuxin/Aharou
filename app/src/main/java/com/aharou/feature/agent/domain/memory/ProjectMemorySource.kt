@@ -68,14 +68,15 @@ class ProjectMemorySource(
         contextLoad: ContextLoad?,
         contextCategory: ContextCategory?,
         contextFolder: String?,
-        contextSessionId: String?
+        contextSessionId: String?,
+        contextRequest: String?
     ): MemoryWriteResult {
         if (projectRoot.isBlank()) {
             return MemoryWriteResult.Failure("NO_WORKSPACE", "当前未选择工作区，无法保存项目级记忆")
         }
         return MemoryFileStorage.saveChecked(
             memoryRoot, MemoryScope.PROJECT, name, description, content, type, expiresAt, pending,
-            keywords, expectedVersion, contextKind, contextLoad, contextCategory, contextFolder, contextSessionId
+            keywords, expectedVersion, contextKind, contextLoad, contextCategory, contextFolder, contextSessionId, contextRequest
         )
     }
 

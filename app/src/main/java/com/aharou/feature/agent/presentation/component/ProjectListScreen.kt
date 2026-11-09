@@ -1,6 +1,7 @@
 package com.aharou.feature.agent.presentation.component
 
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -25,13 +26,14 @@ import com.aharou.core.ui.AppTextField
 import com.aharou.feature.agent.domain.task.*
 import com.aharou.feature.agent.presentation.ProjectTaskViewModel
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun ProjectListScreen(viewModel: ProjectTaskViewModel, createRequested: Boolean,
     onCreateConsumed: () -> Unit, onOpenProject: (String) -> Unit, onOpenTask: (String) -> Unit,
     onNewSession: () -> Unit, sessionsContent: @Composable () -> Unit) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     var deletingProject by remember { mutableStateOf<com.aharou.feature.agent.domain.task.ProjectPlan?>(null) }
+    var menuProject by remember { mutableStateOf<ProjectPlan?>(null) }
     var creating by rememberSaveable { mutableStateOf(false) }
     var showSessions by rememberSaveable { mutableStateOf(false) }
     var createMenu by remember { mutableStateOf(false) }
@@ -60,16 +62,15 @@ fun ProjectListScreen(viewModel: ProjectTaskViewModel, createRequested: Boolean,
         state.error?.let { Text(stringResource(R.string.project_task_error, projectTaskExecutionReasonLabel(it)), color = MaterialTheme.colorScheme.error) }
         LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 80.dp), verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
             items(state.projects, key = { it.id }) { project ->
+                Box {
                 Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceContainer,
-                    modifier = Modifier.fillMaxWidth().clickable { onOpenProject(project.id) }) {
+                    modifier = Modifier.fillMaxWidth().testTag("project_${project.id}").combinedClickable(
+                        onClick = { onOpenProject(project.id) },
+                        onLongClickLabel = stringResource(R.string.project_delete),
+                        onLongClick = { menuProject = project }
+                    )) {
                     Column(Modifier.padding(Spacing.md)) {
-                        Row(Modifier.fillMaxWidth()) {
-                            Text(project.title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                            TextButton(onClick = { deletingProject = project }, enabled = viewModel.canDeleteProject(project),
-                                modifier = Modifier.heightIn(min = 48.dp).testTag("delete_project_${project.id}")) {
-                                Text(stringResource(R.string.project_delete), color = MaterialTheme.colorScheme.error)
-                            }
-                        }
+                        Text(project.title, style = MaterialTheme.typography.titleMedium)
                         Text(stringResource(if (project.workspaceOwnership == "owned") R.string.project_workspace_owned else R.string.project_workspace_legacy, project.workspace))
                         project.continuationSourceProjectId?.let { Text(stringResource(R.string.project_workspace_continuation_source, it)) }
                         if (project.workspaceOwnership == "legacy_shared") TextButton(
@@ -81,6 +82,15 @@ fun ProjectListScreen(viewModel: ProjectTaskViewModel, createRequested: Boolean,
                         Text(project.requirements, maxLines = 2, style = MaterialTheme.typography.bodySmall)
                         Text(stringResource(R.string.project_task_count, state.projectTaskCounts[project.id] ?: 0))
                     }
+                }
+                DropdownMenu(expanded = menuProject?.id == project.id, onDismissRequest = { menuProject = null }) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.project_delete), color = MaterialTheme.colorScheme.error) },
+                        enabled = viewModel.canDeleteProject(project),
+                        modifier = Modifier.testTag("delete_project_${project.id}"),
+                        onClick = { menuProject = null; deletingProject = project }
+                    )
+                }
                 }
             }
             if (state.tasks.any { it.projectId == null }) {

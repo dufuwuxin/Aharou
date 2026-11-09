@@ -5,6 +5,7 @@ import java.io.File
 import java.nio.file.Files
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -92,6 +93,66 @@ class ContextFolderStoreTest {
             assertFalse(store.list("/workspace/a").getValue(ContextCategory.MAIN_INJECTED).contains("role-only"))
             assertFalse(store.list("/workspace/b").getValue(ContextCategory.ROLE_INJECTED).contains("role-only"))
             assertTrue(store.list(null).getValue(ContextCategory.MAIN_INJECTED).contains("legacy-folder"))
+        } finally { root.deleteRecursively() }
+    }
+
+
+    @Test fun deleteNestedMarkersIsDurableAndScopeCategoryPrefixBounded() {
+        val root = Files.createTempDirectory("delete-folders-").toFile()
+        try {
+            val store = store(root)
+            for (project in listOf(null, "/workspace/a", "/workspace/b")) {
+                assertTrue(store.create(ContextCategory.RULE, "资料/子/孙", project))
+                assertTrue(store.create(ContextCategory.RULE, "资料库/子", project))
+                assertTrue(store.create(ContextCategory.LONG_TERM, "资料/子", project))
+            }
+            assertTrue(store.delete(ContextCategory.RULE, "资料/子", com.aharou.feature.agent.domain.memory.MemoryScope.PROJECT, "/workspace/a"))
+            assertFalse(store(root).listScope(ContextCategory.RULE, com.aharou.feature.agent.domain.memory.MemoryScope.PROJECT, "/workspace/a").any { it == "资料/子" || it.startsWith("资料/子/") })
+            assertTrue(store(root).list("/workspace/b").getValue(ContextCategory.RULE).contains("资料/子/孙"))
+            assertTrue(store(root).list(null).getValue(ContextCategory.RULE).contains("资料/子/孙"))
+            assertTrue(store(root).list("/workspace/a").getValue(ContextCategory.LONG_TERM).contains("资料/子"))
+            assertTrue(store(root).list("/workspace/a").getValue(ContextCategory.RULE).contains("资料库/子"))
+        } finally { root.deleteRecursively() }
+    }
+
+
+    @Test fun corruptFolderConfigFailsWithoutOverwritingOriginalOrCrashing() {
+        val root = Files.createTempDirectory("corrupt-folders-").toFile()
+        try {
+            val file = File(root, "aharou-global/memory/.context-folders.json")
+            file.parentFile.mkdirs()
+            file.writeText("{corrupt")
+            val store = store(root)
+            assertNull(store.snapshot(null))
+            assertTrue(store.list(null).isEmpty())
+            assertFalse(store.create(ContextCategory.RULE, "资料", null))
+            assertFalse(store.delete(ContextCategory.RULE, "资料", com.aharou.feature.agent.domain.memory.MemoryScope.GLOBAL, null))
+            assertEquals("{corrupt", file.readText())
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test fun oldFolderMarkersMigrateOnceAndDefaultFoldersCannotBeDeleted() {
+        val root = Files.createTempDirectory("legacy-folders-").toFile()
+        try {
+            val file = File(root, "aharou-global/memory/.context-folders.json")
+            file.parentFile.mkdirs()
+            file.writeText("""{"__global__":{"RULE":["requests","requests/agent","requests/agent/custom.md"],"ROLE_INJECTED":["内置默认"],"INJECTED":["内置默认"]}}""")
+            val store = store(root)
+            assertEquals(listOf("辅助请求"), store.list(null).getValue(ContextCategory.RULE))
+            assertFalse(file.readText().contains("requests"))
+            val bytes = file.readText()
+            store(root).list(null)
+            assertEquals(bytes, file.readText())
+            for (category in listOf(ContextCategory.ROLE_INJECTED, ContextCategory.MAIN_INJECTED)) {
+                val path = store.list(null).getValue(category).single()
+                assertFalse(store.delete(category, path, com.aharou.feature.agent.domain.memory.MemoryScope.GLOBAL, null))
+            }
+            assertTrue(store.create(ContextCategory.RULE, "空/子", null))
+            val version = store.snapshot(null)!!.second
+            assertTrue(store.create(ContextCategory.RULE, "空/新", null))
+            assertFalse(store.delete(ContextCategory.RULE, "空", com.aharou.feature.agent.domain.memory.MemoryScope.GLOBAL, null, version))
+            assertTrue(store.delete(ContextCategory.RULE, "空", com.aharou.feature.agent.domain.memory.MemoryScope.GLOBAL, null))
+            assertFalse(store(root).list(null).getValue(ContextCategory.RULE).any { it == "空" || it.startsWith("空/") })
         } finally { root.deleteRecursively() }
     }
 

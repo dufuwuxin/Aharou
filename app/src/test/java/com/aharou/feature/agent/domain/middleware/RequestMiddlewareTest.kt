@@ -296,40 +296,15 @@ class RequestMiddlewareTest {
         assertEquals(1, report.rejected.size)
     }
 
-    // ---------- systemPrompt ----------
-
-    @Test
-    fun systemPrompt_appends_to_existing_string_system() {
-        val raw = """{"model":"fast","system":"be nice"}"""
-        val out = RequestMiddleware.apply(MiddlewareConfig(systemPrompt = "answer in JSON"), ctx, body(raw))
-
-        assertEquals("be nice\n\nanswer in JSON", out.str("system"))
-    }
-
-    @Test
-    fun systemPrompt_prepends_message_when_messages_have_no_system_head() {
-        val out = RequestMiddleware.apply(MiddlewareConfig(systemPrompt = "answer in JSON"), ctx, body(baseBody))
-
-        val messages = out["messages"] as JsonArray
-        assertEquals(2, messages.size)
-        val head = messages[0].jsonObject
-        assertEquals("system", head.str("role"))
-        assertEquals("answer in JSON", head.str("content"))
-    }
-
-    @Test
-    fun systemPrompt_respects_target_list() {
-        val hit = MiddlewareConfig(systemPrompt = "answer in JSON", systemPromptTargets = listOf("openai"))
-        val miss = MiddlewareConfig(systemPrompt = "answer in JSON", systemPromptTargets = listOf("anthropic"))
-
-        assertEquals(2, (RequestMiddleware.apply(hit, ctx, body(baseBody))["messages"] as JsonArray).size)
-        assertEquals(body(baseBody), RequestMiddleware.apply(miss, ctx, body(baseBody)))
-    }
-
-    @Test
-    fun blank_system_prompt_is_ignored() {
-        val out = RequestMiddleware.apply(MiddlewareConfig(systemPrompt = "   "), ctx, body(baseBody))
-        assertEquals(body(baseBody), out)
+    @Test fun middlewareCannotAppendPromptOutsideNativeMemory() {
+        val configured = MiddlewareConfig(systemPrompt = "NON_NATIVE_BODY", systemPromptTargets = listOf("openai"))
+        val raw = """{"model":"fast","system":"native body"}"""
+        assertEquals("native body", RequestMiddleware.apply(configured, ctx, body(raw)).str("system"))
+        assertEquals(body(baseBody), RequestMiddleware.apply(configured, ctx, body(baseBody)))
+        val application = applyProviderMiddleware("""{"systemPrompt":"NON_NATIVE_BODY","modelMap":{"fast":"mapped"}}""",
+            "prov-1", "openai", "fast", "native body")
+        assertEquals("mapped", application.actualModel)
+        assertEquals("native body", application.systemPrompt)
     }
 
     // ---------- 配置解析与健壮性 ----------

@@ -68,12 +68,6 @@ internal fun SettingsAharouRows(onOpen: (SettingsSection) -> Unit) {
     ) {
         SettingsGroup {
             SettingsRow(
-                icon = FeatherIcons.Smile,
-                title = stringResource(R.string.memory_settings_title),
-                onClick = { onOpen(SettingsSection.Memory) }
-            )
-            SettingsDivider()
-            SettingsRow(
                 icon = FeatherIcons.Clock,
                 title = stringResource(SettingsSection.ConfigAudit.titleRes),
                 onClick = { onOpen(SettingsSection.ConfigAudit) }

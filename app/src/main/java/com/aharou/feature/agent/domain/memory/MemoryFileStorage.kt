@@ -11,6 +11,17 @@ import java.security.MessageDigest
 
 internal object MemoryFileStorage {
     val lock = Any()
+    private var defaultFolderJournal: ContextMetadataRecovery? = null
+    internal var folderJournal: ContextMetadataRecovery
+        get() = checkNotNull(defaultFolderJournal)
+        set(value) { defaultFolderJournal = value }
+
+    internal fun resetFolderJournal() {
+        defaultFolderJournal = null
+    }
+
+    @Volatile internal var beforeMetadataWrite: (File) -> Unit = {}
+    @Volatile internal var beforeMetadataCommit: (File) -> Unit = {}
 
     /**
      * 内容版本：全文的 SHA-256 取前 12 位十六进制。
@@ -74,6 +85,7 @@ internal object MemoryFileStorage {
         }
         var temporary: File? = null
         try {
+            beforeMetadataWrite(file)
             val parent = file.absoluteFile.parentFile ?: return@synchronized false
             if (!parent.isDirectory && !parent.mkdirs()) return@synchronized false
             if (file.exists() && !file.isFile) return@synchronized false
@@ -137,12 +149,94 @@ internal object MemoryFileStorage {
         }
     }
 
+    /** Only metadata changes; the body and unrelated frontmatter bytes remain user-owned. */
+    fun rewriteContextMetadata(updates: List<Memory>, finish: () -> Boolean = { true }): Boolean = synchronized(lock) {
+        val originals = linkedMapOf<File, String>()
+        val payloads = linkedMapOf<File, String>()
+        val journal = if (updates.isEmpty()) null else defaultFolderJournal
+        for (updated in updates) {
+            val file = updated.file ?: return@synchronized false
+            if (file in originals || !ContextFolderPath.valid(updated.contextFolder)) return@synchronized false
+            val text = file.readText()
+            if (updated.version.isBlank() || versionOf(text) != updated.version) return@synchronized false
+            val delimiters = Regex("(?m)^---\\r?$").findAll(text).take(2).toList()
+            if (delimiters.size != 2 || delimiters.first().range.first != 0) return@synchronized false
+            val end = delimiters[1].range.first
+            val eol = if (text.contains("\r\n")) "\r\n" else "\n"
+            var header = text.substring(0, end)
+            val formatted = MemoryParser.format(updated).substringBefore("\n---\n")
+            for (key in listOf("context_folder", "context_request")) {
+                header = header.replace(Regex("(?m)^$key:[^\\r\\n]*(?:\\r?\\n|$)"), "")
+                val line = formatted.lineSequence().firstOrNull { it.startsWith("$key:") }
+                if (line != null) header += line + eol
+            }
+            originals[file] = text
+            payloads[file] = header + text.substring(end)
+        }
+        val written = mutableListOf<File>()
+        var committed = false
+        try {
+            if (journal != null && !journal.recover()) return@synchronized false
+            if (journal != null && !journal.prepare(originals)) return@synchronized false
+            journal?.active = true
+            for ((file, payload) in payloads) {
+                written += file
+                if (!write(file, payload, versionOf(originals.getValue(file)))) return@synchronized false
+            }
+            if (!finish() || journal?.commit() == false) return@synchronized false
+            committed = true
+            if (journal?.committed == true) journal.finish()
+            true
+        } catch (e: Exception) {
+            FileLogger.w("MemoryFileStorage", "目录元数据操作中断", e)
+            false
+        } finally {
+            journal?.active = false
+            if (!committed && journal?.committed != true) {
+                for (file in written.asReversed()) {
+                    if (!write(file, originals.getValue(file))) {
+                        FileLogger.w("MemoryFileStorage", "目录条目恢复失败，恢复记录已保留: ${file.name}")
+                        return@synchronized false
+                    }
+                }
+                if (journal != null && !journal.recover()) {
+                    FileLogger.w("MemoryFileStorage", "目录操作恢复记录保留待重试")
+                }
+            }
+        }
+    }
+
+
+    fun migrateContextLayout(memories: List<Memory>): List<Memory> = synchronized(lock) {
+        val updates = memories.mapNotNull { memory ->
+            if (!memory.hasContextMetadata) return@mapNotNull null
+            val folder = memory.contextFolder
+            when {
+                memory.contextCategory == ContextCategory.RULE && folder == "requests" ->
+                    memory.copy(contextFolder = "辅助请求")
+                memory.contextCategory == ContextCategory.RULE &&
+                    folder.startsWith("requests/") && folder.removePrefix("requests/").isNotBlank() ->
+                    memory.copy(contextFolder = "辅助请求", contextRequest = memory.contextRequest ?: folder.removePrefix("requests/"))
+                memory.contextCategory.isInjection && (folder == "内置默认" || folder.startsWith("内置默认/")) ->
+                    memory.copy(contextFolder = (if (memory.contextCategory == ContextCategory.ROLE_INJECTED)
+                        "角色注入" else "主代理注入") + folder.removePrefix("内置默认"))
+                else -> null
+            }
+        }
+        if (updates.isEmpty()) return@synchronized memories
+        if (!rewriteContextMetadata(updates)) return@synchronized memories
+        val updatedFiles = updates.map { it.file }.toSet()
+        memories.map { memory ->
+            if (memory.file in updatedFiles) checkNotNull(MemoryParser.parse(checkNotNull(memory.file), memory.scope)) else memory
+        }
+    }
+
     fun merge(
         group: List<Memory>, name: String, description: String, content: String, type: MemoryType? = null
     ): Boolean = synchronized(lock) {
         if (group.size < 2 || group.any { it.pending || it.file == null }) return@synchronized false
         val first = group.first()
-        if (group.any { it.scope != first.scope || it.type != first.type || it.expiresAt != first.expiresAt || it.contextKind != first.contextKind || it.contextLoad != first.contextLoad || it.contextCategory != first.contextCategory || it.contextFolder != first.contextFolder || it.contextSessionId != first.contextSessionId }) {
+        if (group.any { it.scope != first.scope || it.type != first.type || it.expiresAt != first.expiresAt || it.contextKind != first.contextKind || it.contextLoad != first.contextLoad || it.contextCategory != first.contextCategory || it.contextFolder != first.contextFolder || it.contextSessionId != first.contextSessionId || it.contextRequest != first.contextRequest }) {
             return@synchronized false
         }
         val root = first.file?.parentFile ?: return@synchronized false
@@ -162,7 +256,7 @@ internal object MemoryFileStorage {
         }
         val payload = MemoryParser.format(
             name, description, content, type ?: first.type, group.flatMap { it.keywords }.distinct(), first.expiresAt, first.pending,
-            first.contextKind, first.contextLoad, first.contextCategory, first.contextFolder, first.contextSessionId
+            first.contextKind, first.contextLoad, first.contextCategory, first.contextFolder, first.contextSessionId, first.contextRequest
         )
         if (!write(target, payload)) return@synchronized false
         var deleted = true
@@ -206,7 +300,8 @@ internal object MemoryFileStorage {
         contextLoad: ContextLoad? = null,
         contextCategory: ContextCategory? = null,
         contextFolder: String? = null,
-        contextSessionId: String? = null
+        contextSessionId: String? = null,
+        contextRequest: String? = null
     ): MemoryWriteResult = synchronized(lock) {
         try {
             val file = MemorySource.resolveMemoryFile(root, name)
@@ -240,7 +335,8 @@ internal object MemoryFileStorage {
                 contextLoad ?: existing?.contextLoad ?: ContextLoad.INDEX,
                 contextCategory ?: existing?.contextCategory ?: ContextCategory.LONG_TERM,
                 folder,
-                contextSessionId ?: existing?.contextSessionId
+                contextSessionId ?: existing?.contextSessionId,
+                contextRequest ?: existing?.contextRequest
             )
             if (currentText == payload) return@synchronized MemoryWriteResult.Success
             if (currentText != null && MemorySource.archiveExistingFile(root, name) == null) {

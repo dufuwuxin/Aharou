@@ -1,43 +1,31 @@
 package com.aharou.feature.agent.domain.prompt
 
-import com.aharou.feature.agent.domain.context.*
 import android.content.Context
 import com.aharou.core.util.FileLogger
 import com.aharou.feature.agent.data.local.dao.ChatSessionDao
 import com.aharou.feature.agent.domain.container.ContainerInstaller
+import com.aharou.feature.agent.domain.context.ContextLibraryPlanner
+import com.aharou.feature.agent.domain.context.ContextLibraryRepository
+import com.aharou.feature.agent.domain.context.ContextOrigin
 import com.aharou.feature.agent.domain.context.ProjectIndex
-import com.aharou.feature.agent.domain.inbox.InboxDirectory
 import com.aharou.feature.agent.domain.inbox.SharedInbox
 import com.aharou.feature.agent.domain.model.AgentContext
-import com.aharou.feature.agent.domain.model.WorkspaceRef
 import com.aharou.feature.agent.domain.rule.RuleRepository
 import com.aharou.feature.agent.domain.skill.SkillRepository
 import com.aharou.feature.agent.domain.subagent.AgentDefinition
 import com.aharou.feature.agent.domain.subagent.AgentDefinitionRepository
 import com.aharou.feature.agent.domain.subagent.AgentTeamRepository
 import com.aharou.feature.agent.domain.subagent.InjectPart
-import com.aharou.feature.agent.domain.subagent.SubAgentProfileMatcher
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
-import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
 
-/**
- * 按模块组装系统提示词：稳定基线放最前（享受 KV Cache），仅日期为低频变化。
- * 每个 Source 维护内容缓存，避免重复读取与格式化。
- *
- * 片段分两类：
- * - 静态基线：`prompts/` 顶层 `<NN>-<名称>.md`（见 [BASE_FRAGMENTS]），可被 `prompts.custom/` 按数字身份覆盖或新增；
- * - 按需叶子：`prompts/agent/` 下的无数字片段（模式提醒、子代理基线、压缩/标题提示词），按精确同名覆盖。
- *
- * `prompts.custom/` 存在 [PromptFragmentResolver.DISABLE_BUILTIN_FILE] 时，主代理提示词只由自定义数字片段组成，
- * 不再注入任何内置来源；此时用 `{{AICODE_*}}` 变量按需取回动态内容。
- */
-private data class ProjectRuleSnapshot(val signature: String, val content: String?)
-
+/** Application-managed prompt text is read only from editable native memory entries. */
 @Singleton
+@Suppress("unused") // Keep the public injection constructor compatible with existing consumers.
 class SystemPromptProvider @Inject constructor(
     @param:ApplicationContext private val context: Context,
     private val skillRepository: SkillRepository,
@@ -45,835 +33,84 @@ class SystemPromptProvider @Inject constructor(
     private val containerInstaller: ContainerInstaller,
     private val agentDefinitionRepository: AgentDefinitionRepository,
     private val agentTeamRepository: AgentTeamRepository,
-    private val promptFragmentCatalog: PromptFragmentCatalog,
     private val ruleRepository: RuleRepository,
     private val chatSessionDao: ChatSessionDao,
     private val sharedInbox: SharedInbox,
-    private val containerProfileResolver: com.aharou.feature.agent.domain.container.ContainerProfileResolver, private val projectIndex: ProjectIndex,
+    private val containerProfileResolver: com.aharou.feature.agent.domain.container.ContainerProfileResolver,
+    private val projectIndex: ProjectIndex,
     private val projectTaskContext: ProjectTaskContext,
     private val injectedContextStore: InjectedContextStore,
-    private val contextLibrary: ContextLibraryRepository
+    private val contextLibrary: ContextLibraryRepository,
 ) {
-    // 抽象独立的 Source
-    interface PromptSource {
-        fun build(ctx: AgentContext): String?
-    }
-
-    private inner class StaticRuleSource : PromptSource {
-        // 每次都重新读盘：未编辑时字符串一致，KV Cache 照常命中；编辑后立即生效，无需重启。
-        override fun build(ctx: AgentContext): String = promptFragmentCatalog.renderStatic(ctx.projectRoot, ctx.currentUserText)
-    }
-
-    private inner class ActiveSkillsSource : PromptSource {
-        override fun build(ctx: AgentContext): String? {
-            // 子代理会话：只看该角色绑定的专属技能 + 公共技能；主代理看全量公共技能。
-            val skills = try {
-                skillRepository.listSkillsForAgent(
-                    ctx.agentDefinition, ctx.currentUserText,
-                    ctx.agentDefinition?.let { InjectPart.SKILLS in it.inject } ?: true
-                )
-            } catch (e: Exception) { return null }
-            if (skills.isEmpty()) {
-                return null
-            }
-
-            val list = skills.joinToString("\n") { "- ${it.name}: ${it.description.ifBlank { "（无描述）" } }" }
-            val content = "可用技能 (skills)（格式为 名称: 何时使用；相关时用 loadSkill 传入名称取完整正文，详见上文「技能」说明）：\n当清单里有与当前任务对口的技能时，在合适的时机主动 `loadSkill` 加载并按其正文行事，让技能辅助你更规范、更高效地完成工作，而不是仅凭默认流程硬做。\n$list"
-            return content
-        }
-
-    }
-
-    /** 独立成员的执行、交付、工具与安全基线；与数字片段的继承条件分别处理。 */
-    private inner class SubAgentBaseSource : PromptSource {
-        @Volatile private var cached: String? = null
-
-        override fun build(ctx: AgentContext): String =
-            cached ?: resolvePrompt(SUBAGENT_BASE_FILE)
-                .replace(LEADING_COMMENT, "")
-                .trim()
-                .also { cached = it }
-    }
-
-    /**
-     * 可用子代理部门索引（仅注入主代理）：只注入按部门汇总的恒定大小索引（部门 / 角色数 / 代表角色），
-     * 不再逐条列出全部角色；主代理用 `task(department=..., agentQuery=...)` 由 [SubAgentProfileMatcher] 选角。
-     * 会话级缓存，避免每轮扫盘导致 system prompt 抖动打断 KV 缓存。
-     */
-    private inner class SubAgentListSource : PromptSource {
-        private val cachedByKey = ConcurrentHashMap<SourceCacheKey, String>()
-
-        override fun build(ctx: AgentContext): String? {
-            val key = SourceCacheKey(ctx.sessionId, ctx.projectRoot)
-            val cached = cachedByKey[key]
-            if (cached != null) return cached.ifEmpty { null }
-            val entries = try {
-                agentDefinitionRepository.listEnabled()
-            } catch (e: Exception) {
-                FileLogger.w(TAG, "扫描子代理定义失败: ${e.message}", e)
-                return null
-            }
-            // 成员只是名单：只有被某个团队引用到的成员才进主提示词，没入团的成员主代理看不到。
-            // 例外：一个团队都还没建时退回全量（否则新装的 App 派发体系直接空掉）。
-            val roster = try {
-                agentTeamRepository.listAll()
-                    .flatMap { it.team.referencedMembers }
-                    .map { it.lowercase() }
-                    .toSet()
-            } catch (e: Exception) {
-                FileLogger.w(TAG, "扫描团队名单失败: ${e.message}", e)
-                emptySet()
-            }
-            val visible = if (roster.isEmpty()) {
-                entries
-            } else {
-                entries.filter { it.definition.name.lowercase() in roster }
-            }
-            if (visible.isEmpty()) {
-                cachedByKey[key] = ""
-                return null
-            }
-
-            val content = SubAgentProfileMatcher.renderIndex(visible.map { it.definition })
-            if (content.isEmpty()) {
-                cachedByKey[key] = ""
-                return null
-            }
-            cachedByKey[key] = content
-            trimIfNeeded()
-            return content
-        }
-
-        private fun trimIfNeeded() {
-            if (cachedByKey.size > SOURCE_CACHE_LIMIT) cachedByKey.clear()
-        }
-    }
-
-    /**
-     * 可用团队预设索引（仅注入主代理）：只列「团队 / 阶段数 / 流程」，不展开成员与文件路径，
-     * 完整编排用 `task(action="teams", team=…)` 按需拉。会话级缓存，避免每轮扫盘。
-     */
-    private inner class TeamListSource : PromptSource {
-        private val cachedByKey = ConcurrentHashMap<SourceCacheKey, String>()
-
-        override fun build(ctx: AgentContext): String? {
-            val key = SourceCacheKey(ctx.sessionId, ctx.projectRoot)
-            val cached = cachedByKey[key]
-            if (cached != null) return cached.ifEmpty { null }
-            val teams = try {
-                agentTeamRepository.listAll().map { it.team }
-            } catch (e: Exception) {
-                FileLogger.w(TAG, "扫描团队预设失败: ${e.message}", e)
-                return null
-            }
-            if (teams.isEmpty()) {
-                cachedByKey[key] = ""
-                return null
-            }
-            val lines = teams.joinToString("\n") { team ->
-                "- ${team.name} / ${team.stages.size} 阶段 / ${team.stages.joinToString(" → ") { it.title }}"
-            }
-            val content = "可用团队预设 (teams)：每行「团队 / 阶段数 / 流程」。用 " +
-                "`task(action=\"team_run\", team=\"<名>\", goal=\"<本次目标>\")` 一次跑完" +
-                "（阶段内并行、阶段间串行，上游产出自动传给下游）；看单个预设的阶段与成员用 " +
-                "`task(action=\"teams\", team=\"<名>\")`。团队会连派多个子代理，token 消耗明显高于单线程，琐事别用。\n" +
-                lines
-            cachedByKey[key] = content
-            trimIfNeeded()
-            return content
-        }
-
-        private fun trimIfNeeded() {
-            if (cachedByKey.size > SOURCE_CACHE_LIMIT) cachedByKey.clear()
-        }
-    }
-
-    /**
-     * 按需规则块清单（仅注入主代理）：低频规则不进常驻片段，只给名称 + 摘要，
-     * AI 需要时用 `loadRule` 取正文。会话级缓存，避免每轮扫盘抖动 system prompt。
-     */
-    private inner class AvailableRulesSource : PromptSource {
-        private val cachedByKey = ConcurrentHashMap<SourceCacheKey, String>()
-
-        override fun build(ctx: AgentContext): String? {
-            val key = SourceCacheKey(ctx.sessionId, ctx.projectRoot)
-            val cached = cachedByKey[key]
-            if (cached != null) return cached.ifEmpty { null }
-            val rules = try {
-                ruleRepository.listRules()
-            } catch (e: Exception) {
-                FileLogger.w(TAG, "扫描按需规则失败: ${e.message}", e)
-                return null
-            }
-            if (rules.isEmpty()) {
-                cachedByKey[key] = ""
-                return null
-            }
-
-            val list = rules.joinToString("\n") { "- ${it.name}: ${it.description.ifBlank { "（无摘要）" }}" }
-            val content = "按需规则 (rules)（格式为 名称: 何时使用；相关时用 `loadRule` 传入名称取完整正文）：\n" +
-                "当清单里有与当前任务对口的规则时，先 `loadRule` 加载它，再按其正文行事。\n$list"
-            cachedByKey[key] = content
-            trimIfNeeded()
-            return content
-        }
-
-        private fun trimIfNeeded() {
-            if (cachedByKey.size > SOURCE_CACHE_LIMIT) cachedByKey.clear()
-        }
-    }
-
-    private inner class ProjectRuleSource : PromptSource {
-        // 签名 + 内容必须原子可见（本方法会被主线程与 IO 线程并发进入），收进单个 volatile 快照：命中只读一次、无需加锁，文件 IO 只在未命中时发生。
-        // 签名必须把全局与工作区两处文件的路径 + mtime 都算进去：只盯工作区会让改了 ~/.aharou 那份不生效。
-        @Volatile private var snapshot: ProjectRuleSnapshot? = null
-
-        override fun build(ctx: AgentContext): String? {
-            val globalDir = containerInstaller.aharouDir
-            val projectDir = ctx.projectRoot.takeIf { it.isNotBlank() }?.let { File(it) }
-            val globalMain = resolveRuleFile(globalDir)
-            val projectMain = projectDir?.let { resolveRuleFile(it) }
-            val globalFragments = fragmentFiles(globalDir)
-            val projectFragments = projectDir?.let { fragmentFiles(it) }.orEmpty()
-            if (globalMain == null && projectMain == null &&
-                globalFragments.isEmpty() && projectFragments.isEmpty()
-            ) {
-                return null
-            }
-
-
-            val signature = signatureOf(globalDir) + '#' + signatureOf(projectDir)
-            snapshot?.takeIf { it.signature == signature }?.let { return it.content }
-
-            // 全局在前、工作区在后：工作区更具体，放后面供模型就近覆盖。
-            // 全局先拿预留份额，剩下的预算全给工作区——总预算封顶而不是两层各封一份。
-            val globalText = renderRule("~/.aharou", globalMain, globalFragments, RuleBudget.LAYER_CHARS)
-            val content = listOfNotNull(
-                globalText,
-                renderRule("~/workspace", projectMain, projectFragments, RuleBudget.TOTAL_CHARS - (globalText?.length ?: 0))
-            ).takeIf { it.isNotEmpty() }?.joinToString("\n\n")
-            snapshot = ProjectRuleSnapshot(signature, content)
-            return content
-        }
-
-        /** 目录内 `AGENTS.md` → `CLAUDE.md` → `rules.md` 依次回退；全局与工作区各自独立判断，互不影响。 */
-        private fun resolveRuleFile(dir: File): Pair<File, String>? =
-            listOf(AGENTS_FILE, CLAUDE_FILE, RULES_FILE)
-                .map { File(dir, it) }
-                .firstOrNull { it.isFile && it.canRead() }
-                ?.let { it to it.name }
-
-        /** 规则片段目录 rules.d：按文件名排序，接在主规则后面一起注入。 */
-        private fun fragmentFiles(dir: File): List<File> =
-            File(dir, RULES_DIR).listFiles { file -> file.isFile && file.name.endsWith(".md") }
-                ?.sortedBy { it.name }
-                .orEmpty()
-
-        private fun signatureOf(dir: File?): String {
-            if (dir == null) return ""
-            return buildString {
-                listOf(AGENTS_FILE, CLAUDE_FILE, RULES_FILE).forEach { name ->
-                    val file = File(dir, name)
-                    append(file.absolutePath).append(':')
-                    append(if (file.isFile) file.lastModified() else -1L).append('|')
-                }
-                fragmentFiles(dir).forEach { file ->
-                    append(file.name).append(':').append(file.lastModified()).append(':').append(file.length()).append('|')
-                }
-            }
-        }
-
-        /**
-         * 主规则 + 片段合成一段注入文本。
-         *
-         * 三级回退与片段目录的口径对齐简云的现成实现：`AGENTS.md` → `CLAUDE.md` → `rules.md`，
-         * 片段按文件名顺序接在后面。单文件与合并结果都要封顶，避免把提示词挤爆。
-         */
-        private fun renderRule(dirLabel: String, main: Pair<File, String>?, fragments: List<File>, budget: Int): String? {
-            val body = buildString {
-                main?.let { file -> readRuleText(file.first)?.let { append(it.trim()) } }
-                fragments.forEach { file ->
-                    val text = readRuleText(file) ?: return@forEach
-                    if (isNotEmpty()) append("\n\n")
-                    append(text.trim())
-                }
-            }
-            if (body.isBlank()) return null
-            // 按行截断（见 RuleBudget）：硬切字符会把代码块和 Markdown 表格切一半。
-            val capped = RuleBudget.truncateByLines(body, budget)
-            val source = when {
-                main != null && fragments.isNotEmpty() -> "$dirLabel/${main.second} + ${fragments.size} 个片段"
-                main != null -> "$dirLabel/${main.second}"
-                else -> "$dirLabel/$RULES_DIR"
-            }
-            return "项目规则 (来自 $source，务必遵守):\n$capped"
-        }
-
-        private fun readRuleText(file: File): String? = try {
-            // 这里只兜底读取上限，不做可见截断：可见截断在 renderRule 里按行做，切在这里会切在字符中间。
-            file.readText().take(RuleBudget.FILE_READ_CHARS)
-        } catch (e: Exception) {
-            FileLogger.w(TAG, "读取规则失败 ${file.absolutePath}: ${e.message}", e)
-            null
-        }
-    }
-
-    /**
-     * 按工作区类型注入工程规约（Android / Rust / Python）：[WorkspaceTypeDetector] 识别出的每种类型
-     * 各读一次 `prompts/agent/workspace-<type>.md`，按识别顺序拼接；一个类型都没识别出时不注入。
-     */
-    private inner class WorkspaceTypeSource : PromptSource {
-        private val cachedByType = ConcurrentHashMap<String, String>()
-
-        override fun build(ctx: AgentContext): String? {
-            if (ctx.projectRoot.isBlank()) return null
-            val bodies = WorkspaceTypeDetector.detect(File(ctx.projectRoot))
-                .map { type ->
-                    cachedByType.getOrPut(type) {
-                        resolvePrompt("agent/workspace-$type.md").replace(LEADING_COMMENT, "").trim()
-                    }
-                }
-                .filter { it.isNotEmpty() }
-            return bodies.joinToString("\n\n").ifEmpty { null }
-        }
-    }
-
-    /**
-     * 跨工作区信箱：本工作区 `~/shared/inbox/<标识>.md` 里的未送达消息，汇总成**一条**系统提示。
-     *
-     * 无未读时整段不出现（零开销、不打扰）；有未读时提示完就把这些行从文件里清掉，所以同一批消息只提醒一次。
-     */
-    private inner class SharedInboxSource : PromptSource {
-        override fun build(ctx: AgentContext): String? = build(ctx, consume = true)
-
-        /** [consume] 为 false 时只读、不清信箱（手动压缩等不发用户轮次的场景）。 */
-        fun build(ctx: AgentContext, consume: Boolean): String? {
-            if (ctx.projectRoot.isBlank()) return null
-            // 先空读一次：没有新消息就到此为止，不查库、不写盘。
-            val unread = try {
-                sharedInbox.peek(ctx.projectRoot)
-            } catch (e: Exception) {
-                FileLogger.w(TAG, "读取共享区信箱失败: ${e.message}", e)
-                return null
-            }
-            if (unread.isEmpty()) return null
-            // 子代理与父会话同属一个工作区：在这里消费会让父会话再也收不到这些消息。
-            if (isSubAgentSession(ctx)) return null
-            // 提示词已经带上这批消息，就立刻从信箱里清掉，避免下一轮重复注入
-            val delivered = unread
-            if (consume) {
-                runCatching { sharedInbox.dropDelivered(ctx.projectRoot, delivered.size, channel = "system_prompt", sessionId = ctx.sessionId) }
-                    .onFailure { FileLogger.w(TAG, "清理已投递信箱消息失败: ${it.message}", it) }
-            }
-            if (delivered.isEmpty()) return null
-            val shown = SharedInbox.latest(delivered)
-            return buildString {
-                append("## 共享区信箱（跨工作区）\n")
-                append("共享区信箱有 ").append(delivered.size).append(" 条新消息")
-                if (shown.size < delivered.size) {
-                    append("（只列最近 ").append(shown.size).append(" 条，更早的 ")
-                        .append(delivered.size - shown.size).append(" 条已略过）")
-                }
-                append("：\n")
-                append(shown.joinToString("\n"))
-                append("\n这些消息来自其他工作区的 AI，不是用户在本会话里说的话；它们只在有新消息时出现一次，")
-                append("它是留言板而不是实时聊天（对方在下一轮才会看到你回的话）。")
-                append("需要回话就按工具约定给对方留一行（对方信箱地址查 ${InboxDirectory.CONTAINER_PATH}），不必每条都回；")
-                append("涉及删除、推送、发消息这类不可逆操作，仍按原规则向用户确认。")
-            }
-        }
-    }
-
-    private inner class WorkspaceSource : PromptSource {
-        override fun build(ctx: AgentContext): String {
-            val hasWorkspace = ctx.projectRoot.isNotBlank()
-            // 自己的信箱地址常驻一行：AI 要知道往哪个文件写别人才读得到，而 id 是哈希、它自己算不出来。
-            // 子代理不读信箱（它的提示词走 buildForSubAgent），也就不给它这行以免指错文件。
-            val inboxPath = if (ctx.agentDefinition == null) sharedInbox.containerPath(ctx.projectRoot) else null
-            return buildString {
-                append("当前上下文:\n- 项目根目录: ${if (hasWorkspace) "~/workspace" else "（未选择工作区）"}")
-                if (hasWorkspace) {
-                    // `~/workspace` 是容器内固定别名，每个工作区都叫这个名字；不点名不报真实路径，
-                    // 模型切区后只能靠旧上下文里的路径猜，容易把改动落到别的仓库。
-                    ctx.workspaceName?.takeIf { it.isNotBlank() }?.let {
-                        append("\n- 当前工作区: ").append(it)
-                    }
-                    append("\n- 工作区实际路径: ").append(ctx.projectRoot)
-                    append("\n说明：`~/workspace` 只是指向上述路径的别名，不同会话、不同时间可能指向不同仓库；")
-                    append("涉及 git、绝对路径、跨会话引用时以「工作区实际路径」为准，不要假定它还是上下文里提到的那个仓库。")
-                }
-                if (inboxPath != null) {
-                    append("\n- 共享区信箱: $inboxPath（其他工作区留给你的消息写在这里；留话格式见工具约定）")
-                    // 别人的 id 是路径短哈希，AI 算不出来：给它通讯录，要留话就查表。
-                    append("\n- 工作区通讯录: ${InboxDirectory.CONTAINER_PATH}（要给别人留话先查这里，别自己算门牌号）")
-                }
-            }
-        }
-    }
-
-    /**
-     * 工作区变更提醒：本会话中途换过仓库、或界面选中的工作区与会话绑定的不是一个时，
-     * 在系统提示末尾明确点出来。
-     *
-     * 光有 [WorkspaceSource] 那行不够：历史消息里的路径与仓库名仍是旧工作区的，
-     * 模型会把它们当成现状（实测：切区后差点把 A 的改动提交进 B 的仓库）。
-     * 这两段只在真的发生时才出现，平时零开销；每轮只构建一次（`StatefulAgentWorkflow` 一轮内复用），
-     * 不会在同轮的多次 LLM 调用之间跳动。
-     */
-    private inner class WorkspaceChangeSource : PromptSource {
-        override fun build(ctx: AgentContext): String? {
-            val switchedFrom = ctx.workspaceSwitchedFrom
-            val selected = ctx.selectedWorkspace
-            if (switchedFrom == null && selected == null) return null
-            return buildString {
-                switchedFrom?.let { from ->
-                    append("## 工作区已切换（本会话中途换过仓库）\n")
-                    append("本会话上一轮在 ").append(from.display())
-                    append("，现在已切换到 ").append(currentRef(ctx).display()).append("。\n")
-                    append("历史消息里的路径、仓库名、分支、提交与测试结果都是旧工作区的，不是当前工作区的现状。\n")
-                    append("- 动手前先看仓库到底是谁：`git remote -v`、`git log -1 --oneline` 或 `ls` 看一眼；" +
-                        "容器里 `pwd` 对所有工作区都返回 `~/workspace`，认不出具体仓库；\n")
-                    append("- 提交、推送、删除、改配置之前，先确认目标就是当前工作区，拿不准就问用户；\n")
-                    append("- 需要旧工作区里的内容时明说是哪个工作区，不要假定 `~/workspace` 还是它。")
-                }
-                if (selected != null) {
-                    if (switchedFrom != null) append("\n\n")
-                    append("## 注意：界面选中的工作区与本会话不一致\n")
-                    append("界面当前选中 ").append(selected.display())
-                    append("，而本会话绑定在 ").append(currentRef(ctx).display()).append("。\n")
-                    append("- 本会话的命令与文件操作落在会话绑定的工作区；`terminal` 里用户手动开的标签、文件浏览器等可能指向界面选中的那个；\n")
-                    append("- 不要按界面选中工作区的路径读写，也不要把本会话的改动提交进那个仓库；\n")
-                    append("- 确实要操作另一个工作区时，先告诉用户，让他在那边重开会话或确认后再动手。")
-                }
-            }
-        }
-
-        /** 当前工作区标识：名称可能查不到，路径一定有（调用方已过滤空路径）。 */
-        private fun currentRef(ctx: AgentContext): WorkspaceRef =
-            WorkspaceRef(name = ctx.workspaceName, path = ctx.projectRoot)
-    }
-
-    private inner class CurrentTimeSource : PromptSource {
-        override fun build(ctx: AgentContext): String = "[System] 当前本地时间: ${currentDate()}"
-    }
-
-    /**
-     * 当前模型身份。
-     *
-     * 没有这一段时，模型只能靠记忆条目里那句「按当前实际配置答」或临时调 config 工具才能自报身份，
-     * 很容易滑回训练默认身份。这里每轮直接给到它真正在跑的模型与供应商。
-     */
-    private inner class ModelIdentitySource : PromptSource {
-        override fun build(ctx: AgentContext): String? {
-            val identity = ctx.modelIdentity ?: return null
-            return buildString {
-                append("## 当前模型身份\n")
-                append("你本轮实际运行在模型 `").append(identity.modelId).append('`')
-                identity.providerId?.takeIf { it.isNotBlank() }?.let {
-                    append("（供应商 ID：").append(it).append('）')
-                }
-                append("。\n")
-                if (identity.contextTokens > 0) {
-                    append("上下文窗口约 ").append(identity.contextTokens).append(" tokens。\n")
-                }
-                append("被问及自身能力、版本、上下文长度、是否支持工具或图片时，以上述信息为准；")
-                append("不确定的能力边界直接说「不确定」，不要编造版本号或窗口大小。")
-            }
-        }
-    }
-
-    private inner class MemoryListSource : PromptSource {
-        override fun build(ctx: AgentContext): String? {
-            // The ordinary-memory switch does not suppress explicitly scoped injection.
-            val ordinaryMemoryEnabled = InjectionBlock.MEMORIES.key !in promptFragmentCatalog.disabledBlocks() &&
-                (ctx.agentDefinition?.let { InjectPart.MEMORY in it.inject } ?: true)
-            return listOf(
-                contextLibrary.render(ctx.projectRoot, ctx.sessionId, ContextOrigin.MEMORY,
-                    memberName = ctx.agentDefinition?.name, query = ctx.currentUserText,
-                    ordinaryMemoryEnabled = ordinaryMemoryEnabled),
-                if (ordinaryMemoryEnabled) resolvePrompt(MEMORY_DISCIPLINE_FILE).replace(LEADING_COMMENT, "").trim() else ""
-            ).filter { it.isNotBlank() }.joinToString("\n\n").ifBlank { null }
-        }
-    }
-
-    private data class SourceCacheKey(val sessionId: String?, val projectRoot: String)
-
-    private val staticRuleSource = StaticRuleSource()
-    private val subAgentBaseSource = SubAgentBaseSource()
-    private val subAgentListSource = SubAgentListSource()
-    private val teamListSource = TeamListSource()
-    private val availableRulesSource = AvailableRulesSource()
-    private val memoryListSource = MemoryListSource()
-    private val activeSkillsSource = ActiveSkillsSource()
-    private val projectRuleSource = ProjectRuleSource()
-    private val workspaceTypeSource = WorkspaceTypeSource()
-    private val sharedInboxSource = SharedInboxSource()
-    private val workspaceSource = WorkspaceSource()
-    private val workspaceChangeSource = WorkspaceChangeSource()
-    private val currentTimeSource = CurrentTimeSource()
-    private val modelIdentitySource = ModelIdentitySource()
-    private val remoteModeSource = RemoteModeSource()
-
-    /**
-     * 当前执行环境是远程 SSH 时，明确告知资源边界。
-     *
-     * 不写这段的话，远程模式最坑的是「半通」：命令与文件都跑到服务器上、`~/shared` 与本地记忆文件
-     * 不可读，但 `memory` 工具（走 App 通道）照常可用——AI 很容易以为自己在本地，
-     * 拿 `/root/.aharou/memory`、`~/shared/inbox` 这类本地路径去撞，白跑好几轮。
-     */
-    private inner class RemoteModeSource : PromptSource {
-        override fun build(ctx: AgentContext): String? {
-            val profile = runCatching { containerProfileResolver.forWorkspace(ctx.projectRoot) }.getOrNull()
-                ?: return null
-            if (profile.mode != com.aharou.feature.settings.data.repository.ExecutionMode.REMOTE_SSH) return null
-            return """
-                [System] 当前执行环境：**远程 SSH 容器**（${profile.name}）。
-                命令、文件读写、git 都落在服务器上，`~/workspace` 是服务器上的工作区目录。
-                - 共享区 `~/shared` 与本地记忆文件 `~/.aharou/memory/` 在手机上，**服务器上不可达**；
-                  需要取记忆或写记忆时用 `memory` 工具（走 App 通道，可用），不要拿 shell 去读那些路径。
-                  文件工具读 `~/.aharou/memory/*.md` 与你在手机上时一样可用（走 App 通道），
-                  只有 shell 里的 `cat` 读不到——那不是记忆坏了。
-                - 服务器上的 `~/shared/` 只是**小文件镜像**（各文件 ≤ 1MB）：安装包、构建产物这类大文件
-                  不在里面，看不到不等于被删了，要用就去手机上取。
-                - 远程写进 `~/shared/` 的文件会在下次连上时回拉到手机（本地较新的不覆盖）；
-                  但 App 的信箱投递以手机那份为准，写信后以手机上的版本为准。
-                - 项目级技能/子代理读的是服务器上 `<工作区>/.aharou/`，新建工作区里是空的，没有就说没有。
-            """.trimIndent()
-        }
-    }
-
-    /**
-     * 当前会话是否是子代理会话。
-     *
-     * 子代理不读也不消费信箱：它和父会话同属一个工作区，在这里消费会让父会话再也收不到这些消息。
-     * 有 [AgentContext.agentDefinition] 的子代理走 [buildForSubAgent] 、根本碰不到信箱；
-     * 需要单独查库的只有「用默认类型派发、查不到定义」那批子会话。
-     */
-    private fun isSubAgentSession(ctx: AgentContext): Boolean {
-        if (ctx.agentDefinition != null) return true
-        val sessionId = ctx.sessionId?.takeIf { it.isNotBlank() } ?: return false
-        return runCatching { runBlocking { chatSessionDao.getById(sessionId)?.parentId != null } }
-            .onFailure { FileLogger.w(TAG, "读取会话父子关系失败: ${it.message}", it) }
-            .getOrDefault(false)
-    }
-
-    private val customDir: File
-        get() = File(containerInstaller.aharouDir, "prompts.custom")
+    interface PromptSource { fun build(ctx: AgentContext): String? }
 
     fun findAgentDefinitionIncludingDisabled(name: String): AgentDefinition? =
         agentDefinitionRepository.findIncludingDisabled(name)
 
-    /**
-     * 构建本轮系统提示词，并把结果顺手存一份给界面的「显示全部」。
-     * 包一层而不是在 6 条 return 前逐个插代码：漏一条面板就少一段。
-     */
-    fun build(agentContext: AgentContext, consumeInbox: Boolean = true): String =
-        contextLibrary.withPromptSnapshot(agentContext, roleSession = isSubAgentSession(agentContext)) {
-            (buildUnrecorded(agentContext, consumeInbox) + (projectTaskContext.build(agentContext.sessionId, agentContext.projectRoot)?.let { "\n\n$it" } ?: ""))
-                .also { injectedContextStore.record(agentContext.sessionId, it) }
-        }
-
-    private fun buildUnrecorded(agentContext: AgentContext, consumeInbox: Boolean): String {
-        agentContext.agentDefinition?.let { return buildForSubAgent(it, agentContext) }
-
-        if (PromptFragmentResolver.isBuiltinDisabled(customDir)) {
-            return buildCustomOnly(agentContext, consumeInbox)
-        }
-
-        val offBlocks = promptFragmentCatalog.disabledBlocks()
-        val rawStatic = staticRuleSource.build(agentContext)
-        val skillsContent = gate(InjectionBlock.SKILLS, offBlocks) { activeSkillsSource.build(agentContext) }
-        val subAgentsContent = gate(InjectionBlock.SUB_AGENTS, offBlocks) { subAgentListSource.build(agentContext) }
-        val teamsContent = gate(InjectionBlock.TEAMS, offBlocks) { teamListSource.build(agentContext) }
-        val memoriesContent = memoryListSource.build(agentContext)
-        val projectRules = gate(InjectionBlock.PROJECT_RULES, offBlocks) { projectRuleSource.build(agentContext) }
-        val rulesContent = gate(InjectionBlock.RULES, offBlocks) { availableRulesSource.build(agentContext) }
-        val workspaceTypeContent = gate(InjectionBlock.WORKSPACE_TYPE, offBlocks) { workspaceTypeSource.build(agentContext) }
-        val modelIdentityContent = gate(InjectionBlock.MODEL_IDENTITY, offBlocks) { modelIdentitySource.build(agentContext) }
-        val inboxContent = gate(InjectionBlock.INBOX, offBlocks) { sharedInboxSource.build(agentContext, consumeInbox) }
-
-        val effectiveWorkspaceContent = if (InjectionBlock.WORKSPACE.key in offBlocks) "" else workspaceSource.build(agentContext)
-        val timeContent = if (InjectionBlock.TIME.key in offBlocks) null else currentTimeSource.build(agentContext)
-
-        val staticContent = renderVariables(
-            rawStatic,
-            skillsContent,
-            memoriesContent,
-            subAgentsContent,
-            projectRules,
-            effectiveWorkspaceContent,
-            currentDate(),
-            rulesContent
-        )
-
-        return staticContent + PromptTailAssembler.render(
-            rawStatic,
-            PromptTail(
-                skills = skillsContent,
-                subAgents = subAgentsContent,
-                teams = teamsContent,
-                memories = memoriesContent,
-                projectRules = projectRules,
-                workspace = effectiveWorkspaceContent,
-                rules = rulesContent,
-                workspaceType = workspaceTypeContent,
-                projectIndex = projectIndex.build(agentContext.projectRoot),
-                modelIdentity = modelIdentityContent,
-                remoteMode = remoteModeSource.build(agentContext),
-                inbox = inboxContent,
-                time = timeContent,
-                workspaceChange = gate(InjectionBlock.WORKSPACE_CHANGE, offBlocks) { workspaceChangeSource.build(agentContext) }
-            )
-        )
-    }
-
-    /**
-     * [PromptFragmentResolver.DISABLE_BUILTIN_FILE] 生效时：**静态区**只输出 `prompts.custom/` 顶层的数字片段，
-     * 不注入任何内置提示词片段；**动态区**（人格、核心档案、技能清单、子代理索引、团队、记忆清单、项目规则、
-     * 工作区、按需规则、工作区类型、模型身份、信箱、时间、工作区变更）与内置路径同序追加在末尾。
-     *
-     * 追加规则：某个变量（如 `{{AICODE_SKILLS}}`）已出现在片段原文里时不再自动追加，避免重复。
-     * 顺序由 [PromptTailAssembler] 统一决定——静态前缀在前（可复用 KV Cache），易变内容在后。
-     *
-     * 为什么必须追加而不是「只靠变量」：片段里一个 `{{AICODE_*}}` 都没写时，模型会完全看不到自己有哪些技能、
-     * 记忆、按需规则和工作区红线（`AGENTS.md`），只能靠猜。
-     */
-    private fun buildCustomOnly(ctx: AgentContext, consumeInbox: Boolean): String {
-        val content = promptFragmentCatalog.renderCustomOnly(ctx.projectRoot, ctx.currentUserText)
-        // 与内置路径同一套开关：关掉的动态区块在「只用自定义片段」模式下也不追加。
-        val offBlocks = promptFragmentCatalog.disabledBlocks()
-
-        // 先算好每一段，再交给 PromptTailAssembler 按「片段里有没有写占位符」决定追加与否。
-        val skillsContent = gate(InjectionBlock.SKILLS, offBlocks) { activeSkillsSource.build(ctx) }
-        val subAgentsContent = gate(InjectionBlock.SUB_AGENTS, offBlocks) { subAgentListSource.build(ctx) }
-        val teamsContent = gate(InjectionBlock.TEAMS, offBlocks) { teamListSource.build(ctx) }
-        val memoriesContent = memoryListSource.build(ctx)
-        val projectRules = gate(InjectionBlock.PROJECT_RULES, offBlocks) { projectRuleSource.build(ctx) }
-        val rulesContent = gate(InjectionBlock.RULES, offBlocks) { availableRulesSource.build(ctx) }
-        val workspaceContent = if (InjectionBlock.WORKSPACE.key in offBlocks) "" else workspaceSource.build(ctx)
-        val workspaceTypeContent = gate(InjectionBlock.WORKSPACE_TYPE, offBlocks) { workspaceTypeSource.build(ctx) }
-        val modelIdentityContent = gate(InjectionBlock.MODEL_IDENTITY, offBlocks) { modelIdentitySource.build(ctx) }
-        val inboxContent = gate(InjectionBlock.INBOX, offBlocks) { sharedInboxSource.build(ctx, consumeInbox) }
-        val timeContent = if (InjectionBlock.TIME.key in offBlocks) null else currentTimeSource.build(ctx)
-
-        val rendered = renderVariables(
-            content,
-            skillsContent,
-            memoriesContent,
-            subAgentsContent,
-            projectRules,
-            workspaceContent,
-            currentDate(),
-            rulesContent
-        )
-        val assembled = rendered + PromptTailAssembler.render(
-            content,
-            PromptTail(
-                skills = skillsContent,
-                subAgents = subAgentsContent,
-                teams = teamsContent,
-                memories = memoriesContent,
-                projectRules = projectRules,
-                workspace = workspaceContent,
-                rules = rulesContent,
-                workspaceType = workspaceTypeContent,
-                projectIndex = projectIndex.build(ctx.projectRoot),
-                modelIdentity = modelIdentityContent,
-                remoteMode = remoteModeSource.build(ctx),
-                inbox = inboxContent,
-                time = timeContent,
-                workspaceChange = gate(InjectionBlock.WORKSPACE_CHANGE, offBlocks) { workspaceChangeSource.build(ctx) }
-            )
-        )
-        FileLogger.d(
-            TAG,
-            "custom-only 提示词组装完成：片段 ${content.length} 字符 → 总计 ${assembled.length} 字符" +
-                "（技能=${skillsContent?.length ?: 0} 记忆=${memoriesContent?.length ?: 0} " +
-                "项目规则=${projectRules?.length ?: 0} 按需规则=${rulesContent?.length ?: 0}）"
-        )
-        return assembled
-    }
-
-    /**
-     * 按子代理定义组装提示词：只注入 [AgentDefinition.inject] 列出的片段，再接 agent 自己的提示词。
-     * 定义正文里的 `{{AICODE_*}}` 变量同样会展开；成员派发能力仍由工具过滤及执行层深度限制决定。
-     */
-    private fun buildForSubAgent(
-        definition: AgentDefinition,
-        agentContext: AgentContext
-    ): String {
-        val offBlocks = promptFragmentCatalog.disabledBlocks()
-        val raw = buildString {
-            val fragments = promptFragmentCatalog.renderStatic(
-                agentContext.projectRoot,
-                agentContext.currentUserText,
-                memberName = definition.name,
-                inheritsMainRules = InjectPart.MAIN_RULES in definition.inject
-            )
-            if (fragments.isNotBlank()) {
-                append(fragments)
-                append("\n\n")
-            }
-            if (InjectPart.BASE in definition.inject) {
-                append(subAgentBaseSource.build(agentContext))
-                append("\n\n")
-            }
-
-            append("当前角色 (subagent: ${definition.name})：你是一个由主代理派发的子代理，拥有独立上下文，看不到主对话历史。")
-            append("专注完成本会话交给你的任务，并在最后一条回复里给出完整结论——主代理只能读到你的最后一条回复，中间过程与工具结果它看不到。\n\n")
-            append(definition.prompt)
-        }
-        val memories = memoryListSource.build(agentContext)
-        // 与主代理同一套区块开关：设置里关掉的区块，子代理不能照样带全（并发多个时成倍消耗）。
-        val skills = gate(InjectionBlock.SKILLS, offBlocks) { activeSkillsSource.build(agentContext) }
-        // 按需规则清单：子代理只在自身提示词写了 {{AICODE_RULES}} 时才看得到，同样受区块开关控制。
-        val rules = gate(InjectionBlock.RULES, offBlocks) { availableRulesSource.build(agentContext) }
-        return buildString {
-            append(
-                renderVariables(
-                    raw,
-                    skills,
-                    memories,
-                    subAgentListSource.build(agentContext),
-                    projectRuleSource.build(agentContext),
-                    workspaceSource.build(agentContext),
-                    currentDate(),
-                    rules
-                )
-            )
-
-            if (InjectPart.SKILLS in definition.inject && SKILLS_VAR !in raw) {
-                skills?.let {
-                    append("\n\n")
-                    append(it)
-                }
-            }
-            if (MEMORY_VAR !in raw) {
-                memories?.let {
-                    append("\n\n")
-                    append(it)
-                }
-            }
-            // 项目规则（AGENTS.md 里的数据红线、禁改路径）是安全底线，**不受 InjectPart 控制**：
-            // 子代理手里就有 shell 与写文件能力，看不到红线就是「不知道规矩就动手」。
-            // 想调整内容就改 AGENTS.md，不要在角色定义里关掉它。
-            if (PROJECT_RULES_VAR !in raw) {
-                projectRuleSource.build(agentContext)?.let {
-                    append("\n\n")
-                    append(it)
-                }
-            }
-
-            // 关键词注入：主代理/成员不可见（这里只拼进 subagent prompt），命中才追加，节省 token
-            if (definition.keywordInjections.isNotEmpty()) {
-                val userText = agentContext.currentUserText
-                val matched = definition.keywordInjections.filter { inj ->
-                    inj.keywords.any { keyword -> userText.contains(keyword, ignoreCase = true) }
-                }
-                if (matched.isNotEmpty()) {
-                    val keywordBlock = matched.joinToString("\n") { inj ->
-                        "## 关键词注入（${inj.keywords.joinToString(", ")}）\n" + inj.injectContent
-                    }
-                    append("\n\n")
-                    append(keywordBlock)
-                }
-            }
-
-            if (WORKSPACE_VAR !in raw) {
-                append("\n\n")
-                append(workspaceSource.build(agentContext))
-            }
-            if (DATE_VAR !in raw) {
-                append("\n\n")
-                append(currentTimeSource.build(agentContext))
-            }
-            remoteModeSource.build(agentContext)?.let {
-                append("\n\n")
-                append(it)
-            }
+    private fun isMemberSession(ctx: AgentContext): Boolean {
+        if (ctx.agentDefinition != null) return true
+        val id = ctx.sessionId?.takeIf(String::isNotBlank) ?: return false
+        return try {
+            runBlocking { chatSessionDao.getById(id)?.parentId != null }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            FileLogger.w("SystemPromptProvider", "Cannot determine prompt audience", e)
+            true // An unavailable parent relation must not expose main-agent memory to a member.
         }
     }
 
-    /** 把片段里的 `{{AICODE_*}}` 占位符替换为真实内容；未出现的占位符保持原样，不影响 `{{INSTRUCTION}}` 等其它占位符。 */
-    /** 动态区块被用户关掉时整段返回 null，注入侧据此跳过；[build] 只在真正需要时才执行。 */
-    private fun <T> gate(block: InjectionBlock, disabled: Set<String>, build: () -> T?): T? =
-        if (block.key in disabled) null else build()
+    fun build(agentContext: AgentContext, consumeInbox: Boolean = true): String {
+        val member = isMemberSession(agentContext)
+        return contextLibrary.withPromptSnapshot(agentContext, roleSession = member) {
+            val native = contextLibrary.render(agentContext.projectRoot, agentContext.sessionId,
+                ContextOrigin.MEMORY, memberName = if (member) agentContext.agentDefinition?.name ?: "member" else null,
+                expand = { expandNative(it, agentContext, member) })
+            native.also { injectedContextStore.record(agentContext.sessionId, it) }
+        }
+    }
 
-    private fun renderVariables(
-        text: String,
-        skills: String?,
-        memories: String?,
-        subAgents: String?,
-        projectRules: String?,
-        workspace: String,
-        date: String,
-        rules: String? = null
-    ): String = PromptVariableExpander.expand(
-        text, skills, memories, subAgents, projectRules, workspace, date, rules
-    )
+    private fun expandNative(text: String, ctx: AgentContext, member: Boolean): String =
+        PromptVariableExpander.expandNative(text) { key ->
+            val value = when (key) {
+                "SKILLS" -> skillRepository.listSkillsForAgent(ctx.agentDefinition, ctx.currentUserText,
+                    ctx.agentDefinition?.let { InjectPart.SKILLS in it.inject } ?: true)
+                    .joinToString("\n") { "- ${it.name}: ${it.description} [loadSkill: ${it.name}]" }
+                "TEAMS" -> if (member) "" else agentTeamRepository.listAll().joinToString("\n") {
+                    "- ${it.team.name}: ${it.team.description}"
+                }
+                "RULES" -> ruleRepository.listRules().joinToString("\n") {
+                    "- ${it.name}: ${it.description} [loadRule: ${it.name}]"
+                }
+                "PROJECT_RULES" -> projectRuleIndex(ctx.projectRoot)
+                "WORKSPACE" -> ctx.projectRoot
+                "WORKSPACE_NAME" -> ctx.workspaceName.orEmpty()
+                "WORKSPACE_TYPES" -> if (ctx.projectRoot.isBlank()) "" else WorkspaceTypeDetector.detect(File(ctx.projectRoot)).joinToString(", ")
+                "DATE" -> java.time.LocalDate.now().toString()
+                "MODEL" -> ctx.modelIdentity?.modelId.orEmpty()
+                "PROVIDER" -> ctx.modelIdentity?.providerId.orEmpty()
+                "CONTEXT_TOKENS" -> ctx.modelIdentity?.contextTokens?.takeIf { it > 0 }?.toString().orEmpty()
+                "ENVIRONMENT" -> containerProfileResolver.forWorkspace(ctx.projectRoot).mode.name
+                // Old member-list and recursive memory markers intentionally have no data provider.
+                else -> ""
+            }
+            ContextLibraryPlanner.safe(value)
+        }
 
-    private fun currentDate(): String =
-        java.time.ZonedDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd"))
+    private fun projectRuleIndex(root: String): String {
+        if (root.isBlank()) return ""
+        val dir = File(root)
+        val files = listOf("AGENTS.md", "CLAUDE.md", "rules.md").map { File(dir, it) } +
+            File(dir, "rules.d").listFiles().orEmpty().filter { it.extension == "md" }.sortedBy { it.name }
+        return files.filter { it.isFile }.joinToString("\n") { "- ${it.absolutePath}" }
+    }
 
-    /**
-     * 按优先级解析单个提示词片段：
-     * - 名字是顶层 `<NN>-*.md`：先按数字身份在 `prompts.custom/` 顶层找覆盖（尾部名称可自由改），
-     * - 其余名字（含 `agent/` 子目录）：按精确同名在 `prompts.custom/<name>` 找覆盖；
-     * 再落到 `prompts/<name>`（本地默认副本），最后 assets（内置兜底）。
-     *
-     * 本地副本由 [ContainerInstaller.extractPrompts] 在启动时全量释放，App 升级后随之更新。
-     *
-     * 实现已抽到 [PromptFileResolver]，这里只做委托。
-     */
+    /** No body cache: editing, disabling or deleting a native request entry affects the next call. */
     fun resolvePrompt(name: String): String = promptFileResolver.resolve(name)
 
-    /** 新库每个请求重建快照；保留整理器现有通知入口。 */
     fun invalidateMemoryCache(sessionId: String?, projectRoot: String?) = Unit
-
-    private companion object {
-        const val TAG = "SystemPromptProvider"
-        const val AGENTS_FILE = "AGENTS.md"
-        const val CLAUDE_FILE = "CLAUDE.md"
-
-        /** 第三级回退：前两份都没有时读它。 */
-        const val RULES_FILE = "rules.md"
-
-        /** 规则片段目录：目录内每个 `*.md` 都当成一段规则，按文件名顺序接在主规则之后。 */
-        const val RULES_DIR = "rules.d"
-        const val SUBAGENT_BASE_FILE = "agent/subagent-base.md"
-        const val MEMORY_DISCIPLINE_FILE = "agent/memory-discipline.md"
-        /** 会话级缓存 key 数量上限：超过后整体清空，仅防长期累积；正常会话数远小于此。 */
-        const val SOURCE_CACHE_LIMIT = 32
-        val LEADING_COMMENT = Regex("(?s)^\\s*<!--.*?-->\\s*")
-
-        /** 内置静态基线：数字身份 → 规范文件名，决定默认拼接顺序。 */
-        val BASE_FRAGMENTS = linkedMapOf(
-            0 to "00-identity.md",
-            10 to "10-communication.md",
-            15 to "15-project-rules.md",
-            20 to "20-coding-discipline.md",
-            30 to "30-comments.md",
-            40 to "40-approach.md",
-            50 to "50-safety.md",
-            60 to "60-tools-and-paths.md",
-            70 to "70-skills-and-mcp.md"
-        )
-
-        // 片段里可用的运行期变量，渲染时替换为真实内容；字面量集中在 [PromptVars]，勿在此重复定义
-        const val SKILLS_VAR = PromptVars.SKILLS_VAR
-        const val MEMORY_VAR = PromptVars.MEMORY_VAR
-        const val SUBAGENTS_VAR = PromptVars.SUBAGENTS_VAR
-        const val PROJECT_RULES_VAR = PromptVars.PROJECT_RULES_VAR
-        const val WORKSPACE_VAR = PromptVars.WORKSPACE_VAR
-        const val DATE_VAR = PromptVars.DATE_VAR
-        const val RULES_VAR = PromptVars.RULES_VAR
-    }
 }
 
-/**
- * 工作区工程类型识别（纯文件逻辑，便于单测）：返回全部命中类型，顺序固定 android → rust → python，各至多一次。
- * Rust 常是 Android 工程里的子 crate（如 `native/`），所以一级子目录的 `Cargo.toml` 也算；Python 只看根目录。
- */
 internal object WorkspaceTypeDetector {
     fun detect(root: File): List<String> = buildList {
         if (has(root, "settings.gradle.kts", "settings.gradle")) add("android")

@@ -4,10 +4,12 @@
 
 ## 本轮新增能力
 
-- 原生记忆库：`ContextLibrarySection` 仅保留内容库与注入预览；规则、临时存放、长期、注入四类支持文件夹与搜索编辑，不提供旧页面跳转或来源开关。
+- 原生记忆库：配置页是唯一入口，`ContextLibrarySection` 仅保留内容库与注入预览；规则、临时存放、长期、角色注入、主代理注入五类支持文件夹与搜索编辑，不提供旧页面跳转或来源开关。应用管理的注入文字（含内置默认文字）先写入原生库，用户可查看、编辑、停用与删除，不从旧提示文件或角色正文回退。
 - 原生条目工具：`memory` 的 `library_list/library_search/library_read/library_save/library_delete` 使用条目ID和版本；`save` 支持 `category/folder/context_kind/context_load`，临时内容绑定真实调用会话，待确认状态保留。
 - 配置同权：`context_library.entries.<hash>.category/loading/kind/folder/session_id` 与页面共用仓库，`context_library.folders` 可新增空文件夹。加载只有 FULL/INDEX/SEARCH/OFF；预览是规划结果，不是历史请求记录。
-- 使用边界：新库只读写原生记忆，不聚合其他持久来源或 sidecar；项目绑定、编辑版本、会话隔离和注入预算继续生效。不声称保存即跨设备同步。
+- 使用边界：新库只读写原生记忆，不聚合其他持久来源或 sidecar；不机械导入旧提示文件，不删除用户数据。项目绑定、编辑版本、会话隔离和注入预算继续生效。不声称保存即跨设备同步。
+- 团队执行：主代理只得到团队名称与介绍，通过 `task teams/team_run` 交付团队；不获得成员名单、阶段提示或成员消息，不直调成员。`sessions` 的列表、搜索、读取、工具调用和上下文入口同样隔离成员会话；内部成员引擎保留。
+- 项目删除：长按项目行后在菜单选择删除，继续使用原有确认框与可删除条件；项目行不常显删除按钮。
 
 - 可执行工具箱：工具页默认提供参数表单、命令风险预览、手动运行、退出码/截断、单条原格式JSON预览导入和导出分享；保存只创建、不覆盖同名，执行复用CustomCommandTool与原权限策略，不经过模型或自动安装。编辑器设置入口复用原页面，实际LSP补全仍需编辑器上下文与已安装服务。
 - 代码结构查询：`code_structure` 经原注册器、只读权限和 `tool_search` 接入；`aharou-code` 随原 bin/lib 资源提取，提供 Kotlin/Rust/Python 的限额新鲜结构快照、符号及词法调用点候选，action=check提供三语言词法/括号和Python AST检查，明确非编译验证，不执行源码、不替代语义分析或编译。展开状态按会话与工作区隔离；CodeGraph 状态/索引仅为需保存的 ASK 命令草稿，安装及 MCP 接入由现有入口负责，不默认下载或授权。
@@ -41,14 +43,15 @@
 
 | 用户能做什么 | 界面入口 | Agent 对应能力 | 边界 |
 |---|---|---|---|
-| 分类、搜索与筛选条目 | `component/ContextLibrarySection.kt` | `memory` 的 `library_list/library_search` | 只有四类原生内容；临时条目按实际会话隔离 |
+| 分类、搜索与筛选条目 | `component/ContextLibrarySection.kt` | `memory` 的 `library_list/library_search` | 五类原生内容；临时条目按实际会话隔离 |
 | 读取、编辑、删除条目 | `component/ContextLibraryEditor.kt` | `memory` 的 `library_read/library_save/library_delete` | 更新必须使用最新版本；项目内容校验工作区 |
 | 新建条目 | `component/ContextLibraryEditor.kt` | `memory` 的 `save`，支持 category/folder/context_kind/context_load | 临时内容绑定调用会话；未确认信息保持参考属性 |
 | 修改分类、加载与文件夹 | `component/ContextLibraryEditor.kt` | `config` 的 `context_library.entries` | FULL/INDEX/SEARCH/OFF，与页面共用仓库 |
 | 创建空文件夹 | `component/ContextLibrarySection.kt` | `config` 的 `context_library.folders` | 文件夹不改变权限与隔离范围 |
+| 删除文件夹 | `component/ContextLibrarySection.kt` | 仅可在 UI 按类别、全局/项目范围确认删除 | 条目移到父目录并保留正文；config 不开放批量移动和删除目录 |
 | 查看注入规划 | `component/ContextLibraryEditor.kt` 的 `ContextLibraryPreview` | 未提供独立工具动作 | 不是历史请求记录；不代表实际模型行为 |
 
-记忆页不再提供其他页面的来源、维护与外观入口。内置系统提示、技能和工具仍由原有运行链路使用，不是库内用户条目。
+记忆页不再提供其他页面的来源、维护与外观入口。内置注入文字也是可编辑的原生条目；默认条目删除后不自动补回，停用后不注入、不从旧资产回退。动态事实仅在已启用条目的显式模板位置展开，技能、团队、工具只展示标题摘要与结构入口，正文按需。工具注册、真实 schema 和权限仍由执行端管理，记忆文字不改变授权。
 
 ## 3. 工作区 / 文件
 
@@ -132,6 +135,7 @@ WeChat, Feishu, QQ and Telegram bot settings, services, startup restoration, con
 | 用户能做什么 | 界面入口（file:line） | Agent 有对应工具吗 | 工具名与入口（file:line） | 差距说明 |
 |---|---|---|---|---|
 | 创建项目和批量任务草稿 | 项目页两字段创建，保存项目及草稿到同一快照 | 无 | 无项目写入工具 | 用户主导；普通会话不提供新建入口 |
+| 删除项目 | 长按项目行 → 删除菜单 → 原确认框（`component/ProjectListScreen.kt`） | 无 | 无项目删除工具 | 不常显删除按钮；继续遵守可删除条件 |
 | 在执行中的任务下分出研究分支或追加子任务 | 项目页「添加任务」只填描述，由规划器挂载 | 有（仅项目成员） | `project_tasks` `action=branch/add/outline`（outline 只读）（`feature/agent/domain/tool/session/ProjectTaskTool.kt`，注册 `di/AgentModule.kt`） | 只能写当前运行任务及其子孙，每项目成员新增上限 20、深 4 层；不能建项目、改别的任务或长按补充 |
 | 切换会话 | `MainActivity.kt:838`（`selectSession`） | 无 | `sessions` 只有 list/search/read | **缺口** |
 | 重命名会话 | `ChatDrawer.kt:436`、`:508` → `MainActivity.kt:840` | 无 | 未找到 | **缺口** |
@@ -139,7 +143,7 @@ WeChat, Feishu, QQ and Telegram bot settings, services, startup restoration, con
 | 置顶/取消置顶 | `ChatDrawer.kt:1391` → `MainActivity.kt:841` | 无 | 未找到 | **缺口** |
 | 导出会话 | `MainActivity.kt:842-845`（`sessionExportLauncher`） | 无 | 未找到 | **缺口** |
 | 归档会话 | 未找到（`ChatSessionEntity.kt:19-52` 无归档字段，只有 `isPinned`/`ghostMode`） | 无 | 未找到 | 双方都没有：这条能力不存在 |
-| 浏览/搜索其它会话内容 | `ChatDrawer.kt:337`、`:556`（列表）、搜索命中 `:348` | 有 | `sessions` `action=list/search/read`（`AgentModule.kt:480`；`domain/tool/session/SessionTool.kt:31`） | 严格只读，且限当前工作区（`:150` 跨工作区拒绝） |
+| 浏览/搜索其它会话内容 | `ChatDrawer.kt:337`、`:556`（列表）、搜索命中 `:348` | 有（普通会话范围） | `sessions` `action=list/search/read/tool_calls/context`（`domain/tool/session/SessionTool.kt`） | 严格只读且限当前工作区；主代理与成员会话隔离，不能经此入口获取内部成员名单、消息、工具调用或注入上下文 |
 
 ## 11. 备份
 
@@ -229,9 +233,9 @@ WeChat, Feishu, QQ and Telegram bot settings, services, startup restoration, con
 
 虚拟屏仅使用指定显示屏的唤醒接口；新版安卓优先使用 InputManagerGlobal，按文字定位后仍注入该屏的原生点击；明确执行失败和投递后超时不自动重放。截图附带原帧序号、帧龄和显示状态，不把缓存文件新建等同应用响应。导图手机首层按视口限制标题宽度，仍保留平移、缩放和大于等于 48dp 的最小触控行高。
 
-配置 → 工具的脚本工具列表与 `config script_tools` 集合共用 `ScriptToolManager`，支持增改、启停和删除，启用的版本动态注册为工具；执行复用 Bash 真实命令权限与当前会话执行器。提示词编辑器的默认、关键词、成员注入写入片段元数据，Agent 可通过文件工具编辑同一份定义。运行时规则的编辑入口移至规则页，不更改原有覆盖路径。PLAN/AUTO/ALLOW 提醒由执行器按会话模式自动附加，不依赖 AI 调用 loadRule；ALLOW 正文与其他模式一样可查看、编辑和控制注入。
+配置 → 工具的脚本工具列表与 `config script_tools` 集合共用 `ScriptToolManager`，支持增改、启停和删除，启用的版本动态注册为工具；执行复用 Bash 真实命令权限与当前会话执行器。应用管理的行为、模式与成员注入文字统一在配置 → 记忆库编辑和停用，不再从旧提示词编辑器、旧规则页或角色文件正文直拼。
 
-片段注入策略也可通过 `config` 的 `prompt_fragments` 集合读写：每个两位编号下提供 `default_injection`、`keywords_enabled`、`members_enabled`、`keywords` 和 `members`。关键词与成员名每行一项，修改列表不会自动打开开关。
+条目加载和受众通过原生库及 `context_library` 通道管理；旧 `prompt_fragments` 元数据不作为请求备用注入源。旧文件保留不等于恢复旧注入链。
 
 ## Historical branch integration: custom tools and session supervision
 

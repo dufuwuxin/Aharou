@@ -35,6 +35,7 @@ import com.aharou.feature.agent.domain.context.ContextEntry
 import com.aharou.feature.agent.domain.context.ContextLoad
 import com.aharou.feature.agent.domain.memory.MemoryScope
 import com.aharou.feature.settings.presentation.ContextLibraryViewModel
+import com.aharou.feature.settings.presentation.ContextLibraryState
 import com.aharou.feature.settings.presentation.contextChildFolders
 import com.aharou.feature.settings.presentation.contextVisibleEntries
 import com.aharou.feature.settings.presentation.contextParentFolder
@@ -55,6 +56,10 @@ internal fun ContextLibrarySection(viewModel: ContextLibraryViewModel = hiltView
     var creating by rememberSaveable { mutableStateOf(false) }
     var creatingFolder by rememberSaveable { mutableStateOf(false) }
     var folderName by rememberSaveable { mutableStateOf("") }
+    var deletingFolder by remember { mutableStateOf<String?>(null) }
+    var deleteCategory by remember { mutableStateOf(category) }
+    var deleteScope by remember { mutableStateOf(MemoryScope.GLOBAL) }
+    var deleteSnapshot by remember { mutableStateOf<ContextLibraryState?>(null) }
     LifecycleResumeEffect(Unit) {
         viewModel.refresh()
         onPauseOrDispose { }
@@ -97,6 +102,32 @@ internal fun ContextLibrarySection(viewModel: ContextLibraryViewModel = hiltView
         }) { Text(stringResource(R.string.common_save)) } },
         dismissButton = { TextButton(enabled = !state.writing, onClick = { creatingFolder = false }) { Text(stringResource(R.string.common_cancel)) } },
     )
+    deletingFolder?.let { path ->
+        AlertDialog(
+            onDismissRequest = { if (!state.writing) { deletingFolder = null; deleteSnapshot = null } },
+            title = { Text(stringResource(R.string.context_delete_folder_title)) },
+            text = { Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                Text(stringResource(R.string.context_delete_folder_body, path))
+                val scopes = if (deleteSnapshot?.hasWorkspace == true) MemoryScope.entries else listOf(MemoryScope.GLOBAL)
+                ContextChoiceRow(scopes.map { stringResource(it.label()) }, scopes.indexOf(deleteScope),
+                    { if (!state.writing) deleteScope = scopes[it] })
+                if (state.error) ContextNotice(stringResource(R.string.context_save_error), error = true)
+            } },
+            confirmButton = { TextButton(enabled = !state.writing && !state.loading, onClick = {
+                deleteSnapshot?.let { snapshot ->
+                    viewModel.deleteFolder(deleteCategory, path, deleteScope, snapshot) {
+                        folder = contextParentFolder(path)
+                        deletingFolder = null
+                        deleteSnapshot = null
+                        query = ""
+                    }
+                }
+            }) { Text(stringResource(R.string.context_delete_folder)) } },
+            dismissButton = { TextButton(enabled = !state.writing, onClick = {
+                deletingFolder = null; deleteSnapshot = null
+            }) { Text(stringResource(R.string.common_cancel)) } },
+        )
+    }
     val currentFolder = folder
     val visible = remember(state.entries, query, scope, loading, category, currentFolder) {
         contextVisibleEntries(state.entries, query, category, currentFolder, scope, loading)
@@ -119,6 +150,14 @@ internal fun ContextLibrarySection(viewModel: ContextLibraryViewModel = hiltView
                 TextButton(onClick = up) { Text(stringResource(R.string.context_folder_up)) }
                 Text(stringResource(R.string.context_folder_path, currentFolder.ifEmpty { stringResource(R.string.context_folder_root_title) }),
                     style = MaterialTheme.typography.titleMedium)
+                if (viewModel.canDeleteFolder(category, currentFolder)) {
+                    TextButton(enabled = !state.loading && !state.writing, onClick = {
+                        deleteSnapshot = state
+                        deleteCategory = category
+                        deleteScope = scope ?: if (state.hasWorkspace) MemoryScope.PROJECT else MemoryScope.GLOBAL
+                        deletingFolder = currentFolder
+                    }) { Text(stringResource(R.string.context_delete_folder)) }
+                }
             }
             item { AppTextField(query, { query = it }, placeholder = stringResource(R.string.context_search_placeholder)) }
             if (currentFolder != null || query.isNotBlank()) {

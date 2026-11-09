@@ -177,7 +177,10 @@ class SessionTool @Inject constructor(
         if (query.isNullOrBlank()) return ToolResult.Error("search 需要 query", "MISSING_ARGS")
         val hits = messagePersistenceUseCase.searchInWorkspace(
             workspace, query, (limit ?: DEFAULT_LIST_LIMIT).coerceIn(1, MAX_LIMIT)
-        )
+        ).filter { hit ->
+            val session = sessionUseCase.getSessionById(hit.sessionId)
+            session != null && session.workspacePath == workspace && session.parentId == null
+        }
         return ToolResult.Success(
             buildJsonObject {
                 put("workspace", workspace)
@@ -207,6 +210,7 @@ class SessionTool @Inject constructor(
         val session = sessionUseCase.getSessionById(id)
             ?: return ToolResult.Error("Session not found", "SESSION_NOT_FOUND")
         if (session.workspacePath != workspace) return ToolResult.Error("Session not visible", "CROSS_WORKSPACE_DENIED")
+        if (session.parentId != null) return ToolResult.Error("成员执行记录不向主代理开放", "MEMBER_SESSION_DENIED")
         if (action == "context") {
             if (id != context.sessionId) return ToolResult.Error("Context snapshots are current-session only", "CROSS_SESSION_DENIED")
             val snapshot = injectedContexts.snapshot(id)
@@ -260,6 +264,7 @@ class SessionTool @Inject constructor(
         if (session.workspacePath != workspace) {
             return ToolResult.Error("只能读取当前工作区的会话（跨工作区不可见）", "CROSS_WORKSPACE_DENIED")
         }
+        if (session.parentId != null) return ToolResult.Error("成员消息不向主代理开放", "MEMBER_SESSION_DENIED")
         val messages = messagePersistenceUseCase.getMessagesOnce(sessionId)
             .filter {
                 (it.role == MessageRole.USER.name || it.role == MessageRole.ASSISTANT.name) &&

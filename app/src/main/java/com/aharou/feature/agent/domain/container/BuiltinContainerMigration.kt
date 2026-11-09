@@ -2,14 +2,15 @@ package com.aharou.feature.agent.domain.container
 
 import java.io.File
 import java.io.IOException
-import java.nio.file.FileVisitResult
 import java.nio.file.Files
 import java.nio.file.LinkOption.NOFOLLOW_LINKS
 import java.nio.file.Path
-import java.nio.file.SimpleFileVisitor
 import java.nio.file.StandardCopyOption.COPY_ATTRIBUTES
 import java.nio.file.StandardCopyOption.REPLACE_EXISTING
-import java.nio.file.attribute.BasicFileAttributes
+import java.nio.file.attribute.PosixFilePermission
+import java.nio.file.attribute.PosixFilePermission.OWNER_EXECUTE
+import java.nio.file.attribute.PosixFilePermission.OWNER_READ
+import java.nio.file.attribute.PosixFilePermission.OWNER_WRITE
 
 /** A failed extraction/probe/copy never deletes the old builtin or its homes. */
 internal class BuiltinContainerMigration(private val filesDir: File) {
@@ -78,15 +79,24 @@ internal class BuiltinContainerMigration(private val filesDir: File) {
         } else if (Files.isDirectory(source, NOFOLLOW_LINKS)) {
             if (Files.exists(target, NOFOLLOW_LINKS) && !Files.isDirectory(target, NOFOLLOW_LINKS)) removeTree(target.toFile())
             Files.createDirectories(target)
-            Files.newDirectoryStream(source).use { children ->
-                for (child in children) {
-                    if (rootHome && child.fileName.toString() in managedBindings) {
-                        managedHomes += child to source.parent.fileName.toString()
-                    } else copyHome(child, target.resolve(child.fileName))
+            val sourcePermissions = Files.getPosixFilePermissions(source, NOFOLLOW_LINKS)
+            val readPermissions = setOf(OWNER_READ, OWNER_EXECUTE)
+            val temporaryRead = !sourcePermissions.containsAll(readPermissions)
+            if (temporaryRead) Files.setPosixFilePermissions(source, sourcePermissions + readPermissions)
+            try {
+                Files.newDirectoryStream(source).use { children ->
+                    for (child in children) {
+                        if (rootHome && child.fileName.toString() in managedBindings) {
+                            managedHomes += child to source.parent.fileName.toString()
+                        } else copyHome(child, target.resolve(child.fileName))
+                    }
                 }
+            } finally {
+                if (temporaryRead) Files.setPosixFilePermissions(source, sourcePermissions)
             }
-            Files.setPosixFilePermissions(target, Files.getPosixFilePermissions(source, NOFOLLOW_LINKS))
+            // Android opens the target to set its timestamp, so restore restrictive permissions last.
             Files.setLastModifiedTime(target, Files.getLastModifiedTime(source, NOFOLLOW_LINKS))
+            Files.setPosixFilePermissions(target, sourcePermissions)
         } else if (Files.isRegularFile(source, NOFOLLOW_LINKS)) {
             if (Files.isDirectory(target, NOFOLLOW_LINKS) || Files.isSymbolicLink(target)) removeTree(target.toFile())
             Files.copy(source, target, REPLACE_EXISTING, COPY_ATTRIBUTES, NOFOLLOW_LINKS)
@@ -115,16 +125,38 @@ internal class BuiltinContainerMigration(private val filesDir: File) {
 
     internal fun removeTree(directory: File) {
         if (!exists(directory)) return
-        Files.walkFileTree(directory.toPath(), object : SimpleFileVisitor<Path>() {
-            override fun visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult {
-                Files.delete(file)
-                return FileVisitResult.CONTINUE
+        val adjusted = mutableMapOf<Path, Set<PosixFilePermission>>()
+        fun remove(path: Path) {
+            if (Files.isDirectory(path, NOFOLLOW_LINKS)) {
+                val permissions = Files.getPosixFilePermissions(path, NOFOLLOW_LINKS)
+                val required = setOf(OWNER_READ, OWNER_WRITE, OWNER_EXECUTE)
+                if (!permissions.containsAll(required)) {
+                    adjusted[path] = permissions
+                    Files.setPosixFilePermissions(path, permissions + required)
+                }
+                Files.newDirectoryStream(path).use { children ->
+                    for (child in children) remove(child)
+                }
             }
-            override fun postVisitDirectory(dir: Path, error: IOException?): FileVisitResult {
-                if (error != null) throw error
-                Files.delete(dir)
-                return FileVisitResult.CONTINUE
+            Files.delete(path)
+            adjusted.remove(path)
+        }
+        try {
+            remove(directory.toPath())
+        } catch (error: Exception) {
+            restoreAfterDeleteFailure(adjusted, error)
+        }
+    }
+
+    internal fun restoreAfterDeleteFailure(adjusted: Map<Path, Set<PosixFilePermission>>, error: Exception): Nothing {
+        for ((dir, permissions) in adjusted.entries.toList().asReversed()) {
+            if (!Files.exists(dir, NOFOLLOW_LINKS)) continue
+            try {
+                Files.setPosixFilePermissions(dir, permissions)
+            } catch (restoreError: Exception) {
+                error.addSuppressed(restoreError)
             }
-        })
+        }
+        throw error
     }
 }

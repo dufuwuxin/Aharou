@@ -435,7 +435,7 @@ class AIEditorApp : Application(), Configuration.Provider {
         // 启动即把内置提示词全量释放到 ~/.aharou/prompts/（覆盖式，随 App 升级更新）；
         // 用户自定义覆盖放在 ~/.aharou/prompts.custom/，同名即覆盖，不被升级覆盖。
         appScope.launch {
-            ContainerInstaller.extractPrompts(this@AIEditorApp)
+            ContainerInstaller.extractSkills(this@AIEditorApp)
         }
         // 启动即释放内置子代理定义（Explore）与团队预设；已存在不覆盖，用户改过或删掉都不会被升级拉回。
         appScope.launch {

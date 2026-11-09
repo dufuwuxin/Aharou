@@ -72,4 +72,27 @@ class ContextLibraryNavigationTest {
         assertEquals(ContextLoad.INDEX, restored.loading)
     }
 
+
+    @Test fun stableRequestSurvivesDraftSaveRestoreAndCategoryChanges() {
+        val draft = ContextEditorDraft.from(null, ContextCategory.RULE, "辅助请求", false)
+            .copy(requestKey = "agent/custom.md", name = "改名", content = "正文")
+        assertEquals(draft, ContextEditorDraft.restore(draft.savedFields()))
+        assertEquals(draft.requestKey, draft.changeCategory(ContextCategory.LONG_TERM).requestKey)
+        assertNull(ContextEditorDraft.restore(draft.savedFields().take(9)).requestKey)
+    }
+
+
+    @Test fun entryStateSaverRetainsStableRequestAndReadsOlderSavedState() {
+        val entry = com.aharou.feature.agent.domain.context.ContextEntry("id", "改名", "摘要", "正文",
+            MemoryScope.GLOBAL, com.aharou.feature.agent.domain.context.ContextKind.INSTRUCTION, ContextLoad.OFF,
+            com.aharou.feature.agent.domain.context.ContextOrigin.MEMORY, "/native/request.md",
+            folder = "任意/目录", requestKey = "agent/custom.md")
+        val scope = object : androidx.compose.runtime.saveable.SaverScope {
+            override fun canBeSaved(value: Any) = true
+        }
+        val saver = com.aharou.feature.settings.presentation.component.ContextEntryStateSaver
+        val fields = with(saver) { scope.save(entry) }!!
+        assertEquals(entry, saver.restore(fields))
+        assertNull(saver.restore(ArrayList(fields.take(17)))!!.requestKey)
+    }
 }

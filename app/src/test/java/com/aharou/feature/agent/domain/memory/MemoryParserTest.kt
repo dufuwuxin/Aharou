@@ -110,4 +110,15 @@ class MemoryParserTest {
         }
     }
 
+
+    @Test fun stableRequestMetadataRoundTripsIndependentOfEditableFolderAndName() {
+        val file = tempFolder.newFile("request.md")
+        file.writeText(MemoryParser.format("改名", "说明", "正文", contextFolder = "任意/目录",
+            contextRequest = "agent/custom.md"))
+        val memory = MemoryParser.parse(file, MemoryScope.GLOBAL)!!
+        assertEquals("agent/custom.md", memory.contextRequest)
+        file.writeText(MemoryParser.format(memory.copy(name = "再次改名", contextFolder = "")))
+        assertEquals("agent/custom.md", MemoryParser.parse(file, MemoryScope.GLOBAL)!!.contextRequest)
+    }
+
 }

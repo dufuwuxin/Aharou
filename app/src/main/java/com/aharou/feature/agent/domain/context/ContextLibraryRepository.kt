@@ -14,6 +14,7 @@ import javax.inject.Singleton
 @Singleton
 class ContextLibraryRepository @Inject constructor(
     private val memories: MemoryRepository,
+    private val builtins: BuiltinContextEntries? = null,
 ) {
     private class Snapshot(
         val root: String?, val sessionId: String?, val memoryAllowed: Boolean,
@@ -37,13 +38,14 @@ class ContextLibraryRepository @Inject constructor(
         m.scope, m.contextKind, m.contextLoad, ContextOrigin.MEMORY, m.file?.absolutePath ?: m.name,
         m.version, pending = m.pending, enabled = m.expiresAt?.let { it > System.currentTimeMillis() } ?: true,
         category = m.contextCategory, folder = m.contextFolder, sessionId = m.contextSessionId,
-        workspaceRoot = if (m.scope == MemoryScope.PROJECT) projectRoot else null,
+        workspaceRoot = if (m.scope == MemoryScope.PROJECT) projectRoot else null, requestKey = m.contextRequest,
     )
 
     internal fun sources(projectRoot: String?): List<ContextEntry> = buildList {
+        builtins?.ensureSeeded(memories)
         addAll(memories.listMemoriesInScope(MemoryScope.GLOBAL, projectRoot))
         if (!projectRoot.isNullOrBlank()) addAll(memories.listMemoriesInScope(MemoryScope.PROJECT, projectRoot))
-    }.filterNot { memory ->
+    }.let(MemoryFileStorage::migrateContextLayout).filterNot { memory ->
         !memory.hasContextMetadata && listOf("SOUL", "CORE", "GLOBAL").any { it.equals(memory.name, true) }
     }.map { memoryEntry(it, projectRoot) }
 
@@ -51,6 +53,15 @@ class ContextLibraryRepository @Inject constructor(
         val active = snapshot.get()?.takeIf { it.root == projectRoot?.takeIf(String::isNotBlank) }
         val entries = active?.entries ?: sources(projectRoot).also { active?.entries = it }
         return entries.filter { sessionId == null || it.category != ContextCategory.TEMPORARY || it.sessionId == sessionId }
+    }
+
+    /** Named requests are explicit retrieval, not a second prompt storage channel. OFF always wins. */
+    fun resolvePrompt(name: String): String {
+        val active = snapshot.get()
+        return list(active?.root, active?.sessionId).filter { entry ->
+            entry.requestKey == name && entry.enabled && !entry.pending && entry.loading != ContextLoad.OFF &&
+                entry.category == ContextCategory.RULE
+        }.joinToString("\n\n") { ContextLibraryPlanner.safe(it.content) }
     }
 
     fun search(query: String, projectRoot: String?): List<ContextEntry> {
@@ -72,12 +83,13 @@ class ContextLibraryRepository @Inject constructor(
             return@synchronized MemoryFileStorage.renameChecked(original, original.copy(
                 name = entry.title, description = entry.description, content = entry.content,
                 contextKind = entry.kind, contextLoad = entry.loading, contextCategory = entry.category,
-                contextFolder = entry.folder, contextSessionId = entry.sessionId
+                contextFolder = entry.folder, contextSessionId = entry.sessionId, contextRequest = source.requestKey
             ), entry.version)
         }
         memories.writeMemory(source.title, entry.description, entry.content, source.scope, projectRoot,
             expectedVersion = entry.version, contextKind = entry.kind, contextLoad = entry.loading,
-            contextCategory = entry.category, contextFolder = entry.folder, contextSessionId = entry.sessionId) == MemoryWriteResult.Success
+            contextCategory = entry.category, contextFolder = entry.folder, contextSessionId = entry.sessionId,
+            contextRequest = source.requestKey) == MemoryWriteResult.Success
     }
 
     fun create(name: String, description: String, content: String, scope: MemoryScope, kind: ContextKind,
@@ -95,6 +107,28 @@ class ContextLibraryRepository @Inject constructor(
         if (entry.version.isBlank() || current.version != entry.version || !current.editable) return@synchronized false
         if (current.scope == MemoryScope.PROJECT && entry.workspaceRoot != projectRoot) return@synchronized false
         memories.deleteMemory(current.title, current.scope, projectRoot)
+    }
+
+    /** The confirmation snapshot must still describe every affected native entry, including descendants. */
+    fun deleteFolder(category: ContextCategory, folder: String, scope: MemoryScope, projectRoot: String?,
+                     expectedEntries: List<ContextEntry>, removeMarkers: () -> Boolean): Boolean = synchronized(MemoryFileStorage.lock) {
+        if (folder.isEmpty() || !ContextFolderPath.valid(folder) ||
+            (scope == MemoryScope.PROJECT && projectRoot.isNullOrBlank())) return@synchronized false
+        fun affected(entry: ContextEntry) = entry.category == category && entry.scope == scope &&
+            (entry.folder == folder || entry.folder.startsWith("$folder/"))
+        val expected = expectedEntries.filter(::affected)
+        if (expected.any { !it.editable || it.version.isBlank() ||
+                (scope == MemoryScope.PROJECT && it.workspaceRoot != projectRoot) }) return@synchronized false
+        val current = sources(projectRoot).filter(::affected)
+        if (expected.associate { it.id to it.version } != current.associate { it.id to it.version }) return@synchronized false
+        val parent = folder.substringBeforeLast('/', "")
+        val updates = current.map { entry ->
+            val memory = com.aharou.feature.agent.domain.memory.MemoryParser.parse(java.io.File(entry.sourceLabel), scope)
+                ?: return@synchronized false
+            if (memory.version != entry.version) return@synchronized false
+            memory.copy(contextFolder = parent)
+        }
+        MemoryFileStorage.rewriteContextMetadata(updates, removeMarkers)
     }
 
     fun preview(projectRoot: String?, query: String, sessionId: String? = null): ContextPreview {
@@ -116,8 +150,18 @@ class ContextLibraryRepository @Inject constructor(
 
     fun render(projectRoot: String?, sessionId: String?, origin: ContextOrigin, enabled: Boolean = true,
                memberName: String? = null, inheritsMainRules: Boolean = false, query: String = "",
-               ordinaryMemoryEnabled: Boolean = true): String {
+               ordinaryMemoryEnabled: Boolean = true, expand: ((String) -> String)? = null): String {
         if (!enabled) return ""
+        if (expand != null) {
+            val active = snapshot.get()
+            val audience = active?.injectionCategory ?: if (memberName == null) ContextCategory.MAIN_INJECTED else ContextCategory.ROLE_INJECTED
+            val entries = list(projectRoot).map { entry ->
+                if (entry.category.isInjection && entry.category != audience || !entry.enabled || entry.loading != ContextLoad.FULL) entry
+                else entry.copy(content = expand(entry.content))
+            }
+            return ContextLibraryPlanner.plan(entries, sessionId, origin, audience,
+                ordinaryMemoryEnabled && active?.memoryAllowed != false).rendered
+        }
         return plan(projectRoot, sessionId, ordinaryMemoryEnabled, memberName).rendered
     }
 }

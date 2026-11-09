@@ -100,6 +100,7 @@ jobs:
       - name: Check architecture rules
         run: |
           python3 scripts/check_architecture.py
+          python3 scripts/test_native_memory_contract.py
           python3 -m unittest discover -s scripts -p test_arm64_assets.py
           python3 scripts/test_void_toolchain.py
           python3 scripts/test_build_logging.py

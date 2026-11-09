@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Static asset contracts only: not model-trigger, runtime, or effectiveness tests."""
 
+import json
 import re
 import unittest
 from pathlib import Path
@@ -108,7 +109,8 @@ def skill_metadata(text: str) -> tuple[dict[str, str], str]:
 class BuiltinSystemTest(unittest.TestCase):
     def test_identity_does_not_promise_a_fixed_or_preinstalled_environment(self):
         identity = (ROOT / "app/src/main/java/com/aharou/core/soul/SoulStore.kt").read_text()
-        base = (ASSETS / "prompts/agent/subagent-base.md").read_text()
+        entries = json.loads((ASSETS / "context-library/builtin.json").read_text(encoding="utf-8"))["entries"]
+        base = next(entry["content"] for entry in entries if entry["id"] == "member-foundation")
         self.assertNotIn("Alpine Linux via PRoot", identity)
         self.assertNotIn("fully functional Linux sandbox", identity)
         self.assertIn("session's configured Linux container or remote SSH environment", identity)

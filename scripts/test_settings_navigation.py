@@ -160,9 +160,13 @@ class SettingsNavigationTest(unittest.TestCase):
         self.assertFalse((SRC / "feature/account/presentation/UserIdentityCard.kt").exists())
         self.assertNotIn("SettingsSection.Soul", self.screen + self.groups)
         self.assertFalse((SETTINGS / "SoulSettingsSection.kt").exists())
+        self.assertNotIn("onOpen(SettingsSection.Memory)", masked(account))
+        config = function(self.groups, "SettingsAiGroupScreen")
+        self.assertIn("onOpen(SettingsSection.Memory)", masked(config))
+        self.assertEqual(1, masked(self.groups).count("onOpen(SettingsSection.Memory)"))
+        self.assertIn("onOpen(SettingsSection.ConfigAudit)", account)
         for name in ("Memory", "ConfigAudit"):
             with self.subTest(section=name):
-                self.assertIn(f"onOpen(SettingsSection.{name})", account)
                 self.assertRegex(self.screen, rf"SettingsSection\.{name}\s*->")
         self.assertIn("UserIdentityStore.observe(context)", source(SRC / "feature/agent/presentation/component/SoulChatHeader.kt"))
         self.assertIn("UserIdentityStore.setName", source(SRC / "core/config/ConfigBuiltins.kt"))

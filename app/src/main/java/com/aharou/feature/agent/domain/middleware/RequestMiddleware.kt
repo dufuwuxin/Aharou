@@ -98,11 +98,6 @@ object RequestMiddleware {
             applied += rule
         }
 
-        val prompt = config.systemPrompt?.trim().orEmpty()
-        if (prompt.isNotEmpty() && promptTargeted(config.systemPromptTargets, ctx, actualModel)) {
-            out = appendSystemPrompt(out, prompt)
-        }
-
         return MiddlewareResult(out, applied, rejected, invalid)
     }
 
@@ -122,13 +117,6 @@ object RequestMiddleware {
         val provider = rule.whenProvider
         if (provider != null && !provider.equals(ctx.providerId, true) && !provider.equals(ctx.providerType, true)) return false
         return true
-    }
-
-    private fun promptTargeted(targets: List<String>, ctx: MiddlewareContext, actualModel: String): Boolean {
-        val normalized = targets.map { it.trim() }.filter { it.isNotEmpty() }
-        if (normalized.isEmpty()) return true
-        val candidates = listOf(ctx.providerId, ctx.providerType, ctx.requestedModel, actualModel)
-        return normalized.any { target -> candidates.any { it.equals(target, true) } }
     }
 
     /** 返回 null 表示该路径上有非对象节点挡路，规则无法落地（交给调用方按「跳过」处理）。 */
@@ -161,46 +149,6 @@ object RequestMiddleware {
      * 这里可以写 `messages`，而 [ParamOverride] 不行：追加系统提示是用户显式开启的单一意图，
      * 只增不改既有对话内容；参数规则任意改写 messages 则会直接破坏对话与工具调用配对。
      */
-    private fun appendSystemPrompt(body: JsonObject, prompt: String): JsonObject {
-        when (val system = body["system"]) {
-            is JsonPrimitive -> if (system.isString) {
-                return body.withField("system", JsonPrimitive(joinPrompt(system.content, prompt)))
-            }
-            is JsonArray -> return body.withField(
-                "system",
-                JsonArray(system + JsonObject(mapOf("type" to JsonPrimitive("text"), "text" to JsonPrimitive(prompt))))
-            )
-            else -> Unit
-        }
-
-        val instructions = body["instructions"]
-        if (instructions is JsonPrimitive && instructions.isString) {
-            return body.withField("instructions", JsonPrimitive(joinPrompt(instructions.content, prompt)))
-        }
-
-        for (key in listOf("messages", "input")) {
-            val list = body[key] as? JsonArray ?: continue
-            val head = list.firstOrNull() as? JsonObject
-            val role = (head?.get("role") as? JsonPrimitive)?.content
-            val content = head?.get("content")
-            if (head != null && (role == "system" || role == "developer") &&
-                content is JsonPrimitive && content.isString
-            ) {
-                val newHead = head.withField("content", JsonPrimitive(joinPrompt(content.content, prompt)))
-                return body.withField(key, JsonArray(listOf(newHead) + list.drop(1)))
-            }
-            return body.withField(
-                key,
-                JsonArray(listOf(JsonObject(mapOf("role" to JsonPrimitive("system"), "content" to JsonPrimitive(prompt)))) + list)
-            )
-        }
-
-        return body.withField("system", JsonPrimitive(prompt))
-    }
-
-    private fun joinPrompt(existing: String, prompt: String): String =
-        if (existing.isBlank()) prompt else "$existing\n\n$prompt"
-
     private fun JsonObject.withField(key: String, value: JsonElement): JsonObject =
         JsonObject(toMutableMap().apply { put(key, value) })
 }

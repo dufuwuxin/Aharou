@@ -38,6 +38,7 @@ data class ContextEntry(
     val folder: String = "",
     val sessionId: String? = null,
     val workspaceRoot: String? = null,
+    val requestKey: String? = null,
 )
 
 data class ContextPreview(

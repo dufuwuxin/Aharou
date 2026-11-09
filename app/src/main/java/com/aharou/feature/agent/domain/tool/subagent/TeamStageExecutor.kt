@@ -149,12 +149,8 @@ class TeamStageExecutor @Inject constructor(private val registry: TeamRunRegistr
                         append("### ").append(id(upstream)).append('\n').append(outputs.getValue(upstream)).append("\n\n")
                     }
                     feedback[node]?.let { append("## Rework reason and original evidence\n").append(it).append('\n') }
-                    append("Analyze before deciding whether to dispatch the next stage. Completion alone is not approval.\n")
                     val allowed = TeamFlowGraph.forward(team).filter { it.from == node }.map { it.to }
                     append("Allowed outgoing endpoints: ").append(allowed.joinToString { "${it.stageId}/${it.taskId}" }).append('\n')
-                    append("Optional structured decision, exactly one line: TEAM_HANDOFF: {\"next\":[{\"stageId\":\"...\",\"taskId\":\"...\"}],\"hold\":false,\"reason\":\"analysis\"}. Only existing outgoing endpoints may be selected.\n")
-                    append("For pause use next:[], hold:true and a required reason. No marker means legacy static ALL outgoing edges; natural language never selects routes.\n")
-                    if (TeamFlowGraph.isReview(team, node)) append("Return exactly one verdict: TEAM_REVIEW: PASS or TEAM_REVIEW: REJECT <required reason and corrections>.\n")
                 }
                 JsonObject(original.toMutableMap().apply {
                     put("dependsOn", JsonArray(emptyList())) // Required predecessors already completed in this run.

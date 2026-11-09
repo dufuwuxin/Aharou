@@ -1586,6 +1586,8 @@ class AIAgentViewModel @Inject constructor(
 
     /** 子代理发给主会话的消息：同上，收件人为主会话。 */
     private suspend fun deliverMessageToParent(event: SubAgentEvent) {
+        val recipient = sessionUseCase.getSessionById(event.parentSessionId) ?: return
+        if (recipient.parentId == null) return
         val senderTitle = sessionUseCase.getSessionById(event.subSessionId)?.title ?: "子代理"
         deliverAgentMessage(
             recipientSessionId = event.parentSessionId,
@@ -1663,6 +1665,8 @@ class AIAgentViewModel @Inject constructor(
         outcome: NotificationOutcome,
         detail: String?
     ) {
+        val recipient = sessionUseCase.getSessionById(parentSessionId) ?: return
+        if (recipient.parentId == null) return
         val item = PendingNotification(
             kind = AgentNotificationKind.SUBAGENT,
             sourceId = subSessionId,

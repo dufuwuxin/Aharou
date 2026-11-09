@@ -70,6 +70,7 @@ class MemoryCurator @Inject constructor(
             if (c.scope == MemoryScope.PROJECT && projectRoot.isNullOrBlank()) continue
             val effectiveScope = c.scope
             val existing = memoryRepository.findMemory(c.name, projectRoot, effectiveScope)
+            if (existing?.let { it.contextCategory.isInjection || it.contextFolder.startsWith("requests/") } == true) continue
             if (existing != null) {
                 if (existing.content.trim() != c.content.trim()) {
                     if (preserveConflict(c, existing, projectRoot, sessionId)) saved++
@@ -91,6 +92,7 @@ class MemoryCurator @Inject constructor(
             val similar = memoryRepository
                 .findSimilarMemories(c.name, c.description, projectRoot, limit = 1, scope = effectiveScope)
                 .firstOrNull()
+            if (similar?.let { it.contextCategory.isInjection || it.contextFolder.startsWith("requests/") } == true) continue
             if (similar?.pending == true) {
                 if (preserveConflict(c, similar, projectRoot, sessionId)) saved++
                 continue

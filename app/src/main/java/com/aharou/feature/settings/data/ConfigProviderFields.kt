@@ -291,7 +291,7 @@ class ConfigProviderFields @Inject constructor(
                 str(
                     field = "request_middleware",
                     name = "请求中间件",
-                    desc = "JSON 配置：{\"modelMap\":{\"别名\":\"真实模型\"},\"systemPrompt\":\"追加的系统提示\",\"systemPromptTargets\":[\"openai\"]}。留空不启用；参数覆盖（paramOverrides）暂未接入请求体。",
+                    desc = "JSON 配置：{\"modelMap\":{\"别名\":\"真实模型\"}}。留空不启用；systemPrompt、systemPromptTargets 和 paramOverrides 暂未接入请求体。",
                     read = { it.requestMiddleware },
                     write = { p, s -> p.copy(requestMiddleware = s.trim()) },
                 ),

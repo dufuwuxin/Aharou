@@ -152,6 +152,8 @@ jobs:
       - name: Check architecture rules
         run: |
           python3 scripts/check_architecture.py
+          python3 scripts/test_native_memory_contract.py
+          python3 scripts/test_builtin_system.py
           python3 -m unittest discover -s scripts -p test_arm64_assets.py
 
       # 发版质量门禁：跑单元测试，失败即中止，避免发出回归包。

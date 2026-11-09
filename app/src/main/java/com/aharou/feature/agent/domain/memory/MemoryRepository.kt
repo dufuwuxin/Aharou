@@ -478,7 +478,8 @@ class MemoryRepository @Inject constructor(
         contextLoad: ContextLoad? = null,
         contextCategory: ContextCategory? = null,
         contextFolder: String? = null,
-        contextSessionId: String? = null
+        contextSessionId: String? = null,
+        contextRequest: String? = null
     ): MemoryWriteResult {
         val existing = existingMemoryOf(name, scope, projectRoot)
         if (isSoulFile(name) && existing?.hasContextMetadata != true &&
@@ -492,7 +493,7 @@ class MemoryRepository @Inject constructor(
         return when (scope) {
             MemoryScope.GLOBAL -> globalMemorySource.writeMemory(
                 name, description, content, effectiveType, effectiveExpiresAt, effectivePending,
-                effectiveKeywords, expectedVersion, contextKind, contextLoad, contextCategory, contextFolder, contextSessionId
+                effectiveKeywords, expectedVersion, contextKind, contextLoad, contextCategory, contextFolder, contextSessionId, contextRequest
             )
             MemoryScope.PROJECT -> {
                 if (projectRoot.isNullOrBlank()) {
@@ -500,7 +501,7 @@ class MemoryRepository @Inject constructor(
                 } else {
                     projectSource(projectRoot).writeMemory(
                         name, description, content, effectiveType, effectiveExpiresAt, effectivePending,
-                        effectiveKeywords, expectedVersion, contextKind, contextLoad, contextCategory, contextFolder, contextSessionId
+                        effectiveKeywords, expectedVersion, contextKind, contextLoad, contextCategory, contextFolder, contextSessionId, contextRequest
                     )
                 }
             }

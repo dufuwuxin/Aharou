@@ -25,18 +25,16 @@ import javax.inject.Singleton
 class ConfigRuleFields @Inject constructor(
     private val rules: RuleFileRepository,
     private val workspaceRepository: WorkspaceRepository,
-    private val promptFragments: ConfigPromptFragmentFields,
     private val contextLibrary: ConfigContextLibraryFields,
 ) {
 
     fun registerInto(registry: ConfigRegistry) {
-        promptFragments.registerInto(registry)
         contextLibrary.registerInto(registry)
         registry.register(
             ClosureField(
                 path = "rules.global",
                 displayName = "全局规则",
-                description = "所有工作区共用的规则正文，写在 ~/.aharou/AGENTS.md（目录里已有 CLAUDE.md / rules.md 时写回生效那一份）；空串表示清空。每轮对话都会注入，只放常驻约定。",
+                description = "所有工作区共用的规则文件正文；按需读取，不自动注入。常驻约定请在原生记忆库维护。空串表示清空文件正文。",
                 valueSchema = ConfigSchema.Str(maxLength = MAX_CHARS),
                 reader = { ConfigValue.Str(rules.readGlobal().content) },
                 writer = { value -> rules.saveGlobal(strOf(value)) }

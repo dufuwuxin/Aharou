@@ -257,6 +257,8 @@ def main():
         check_banned_imports(policy, baseline, errors, notes)
         check_file_lines(policy, baseline, errors, notes)
         check_chinese_resources(policy, errors)
+        from check_native_memory_contract import violations
+        errors.extend(violations(Path(ROOT)))
     for note in notes:
         print("[WARN] %s" % note)
     if errors:

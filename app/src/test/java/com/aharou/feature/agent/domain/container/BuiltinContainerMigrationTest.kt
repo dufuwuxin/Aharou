@@ -3,6 +3,7 @@ package com.aharou.feature.agent.domain.container
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertSame
 import org.junit.Assert.fail
 import org.junit.Rule
 import org.junit.Test
@@ -10,6 +11,12 @@ import org.junit.rules.TemporaryFolder
 import java.io.File
 import java.io.IOException
 import java.nio.file.Files
+import java.nio.file.LinkOption.NOFOLLOW_LINKS
+import java.nio.file.attribute.FileTime
+import java.nio.file.attribute.PosixFilePermission
+import java.nio.file.attribute.PosixFilePermission.OWNER_EXECUTE
+import java.nio.file.attribute.PosixFilePermission.OWNER_READ
+import java.nio.file.attribute.PosixFilePermission.OWNER_WRITE
 
 class BuiltinContainerMigrationTest {
     @get:Rule val temp = TemporaryFolder()
@@ -103,6 +110,98 @@ class BuiltinContainerMigrationTest {
         stage(migration); commit(migration)
         assertEquals("ubuntu-home", File(migration.destination, "root/keep").readText())
         assertFalse(File(temp.root, "rootfs_ubuntu.previous").exists())
+    }
+
+    @Test fun unreadableManagedBindingCanBeCopiedRetriedAndCleanedUp() {
+        val migration = BuiltinContainerMigration(temp.root)
+        val source = File(migration.legacy, "root/workspace").apply { mkdirs() }
+        File(source, "keep.txt").writeText("original")
+        stage(migration)
+        val sourcePath = source.toPath()
+        val modifiedTime = FileTime.fromMillis(1_700_000_000_000L)
+        Files.setLastModifiedTime(sourcePath, modifiedTime)
+        val stageArchive = File(migration.stage, "root/.container-migration/rootfs/workspace")
+        val finalArchive = File(migration.destination, "root/.container-migration/rootfs/workspace")
+        val noPermissions = emptySet<PosixFilePermission>()
+        val ownerPermissions = setOf(OWNER_READ, OWNER_WRITE, OWNER_EXECUTE)
+        Files.setPosixFilePermissions(sourcePath, noPermissions)
+        try {
+            var validations = 0
+            try {
+                migration.commit(version) {
+                    validations++
+                    if (validations == 2) throw IOException("stop after archive")
+                }
+                fail("must stop before cleanup")
+            } catch (_: IOException) { }
+            assertEquals(2, validations)
+            assertEquals(noPermissions, Files.getPosixFilePermissions(sourcePath, NOFOLLOW_LINKS))
+            assertEquals(noPermissions, Files.getPosixFilePermissions(stageArchive.toPath(), NOFOLLOW_LINKS))
+            assertEquals(modifiedTime, Files.getLastModifiedTime(stageArchive.toPath(), NOFOLLOW_LINKS))
+            assertEquals(modifiedTime, Files.getLastModifiedTime(sourcePath, NOFOLLOW_LINKS))
+            Files.setPosixFilePermissions(stageArchive.toPath(), ownerPermissions)
+            assertEquals("original", File(stageArchive, "keep.txt").readText())
+            Files.setPosixFilePermissions(stageArchive.toPath(), noPermissions)
+
+            stage(migration)
+            commit(migration)
+            assertFalse(migration.legacy.exists())
+            assertEquals(noPermissions, Files.getPosixFilePermissions(finalArchive.toPath(), NOFOLLOW_LINKS))
+            assertEquals(modifiedTime, Files.getLastModifiedTime(finalArchive.toPath(), NOFOLLOW_LINKS))
+            Files.setPosixFilePermissions(finalArchive.toPath(), ownerPermissions)
+            assertEquals("original", File(finalArchive, "keep.txt").readText())
+        } finally {
+            if (Files.exists(sourcePath, NOFOLLOW_LINKS)) Files.setPosixFilePermissions(sourcePath, ownerPermissions)
+            if (Files.exists(stageArchive.toPath(), NOFOLLOW_LINKS)) Files.setPosixFilePermissions(stageArchive.toPath(), ownerPermissions)
+            if (Files.exists(finalArchive.toPath(), NOFOLLOW_LINKS)) Files.setPosixFilePermissions(finalArchive.toPath(), ownerPermissions)
+        }
+    }
+
+    @Test fun unreadableNestedTreeIsRemovedWithoutFollowingLinks() {
+        val migration = BuiltinContainerMigration(temp.root)
+        val parent = temp.newFolder("restricted").toPath()
+        val child = Files.createDirectory(parent.resolve("child"))
+        val outside = temp.newFolder("outside-cleanup").toPath()
+        Files.write(outside.resolve("sentinel"), "untouched".toByteArray())
+        Files.write(child.resolve("keep.txt"), "fixture".toByteArray())
+        Files.createSymbolicLink(child.resolve("outside"), outside)
+        val ownerPermissions = setOf(OWNER_READ, OWNER_WRITE, OWNER_EXECUTE)
+        Files.setPosixFilePermissions(child, emptySet())
+        Files.setPosixFilePermissions(parent, emptySet())
+        try {
+            migration.removeTree(parent.toFile())
+            assertFalse(Files.exists(parent, NOFOLLOW_LINKS))
+            assertEquals("untouched", File(outside.toFile(), "sentinel").readText())
+        } finally {
+            if (Files.exists(parent, NOFOLLOW_LINKS)) Files.setPosixFilePermissions(parent, ownerPermissions)
+            if (Files.exists(child, NOFOLLOW_LINKS)) Files.setPosixFilePermissions(child, ownerPermissions)
+        }
+    }
+
+    @Test fun nestedPermissionRestoreRunsChildrenBeforeParentsAndRethrowsOriginal() {
+        val migration = BuiltinContainerMigration(temp.root)
+        val parent = temp.newFolder("parent").toPath()
+        val child = Files.createDirectory(parent.resolve("child"))
+        val noPermissions = emptySet<PosixFilePermission>()
+        val ownerPermissions = setOf(OWNER_READ, OWNER_WRITE, OWNER_EXECUTE)
+        val adjusted = linkedMapOf(parent to noPermissions, child to noPermissions)
+        Files.setPosixFilePermissions(parent, ownerPermissions)
+        Files.setPosixFilePermissions(child, ownerPermissions)
+        val original = IOException("delete failed")
+        try {
+            try {
+                migration.restoreAfterDeleteFailure(adjusted, original)
+                fail("must rethrow")
+            } catch (error: IOException) {
+                assertSame(original, error)
+            }
+            assertEquals(noPermissions, Files.getPosixFilePermissions(parent, NOFOLLOW_LINKS))
+            Files.setPosixFilePermissions(parent, ownerPermissions)
+            assertEquals(noPermissions, Files.getPosixFilePermissions(child, NOFOLLOW_LINKS))
+        } finally {
+            Files.setPosixFilePermissions(parent, ownerPermissions)
+            Files.setPosixFilePermissions(child, ownerPermissions)
+        }
     }
 
     @Test fun interruptedRenameRestoresBackupBeforeRetry() {
