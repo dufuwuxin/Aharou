@@ -154,4 +154,16 @@ class ProjectTaskGraphTest {
         assertEquals(listOf("root"), ProjectTaskGraph.visibleTree(tasks, "", null, setOf("root")).map { it.task.id })
         assertEquals("branch", tasks.last().parentId)
     }
+
+    @Test fun onlyContainersMayHaveEmptyRequirementsAndTheyCannotAcquireExecutionOrAcceptance() {
+        val branch = task("branch").copy(projectId = "p", requirement = "", isRequirementBranch = true)
+        assertNull(ProjectTaskGraph.validate(listOf(branch)))
+        assertEquals("REQUIRED_FIELDS", ProjectTaskGraph.validate(listOf(branch.copy(isRequirementBranch = false))))
+        assertEquals("INVALID_REQUIREMENT_BRANCH", ProjectTaskGraph.validate(listOf(branch.copy(owner = "member"))))
+        assertEquals("INVALID_REQUIREMENT_BRANCH", ProjectTaskGraph.validate(listOf(branch.copy(status = ProjectTaskStatus.DONE))))
+        assertFalse(ProjectTaskGraph.executionReady(branch, "discussion", listOf(branch)))
+        val dependent = task("dependent").copy(projectId = "p", dependencyIds = listOf(branch.id))
+        assertEquals("BRANCH_NOT_EXECUTABLE", ProjectTaskGraph.validate(listOf(branch, dependent)))
+    }
+
 }

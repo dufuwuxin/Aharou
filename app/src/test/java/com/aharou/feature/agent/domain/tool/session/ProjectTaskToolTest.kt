@@ -204,4 +204,31 @@ class ProjectTaskToolTest {
         val outsider = tool.executeWithContext(args, AgentContext(null, null, "w", null, sessionId = "someone-else"))
         assertEquals(ProjectTaskTool.NOT_IN_TASK, (outsider as ToolResult.Error).code)
     }
+
+    @Test fun branchCallerScopeIgnoresSpoofedProjectAndParentAndCannotSupplementSibling() = runBlocking {
+        val repository = mockk<ProjectTaskRepository>()
+        val project = ProjectPlan(id = "p", workspace = "w", title = "p", requirements = "r", flowSessionIds = listOf("root"))
+        val branch = task("b").copy(isRequirementBranch = true, status = ProjectTaskStatus.DRAFT, sessionIds = listOf("discussion"))
+        val sibling = task("sibling").copy(isRequirementBranch = true, status = ProjectTaskStatus.DRAFT, sessionIds = listOf("other-discussion"))
+        val snapshot = ProjectTaskSnapshot(tasks = listOf(branch, sibling), projects = listOf(project))
+        every { repository.snapshots } returns MutableStateFlow(mapOf("w" to snapshot))
+        coEvery { repository.load("w") } returns snapshot
+        coEvery { repository.appendBranchRequirements("b", "new", "w") } returns
+            com.aharou.feature.agent.data.task.ProjectPlanOutcome(project, true)
+        val tool = ProjectTaskTool(repository, flows)
+        val caller = AgentContext(null, null, "w", null, sessionId = "discussion", mode = com.aharou.feature.agent.domain.model.AgentMode.PLAN)
+        val args = mapOf("action" to JsonPrimitive("plan"), "requirement" to JsonPrimitive("new"),
+            "parent_id" to JsonPrimitive("sibling"), "project_id" to JsonPrimitive("other"))
+        assertTrue(tool.executeWithContext(args, caller) is ToolResult.Success)
+        val outline = tool.executeWithContext(mapOf("action" to JsonPrimitive("outline")), caller)
+        assertTrue(outline is ToolResult.Success)
+        assertFalse(outline.toString().contains("sibling"))
+        assertTrue(tool.executeWithContext(args + mapOf("action" to JsonPrimitive("supplement"),
+            "task_id" to JsonPrimitive("sibling")), caller) is ToolResult.Error)
+        assertTrue(tool.executeWithContext(args, caller.copy(projectRoot = "foreign")) is ToolResult.Error)
+        coVerify(exactly = 1) { repository.appendBranchRequirements("b", "new", "w") }
+        coVerify(exactly = 0) { repository.appendRequirements(any(), any(), any()); repository.supplement(any(), any(), any()) }
+        io.mockk.verify(exactly = 0) { flows.continueProject(any(), any(), any()) }
+    }
+
 }

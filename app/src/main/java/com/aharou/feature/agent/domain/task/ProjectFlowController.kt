@@ -121,6 +121,7 @@ class ProjectFlowController @Inject constructor(
         }
 
     fun runProjectTask(task: ProjectTask) {
+        if (task.isRequirementBranch) return
         val projectId = task.projectId ?: return
         scope.launch {
             val key = ProjectRunKey(task.workspace, projectId)
@@ -158,7 +159,7 @@ class ProjectFlowController @Inject constructor(
     }
 
     private suspend fun hasPendingTasks(key: ProjectRunKey): Boolean = try {
-        repository.load(key.workspace).tasks.any { it.projectId == key.projectId && !ProjectWorkflowPlan.delivered(it) }
+        repository.load(key.workspace).tasks.any { it.projectId == key.projectId && !it.isRequirementBranch && !ProjectWorkflowPlan.delivered(it) }
     } catch (cancelled: CancellationException) { throw cancelled }
     catch (failure: Exception) { error(key.workspace, failure.message ?: "TASK_READ_FAILED"); false }
 

@@ -96,7 +96,8 @@ fun ProjectTaskMap(projectId: String, projectTitle: String, tasks: List<ProjectT
     process: @Composable (ProjectTask) -> Unit = {}) {
     val onDrag by rememberUpdatedState(onContentDrag)
     val byId = remember(tasks) { tasks.associateBy { it.id } }
-    val outlines = remember(tasks) { tasks.associate { it.id to ProjectTaskOutline.of(it, tasks) } }
+    val outlines = remember(tasks) { tasks.associate { it.id to
+        if (it.isRequirementBranch) emptyList() else ProjectTaskOutline.of(it, tasks) } }
     val outer = LocalDensity.current
     val density = outer.density
     var viewportWidth by remember(projectId) { mutableFloatStateOf(Float.POSITIVE_INFINITY) }
@@ -306,7 +307,8 @@ fun ProjectTaskMap(projectId: String, projectTitle: String, tasks: List<ProjectT
                     val r = ProjectTaskMapLayout.DOT_RADIUS * zoom * density
                     if (node.id in shown) drawLine(weakLine, Offset(c.x, c.y + r), Offset(c.x, sy(node.y + node.height - Spacing.sm.value)),
                         EDGE_DP * density, alpha = alpha)
-                    val style = dotStyle(task.status, node.id in pathIds)
+                    val style = if (task.isRequirementBranch) DotStyle(weakLine, filled = false)
+                        else dotStyle(task.status, node.id in pathIds)
                     if (style.glow) drawCircle(style.color, RUN_GLOW * zoom * density, c, alpha = GLOW_ALPHA * alpha)
                     if (style.filled) drawCircle(style.color, r, c, alpha = alpha)
                     else {
@@ -329,12 +331,13 @@ fun ProjectTaskMap(projectId: String, projectTitle: String, tasks: List<ProjectT
                     .testTag("map_node_" + node.id)) {
                     CompositionLocalProvider(LocalDensity provides zoomed) {
                         if (task == null) ProjectTaskMapRootHeader(projectTitle,
-                            stringResource(R.string.project_flow_progress, tasks.count { ProjectWorkflowPlan.delivered(it) }, tasks.size),
+                            stringResource(R.string.project_flow_progress, tasks.count { !it.isRequirementBranch && ProjectWorkflowPlan.delivered(it) }, tasks.count { !it.isRequirementBranch }),
                             rootStyle, onClick = onOpenRoot)
                         else Column {
-                            ProjectTaskMapHeader(task.title, projectTaskStatusLabel(task.status), outlines[task.id].orEmpty().size, unfolded,
+                            ProjectTaskMapHeader(task.title, if (task.isRequirementBranch) stringResource(R.string.project_requirement_branch) else projectTaskStatusLabel(task.status), outlines[task.id].orEmpty().size, unfolded,
                                 emphasised = node.id in pathIds || node.id in hitIds || task.status == ProjectTaskStatus.RUNNING,
-                                titleStyle = titleStyle, onClick = { toggle(task.id) }, onLongClick = { toggle(task.id) })
+                                titleStyle = titleStyle, onClick = { if (task.isRequirementBranch) onOpenProcess(task.id) else toggle(task.id) },
+                                onLongClick = { if (task.isRequirementBranch) onOpenProcess(task.id) else toggle(task.id) })
                             if (unfolded) ProjectTaskOutlineView(outlines[task.id].orEmpty(), kindsOpen(task.id), linesOpen(task.id),
                                 hitLines[task.id].orEmpty(),
                                 onToggleGroup = { kind -> val k = "${task.id}#${kind.name}"; openGroups = if (k in openGroups) openGroups - k else openGroups + k },
@@ -354,17 +357,17 @@ fun ProjectTaskMap(projectId: String, projectTitle: String, tasks: List<ProjectT
             Box(Modifier.weight(1f).fillMaxWidth()) { rootConversation() }
         }
     }
-    val selected = byId[processId]
+    val selected = byId[processId]?.takeUnless { it.isRequirementBranch }
     if (selected != null) AdaptiveModalBottomSheet(onDismissRequest = onDismissProcess,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(Modifier.fillMaxWidth().fillMaxHeight(0.9f).testTag("map_process_sheet")) {
             Row(Modifier.fillMaxWidth().padding(horizontal = Spacing.lg), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-                Box(Modifier.size(Spacing.sm).background(projectTaskStatusColor(selected.status), CircleShape))
+                if (!selected.isRequirementBranch) Box(Modifier.size(Spacing.sm).background(projectTaskStatusColor(selected.status), CircleShape))
                 Text(selected.title, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.weight(1f))
                 TextButton(onClick = { onAddChild(selected) }) { Text(stringResource(R.string.project_node_add_child)) }
-                Text(projectTaskStatusLabel(selected.status), style = MaterialTheme.typography.labelMedium)
+                Text(if (selected.isRequirementBranch) stringResource(R.string.project_requirement_branch) else projectTaskStatusLabel(selected.status), style = MaterialTheme.typography.labelMedium)
             }
             Box(Modifier.weight(1f).fillMaxWidth()) { process(selected) }
         }

@@ -13,6 +13,22 @@ def source(name):
 
 
 class ProjectChatComposerContract(unittest.TestCase):
+    def assert_branch_binding(self, screen):
+        self.assertIn("var requirementBranchId by rememberSaveable(id, workspace)", screen)
+        selected = screen.split("val selectedBranch =", 1)[1].split("val chooseBranch:", 1)[0]
+        for guard in ("it.id == requirementBranchId", "it.projectId == id", "it.workspace == workspace", "it.isRequirementBranch"):
+            self.assertIn(guard, selected)
+        effect = screen.split("LaunchedEffect(id, workspace, project != null, state.workspace, requirementBranchId)", 1)[1].split("val ready =", 1)[0]
+        for contract in ("val requestedBranch = requirementBranchId",
+                         "if (requestedBranch == null) projects.ensureProjectSession(id, workspace)",
+                         "else projects.ensureBranchSession(requestedBranch, workspace)",
+                         "currentCoroutineContext().ensureActive()",
+                         "projects.state.value.workspace == workspace && requirementBranchId == requestedBranch",
+                         "sessionId = target; agent.selectSession(target)"):
+            self.assertIn(contract, effect)
+        self.assertIn("requirementBranchId = requirementBranchId, onSelectRequirementBranch = chooseBranch", screen)
+        self.assertIn("branchSessionId = sessionId.takeIf { requirementBranchId != null }", screen)
+
     def test_same_chat_consumer_and_default_compatibility(self):
         panel = source("AIChatPanel.kt")
         self.assertIn("bodyOverride:", panel)
@@ -62,13 +78,16 @@ class ProjectChatComposerContract(unittest.TestCase):
                          "sessions.upsertSession(", "repository.linkProjectExecution("):
             self.assertIn(contract, vm)
 
-    def test_tree_preserves_manual_add_without_inline_editing(self):
+    def test_tree_creates_empty_branch_without_inline_editing(self):
         workbench = source("ProjectTaskWorkbench.kt")
         for removed in ("ProjectTaskNodeMenu(", "ProjectTaskEditor(",
                         "ProjectTaskSupplementSheet(", "R.string.project_add_content"):
             self.assertNotIn(removed, workbench)
         self.assertIn("ProjectTaskAddSheet(", workbench)
-        self.assertIn("viewModel.addTaskByDescription(", workbench)
+        submit = workbench.split("onSubmit = { description ->", 1)[1].split("onDismiss =", 1)[0]
+        self.assertIn("viewModel.createRequirementBranch(projectId, description, parentId = addingParentId)", submit)
+        self.assertIn("onSelectRequirementBranch(branchId)", submit)
+        self.assertNotIn("addTaskByDescription", submit)
         self.assertRegex(workbench, r'(?s)val header:.*?DropdownMenu\(expanded = menuOpen, onDismissRequest = \{ menuOpen = false \}\).*?DropdownMenuItem\(text = \{ Text\(stringResource\(R.string.project_add_task\)\) \}, enabled = !state.busy,\s*modifier = Modifier.testTag\("project_add_task"\),\s*onClick = \{ addingParentId = null; adding = true; menuOpen = false \}\)')
         self.assertIn("addingParentId = row.task.id", workbench)
         self.assertNotIn("ProjectTaskNodeMenu(", source("ProjectTaskMap.kt"))
@@ -100,6 +119,58 @@ class ProjectChatComposerContract(unittest.TestCase):
             self.assertIn(gate, process)
         self.assertIn("if (!readOnly) TextButton(onClick = onEdit)", process)
         self.assertIn("onAccept = { viewModel.accept(task) }", source("ProjectTaskWorkbench.kt"))
+
+    def test_branch_binding_rejects_scope_and_late_selection_mutants(self):
+        screen = source("ProjectChatScreen.kt")
+        self.assert_branch_binding(screen)
+        for old, new in (("projects.ensureBranchSession(requestedBranch, workspace)", "projects.ensureProjectSession(id, workspace)"),
+                         ("requirementBranchId == requestedBranch", "true"),
+                         ("it.projectId == id", "true"),
+                         ("it.workspace == workspace", "true")):
+            mutant = screen.replace(old, new, 1)
+            self.assertNotEqual(mutant, screen)
+            with self.assertRaises(AssertionError):
+                self.assert_branch_binding(mutant)
+        workbench = source("ProjectTaskWorkbench.kt")
+        toggle = workbench.split("val toggle:", 1)[1].split("val process:", 1)[0]
+        self.assertIn("if (id == rootId) onSelectRequirementBranch(null)", toggle)
+        self.assertIn("onSelectRequirementBranch(null); rootReader = true", workbench)
+        self.assertIn("Ask and answer questions normally without planning unless the user asks to add requirements", screen)
+
+    def test_branch_sessions_are_linked_only_to_the_same_branch(self):
+        vm = (JAVA / "feature/agent/presentation/ProjectTaskViewModel.kt").read_text()
+        branch = vm.split("suspend fun ensureBranchSession(", 1)[1].split("\n    fun createRequirementBranch(", 1)[0]
+        for contract in ("sessionMutex.withLock", "it.id == branchId && it.workspace == workspace && it.isRequirementBranch",
+                         "val key = workspace to branchId", "branch.sessionIds +", "pendingBranchSessions[key]",
+                         "it.parentId == null && it.workspacePath == workspace", "sessions.upsertSession(it)",
+                         "repository.transact(workspace)", "it.projectId == branch.projectId",
+                         "latest.copy(sessionIds = latest.sessionIds + session.id)"):
+            self.assertIn(contract, branch)
+        self.assertNotIn("flowSessionIds", branch)
+        self.assertNotIn("linkProjectExecution", branch)
+        create = vm.split("fun createRequirementBranch(", 1)[1].split("\n    fun selectProject(", 1)[0]
+        for guard in ("if (title.isBlank()) return", "repository.createRequirementBranch(projectId, title, workspace, parentId)",
+                      "selectionEpoch == epoch", "mutable.value.workspace == requestedWorkspace",
+                      "mutable.value.selectedProjectId == selectedProject"):
+            self.assertIn(guard, create)
+        graph = (JAVA / "feature/agent/domain/task/ProjectTaskGraph.kt").read_text()
+        for guard in ("parent.projectId != task.projectId", "parent.workspace != task.workspace", "PARENT_NOT_FOUND"):
+            self.assertIn(guard, graph)
+
+    def test_branch_process_returns_before_task_acceptance_and_owner(self):
+        process = source("ProjectTaskProcess.kt")
+        branch = process.split("if (task.isRequirementBranch) {", 1)[1].split("val records = projectProcessRecords(task)", 1)[0]
+        for contract in ("project_branch_discussion_hint", "it in task.sessionIds", "conversation(task, sessionId)"):
+            self.assertIn(contract, branch)
+        self.assertRegex(branch, r"return\s*}\s*$")
+        for task_only in ("onClick = onAccept", "task.owner", "task.status", "task.acceptance", "task.evidenceRefs"):
+            self.assertNotIn(task_only, branch)
+        workbench = source("ProjectTaskWorkbench.kt")
+        self.assertIn("if (!row.task.isRequirementBranch) Text(row.task.owner", workbench)
+        vm = (JAVA / "feature/agent/presentation/ProjectTaskViewModel.kt").read_text()
+        self.assertIn(".filterNot { it.isRequirementBranch }.groupingBy", vm)
+        accept = vm.split("fun accept(", 1)[1].split("\n    }", 1)[0]
+        self.assertIn("if (task.isRequirementBranch || task.status !=", accept)
 
     def test_force_insert_preserves_raw_user_text(self):
         panel = source("AIChatPanel.kt")

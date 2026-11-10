@@ -185,7 +185,7 @@
       "id": "project-plan-request",
       "title": "项目规划请求",
       "description": "内置辅助请求，可编辑和停用；仅在对应功能调用时读取。",
-      "content": "只依据输入需求、可用成员和现有任务构造可验证的任务树。仅返回JSON对象：{\"tasks\":[{\"key\":\"t1\",\"title\":\"标题\",\"requirement\":\"任务边界\",\"parentKey\":null,\"dependsOn\":[],\"acceptance\":\"可观察验收\",\"owner\":\"输入允许的成员\",\"members\":[]}]}。parentKey和dependsOn仅引用本批key或输入已有任务ID；不得虚构成员、工具、执行状态或已完成结果；保留指定父级，避免重复任务。",
+      "content": "只依据输入需求、可用成员和现有任务构造可验证的任务树。仅返回JSON对象：{\"tasks\":[{\"key\":\"t1\",\"title\":\"标题\",\"requirement\":\"任务边界\",\"parentKey\":null,\"dependsOn\":[],\"acceptance\":\"可观察验收\",\"owner\":\"输入允许的成员\",\"members\":[]}]}。parentKey和dependsOn仅引用本批key或输入已有任务ID；不得虚构成员、工具、执行状态或已完成结果；保留指定父级，避免重复任务。若输入指定当前需求分支 scope，顶层执行任务固定挂在该分支下，内部任务只引用本批任务或该 scope 内合法父级，不得指向兄弟或外部分支；容器本身不作为执行任务。总述、共同规范和收尾要求保留为各相关任务背景，不单列任务。",
       "category": "RULE",
       "loading": "SEARCH",
       "folder": "辅助请求", "requestKey": "agent/project-plan.md"
@@ -194,7 +194,7 @@
       "id": "project-revise-request",
       "title": "项目修订请求",
       "description": "内置辅助请求，可编辑和停用；仅在对应功能调用时读取。",
-      "content": "只依据输入补充修订锚点分支，不动无关任务与历史。仅返回JSON对象{\"operations\":[{\"op\":\"edit\",\"taskId\":\"已有分支ID\",\"requirement\":\"完整新要求\"},{\"op\":\"rerun\",\"taskId\":\"已有分支ID\"},{\"op\":\"add\",\"key\":\"新任务key\",\"title\":\"标题\",\"requirement\":\"任务边界\",\"parentKey\":\"锚点或分支ID\",\"dependsOn\":[],\"acceptance\":\"可观察验收\",\"owner\":\"输入允许成员\",\"members\":[]}]}。仅使用edit/rerun/add，taskId须来自锚点分支；add不得指向分支外父级，不添加已存在的任务。不虚构执行状态或成员。",
+      "content": "只依据输入补充修订锚点分支，不动无关任务与历史。仅返回JSON对象{\"operations\":[{\"op\":\"edit\",\"taskId\":\"已有分支ID\",\"requirement\":\"完整新要求\"},{\"op\":\"rerun\",\"taskId\":\"已有分支ID\"},{\"op\":\"add\",\"key\":\"新任务key\",\"title\":\"标题\",\"requirement\":\"任务边界\",\"parentKey\":\"锚点或分支ID\",\"dependsOn\":[],\"acceptance\":\"可观察验收\",\"owner\":\"输入允许成员\",\"members\":[]}]}。仅使用edit/rerun/add，taskId须来自锚点分支；add不得指向分支外父级，不添加已存在的任务。不虚构执行状态或成员。若输入指定当前需求分支 scope，新增执行任务固定在该分支子树内，顶层父级固定为该分支；容器不执行、不作为rerun或验收对象。总述、共同规范和收尾要求保留为各相关任务背景，不单列任务。",
       "category": "RULE",
       "loading": "SEARCH",
       "folder": "辅助请求", "requestKey": "agent/project-revise.md"

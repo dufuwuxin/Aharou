@@ -33,6 +33,7 @@ data class ProjectRevision(
 
     /** The change for [latest], read at commit time so a concurrent edit is never saved over with an old version. */
     fun change(latest: ProjectTask): ProjectTaskChange {
+        check(!latest.isRequirementBranch) { "BRANCH_REVISION_REQUIRES_APPEND" }
         return ProjectTaskChange(latest.copy(requirement = edits[latest.id] ?: latest.requirement), force = latest.id in reruns)
     }
 }
@@ -58,17 +59,26 @@ class ProjectPlanner @Inject constructor(
     suspend fun plan(project: ProjectPlan, requirements: String, existing: List<ProjectTask>, members: List<String>,
         parentId: String? = null): ProjectPlanResult {
         val draft = project.copy(requirements = requirements)
-        val scope = existing.filter { it.projectId == project.id }
+        val projectTasks = existing.filter { it.projectId == project.id && it.workspace == project.workspace }
+        val scope = projectTasks
+        require(parentId == null || scope.any { it.id == parentId }) { "PARENT_NOT_FOUND" }
+        val parent = parentId?.let { id -> scope.single { it.id == id } }
+        val branches = parent?.let { ProjectWorkflowPlan.requirementBranches(it, scope) }.orEmpty()
+        val visible = branches.lastOrNull()?.let { ProjectTaskGraph.subtree(it.id, scope) } ?: scope
         val input = buildString {
             append("Project: ").append(project.title)
+            append("\nProject requirements:\n").append(project.requirements.take(REQUIREMENT_MAX))
+            for (branch in branches) append("\nRequirement branch [").append(branch.id).append("]:\n")
+                .append(branch.requirement.take(REQUIREMENT_MAX))
             append("\nProject purpose (background only, not executable requirements): ").append(project.purpose.take(REQUIREMENT_MAX))
             append("\nEnabled members: ").append(members.joinToString(", ").ifBlank { "(none)" })
             parentId?.let { append("\nFixed parent task id: ").append(it).append(" (every new top-level task hangs under it)") }
             append("\nExisting tasks:")
-            if (scope.isEmpty()) append(" (none)")
-            for (task in ProjectTaskGraph.tree(scope).take(MAX_CONTEXT_TASKS)) {
+            if (visible.isEmpty()) append(" (none)")
+            for (task in ProjectTaskGraph.tree(visible).take(MAX_CONTEXT_TASKS)) {
                 append("\n- id=").append(task.task.id).append(" parent=").append(task.task.parentId ?: "-")
-                    .append(" status=").append(task.task.status.name).append(" title=").append(task.task.title)
+                    .append(" status=").append(if (task.task.isRequirementBranch) "REQUIREMENT_BRANCH" else task.task.status.name)
+                    .append(" title=").append(task.task.title)
             }
             append("\n\nRequirements:\n").append(requirements)
         }
@@ -89,18 +99,25 @@ class ProjectPlanner @Inject constructor(
      * member prompt from there, so copying it into the requirement would show the same words twice.
      */
     suspend fun revise(project: ProjectPlan, anchor: ProjectTask, projectTasks: List<ProjectTask>, text: String, members: List<String>): ProjectRevision {
+        check(!anchor.isRequirementBranch) { "BRANCH_REVISION_REQUIRES_APPEND" }
         val branch = ProjectTaskGraph.subtree(anchor.id, projectTasks).take(MAX_CONTEXT_TASKS)
+        val anchorContainers = ProjectWorkflowPlan.requirementBranches(anchor, projectTasks).map { it.id }
         val input = buildString {
             append("Project: ").append(project.title)
             append("\nProject purpose (background only, not executable requirements): ").append(project.purpose.take(REQUIREMENT_MAX))
             append("\nEnabled members: ").append(members.joinToString(", ").ifBlank { "(none)" })
+            append("\nProject requirements:\n").append(project.requirements.take(REQUIREMENT_MAX))
+            for (container in ProjectWorkflowPlan.requirementBranches(anchor, projectTasks))
+                append("\nRequirement branch [").append(container.id).append("]:\n").append(container.requirement.take(REQUIREMENT_MAX))
             append("\nAnchor task id: ").append(anchor.id)
             append("\nBranch tasks (anchor first):")
             for (task in branch) {
                 append("\n- id=").append(task.id).append(" parent=").append(task.parentId ?: "-")
-                    .append(" status=").append(task.status.name)
+                    .append(" status=").append(if (task.isRequirementBranch) "REQUIREMENT_BRANCH" else task.status.name)
                     .append("\n  title: ").append(task.title)
-                    .append("\n  requirement: ").append(task.requirement.take(CONTEXT_TEXT_MAX))
+                if (!task.isRequirementBranch &&
+                    ProjectWorkflowPlan.requirementBranches(task, projectTasks).map { it.id } == anchorContainers)
+                    append("\n  requirement: ").append(task.requirement.take(CONTEXT_TEXT_MAX))
                     .append("\n  summary: ").append(task.brief.take(CONTEXT_TEXT_MAX).ifBlank { "(none)" })
             }
             append("\n\nUser supplement:\n").append(text)
@@ -128,13 +145,15 @@ class ProjectPlanner @Inject constructor(
         val adds = mutableListOf<JsonObject>()
         for (operation in operations) {
             val id = operation.text("taskId")
+            if (operation.text("op") in setOf("edit", "rerun"))
+                check(branch.none { it.id == id && it.isRequirementBranch }) { "BRANCH_REVISION_REQUIRES_APPEND" }
             when (operation.text("op")) {
                 "edit" -> operation.text("requirement").takeIf { id in branchIds && it.isNotBlank() }?.let { edits[id] = it.take(REQUIREMENT_MAX) }
                 "rerun" -> if (id in branchIds) reruns += id
                 "add" -> adds += operation
             }
         }
-        val scope = projectTasks.filter { it.projectId == anchor.projectId }
+        val scope = projectTasks.filter { it.projectId == anchor.projectId && it.workspace == anchor.workspace }
         val added = mapTasks(adds, project, scope, members, anchor.id, branchIds, ProjectTaskStatus.READY)
             .takeIf { ProjectTaskGraph.validate(scope + it) == null }.orEmpty()
         if (edits.isEmpty() && reruns.isEmpty() && added.isEmpty()) return null
@@ -149,6 +168,7 @@ class ProjectPlanner @Inject constructor(
         val ids = entries.associate { it.first to java.util.UUID.randomUUID().toString() }
         val keyById = ids.entries.associate { (key, id) -> id to key }
         val existingIds = scope.map { it.id }.toSet()
+        val executableIds = scope.filterNot { it.isRequirementBranch }.map { it.id }.toSet()
         fun resolve(reference: String): String? = ids[reference] ?: reference.takeIf { it in existingIds }
         val parents = entries.associate { (key, item) ->
             val parent = item.text("parentKey").takeIf { it.isNotBlank() }?.let(::resolve)?.takeIf { it != ids[key] }
@@ -171,8 +191,18 @@ class ProjectPlanner @Inject constructor(
         val enabled = members.toSet()
         return kept.mapIndexed { index, (key, item) ->
             val id = ids.getValue(key)
+            var existingParent = parents[key]
+            val parentSeen = hashSetOf<String>()
+            while (existingParent != null && existingParent in keyById && parentSeen.add(existingParent))
+                existingParent = parents[keyById.getValue(existingParent)]
+            val container = scope.firstOrNull { it.id == existingParent }?.let {
+                ProjectWorkflowPlan.requirementBranches(it, scope).lastOrNull()
+            }
+            val dependencyIds = container?.let { branch ->
+                ProjectTaskGraph.subtree(branch.id, scope).filterNot { it.isRequirementBranch }.map { it.id }.toSet()
+            } ?: executableIds
             val dependencies = item.names("dependsOn").mapNotNull(::resolve)
-                .filter { (it in keptIds || it in existingIds) && it != id }.distinct()
+                .filter { (it in keptIds || it in dependencyIds) && it != id }.distinct()
             ProjectTask(id = id, workspace = project.workspace, projectId = project.id, title = item.text("title").take(TITLE_MAX),
                 requirement = item.text("requirement").ifBlank { item.text("title") }.take(REQUIREMENT_MAX),
                 parentId = parents[key], dependencyIds = dependencies, acceptance = item.text("acceptance").take(REQUIREMENT_MAX),

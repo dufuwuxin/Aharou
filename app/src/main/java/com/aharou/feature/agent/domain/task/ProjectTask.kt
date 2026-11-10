@@ -48,7 +48,9 @@ data class ProjectTask(
     /** User supplements in original wording, oldest first; recording one never invalidates work by itself. */
     val supplements: List<String> = emptyList(),
     /** Member session that added this task through project_tasks; null for user or planner tasks. */
-    val createdBySessionId: String? = null
+    val createdBySessionId: String? = null,
+    /** Conversation/context container, never an executable task. Legacy records remain tasks. */
+    val isRequirementBranch: Boolean = false
 )
 
 /** One staged write in a repository transaction; [force] bumps the requirements version (rerun) even without a field change. */

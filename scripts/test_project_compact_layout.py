@@ -26,6 +26,12 @@ def region(text, marker, opening="{"):
 
 
 class ProjectCompactLayoutContract(unittest.TestCase):
+    def assert_branch_submit(self, workbench):
+        submit = region(workbench, "onSubmit =", opening="{")
+        self.assertIn("viewModel.createRequirementBranch(projectId, description, parentId = addingParentId)", submit)
+        self.assertIn("onSelectRequirementBranch(branchId)", submit)
+        self.assertNotIn("addTaskByDescription", submit)
+
     def assert_header(self, workbench):
         header = region(workbench, "val header:")
         self.assertEqual(1, header.count('testTag("project_compact_header")'))
@@ -47,7 +53,8 @@ class ProjectCompactLayoutContract(unittest.TestCase):
         self.assertIn('modifier = Modifier.testTag("project_flow_stop")', stop)
         self.assertIn("onClick = { menuOpen = false; viewModel.stopProject(projectId) }", stop)
         start = region(menu, "else DropdownMenuItem", "(")
-        self.assertIn("enabled = !state.loading && !state.busy && !planning && tasks.any { !ProjectWorkflowPlan.delivered(it) }", start)
+        self.assertIn("val executableTasks = tasks.filterNot { it.isRequirementBranch }", workbench)
+        self.assertIn("enabled = !state.loading && !state.busy && !planning && executableTasks.any { !ProjectWorkflowPlan.delivered(it) }", start)
         self.assertIn("onClick = { menuOpen = false; viewModel.startProject(projectId) }", start)
 
     def assert_search(self, task_map):
@@ -137,8 +144,8 @@ class ProjectCompactLayoutContract(unittest.TestCase):
             self.assertNotRegex(controls, r"\b(?:TextButton|IconButton|Button)\(")
             self.assertNotIn(".clickable", controls)
 
-    def test_manual_add_root_and_process_contracts_remain(self):
-        for contract in ("ProjectTaskAddSheet(", "viewModel.addTaskByDescription(",
+    def test_empty_branch_root_and_process_contracts_remain(self):
+        for contract in ("ProjectTaskAddSheet(", "viewModel.createRequirementBranch(",
                          "addingParentId = row.task.id", "onAddChild = { task ->",
                          "rootConversation()", "rootConversation = rootConversation",
                          "onAccept = { viewModel.accept(task) }", "readOnly = true",
@@ -147,6 +154,27 @@ class ProjectCompactLayoutContract(unittest.TestCase):
         self.assertIn("onAddChild(selected)", MAP)
         self.assertIn("rootConversation()", MAP)
         self.assertIn("fillMaxHeight(0.9f)", MAP)
+        self.assert_branch_submit(WORKBENCH)
+        for resource in ("project_add_task", "project_node_add_child"):
+            strings = ET.parse(ROOT / "app/src/main/res/values/strings.xml").getroot()
+            self.assertEqual("添加需求分支", strings.find(f"string[@name='{resource}']").text)
+
+    def test_branch_exclusion_and_creation_mutants_are_rejected(self):
+        for old, new in (("tasks.filterNot { it.isRequirementBranch }", "tasks"),
+                         ("executableTasks.any { !ProjectWorkflowPlan.delivered(it) }", "tasks.any { !ProjectWorkflowPlan.delivered(it) }")):
+            mutant = WORKBENCH.replace(old, new, 1)
+            self.assertNotEqual(mutant, WORKBENCH)
+            with self.assertRaises(AssertionError):
+                self.assert_stop(mutant)
+        for old, new in (("viewModel.createRequirementBranch(", "viewModel.addTaskByDescription("),
+                         ("parentId = addingParentId", "parentId = null"),
+                         ("onSelectRequirementBranch(branchId)", "onSelectRequirementBranch(null)")):
+            mutant = WORKBENCH.replace(old, new, 1)
+            self.assertNotEqual(mutant, WORKBENCH)
+            with self.assertRaises(AssertionError):
+                self.assert_branch_submit(mutant)
+        self.assertIn("tasks.count { !it.isRequirementBranch && ProjectWorkflowPlan.delivered(it) }", MAP)
+        self.assertIn("tasks.count { !it.isRequirementBranch }", MAP)
 
     def test_menu_semantics_use_existing_chinese_resources(self):
         strings = {item.attrib["name"]: "".join(item.itertext()) for item in ET.parse(ROOT / "app/src/main/res/values/strings.xml").getroot() if item.tag == "string"}

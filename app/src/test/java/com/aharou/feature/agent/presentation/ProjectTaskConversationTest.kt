@@ -34,7 +34,9 @@ class ProjectTaskConversationTestApplication : Application(), GeneratedComponent
         every { modelState } returns MutableStateFlow(TranslationModelState.MISSING)
         coEvery { translate(any()) } answers { firstArg<String>() }
     }
-    private val component = object : GeneratedComponent, TranslationEntryPoint {
+    private val intake = SharedIntakeHolder()
+    private val component = object : GeneratedComponent, TranslationEntryPoint, SharedIntakeEntryPoint {
+        override fun sharedIntakeHolder(): SharedIntakeHolder = intake
         override fun translation(): OfflineTranslation = translation
     }
 

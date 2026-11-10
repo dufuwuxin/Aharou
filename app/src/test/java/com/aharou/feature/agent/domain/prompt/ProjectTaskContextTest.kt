@@ -64,4 +64,23 @@ class ProjectTaskContextTest {
         assertNull(context.build("root", ""))
         verify(exactly = 0) { repository.snapshot(any()) }
     }
+
+    @Test fun branchDiscussionHasNoExecutableTaskStatusAndScopeComesOnlyFromItsSession() {
+        val repository = mockk<ProjectTaskRepository>()
+        val branch = ProjectTask(id = "b", workspace = "w", projectId = "p", title = "Discussion", requirement = "original wording",
+            sessionIds = listOf("discussion"), isRequirementBranch = true)
+        every { repository.snapshot("w") } returns ProjectTaskSnapshot(tasks = listOf(branch),
+            projects = listOf(ProjectPlan(id = "p", workspace = "w", title = "Project", purpose = "background")))
+        every { repository.snapshot("other") } returns ProjectTaskSnapshot()
+        val context = ProjectTaskContext(repository)
+        val prompt = context.build("discussion", "w").orEmpty()
+        assertTrue(prompt.contains("Current requirement branch discussion"))
+        assertTrue(prompt.contains("Branch ID: b"))
+        assertTrue(prompt.contains("original wording"))
+        assertTrue(prompt.contains("Answer questions normally without changing tasks"))
+        assertTrue(prompt.contains("caller session fixes this branch as parent"))
+        assertFalse(prompt.contains("Current project task"))
+        assertFalse(prompt.contains("DRAFT"))
+        assertNull(context.build("discussion", "other"))
+    }
 }

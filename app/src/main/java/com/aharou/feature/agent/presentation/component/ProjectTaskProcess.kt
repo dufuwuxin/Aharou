@@ -23,6 +23,26 @@ internal fun ProjectTaskProcess(task: ProjectTask, tasks: List<ProjectTask>, onE
     conversation: @Composable (ProjectTask, String) -> Unit, modifier: Modifier = Modifier, readOnly: Boolean = false,
     fillConversation: Boolean = true, acceptEnabled: Boolean = true,
     onReadFull: ((String?) -> Unit)? = null, initialSession: String? = null, onRecordSelected: ((String?) -> Unit)? = null) {
+    if (task.isRequirementBranch) {
+        Column(modifier.testTag("requirement_branch_${task.id}"), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+            Text(stringResource(R.string.project_requirement_branch), style = MaterialTheme.typography.labelMedium)
+            Text(stringResource(R.string.project_branch_discussion_hint), style = MaterialTheme.typography.bodySmall)
+            if (task.requirement.isNotBlank()) Text(task.requirement, style = MaterialTheme.typography.bodySmall, maxLines = 3)
+            var selected by rememberSaveable(task.id, initialSession) { mutableStateOf(initialSession) }
+            val sessionId = selected?.takeIf { it in task.sessionIds } ?: task.sessionIds.firstOrNull()
+            if (task.sessionIds.size > 1) Row(Modifier.horizontalScroll(rememberScrollState())) {
+                task.sessionIds.forEachIndexed { index, record ->
+                    FilterChip(selected = record == sessionId, onClick = { selected = record },
+                        label = { Text(stringResource(R.string.project_main_record, index + 1)) })
+                }
+            }
+            if (sessionId == null) Text(stringResource(R.string.project_process_empty))
+            else Box(if (fillConversation) Modifier.weight(1f).fillMaxWidth() else Modifier.fillMaxWidth()) {
+                key(task.id, sessionId) { conversation(task, sessionId) }
+            }
+        }
+        return
+    }
     val records = projectProcessRecords(task)
     val recordState = key(task.id) { rememberSaveableStateHolder() }
     var selectedSession by rememberSaveable(task.id, initialSession) { mutableStateOf(projectRecordSelection(records, initialSession)) }

@@ -41,10 +41,13 @@ import compose.icons.feathericons.Square
 @Composable
 fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onBack: () -> Unit,
     conversation: @Composable (ProjectTask, String) -> Unit, approvals: @Composable () -> Unit = {},
-    onContentDrag: () -> Unit = {}, rootConversation: @Composable () -> Unit = {}) {
+    onContentDrag: () -> Unit = {}, rootConversation: @Composable () -> Unit = {},
+    requirementBranchId: String? = null, onSelectRequirementBranch: (String?) -> Unit = {},
+    branchSessionId: String? = null) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val project = state.projects.firstOrNull { it.id == projectId }
     val tasks = state.tasks.filter { it.projectId == projectId }
+    val executableTasks = tasks.filterNot { it.isRequirementBranch }
     val rootId = ProjectTaskMapLayout.rootId(projectId)
     var viewMode by rememberSaveable(projectId) { mutableStateOf("map") }
     var menuOpen by rememberSaveable(projectId) { mutableStateOf(false) }
@@ -59,15 +62,22 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
     var addingParentId by rememberSaveable(projectId) { mutableStateOf<String?>(null) }
     val planning = projectId in state.planningProjectIds
     val ruleFallback = projectId in state.ruleFallbackProjectIds
-    LaunchedEffect(state.selectedId) { if (tasks.any { it.id == state.selectedId }) expandedId = state.selectedId }
+    LaunchedEffect(state.selectedId, tasks.map { it.id }) {
+        tasks.firstOrNull { it.id == state.selectedId }?.let {
+            expandedId = it.id
+            if (it.isRequirementBranch) onSelectRequirementBranch(it.id)
+        }
+    }
     BackHandler(enabled = expandedId != null) { expandedId = null }
     val toggle: (String) -> Unit = { id ->
+        if (id == rootId) onSelectRequirementBranch(null)
+        else if (tasks.any { it.id == id && it.isRequirementBranch }) onSelectRequirementBranch(id)
         if (expandedId == id) expandedId = null else { expandedId = id; viewModel.select(id) }
     }
     val process: @Composable (ProjectTask) -> Unit = { task ->
         ProjectTaskProcess(task, tasks, onEdit = {}, onAccept = { viewModel.accept(task) }, conversation = conversation,
             modifier = Modifier.fillMaxSize().padding(Spacing.sm), readOnly = true, acceptEnabled = !state.busy,
-            onReadFull = { session -> readerSession = session; readerId = task.id }, initialSession = selectedRecords[task.id],
+            onReadFull = { session -> readerSession = session; readerId = task.id }, initialSession = if (task.id == requirementBranchId) branchSessionId else selectedRecords[task.id],
             onRecordSelected = { session -> selectedRecords = selectedRecords + (task.id to session) })
     }
     val sessionMenu = LocalProjectChatMenu.current
@@ -81,7 +91,7 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
             Column(Modifier.weight(1f).clickable { overview = true }.padding(vertical = Spacing.xs)) {
                 Text(project?.title.orEmpty(), maxLines = 1, overflow = TextOverflow.Ellipsis,
                     style = MaterialTheme.typography.titleMedium)
-                Text(stringResource(R.string.project_flow_progress, tasks.count { ProjectWorkflowPlan.delivered(it) }, tasks.size),
+                Text(stringResource(R.string.project_flow_progress, executableTasks.count { ProjectWorkflowPlan.delivered(it) }, executableTasks.size),
                     style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             Box {
@@ -96,7 +106,7 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
                         onClick = { menuOpen = false; viewModel.stopProject(projectId) })
                     else DropdownMenuItem(text = { Text(stringResource(R.string.project_flow_start)) },
                         leadingIcon = { Icon(FeatherIcons.Play, null) },
-                        enabled = !state.loading && !state.busy && !planning && tasks.any { !ProjectWorkflowPlan.delivered(it) },
+                        enabled = !state.loading && !state.busy && !planning && executableTasks.any { !ProjectWorkflowPlan.delivered(it) },
                         modifier = Modifier.testTag("project_flow_start"),
                         onClick = { menuOpen = false; viewModel.startProject(projectId) })
                     DropdownMenuItem(text = { Text(stringResource(R.string.project_task_overview)) },
@@ -113,8 +123,12 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
                 }
             }
         }
-        TextButton(onClick = { rootReader = true }, modifier = Modifier.fillMaxWidth().testTag("project_main_conversation")) {
+        TextButton(onClick = { onSelectRequirementBranch(null); rootReader = true }, modifier = Modifier.fillMaxWidth().testTag("project_main_conversation")) {
             Text(stringResource(R.string.project_main_conversation))
+        }
+        tasks.firstOrNull { it.id == requirementBranchId && it.isRequirementBranch }?.let { selected ->
+            Text(stringResource(R.string.project_branch_composer, selected.title),
+                style = MaterialTheme.typography.labelMedium, modifier = Modifier.testTag("project_branch_composer"))
         }
         if (planning) Column(Modifier.fillMaxWidth().testTag("project_planning"), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
             Text(stringResource(R.string.project_planning), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
@@ -148,12 +162,31 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
     val dragConnection = rememberContentDragConnection(onContentDrag)
     BoxWithConstraints(Modifier.fillMaxSize().statusBarsPadding().nestedScroll(dragConnection).padding(horizontal = Spacing.sm)) {
             val processHeight = (maxHeight * 0.9f).coerceIn(240.dp, 640.dp)
-            if (viewMode == "map") ProjectTaskMap(projectId, stringResource(R.string.project_main_conversation), tasks, processId = expandedId,
-                onOpenProcess = { id -> expandedId = id; viewModel.select(id) }, onDismissProcess = { expandedId = null },
+            if (viewMode == "map") Column(Modifier.fillMaxSize()) {
+                Box(Modifier.weight(1f).fillMaxWidth()) {
+                ProjectTaskMap(projectId, stringResource(R.string.project_main_conversation), tasks, processId = expandedId,
+                onOpenProcess = { id -> expandedId = id; viewModel.select(id)
+                    if (tasks.any { it.id == id && it.isRequirementBranch }) onSelectRequirementBranch(id) }, onDismissProcess = { expandedId = null },
                 onSupplement = {}, onAddChild = { task -> addingParentId = task?.id; adding = true }, onContentDrag = onContentDrag,
                 onOpenRoot = { toggle(rootId) }, rootConversation = rootConversation,
                 modifier = Modifier.fillMaxSize().testTag("project_map_body"), header = header, process = process)
-            else Column(Modifier.fillMaxSize()) {
+                }
+                tasks.firstOrNull { it.id == requirementBranchId && it.isRequirementBranch }?.let { branch ->
+                    Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surface,
+                        modifier = Modifier.fillMaxWidth().height(processHeight / 2).testTag("project_branch_inline")) {
+                        Column {
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                Text(branch.title, modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
+                                TextButton(onClick = { addingParentId = branch.id; adding = true }, enabled = !state.busy,
+                                    modifier = Modifier.testTag("task_add_child_${branch.id}")) {
+                                    Text(stringResource(R.string.project_node_add_child))
+                                }
+                            }
+                            Box(Modifier.weight(1f).fillMaxWidth()) { process(branch) }
+                        }
+                    }
+                }
+            } else Column(Modifier.fillMaxSize()) {
                 header {}
                 LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("project_tree_body"), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
                 item(key = "project-root") {
@@ -186,8 +219,9 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
                                 Row(Modifier.padding(Spacing.sm)) {
                                     Column(Modifier.weight(1f)) {
                                         Text(row.task.title, style = MaterialTheme.typography.titleSmall)
-                                        Text(projectTaskStatusLabel(row.task.status), style = MaterialTheme.typography.labelSmall)
-                                        Text(row.task.owner.ifBlank { stringResource(R.string.project_flow_default_member) }, style = MaterialTheme.typography.labelSmall)
+                                        Text(if (row.task.isRequirementBranch) stringResource(R.string.project_requirement_branch)
+                                            else projectTaskStatusLabel(row.task.status), style = MaterialTheme.typography.labelSmall)
+                                        if (!row.task.isRequirementBranch) Text(row.task.owner.ifBlank { stringResource(R.string.project_flow_default_member) }, style = MaterialTheme.typography.labelSmall)
                                     }
                                     Text(stringResource(if (expanded) R.string.project_process_collapse else R.string.project_process_expand), style = MaterialTheme.typography.labelSmall)
                                     if (tasks.any { it.parentId == row.task.id }) TextButton(onClick = {
@@ -229,8 +263,11 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
     }
     if (adding) ProjectTaskAddSheet(parentTitle = tasks.firstOrNull { it.id == addingParentId }?.title,
         busy = state.busy, onSubmit = { description ->
-            viewModel.addTaskByDescription(projectId, description, parentId = addingParentId)
-            adding = false
+            viewModel.createRequirementBranch(projectId, description, parentId = addingParentId) { branchId ->
+                expandedId = branchId
+                onSelectRequirementBranch(branchId)
+                adding = false
+            }
         }, onDismiss = { adding = false })
     if (overview && project != null) AlertDialog(onDismissRequest = { overview = false },
         title = { Text(project.title) }, text = {

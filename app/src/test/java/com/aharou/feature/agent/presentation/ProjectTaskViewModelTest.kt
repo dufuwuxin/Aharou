@@ -593,4 +593,88 @@ class ProjectTaskViewModelTest {
         coVerify(exactly = 1) { runner.createSessionEntity("/first"); sessions.upsertSession(root) }
     }
 
+
+    @Test fun concurrentBranchSessionsAreIdempotentAndNeverLinkTheProjectRoot() = runTest(dispatcher) {
+        val branch = com.aharou.feature.agent.domain.task.ProjectTask(id = "b", workspace = "/first", projectId = "p",
+            title = "branch", requirement = "", isRequirementBranch = true)
+        var snapshot = ProjectTaskSnapshot(tasks = listOf(branch), projects = listOf(ProjectPlan("p", "/first", "p", "r")))
+        coEvery { repository.load("/first") } coAnswers { snapshot }
+        val root = rootSession("discussion")
+        coEvery { runner.createSessionEntity("/first") } returns root
+        coEvery { sessions.upsertSession(root) } returns Unit
+        coEvery { sessions.getSessionById(root.id) } returns root
+        coEvery { repository.transact("/first", any()) } coAnswers {
+            val changes = secondArg<(ProjectTaskSnapshot) -> List<com.aharou.feature.agent.domain.task.ProjectTaskChange>>()(snapshot)
+            changes.forEach { c -> snapshot = snapshot.copy(tasks = snapshot.tasks.map { if (it.id == c.task.id) c.task else it }) }
+            changes.map { it.task }
+        }
+        val first = async { viewModel.ensureBranchSession("b", "/first") }
+        val second = async { viewModel.ensureBranchSession("b", "/first") }
+        org.junit.Assert.assertEquals("discussion", first.await())
+        org.junit.Assert.assertEquals("discussion", second.await())
+        org.junit.Assert.assertEquals(listOf("discussion"), snapshot.tasks.single().sessionIds)
+        org.junit.Assert.assertTrue(snapshot.projects.single().flowSessionIds.isEmpty())
+        coVerify(exactly = 1) { runner.createSessionEntity("/first"); sessions.upsertSession(root) }
+        coVerify(exactly = 0) { repository.linkProjectExecution(any(), any(), any()) }
+    }
+
+    @Test fun duplicateBranchCreationAndLateWorkspaceCompletionCannotStealSelection() = runTest(dispatcher) {
+        viewModel.workspace("/first"); runCurrent()
+        viewModel.selectProject("p")
+        val gate = kotlinx.coroutines.CompletableDeferred<com.aharou.feature.agent.domain.task.ProjectTask>()
+        coEvery { repository.createRequirementBranch("p", "Branch", "/first", null) } coAnswers { gate.await() }
+        var callbacks = 0
+        viewModel.createRequirementBranch("p", "Branch") { callbacks++ }
+        viewModel.createRequirementBranch("p", "Branch") { callbacks++ }
+        runCurrent()
+        viewModel.workspace("/other"); runCurrent()
+        gate.complete(com.aharou.feature.agent.domain.task.ProjectTask(id = "b", workspace = "/first", projectId = "p",
+            title = "Branch", requirement = "", isRequirementBranch = true))
+        runCurrent()
+        org.junit.Assert.assertEquals(0, callbacks)
+        org.junit.Assert.assertNull(viewModel.state.value.selectedId)
+        coVerify(exactly = 1) { repository.createRequirementBranch("p", "Branch", "/first", null) }
+    }
+
+
+    @Test fun requirementBranchCountsExcludeOnlyContainersAndSessionsStaySeparateAcrossWorkspaces() = runTest(dispatcher) {
+        fun branch(id: String, workspace: String, project: String) =
+            com.aharou.feature.agent.domain.task.ProjectTask(id = id, workspace = workspace, projectId = project,
+                title = id, requirement = "", isRequirementBranch = true)
+        val first = branch("b1", "/first", "p1")
+        val second = branch("b2", "/first", "p1")
+        val foreign = branch("b1", "/second", "p2")
+        val children = (1..5).map { com.aharou.feature.agent.domain.task.ProjectTask(id = "c$it", workspace = "/first",
+            projectId = "p1", title = "c$it", requirement = "work", parentId = first.id) }
+        val stores = repository.snapshots as MutableStateFlow<Map<String, ProjectTaskSnapshot>>
+        stores.value = mapOf(
+            "/first" to ProjectTaskSnapshot(tasks = listOf(first, second) + children, projects = listOf(ProjectPlan("p1", "/first", "p", "r"))),
+            "/second" to ProjectTaskSnapshot(tasks = listOf(foreign), projects = listOf(ProjectPlan("p2", "/second", "p", "r"))))
+        coEvery { repository.load(any()) } coAnswers { stores.value.getValue(firstArg()) }
+        var count = 0
+        val entities = mutableMapOf<String, com.aharou.feature.agent.data.local.entity.ChatSessionEntity>()
+        coEvery { runner.createSessionEntity(any()) } coAnswers {
+            rootSession("discussion-${++count}", firstArg()).also { entities[it.id] = it }
+        }
+        coEvery { sessions.upsertSession(any()) } returns Unit
+        coEvery { sessions.getSessionById(any()) } coAnswers { entities[firstArg<String>()] }
+        coEvery { repository.transact(any(), any()) } coAnswers {
+            val workspace = firstArg<String>()
+            val snapshot = stores.value.getValue(workspace)
+            val changes = secondArg<(ProjectTaskSnapshot) -> List<com.aharou.feature.agent.domain.task.ProjectTaskChange>>()(snapshot)
+            stores.value = stores.value + (workspace to snapshot.copy(tasks = snapshot.tasks.map { task ->
+                changes.firstOrNull { it.task.id == task.id }?.task ?: task
+            }))
+            changes.map { it.task }
+        }
+        viewModel.workspace("/first"); runCurrent()
+        org.junit.Assert.assertEquals(5, viewModel.state.value.projectTaskCounts["p1"])
+        val one = viewModel.ensureBranchSession("b1", "/first")
+        val two = viewModel.ensureBranchSession("b2", "/first")
+        val otherWorkspace = viewModel.ensureBranchSession("b1", "/second")
+        org.junit.Assert.assertEquals(3, setOf(one, two, otherWorkspace).size)
+        org.junit.Assert.assertEquals(one, viewModel.ensureBranchSession("b1", "/first"))
+        org.junit.Assert.assertEquals("/second", entities.getValue(otherWorkspace).workspacePath)
+        org.junit.Assert.assertTrue(stores.value.values.flatMap { it.projects }.all { it.flowSessionIds.isEmpty() })
+    }
 }

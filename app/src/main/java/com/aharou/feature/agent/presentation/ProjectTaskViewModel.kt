@@ -57,6 +57,7 @@ class ProjectTaskViewModel @Inject constructor(
     private val sessionMutex = kotlinx.coroutines.sync.Mutex()
     // Retrying a failed link reuses the already persisted root session.
     private val pendingProjectSessions = mutableMapOf<Pair<String, String>, String>()
+    private val pendingBranchSessions = mutableMapOf<Pair<String, String>, String>()
     private val executing = mutableSetOf<Pair<String, String>>()
     private val deletingProjects = mutableSetOf<Pair<String, String>>()
     private val executionJobs = mutableMapOf<Pair<String, String>, kotlinx.coroutines.Job>()
@@ -87,7 +88,7 @@ class ProjectTaskViewModel @Inject constructor(
             val workspace = mutable.value.workspace
             val snapshot = stores[workspace]
             mutable.update { it.copy(tasks = snapshot?.tasks ?: it.tasks, projects = stores.filterKeys { it in createdWorkspacePaths || knownWorkspacePaths?.contains(it) != false }.values.flatMap { store -> store.projects }.sortedByDescending { project -> project.createdAt },
-                projectTaskCounts = stores.values.flatMap { store -> store.tasks }.groupingBy { task -> task.projectId.orEmpty() }.eachCount(),
+                projectTaskCounts = stores.values.flatMap { store -> store.tasks }.filterNot { it.isRequirementBranch }.groupingBy { task -> task.projectId.orEmpty() }.eachCount(),
                 projectSessionIds = stores.values.flatMap { store -> store.projects.flatMap { it.flowSessionIds } + store.tasks.flatMap { task -> task.sessionIds + task.processSessionIds } }.toSet(),
                 indexedSessionWorkspaces = stores.keys) }
         } }
@@ -134,6 +135,43 @@ class ProjectTaskViewModel @Inject constructor(
         if (session.id !in project.flowSessionIds) repository.linkProjectExecution(projectId, workspace, session.id)
         pendingProjectSessions.remove(key)
         session.id
+    }
+
+    /** Ordinary root conversation, but linked only to the branch, never the project's flow-session list. */
+    suspend fun ensureBranchSession(branchId: String, workspace: String): String = sessionMutex.withLock {
+        val branch = repository.load(workspace).tasks.single { it.id == branchId && it.workspace == workspace && it.isRequirementBranch }
+        val key = workspace to branchId
+        val candidates = (branch.sessionIds + listOfNotNull(pendingBranchSessions[key])).distinct()
+            .mapNotNull { sessions.getSessionById(it) }.filter { it.parentId == null && it.workspacePath == workspace }
+        val session = candidates.firstOrNull() ?: runner.createSessionEntity(workspace).also {
+            check(it.parentId == null && it.workspacePath == workspace)
+            sessions.upsertSession(it)
+            pendingBranchSessions[key] = it.id
+        }
+        repository.transact(workspace) { snapshot ->
+            val latest = snapshot.tasks.single { it.id == branchId && it.isRequirementBranch && it.projectId == branch.projectId }
+            if (session.id in latest.sessionIds) emptyList() else listOf(
+                com.aharou.feature.agent.domain.task.ProjectTaskChange(latest.copy(sessionIds = latest.sessionIds + session.id)))
+        }
+        pendingBranchSessions.remove(key)
+        session.id
+    }
+
+    fun createRequirementBranch(projectId: String, title: String, parentId: String? = null,
+        onCreated: (String) -> Unit = {}) {
+        if (title.isBlank()) return
+        val epoch = selectionEpoch
+        val requestedWorkspace = mutable.value.workspace
+        val selectedProject = mutable.value.selectedProjectId
+        if (selectedProject != null && selectedProject != projectId) return
+        operation { workspace ->
+            val branch = repository.createRequirementBranch(projectId, title, workspace, parentId)
+            if (selectionEpoch == epoch && mutable.value.workspace == requestedWorkspace &&
+                mutable.value.selectedProjectId == selectedProject) {
+                mutable.update { it.copy(selectedId = branch.id) }
+                onCreated(branch.id)
+            }
+        }
     }
 
     fun selectProject(id: String?) { selectionEpoch++; mutable.update { it.copy(selectedProjectId = id, selectedId = null) } }
@@ -332,7 +370,7 @@ class ProjectTaskViewModel @Inject constructor(
     fun stopProject(projectId: String) { flows.stopProject(projectId, mutable.value.workspace) }
 
     fun runProjectTask(task: ProjectTask) {
-        if ((task.workspace to task.id) in executing) return
+        if (task.isRequirementBranch || (task.workspace to task.id) in executing) return
         flows.runProjectTask(task)
     }
 
@@ -352,13 +390,14 @@ class ProjectTaskViewModel @Inject constructor(
     }
 
     fun accept(task: ProjectTask) {
-        if (task.status != ProjectTaskStatus.REVIEW ||
+        if (task.isRequirementBranch || task.status != ProjectTaskStatus.REVIEW ||
             (task.processSessionIds.isNotEmpty() && !com.aharou.feature.agent.domain.task.ProjectWorkflowPlan.delivered(task))) return
         save(task.copy(status = ProjectTaskStatus.DONE, acceptedRequirementsVersion = task.requirementsVersion))
     }
 
     /** A new conversation is persisted and linked first. No network request until explicit start. */
     fun execute(task: ProjectTask, start: Boolean, runExecution: suspend (String, String, String) -> com.aharou.feature.agent.domain.task.ProjectTaskExecutionOutcome) = operation {
+        check(!task.isRequirementBranch) { "BRANCH_NOT_EXECUTABLE" }
         val setupOwner = busyOwner
         if ((task.workspace to task.projectId) in deletingProjects) return@operation
         if (flows.state.value.tasks.any { it.workspace == task.workspace && it.taskId == task.id } || !executing.add(task.workspace to task.id)) return@operation

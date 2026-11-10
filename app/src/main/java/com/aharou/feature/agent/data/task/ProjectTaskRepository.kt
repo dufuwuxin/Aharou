@@ -192,6 +192,51 @@ class ProjectTaskRepository @Inject constructor(@ApplicationContext context: Con
         mutable.value = mutable.value + (workspace to next)
     }
 
+    /** Empty named context, committed under the same lock as ordinary task writes; never resolves the planner. */
+    suspend fun createRequirementBranch(projectId: String, title: String, workspace: String,
+        parentId: String? = null): ProjectTask = withContext(Dispatchers.IO) {
+        require(title.isNotBlank()) { "REQUIRED_FIELDS" }
+        transactLocked(workspace) { current ->
+            require(current.projects.any { it.id == projectId }) { "PROJECT_NOT_FOUND" }
+            parentId?.let { id ->
+                val parent = current.tasks.singleOrNull { it.id == id && it.projectId == projectId } ?: error("PARENT_NOT_FOUND")
+                check(ProjectTaskGraph.depth(parent, current.tasks) < ProjectTaskGraph.MAX_TREE_DEPTH) { "TASK_DEPTH_LIMIT" }
+            }
+            listOf(ProjectTaskChange(ProjectTask(workspace = workspace, projectId = projectId, title = title.trim(),
+                requirement = "", parentId = parentId, order = nextOrder(current), isRequirementBranch = true)))
+        }.single()
+    }
+
+    /** Wording survives a cancelled/failed planning call. New work is confined to this container, including fallback. */
+    suspend fun appendBranchRequirements(branchId: String, text: String, workspace: String): ProjectPlanOutcome =
+        withContext(Dispatchers.IO) {
+            require(text.isNotBlank()) { "REQUIRED_FIELDS" }
+            val branch = recordBranchRequirementsLocked(branchId, text, workspace)
+            val current = snapshot(workspace)
+            val project = current.projects.single { it.id == branch.projectId }
+            val projectTasks = current.tasks.filter { it.projectId == project.id }
+            check(ProjectTaskGraph.depth(branch, projectTasks) < ProjectTaskGraph.MAX_TREE_DEPTH) { "TASK_DEPTH_LIMIT" }
+            val planner = plannerProvider.get()
+            val planned = planner.plan(project, text, projectTasks, planner.members(), parentId = branch.id)
+            ProjectPlanOutcome(appendTasksLocked(project.id, workspace, planned.tasks, null, branch.id), planned.ruleFallback)
+        }
+
+    @Synchronized
+    private fun recordBranchRequirementsLocked(branchId: String, text: String, workspace: String): ProjectTask {
+        val current = snapshot(workspace)
+        val branch = current.tasks.singleOrNull { it.id == branchId && it.isRequirementBranch } ?: error("BRANCH_NOT_FOUND")
+        check(current.projects.any { it.id == branch.projectId }) { "PROJECT_NOT_FOUND" }
+        val updated = ProjectTaskGraph.revise(branch, branch.copy(requirement =
+            if (branch.requirement.isEmpty()) text else branch.requirement + "\n\n" + text,
+            supplements = branch.supplements + text), current.version + 1)
+        val next = current.copy(version = updated.version,
+            tasks = current.tasks.map { if (it.id == branchId) updated else it })
+        require(ProjectTaskGraph.validate(next.tasks) == null) { "INVALID_TASK_GRAPH" }
+        persist(workspace, next)
+        mutable.value = mutable.value + (workspace to next)
+        return updated
+    }
+
     suspend fun appendRequirements(projectId: String, text: String, workspace: String): ProjectPlanOutcome =
         planInto(projectId, text, workspace, extendRequirements = true)
 
@@ -219,9 +264,16 @@ class ProjectTaskRepository @Inject constructor(@ApplicationContext context: Con
         }
 
     @Synchronized
-    private fun appendTasksLocked(projectId: String, workspace: String, planned: List<ProjectTask>, appendText: String?): ProjectPlan {
+    private fun appendTasksLocked(projectId: String, workspace: String, planned: List<ProjectTask>, appendText: String?, branchId: String? = null): ProjectPlan {
         val current = snapshot(workspace)
         val project = current.projects.first { it.id == projectId }
+        if (branchId != null) {
+            check(current.tasks.any { it.id == branchId && it.projectId == projectId && it.isRequirementBranch }) { "BRANCH_NOT_FOUND" }
+            val inside = ProjectTaskGraph.subtree(branchId, planned + current.tasks).map { it.id }.toSet()
+            check(planned.all { it.id in inside && it.projectId == projectId && it.workspace == workspace && !it.isRequirementBranch }) { "OUTSIDE_BRANCH" }
+            check(planned.all { task -> task.dependencyIds.all { it in inside } }) { "OUTSIDE_BRANCH_DEPENDENCY" }
+            check(planned.all { ProjectTaskGraph.depth(it, current.tasks + planned) <= ProjectTaskGraph.MAX_TREE_DEPTH }) { "TASK_DEPTH_LIMIT" }
+        }
         val startOrder = nextOrder(current)
         val tasks = planned.mapIndexed { index, task -> task.copy(version = current.version + index + 1, order = startOrder + index) }
         val updated = if (appendText == null) project else project.copy(requirements =
@@ -239,6 +291,8 @@ class ProjectTaskRepository @Inject constructor(@ApplicationContext context: Con
      * Returns true when the planner fell back to rules, which rerun the task with the recorded supplement.
      */
     suspend fun supplement(taskId: String, text: String, workspace: String): Boolean = withContext(Dispatchers.IO) {
+        if (snapshot(workspace).tasks.any { it.id == taskId && it.isRequirementBranch })
+            return@withContext appendBranchRequirements(taskId, text, workspace).ruleFallback
         val supplement = text.trim()
         require(supplement.isNotBlank()) { "REQUIRED_FIELDS" }
         require(snapshot(workspace).tasks.firstOrNull { it.id == taskId }?.projectId != null) { "PROJECT_NOT_FOUND" }
@@ -297,6 +351,7 @@ class ProjectTaskRepository @Inject constructor(@ApplicationContext context: Con
         catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
         catch (_: Exception) { return } // Task creation already requires readable storage; legacy turns keep their unavailable-context diagnostic.
         val task = tasks.singleOrNull { sessionId in it.sessionIds } ?: return
+        if (task.isRequirementBranch) return // A discussion session has no execution version to satisfy.
         check(ProjectTaskGraph.executionReady(task, sessionId, tasks)) { "TASK_DEPENDENCIES_OR_REQUIREMENTS_CHANGED" }
     }
 

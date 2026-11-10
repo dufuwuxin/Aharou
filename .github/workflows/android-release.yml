@@ -158,6 +158,14 @@ jobs:
 
       # 发版质量门禁：跑单元测试，失败即中止，避免发出回归包。
       # 只跑 ARM64 debug 变体：单测逻辑与 flavor 无关，跑全 flavor 6 变体是重复编译。
+      - name: Use preinstalled JDK 21 for unit tests
+        run: |
+          test -n "$JAVA_HOME_21_X64"
+          test -x "$JAVA_HOME_21_X64/bin/java"
+          echo "JAVA_HOME=$JAVA_HOME_21_X64" >> "$GITHUB_ENV"
+          echo "$JAVA_HOME_21_X64/bin" >> "$GITHUB_PATH"
+          "$JAVA_HOME_21_X64/bin/java" -version
+
       - name: Run unit tests
         run: |
           python3 scripts/test_void_toolchain.py
@@ -172,6 +180,13 @@ jobs:
 
       # 只构建 ARM64 安装包：
       # --stacktrace：构建失败时输出完整调用栈，便于在 CI 定位 OOM/内存类根因。
+      - name: Restore build JDK 17
+        run: |
+          test -n "$JAVA_HOME_17_X64"
+          test -x "$JAVA_HOME_17_X64/bin/java"
+          echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
+          echo "$JAVA_HOME_17_X64/bin" >> "$GITHUB_PATH"
+
       - name: Build ARM64 Release APK
         run: ./gradlew :app:assembleArmsoloRelease --stacktrace
 

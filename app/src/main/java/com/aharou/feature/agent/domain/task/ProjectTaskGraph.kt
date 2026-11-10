@@ -57,11 +57,17 @@ object ProjectTaskGraph {
         if (byId.size != tasks.size) return "DUPLICATE_TASK"
         val sessions = hashSetOf<String>()
         for (task in tasks) {
-            if (task.id.isBlank() || task.workspace.isBlank() || task.title.isBlank() || task.requirement.isBlank()) return "REQUIRED_FIELDS"
+            if (task.id.isBlank() || task.workspace.isBlank() || task.title.isBlank() || (!task.isRequirementBranch && task.requirement.isBlank())) return "REQUIRED_FIELDS"
+            if (task.isRequirementBranch && (task.projectId == null || task.status != ProjectTaskStatus.DRAFT ||
+                    task.owner.isNotEmpty() || task.members.isNotEmpty() || task.dependencyIds.isNotEmpty() ||
+                    task.acceptedRequirementsVersion != null || task.processSessionIds.isNotEmpty() ||
+                    task.executionRequirementsVersions.isNotEmpty() || task.acceptance.isNotEmpty() || task.evidenceRefs.isNotEmpty() ||
+                    task.processMembers.isNotEmpty() || task.processRequirementsVersion != null || task.processParticipants != null)) return "INVALID_REQUIREMENT_BRANCH"
             if (task.sessionIds.any { it.isBlank() || !sessions.add(it) }) return "SESSION_ALREADY_LINKED"
             if (task.dependencyIds.distinct().size != task.dependencyIds.size) return "DUPLICATE_DEPENDENCY"
             for (id in task.dependencyIds) {
                 val dependency = byId[id] ?: return "DEPENDENCY_NOT_FOUND"
+                if (dependency.isRequirementBranch) return "BRANCH_NOT_EXECUTABLE"
                 if (dependency.projectId != task.projectId) return "CROSS_PROJECT_DEPENDENCY"
                 if (dependency.workspace != task.workspace) return "CROSS_WORKSPACE_DEPENDENCY"
             }
@@ -111,7 +117,7 @@ object ProjectTaskGraph {
     }
 
     fun executionReady(task: ProjectTask, sessionId: String, tasks: List<ProjectTask>): Boolean =
-        dependenciesReady(task, tasks) && task.executionRequirementsVersions[sessionId] == task.requirementsVersion
+        !task.isRequirementBranch && dependenciesReady(task, tasks) && task.executionRequirementsVersions[sessionId] == task.requirementsVersion
 
     fun dependenciesReady(task: ProjectTask, tasks: List<ProjectTask>): Boolean = task.dependencyIds.all { id ->
         tasks.any { it.id == id && it.workspace == task.workspace && it.projectId == task.projectId && it.status == ProjectTaskStatus.DONE &&
@@ -139,6 +145,7 @@ object ProjectTaskGraph {
     }
 
     fun revise(old: ProjectTask?, proposed: ProjectTask, version: Long, force: Boolean = false): ProjectTask {
+        require(old == null || old.isRequirementBranch == proposed.isRequirementBranch) { "TASK_KIND_CHANGED" }
         require(old == null || (old.id == proposed.id && old.workspace == proposed.workspace && old.projectId == proposed.projectId))
         val changed = old != null && (force || old.requirement != proposed.requirement || old.background != proposed.background ||
             old.acceptance != proposed.acceptance || old.constraints != proposed.constraints || old.dependencyIds != proposed.dependencyIds ||

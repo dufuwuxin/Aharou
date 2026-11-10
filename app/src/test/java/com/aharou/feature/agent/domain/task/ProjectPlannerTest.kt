@@ -148,4 +148,77 @@ class ProjectPlannerTest {
         assertNull(rerun.acceptedRequirementsVersion)
         assertEquals(1L, ProjectTaskGraph.revise(done, done.copy(supplements = listOf("note")), 2).requirementsVersion)
     }
+
+    @Test fun aRequirementBranchConfinesMaliciousSiblingParentsInBothModelAndFallback() = runBlocking {
+        val branch = task("selected").copy(requirement = "", isRequirementBranch = true)
+        val sibling = task("sibling").copy(isRequirementBranch = true)
+        answer("""{"tasks":[{"title":"escaped","parentKey":"sibling"},{"title":"child","key":"n"},
+            {"title":"nested","parentKey":"n"}]}""")
+        val model = planner.plan(project, "new", listOf(branch, sibling), emptyList(), branch.id)
+        assertFalse(model.ruleFallback)
+        assertTrue(model.tasks.all { it.id in ProjectTaskGraph.subtree(branch.id, listOf(branch, sibling) + model.tasks).map { t -> t.id } })
+        assertTrue(model.tasks.none { it.parentId == sibling.id })
+        answer(null)
+        val fallback = planner.plan(project, "one\ntwo", listOf(branch, sibling), emptyList(), branch.id)
+        assertTrue(fallback.ruleFallback)
+        assertEquals(2, fallback.tasks.size)
+        assertTrue(fallback.tasks.all { it.parentId == branch.id })
+    }
+
+
+    @Test fun fixedBranchRejectsSiblingParentsAndDependenciesButKeepsInternalAndNewBatchDependencies() = runBlocking {
+        val selected = task("A").copy(isRequirementBranch = true, requirement = "A_PRIVATE")
+        val sibling = task("B").copy(isRequirementBranch = true, requirement = "B_PRIVATE")
+        val own = task("a1", selected.id)
+        val other = task("b1", sibling.id).copy(requirement = "B_CHILD_PRIVATE")
+        val external = task("foreign").copy(projectId = "other-project")
+        val all = listOf(selected, sibling, own, other, external)
+        answer("""{"tasks":[{"key":"new1","title":"First","parentKey":"B","dependsOn":["b1","foreign","a1"]},
+            {"key":"new2","title":"Second","parentKey":"new1","dependsOn":["new1","b1"]}]}""")
+        val result = planner.plan(project.copy(requirements = "ROOT_ONLY"), "NEW_A_WORK", all, emptyList(), selected.id)
+        assertFalse(result.ruleFallback)
+        val (first, second) = result.tasks
+        assertEquals(selected.id, first.parentId)
+        assertEquals(listOf(own.id), first.dependencyIds)
+        assertEquals(first.id, second.parentId)
+        assertEquals(listOf(first.id), second.dependencyIds)
+        io.mockk.coVerify { workflow.completeOnce(any(), match {
+            it.contains("ROOT_ONLY") && it.contains("A_PRIVATE") && !it.contains("B_PRIVATE") &&
+                !it.contains("B_CHILD_PRIVATE") && !it.contains("b1")
+        }, any()) }
+        answer(null)
+        val fallback = planner.plan(project.copy(requirements = "ROOT_ONLY"), "NEW_B_WORK", all, emptyList(), sibling.id)
+        assertTrue(fallback.ruleFallback)
+        assertTrue(fallback.tasks.all { it.parentId == sibling.id })
+        io.mockk.coVerify { workflow.completeOnce(any(), match {
+            it.contains("ROOT_ONLY") && it.contains("B_PRIVATE") && !it.contains("A_PRIVATE") && !it.contains("a1")
+        }, any()) }
+    }
+
+    @Test fun revisionCannotEditOrRerunContainersAndAddedDependenciesStayInTheirStructuralBranch() = runBlocking {
+        val anchor = task("anchor")
+        val branch = task("branch", anchor.id).copy(isRequirementBranch = true)
+        val own = task("own", branch.id).copy(requirement = "DESCENDANT_BRANCH_PRIVATE_REQUIREMENT")
+        val outside = task("outside")
+        val all = listOf(anchor, branch, own, outside)
+        for (op in listOf("edit", "rerun")) {
+            answer("""{"operations":[{"op":"$op","taskId":"branch","requirement":"overwrite"}]}""")
+            try { planner.revise(project, anchor, all, "supplement", emptyList()); fail("container mutation must reject") }
+            catch (expected: IllegalStateException) { assertEquals("BRANCH_REVISION_REQUIRES_APPEND", expected.message) }
+        }
+        answer("""{"operations":[{"op":"add","key":"n1","title":"Within branch","parentKey":"branch","dependsOn":["own","outside"]},
+            {"op":"add","key":"n2","title":"Next","parentKey":"n1","dependsOn":["n1","outside"]}]}""")
+        val revision = planner.revise(project, anchor, all, "new work", emptyList())
+        io.mockk.coVerify { workflow.completeOnce(any(), match {
+            it.endsWith("User supplement:\nnew work") && !it.contains("DESCENDANT_BRANCH_PRIVATE_REQUIREMENT")
+        }, any()) }
+        assertEquals(2, revision.added.size)
+        val (first, second) = revision.added
+        assertEquals(branch.id, first.parentId)
+        assertEquals(listOf(own.id), first.dependencyIds)
+        assertEquals(listOf(first.id), second.dependencyIds)
+        try { ProjectRevision(reruns = setOf(branch.id)).change(branch); fail("commit cannot rerun a container") }
+        catch (expected: IllegalStateException) { assertEquals("BRANCH_REVISION_REQUIRES_APPEND", expected.message) }
+    }
+
 }

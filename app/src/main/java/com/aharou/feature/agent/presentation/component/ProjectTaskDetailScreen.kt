@@ -44,7 +44,7 @@ fun ProjectTaskDetailScreen(taskId: String, viewModel: ProjectTaskViewModel, onB
             Column(Modifier.weight(1f)) {
                 Text(task?.title ?: stringResource(R.string.project_unassigned),
                     style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                task?.let { Text(projectTaskStatusLabel(it.status), style = MaterialTheme.typography.labelSmall) }
+                task?.let { Text(if (it.isRequirementBranch) stringResource(R.string.project_requirement_branch) else projectTaskStatusLabel(it.status), style = MaterialTheme.typography.labelSmall) }
             }
             if (task != null) Box {
                 IconButton(onClick = { menuOpen = true }) {
@@ -53,9 +53,9 @@ fun ProjectTaskDetailScreen(taskId: String, viewModel: ProjectTaskViewModel, onB
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                     DropdownMenuItem(text = { Text(stringResource(R.string.project_task_overview)) },
                         onClick = { menuOpen = false; overview = true })
-                    DropdownMenuItem(text = { Text(stringResource(R.string.project_task_edit)) }, enabled = !state.loading && !state.busy,
+                    if (!task.isRequirementBranch) DropdownMenuItem(text = { Text(stringResource(R.string.project_task_edit)) }, enabled = !state.loading && !state.busy,
                         onClick = { menuOpen = false; editing = true })
-                    DropdownMenuItem(text = { Text(stringResource(R.string.project_task_new_execution)) }, enabled = ready && !running,
+                    if (!task.isRequirementBranch) DropdownMenuItem(text = { Text(stringResource(R.string.project_task_new_execution)) }, enabled = ready && !running,
                         onClick = { menuOpen = false; viewModel.execute(task, false, runExecution) })
                     if (task.projectId != null) DropdownMenuItem(text = { Text(stringResource(R.string.project_node_add_child)) },
                         enabled = ready, modifier = Modifier.testTag("detail_add_child"),
@@ -70,13 +70,15 @@ fun ProjectTaskDetailScreen(taskId: String, viewModel: ProjectTaskViewModel, onB
         if (state.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
         if (task != null) Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-            if (running) OutlinedButton(onClick = { viewModel.cancelExecution(task.id) },
-                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("task_stop")) {
-                Text(stringResource(R.string.project_task_cancel_execution))
-            } else Button(onClick = {
-                if (task.projectId != null) viewModel.runProjectTask(task) else viewModel.execute(task, true, runExecution)
-            }, enabled = ready, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("task_start")) {
-                Text(stringResource(R.string.project_task_start))
+            if (!task.isRequirementBranch) {
+                if (running) OutlinedButton(onClick = { viewModel.cancelExecution(task.id) },
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("task_stop")) {
+                    Text(stringResource(R.string.project_task_cancel_execution))
+                } else Button(onClick = {
+                    if (task.projectId != null) viewModel.runProjectTask(task) else viewModel.execute(task, true, runExecution)
+                }, enabled = ready, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("task_start")) {
+                    Text(stringResource(R.string.project_task_start))
+                }
             }
             ProjectTaskProcess(task, state.tasks, onEdit = { editing = true },
                 onAccept = { viewModel.accept(task) }, readOnly = true, fillConversation = false,
@@ -94,7 +96,7 @@ fun ProjectTaskDetailScreen(taskId: String, viewModel: ProjectTaskViewModel, onB
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
                 Text(task.requirement)
                 if (task.background.isNotBlank()) Text(task.background)
-                Text(stringResource(R.string.project_task_collaboration_value, task.owner, task.members.joinToString("、")))
+                if (!task.isRequirementBranch) Text(stringResource(R.string.project_task_collaboration_value, task.owner, task.members.joinToString("、")))
                 if (task.constraints.isNotEmpty()) Text(task.constraints.joinToString("\n"))
                 if (task.acceptance.isNotBlank()) Text(task.acceptance)
                 if (task.brief.isNotBlank()) Text(task.brief)
@@ -104,8 +106,11 @@ fun ProjectTaskDetailScreen(taskId: String, viewModel: ProjectTaskViewModel, onB
     val projectId = task?.projectId
     if (adding && task != null && projectId != null) ProjectTaskAddSheet(task.title, state.busy,
         onSubmit = { description ->
-            viewModel.addTaskByDescription(projectId, description, parentId = task.id)
-            adding = false
+            viewModel.createRequirementBranch(projectId, description, parentId = task.id) { branchId ->
+                adding = false
+                viewModel.select(branchId)
+                onBack()
+            }
         }, onDismiss = { adding = false })
-    if (editing && task != null) ProjectTaskEditor(task, task.workspace, state.tasks, viewModel::save, { editing = false }, task.projectId)
+    if (editing && task != null && !task.isRequirementBranch) ProjectTaskEditor(task, task.workspace, state.tasks, viewModel::save, { editing = false }, task.projectId)
 }

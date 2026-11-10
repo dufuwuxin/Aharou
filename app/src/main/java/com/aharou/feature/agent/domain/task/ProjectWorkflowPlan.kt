@@ -7,14 +7,14 @@ object ProjectWorkflowPlan {
         (listOf(task.owner) + task.members).map(String::trim).filter(String::isNotBlank).ifEmpty { listOf("") }
 
     fun delivered(task: ProjectTask): Boolean =
-        (task.processParticipants == null || task.processParticipants == participants(task)) &&
+        !task.isRequirementBranch && (task.processParticipants == null || task.processParticipants == participants(task)) &&
         ((task.status == ProjectTaskStatus.REVIEW && task.processRequirementsVersion == task.requirementsVersion) ||
         (task.status == ProjectTaskStatus.DONE && task.acceptedRequirementsVersion == task.requirementsVersion &&
             task.acceptance.isNotBlank() && task.evidenceRefs.isNotEmpty()))
 
     fun next(tasks: List<ProjectTask>): ProjectTask? {
         require(ProjectTaskGraph.validate(tasks) == null) { "INVALID_TASK_GRAPH" }
-        val pending = ProjectTaskGraph.tree(tasks).map { it.task }.filterNot(::delivered)
+        val pending = ProjectTaskGraph.tree(tasks).map { it.task }.filterNot { it.isRequirementBranch || delivered(it) }
         if (pending.isEmpty()) return null
         return pending.firstOrNull { dependenciesDelivered(it, tasks) } ?: error("PROJECT_FLOW_BLOCKED")
     }
@@ -28,6 +28,7 @@ object ProjectWorkflowPlan {
      */
     fun nextWithin(tasks: List<ProjectTask>, taskId: String): ProjectTask? {
         val task = tasks.firstOrNull { it.id == taskId } ?: return null
+        if (task.isRequirementBranch) return null
         if (dependenciesDelivered(task, tasks)) return task
         val inside = ProjectTaskGraph.subtree(taskId, tasks).associateBy { it.id }
         val needed = hashSetOf<String>()
@@ -42,6 +43,7 @@ object ProjectWorkflowPlan {
 
     fun runnable(tasks: List<ProjectTask>, taskId: String): ProjectTask {
         val task = tasks.firstOrNull { it.id == taskId } ?: error("PROJECT_TASK_NOT_FOUND")
+        check(!task.isRequirementBranch) { "BRANCH_NOT_EXECUTABLE" }
         check(dependenciesDelivered(task, tasks)) { "PROJECT_FLOW_BLOCKED" }
         return task
     }
@@ -65,10 +67,26 @@ object ProjectWorkflowPlan {
         return reused
     }
 
+    /** Only the current line's ancestor containers contribute executable context, in outer-to-inner order. */
+    fun requirementBranches(task: ProjectTask, tasks: List<ProjectTask>): List<ProjectTask> {
+        val byId = tasks.filter { it.projectId == task.projectId && it.workspace == task.workspace }.associateBy { it.id }
+        val seen = hashSetOf<String>()
+        val branches = mutableListOf<ProjectTask>()
+        var current: ProjectTask? = task
+        while (current != null && seen.add(current.id)) {
+            if (current.isRequirementBranch) branches += current
+            current = current.parentId?.let(byId::get)
+        }
+        return branches.asReversed()
+    }
+
     fun prompt(task: ProjectTask, tasks: List<ProjectTask>, requirements: String,
         member: String = task.owner, ordinal: Int = 1, previous: List<String> = emptyList(),
         projectTools: Boolean = false): String = buildString {
         append("Project requirements:\n").append(requirements)
+        for (branch in requirementBranches(task, tasks)) {
+            append("\n\nRequirement branch [").append(branch.id).append("]:\n").append(branch.requirement)
+        }
         append("\n\nTask ID: ").append(task.id).append("\nTask: ").append(task.title)
         append("\nRequirement:\n").append(task.requirement)
         if (task.supplements.isNotEmpty()) append("\nUser supplements (oldest first, they refine the requirement):\n").append(task.supplements.joinToString("\n"))

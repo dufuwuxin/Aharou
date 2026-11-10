@@ -5,6 +5,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -16,6 +17,7 @@ import com.aharou.feature.agent.presentation.ProjectTaskViewModel
 import com.aharou.feature.settings.presentation.SettingsViewModel
 import com.aharou.feature.workspace.presentation.WorkspaceViewModel
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.ensureActive
 import kotlinx.serialization.json.JsonPrimitive
 
 internal data class ProjectChatBinding(val sessionId: String?, val context: String,
@@ -40,12 +42,22 @@ internal fun rememberProjectChatBinding(agent: AIAgentViewModel, projects: Proje
     val workspace = project?.workspace.orEmpty()
     var sessionId by remember(id, workspace) { mutableStateOf<String?>(null) }
     var failed by remember(id, workspace) { mutableStateOf(false) }
-    LaunchedEffect(id, workspace, project != null, state.workspace, project?.flowSessionIds,
-        rootSessions.filter { it.id in project?.flowSessionIds.orEmpty() }.map { it.id to it.updatedAt }) {
+    var requirementBranchId by rememberSaveable(id, workspace) { mutableStateOf<String?>(null) }
+    val selectedBranch = state.tasks.singleOrNull { it.id == requirementBranchId && it.projectId == id &&
+        it.workspace == workspace && it.isRequirementBranch }
+    val chooseBranch: (String?) -> Unit = { target ->
+        if (requirementBranchId != target) { requirementBranchId = target; sessionId = null; failed = false }
+    }
+    LaunchedEffect(id, workspace, project != null, state.workspace, requirementBranchId) {
         if (project == null || workspace.isBlank() || state.workspace != workspace) return@LaunchedEffect
         try {
-            val root = projects.ensureProjectSession(id, workspace)
-            if (projects.state.value.workspace == workspace) { sessionId = root; agent.selectSession(root) }
+            val requestedBranch = requirementBranchId
+            val target = if (requestedBranch == null) projects.ensureProjectSession(id, workspace)
+                else projects.ensureBranchSession(requestedBranch, workspace)
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            if (projects.state.value.workspace == workspace && requirementBranchId == requestedBranch) {
+                sessionId = target; agent.selectSession(target)
+            }
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (_: Exception) { failed = true }
     }
@@ -60,9 +72,16 @@ internal fun rememberProjectChatBinding(agent: AIAgentViewModel, projects: Proje
             "Successful requirement writes request background continuation outside PLAN; PLAN only saves. " +
             "Saving is not evidence of execution or acceptance. " +
             "Continue the project workflow without creating a separate project.]"
+    }.orEmpty() + selectedBranch?.let {
+        "\n[Selected requirement branch: id=${JsonPrimitive(it.id)}, title=${JsonPrimitive(it.title)}. " +
+            "This session is the branch discussion; project_tasks plan deterministically creates tasks only under this branch. " +
+            "Ask and answer questions normally without planning unless the user asks to add requirements. " +
+            "Existing branch requirements: ${JsonPrimitive(it.requirement)}]"
     }.orEmpty()
     return ProjectChatBinding(sessionId.takeIf { ready }, context) { collapse ->
         if (project != null) ProjectTaskWorkbench(id, projects, onBack, onContentDrag = collapse,
+            requirementBranchId = requirementBranchId, onSelectRequirementBranch = chooseBranch,
+            branchSessionId = sessionId.takeIf { requirementBranchId != null },
             rootConversation = {
                 val records = rootSessions.filter { it.id in project.flowSessionIds && it.parentId == null && it.workspacePath == workspace }
                     .sortedByDescending { it.updatedAt }.map { it.id }

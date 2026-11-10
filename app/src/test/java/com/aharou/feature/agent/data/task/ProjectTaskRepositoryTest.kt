@@ -393,4 +393,63 @@ class ProjectTaskRepositoryTest {
         assertEquals("only task", tasks.single().requirement)
         assertEquals(listOf("s"), tasks.single().supplements)
     }
+
+    @Test fun emptyRequirementBranchesNeedNoPlannerAndPersistWithoutChangingPriorTasks() = runBlocking {
+        val repo = repository()
+        repo.createProject("existing", "old work", "branch-w", "p")
+        val original = repo.load("branch-w").tasks
+        val noModel = ProjectTaskRepository(context, Provider { error("planner must not be resolved") }, Provider { workspaces })
+        val branch = noModel.createRequirementBranch("p", "  New branch  ", "branch-w", original.single().id)
+        assertEquals("New branch", branch.title)
+        assertTrue(branch.isRequirementBranch)
+        assertEquals("", branch.requirement)
+        assertTrue(branch.sessionIds.isEmpty())
+        val reopened = ProjectTaskRepository(context, Provider { error("no model") }, Provider { workspaces }).load("branch-w")
+        assertEquals(original, reopened.tasks.filterNot { it.isRequirementBranch })
+        assertEquals(branch, reopened.tasks.single { it.isRequirementBranch })
+        try { noModel.createRequirementBranch("p", " ", "branch-w"); fail("title required") }
+        catch (_: IllegalArgumentException) { }
+    }
+
+    @Test fun branchRequirementsRetainOriginalTextAndFallbackNeverTouchesOtherBranches() = runBlocking {
+        val repo = repository()
+        repo.createProject("existing", "old work", "branch-plan-w", "p")
+        val prior = repo.load("branch-plan-w").tasks
+        val selected = repo.createRequirementBranch("p", "Selected", "branch-plan-w")
+        val sibling = repo.createRequirementBranch("p", "Sibling", "branch-plan-w")
+        val wording = "  first new work\nsecond new work  "
+        assertTrue(repo.appendBranchRequirements(selected.id, wording, "branch-plan-w").ruleFallback)
+        val current = repo.load("branch-plan-w")
+        assertEquals(wording, current.tasks.single { it.id == selected.id }.requirement)
+        assertEquals(listOf(wording), current.tasks.single { it.id == selected.id }.supplements)
+        assertEquals("old work", current.projects.single().requirements)
+        assertEquals(sibling, current.tasks.single { it.id == sibling.id })
+        assertEquals(prior, current.tasks.filter { it.id in prior.map { t -> t.id } })
+        val newTasks = current.tasks.filter { !it.isRequirementBranch && it.id !in prior.map { t -> t.id } }
+        assertEquals(2, newTasks.size)
+        assertTrue(newTasks.all { it.parentId == selected.id })
+    }
+
+
+    @Test fun realBranchPersistenceAndExecutionPromptsNeverMixSiblingRequirements() = runBlocking {
+        val repo = repository()
+        repo.createProject("Scoped", "ROOT_ONLY", "isolated-w", "p")
+        val first = repo.createRequirementBranch("p", "A", "isolated-w")
+        val second = repo.createRequirementBranch("p", "B", "isolated-w")
+        repo.appendBranchRequirements(first.id, "A_ONLY_JSON_REQUIREMENT", "isolated-w")
+        repo.appendBranchRequirements(second.id, "B_ONLY_MARKDOWN_REQUIREMENT", "isolated-w")
+        val snapshot = repository().load("isolated-w")
+        assertEquals("ROOT_ONLY", snapshot.projects.single().requirements)
+        assertEquals("A_ONLY_JSON_REQUIREMENT", snapshot.tasks.single { it.id == first.id }.requirement)
+        assertEquals(listOf("A_ONLY_JSON_REQUIREMENT"), snapshot.tasks.single { it.id == first.id }.supplements)
+        val a = snapshot.tasks.single { it.parentId == first.id && !it.isRequirementBranch }
+        val b = snapshot.tasks.single { it.parentId == second.id && !it.isRequirementBranch }
+        val aPrompt = com.aharou.feature.agent.domain.task.ProjectWorkflowPlan.prompt(a, snapshot.tasks, snapshot.projects.single().requirements)
+        val bPrompt = com.aharou.feature.agent.domain.task.ProjectWorkflowPlan.prompt(b, snapshot.tasks, snapshot.projects.single().requirements)
+        assertTrue(aPrompt.contains("ROOT_ONLY")); assertTrue(aPrompt.contains("A_ONLY_JSON_REQUIREMENT"))
+        assertFalse(aPrompt.contains("B_ONLY_MARKDOWN_REQUIREMENT"))
+        assertTrue(bPrompt.contains("ROOT_ONLY")); assertTrue(bPrompt.contains("B_ONLY_MARKDOWN_REQUIREMENT"))
+        assertFalse(bPrompt.contains("A_ONLY_JSON_REQUIREMENT"))
+    }
+
 }

@@ -37,7 +37,8 @@ class ProjectTaskTool @Inject constructor(
     private val flows: com.aharou.feature.agent.domain.task.ProjectFlowController
 ) : AbstractContextualTool() {
     override val name = "project_tasks"
-    override val description = "In a linked project root conversation, choose action=plan to turn a new requirement into tasks, " +
+    override val description = "Requirement-branch discussion sessions use plan only inside their selected branch; outline and supplement cannot escape its subtree. " +
+        "In a linked project root conversation, choose action=plan to turn a new requirement into tasks, " +
         "or action=supplement with task_id to revise an existing task. Both take the user's text in requirement. " +
         "Successful requirement writes request background continuation outside PLAN; PLAN only saves. " +
         "Progress questions use read-only outline, not requirement writes. " +
@@ -75,19 +76,30 @@ class ProjectTaskTool @Inject constructor(
         if (action in setOf("plan", "supplement") && text("requirement").isBlank()) return ToolResult.Error("requirement is required", "MISSING_ARGS")
         val request = MemberTaskRequest(action, text("title"), text("requirement"), text("parent_id").ifBlank { null }, text("acceptance"))
         val sessionId = context.sessionId ?: return ToolResult.Error(NOT_IN_TASK_MESSAGE, NOT_IN_TASK)
-        val root = repository.snapshots.value[context.projectRoot]?.projects
-            ?.singleOrNull { sessionId in it.flowSessionIds }
+        val callerStore = repository.snapshots.value[context.projectRoot]
+        val branch = callerStore?.tasks?.singleOrNull {
+            it.isRequirementBranch && it.workspace == context.projectRoot && sessionId in it.sessionIds
+        }
+        val root = callerStore?.projects?.singleOrNull {
+            sessionId in it.flowSessionIds || (branch != null && it.id == branch.projectId)
+        }
         if (root != null) return try {
             val snapshot = repository.load(root.workspace)
-            check(snapshot.projects.any { it.id == root.id && sessionId in it.flowSessionIds }) { "PROJECT_SESSION_CHANGED" }
-            val tasks = snapshot.tasks.filter { it.projectId == root.id }
+            val projectTasks = snapshot.tasks.filter { it.projectId == root.id && it.workspace == context.projectRoot }
+            val currentBranch = branch?.let { selected -> projectTasks.singleOrNull {
+                it.id == selected.id && it.isRequirementBranch && sessionId in it.sessionIds
+            } ?: error("PROJECT_SESSION_CHANGED") }
+            check(currentBranch != null || snapshot.projects.any { it.id == root.id && sessionId in it.flowSessionIds }) { "PROJECT_SESSION_CHANGED" }
+            val tasks = if (currentBranch == null) projectTasks else ProjectTaskGraph.subtree(currentBranch.id, projectTasks)
             when (action) {
                 "plan" -> {
                     val stopEpoch = flows.stopEpoch(root.id, root.workspace)
-                    val planned = repository.appendRequirements(root.id, text("requirement"), root.workspace)
+                    val planned = if (currentBranch == null) repository.appendRequirements(root.id, text("requirement"), root.workspace)
+                        else repository.appendBranchRequirements(currentBranch.id, text("requirement"), root.workspace)
                     if (context.mode != AgentMode.PLAN) flows.continueProject(root.id, root.workspace, stopEpoch)
                     ToolResult.Success(buildJsonObject {
-                        put("project_id", root.id); put("rule_fallback", planned.ruleFallback)
+                        put("project_id", root.id); currentBranch?.let { put("requirement_branch_id", it.id) }
+                        put("rule_fallback", planned.ruleFallback)
                         put("instruction", "New tasks saved to this project. Do not report execution or acceptance without evidence.")
                     })
                 }
@@ -107,7 +119,7 @@ class ProjectTaskTool @Inject constructor(
                     }
                     put("project_id", root.id)
                     put("outline", ProjectTaskGraph.tree(matching).joinToString("\n") {
-                        "${it.task.id} [${it.task.status}] ${it.task.title.take(OUTLINE_LINE_MAX)}: ${it.task.requirement.take(OUTLINE_LINE_MAX)}"
+                        "${it.task.id} [${if (it.task.isRequirementBranch) "REQUIREMENT_BRANCH" else it.task.status}] ${it.task.title.take(OUTLINE_LINE_MAX)}: ${it.task.requirement.take(OUTLINE_LINE_MAX)}"
                     }.take(OUTLINE_TOTAL_MAX))
                 })
                 else -> ToolResult.Error("Root conversations use plan, supplement or outline", "ROOT_ACTION_REQUIRED")
@@ -164,14 +176,15 @@ class ProjectTaskTool @Inject constructor(
                 val indent = "  ".repeat(row.depth)
                 val lines = hits?.get(row.task.id)?.mapNotNull { it.line } ?: ProjectTaskOutline.of(row.task, project)
                 val block = buildString {
-                    append(indent).append("[").append(row.task.status.name).append("] ").append(row.task.title.take(OUTLINE_LINE_MAX))
+                    append(indent).append("[").append(if (row.task.isRequirementBranch) "REQUIREMENT_BRANCH" else row.task.status.name).append("] ").append(row.task.title.take(OUTLINE_LINE_MAX))
                         .append(" (id=").append(row.task.id).append(if (row.task.id == current.id) ", current)" else ")").append('\n')
                     lines.forEach { append(indent).append("  - ").append(it.kind.name).append(": ").append(it.text.take(OUTLINE_LINE_MAX)).append('\n') }
                 }
-                if (shown > 0 && text.length + block.length > OUTLINE_TOTAL_MAX) break
-                text.append(block.take(OUTLINE_TOTAL_MAX)); shown++
+                if (text.isNotEmpty() && text.length + block.length > OUTLINE_TOTAL_MAX) break
+                text.append(block.take(OUTLINE_TOTAL_MAX))
+                if (!row.task.isRequirementBranch) shown++
             }
-            val remaining = rows.size - shown
+            val remaining = rows.count { !it.task.isRequirementBranch } - shown
             if (remaining > 0) text.append("... ").append(remaining).append(" more tasks not shown; narrow with query.\n")
             return buildJsonObject {
                 put("outline", text.toString()); put("tasks", shown); put("remaining", remaining)

@@ -3547,7 +3547,7 @@
     <string name="project_name">项目名称</string>
     <string name="project_purpose">项目存在的意义</string>
     <string name="project_creating">正在创建…</string>
-    <string name="project_created_next_step">项目已创建，在下方告诉AI你的需求</string>
+    <string name="project_created_next_step">可直接在主会话提问，或先添加需求分支，再输入需求让 AI 拆分任务。</string>
     <string name="project_requirements">需求正文</string>
     <string name="project_task_count">%1$d 项任务</string>
     <string name="project_unassigned">未归属任务</string>
@@ -3585,14 +3585,14 @@
     <string name="project_task_member_summary">负责人：%1$s · %2$d 人</string>
     <string name="project_process_member_record">%1$s · 成员 %2$d · 记录 %3$d</string>
     <string name="project_member_timeout">执行超时</string>
-    <string name="project_add_task">添加任务</string>
-    <string name="project_add_task_menu_hint">写一句要做什么，AI 决定放在哪里、依赖谁、由谁来做。</string>
-    <string name="project_add_task_hint">只需一句描述。AI 会决定它挂在哪个任务下、依赖哪些任务、由哪位成员执行；流程未运行时会自动开始。</string>
-    <string name="project_add_task_label">任务描述</string>
-    <string name="project_add_task_under">放在「%1$s」之下</string>
-    <string name="project_add_task_submit">交给 AI 添加</string>
+    <string name="project_add_task">添加需求分支</string>
+    <string name="project_add_task_menu_hint">先创建需求分支，再在当前输入框讨论或提交需求。</string>
+    <string name="project_add_task_hint">先创建命名空分支，再在下方现有输入框讨论或提交需求；创建不调用 AI。</string>
+    <string name="project_add_task_label">需求分支名称</string>
+    <string name="project_add_task_under">创建在「%1$s」下</string>
+    <string name="project_add_task_submit">创建空分支</string>
     <string name="project_node_supplement">补充内容</string>
-    <string name="project_node_add_child">添加子任务</string>
+    <string name="project_node_add_child">添加需求分支</string>
     <string name="project_supplement_target">补充到「%1$s」</string>
     <string name="project_supplement_hint">写下遗漏的要求、更正或新发现。AI 会判断影响了哪些任务：只重做受影响的部分，不受影响且已完成的结果保留，需要时新增任务，然后流程自动继续。</string>
     <string name="project_supplement_label">补充说明</string>
@@ -3809,4 +3809,7 @@
     <string name="project_main_conversation">主会话 / 规划过程</string>
     <string name="project_main_record">主会话记录 %1$d</string>
     <string name="project_member_status_unconfirmed">成员记录尚无终态；是否执行以实时会话为准</string>
+    <string name="project_requirement_branch">需求分支</string>
+    <string name="project_branch_composer">当前输入：需求分支「%1$s」</string>
+    <string name="project_branch_discussion_hint">在现有输入框讨论此分支。提问不会创建任务；提交需求后，AI 只在此分支下拆分任务。</string>
 </resources>

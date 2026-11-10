@@ -112,4 +112,35 @@ class ProjectWorkflowPlanTest {
         assertEquals(0, ProjectPlanDraft.preview(p, "  \n"))
         assertEquals(2, ProjectPlanDraft.preview(p, "1. new\n2. next"))
     }
+
+    @Test fun requirementContainersNeverRunOrPretendToBeDeliveredAndTheirChildrenDoRun() {
+        val branch = task("branch").copy(requirement = "", isRequirementBranch = true)
+        val children = (1..5).map { task("child$it", it.toLong()).copy(parentId = branch.id) }
+        val all = listOf(branch) + children
+        assertEquals(5, all.count { !it.isRequirementBranch })
+        assertEquals("child1", ProjectWorkflowPlan.next(all)?.id)
+        assertFalse(ProjectWorkflowPlan.delivered(branch))
+        assertNull(ProjectWorkflowPlan.next(listOf(branch)))
+        assertNull(ProjectWorkflowPlan.nextWithin(all, branch.id))
+        try { ProjectWorkflowPlan.runnable(all, branch.id); fail("container cannot execute") }
+        catch (expected: IllegalStateException) { assertEquals("BRANCH_NOT_EXECUTABLE", expected.message) }
+        assertNull(ProjectWorkflowPlan.next(listOf(branch) + children.map {
+            it.copy(status = ProjectTaskStatus.REVIEW, processRequirementsVersion = it.requirementsVersion)
+        }))
+        val legacy = Json.decodeFromString<ProjectTask>("""{"workspace":"w","title":"old","requirement":"old"}""")
+        assertFalse(legacy.isRequirementBranch)
+    }
+
+
+    @Test fun nestedBranchAncestorsReachOnlyTheirOwnExecutionLineInOuterToInnerOrder() {
+        val outer = task("outer").copy(isRequirementBranch = true, requirement = "OUTER_CONTEXT")
+        val inner = task("inner").copy(isRequirementBranch = true, parentId = outer.id, requirement = "INNER_CONTEXT")
+        val sibling = task("sibling").copy(isRequirementBranch = true, requirement = "SIBLING_PRIVATE")
+        val child = task("child").copy(parentId = inner.id)
+        val prompt = ProjectWorkflowPlan.prompt(child, listOf(outer, inner, sibling, child), "ROOT_CONTEXT")
+        assertTrue(prompt.contains("ROOT_CONTEXT"))
+        assertTrue(prompt.indexOf("OUTER_CONTEXT") < prompt.indexOf("INNER_CONTEXT"))
+        assertFalse(prompt.contains("SIBLING_PRIVATE"))
+    }
+
 }
