@@ -79,12 +79,15 @@ class ProjectChatComposerContract(unittest.TestCase):
         screen = source("ProjectChatScreen.kt")
         workbench = source("ProjectTaskWorkbench.kt")
         task_map = source("ProjectTaskMap.kt")
-        for contract in ("rootConversation =", "ProjectTaskConversation(root, agent, onToolDetail)"):
+        for contract in ("rootConversation =", "ProjectRootConversation(records, agent, onToolDetail)",
+                         "it.id in project.flowSessionIds", "it.parentId == null", "it.workspacePath == workspace"):
             self.assertIn(contract, screen)
         for contract in ("toggle(rootId)", "rootConversation()", "onOpenRoot = { toggle(rootId) }"):
             self.assertIn(contract, workbench)
         self.assertIn("rootStyle, onClick = onOpenRoot)", task_map)
         conversation = source("ProjectTaskConversation.kt")
+        self.assertIn("ProjectTaskConversation(selected, agentViewModel, onToolDetail)", conversation)
+        self.assertIn("recordState.SaveableStateProvider(selected)", conversation)
         for live_consumer in ("processMessages(sessionId", "processText(sessionId)", "processReasoning(sessionId)", "processTools(sessionId)"):
             self.assertIn(live_consumer, conversation)
         self.assertNotIn("selectSession(", conversation)

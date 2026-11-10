@@ -72,6 +72,22 @@ class ProjectTaskGraphTest {
         assertTrue(encoded.contains("\"createdAt\":${original.createdAt}"))
         assertEquals(original, repositoryJson.decodeFromString(ProjectTask.serializer(), encoded))
     }
+    @Test fun recoveryStopsAllRunningMembersIncludingPreviouslyInterruptedTasks() {
+        val members = linkedMapOf(
+            "one" to ProjectTaskMemberRun("writer", 1, 3),
+            "two" to ProjectTaskMemberRun("reviewer", 2, 3),
+            "done" to ProjectTaskMemberRun("checker", 3, 3, "SUCCEEDED", "evidence"))
+        for (status in listOf(ProjectTaskStatus.RUNNING, ProjectTaskStatus.BLOCKED)) {
+            val original = task("recover").copy(status = status, executionReason = "INTERRUPTED_PREVIOUS_PROCESS",
+                sessionIds = listOf("root"), processSessionIds = members.keys.toList(), processMembers = members,
+                requirement = "keep requirements", evidenceRefs = listOf("keep-output"))
+            val recovered = ProjectTaskGraph.recoverInterrupted(original)
+            assertEquals(original.copy(status = ProjectTaskStatus.BLOCKED,
+                processMembers = members.mapValues { (_, member) -> if (member.outcome == "RUNNING")
+                    member.copy(outcome = "STOPPED", reason = "INTERRUPTED_PREVIOUS_PROCESS") else member }), recovered)
+            assertEquals(recovered, ProjectTaskGraph.recoverInterrupted(recovered))
+        }
+    }
     @Test fun coldRecoveryInterruptsOnlyPersistedRunningAndPreservesHistory() {
         val running = task("a").copy(status = ProjectTaskStatus.RUNNING, sessionIds = listOf("old-session"))
         val recovered = ProjectTaskGraph.recoverInterrupted(running)

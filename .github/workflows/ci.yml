@@ -34,6 +34,9 @@ jobs:
   build:
     name: Build & Test
     runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
     env:
       # 编译闸门的 CI 放行开关（gradlew 读它）：一个 job 里会多次调 gradlew，
       # 而本地授权文件是一次性消费的，不显式放行的话第二次（单测）会被误拒。
@@ -47,6 +50,7 @@ jobs:
           # versionCode 由 build.gradle.kts 的 gitCommitCount() 在配置阶段取
           # git rev-list --count HEAD，浅克隆（默认 depth=1）会得到 1，必须拉完整历史。
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Set up JDK 17
         uses: actions/setup-java@v6
@@ -129,6 +133,14 @@ jobs:
       # 单元测试（app/src/test 与 core-agent/src/test 下的 Kotlin 单测）。
       # 只跑 ARM64 debug 变体：
       # 跑全 flavor 6 变体是重复编译，无额外覆盖。
+      - name: Use preinstalled JDK 21 for unit tests
+        run: |
+          test -n "$JAVA_HOME_21_X64"
+          test -x "$JAVA_HOME_21_X64/bin/java"
+          echo "JAVA_HOME=$JAVA_HOME_21_X64" >> "$GITHUB_ENV"
+          echo "$JAVA_HOME_21_X64/bin" >> "$GITHUB_PATH"
+          "$JAVA_HOME_21_X64/bin/java" -version
+
       - name: Run unit tests
         id: unit_tests
         # 用 tee 而不是重定向：重定向会把 Gradle 输出全写进文件，job 日志里就只剩一行命令，
@@ -205,6 +217,7 @@ jobs:
           path: |
             app/build/test-results/testArmsoloDebugUnitTest/**
             core-agent/build/test-results/test/**
+            app/build/outputs/apk/armsolo/debug/*.apk
           retention-days: 7
           if-no-files-found: warn
 

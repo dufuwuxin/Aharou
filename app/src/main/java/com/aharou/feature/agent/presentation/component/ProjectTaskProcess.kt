@@ -6,6 +6,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -20,10 +21,13 @@ private const val SUPPLEMENTS_SHOWN = 3
 @Composable
 internal fun ProjectTaskProcess(task: ProjectTask, tasks: List<ProjectTask>, onEdit: () -> Unit, onAccept: () -> Unit,
     conversation: @Composable (ProjectTask, String) -> Unit, modifier: Modifier = Modifier, readOnly: Boolean = false,
-    fillConversation: Boolean = true, acceptEnabled: Boolean = true) {
-    val records = (task.sessionIds + task.processSessionIds).distinct()
-    var selectedSession by rememberSaveable(task.id) { mutableStateOf(records.firstOrNull()) }
-    LaunchedEffect(records) { if (selectedSession !in records) selectedSession = records.firstOrNull() }
+    fillConversation: Boolean = true, acceptEnabled: Boolean = true,
+    onReadFull: ((String?) -> Unit)? = null, initialSession: String? = null, onRecordSelected: ((String?) -> Unit)? = null) {
+    val records = projectProcessRecords(task)
+    val recordState = key(task.id) { rememberSaveableStateHolder() }
+    var selectedSession by rememberSaveable(task.id, initialSession) { mutableStateOf(projectRecordSelection(records, initialSession)) }
+    LaunchedEffect(records) { if (selectedSession !in records) selectedSession = projectRecordSelection(records, null) }
+    LaunchedEffect(task.id, selectedSession) { onRecordSelected?.invoke(selectedSession) }
     Column(modifier.testTag("task_process_${task.id}"), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
         Text(task.requirement, maxLines = 3, style = MaterialTheme.typography.bodySmall)
         Row(Modifier.fillMaxWidth()) {
@@ -44,6 +48,7 @@ internal fun ProjectTaskProcess(task: ProjectTask, tasks: List<ProjectTask>, onE
             .joinToString("、").ifBlank { stringResource(R.string.project_flow_no_predecessor) }), style = MaterialTheme.typography.labelSmall)
         if (task.executionReason.isNotBlank()) Text(if (task.executionReason == "TIMEOUT") stringResource(R.string.project_member_timeout)
             else projectTaskExecutionReasonLabel(task.executionReason), style = MaterialTheme.typography.labelSmall)
+        onReadFull?.let { open -> TextButton(onClick = { open(selectedSession) }) { Text(stringResource(R.string.project_process_read_full)) } }
         if (records.size > 1) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
             records.forEachIndexed { index, id ->
                 FilterChip(selected = selectedSession == id, onClick = { selectedSession = id },
@@ -65,12 +70,16 @@ internal fun ProjectTaskProcess(task: ProjectTask, tasks: List<ProjectTask>, onE
             task.processMembers[sessionId]?.let { member ->
                 Text(when (member.outcome) {
                     "TIMEOUT" -> stringResource(R.string.project_member_timeout)
-                    "RUNNING" -> projectTaskStatusLabel(com.aharou.feature.agent.domain.task.ProjectTaskStatus.RUNNING)
+                    "RUNNING" -> stringResource(R.string.project_member_status_unconfirmed)
                     else -> projectTaskExecutionReasonLabel(member.outcome)
                 }, style = MaterialTheme.typography.labelSmall)
                 if (member.reason.isNotBlank()) Text(member.reason, maxLines = 3, style = MaterialTheme.typography.bodySmall)
             }
-            Box(if (fillConversation) Modifier.weight(1f).fillMaxWidth() else Modifier.fillMaxWidth()) { conversation(task, sessionId) }
+            Box(if (fillConversation) Modifier.weight(1f).fillMaxWidth() else Modifier.fillMaxWidth()) {
+                recordState.SaveableStateProvider(sessionId) {
+                    key(task.id, sessionId) { conversation(task, sessionId) }
+                }
+            }
         }
     }
 }

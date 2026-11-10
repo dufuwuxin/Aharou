@@ -28,6 +28,7 @@ internal fun rememberProjectChatBinding(agent: AIAgentViewModel, projects: Proje
     val state by projects.state.collectAsStateWithLifecycle()
     val currentSession by agent.currentSessionId.collectAsStateWithLifecycle()
     val messages by agent.messagesState.collectAsStateWithLifecycle()
+    val rootSessions by agent.sessions.collectAsStateWithLifecycle()
     val selectedSession by agent.currentSessionState.collectAsStateWithLifecycle()
     val selectedWorkspace by agent.currentSessionWorkspace.collectAsStateWithLifecycle()
     val project = state.projects.firstOrNull { candidate ->
@@ -39,7 +40,8 @@ internal fun rememberProjectChatBinding(agent: AIAgentViewModel, projects: Proje
     val workspace = project?.workspace.orEmpty()
     var sessionId by remember(id, workspace) { mutableStateOf<String?>(null) }
     var failed by remember(id, workspace) { mutableStateOf(false) }
-    LaunchedEffect(id, workspace, project != null, state.workspace) {
+    LaunchedEffect(id, workspace, project != null, state.workspace, project?.flowSessionIds,
+        rootSessions.filter { it.id in project?.flowSessionIds.orEmpty() }.map { it.id to it.updatedAt }) {
         if (project == null || workspace.isBlank() || state.workspace != workspace) return@LaunchedEffect
         try {
             val root = projects.ensureProjectSession(id, workspace)
@@ -62,9 +64,9 @@ internal fun rememberProjectChatBinding(agent: AIAgentViewModel, projects: Proje
     return ProjectChatBinding(sessionId.takeIf { ready }, context) { collapse ->
         if (project != null) ProjectTaskWorkbench(id, projects, onBack, onContentDrag = collapse,
             rootConversation = {
-                val root = sessionId
-                if (root != null) key(root) { ProjectTaskConversation(root, agent, onToolDetail) }
-                else CircularProgressIndicator()
+                val records = rootSessions.filter { it.id in project.flowSessionIds && it.parentId == null && it.workspacePath == workspace }
+                    .sortedByDescending { it.updatedAt }.map { it.id }
+                key(id, workspace) { ProjectRootConversation(records, agent, onToolDetail) }
             }, conversation = { _, record -> key(record) { ProjectTaskConversation(record, agent, onToolDetail) } })
         else Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             if (failed) Text(stringResource(R.string.project_chat_binding_failed), color = MaterialTheme.colorScheme.error)

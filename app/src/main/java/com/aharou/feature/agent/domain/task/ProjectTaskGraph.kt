@@ -41,8 +41,14 @@ object ProjectTaskGraph {
         requirementsChanged -> ProjectTaskStatus.READY
         else -> ProjectTaskStatus.REVIEW
     }
-    fun recoverInterrupted(task: ProjectTask): ProjectTask = if (task.status == ProjectTaskStatus.RUNNING)
-        task.copy(status = ProjectTaskStatus.BLOCKED, executionReason = "INTERRUPTED_PREVIOUS_PROCESS") else task
+    fun recoverInterrupted(task: ProjectTask): ProjectTask {
+        if (task.status != ProjectTaskStatus.RUNNING &&
+            !(task.status == ProjectTaskStatus.BLOCKED && task.executionReason == "INTERRUPTED_PREVIOUS_PROCESS")) return task
+        return task.copy(status = ProjectTaskStatus.BLOCKED, executionReason = "INTERRUPTED_PREVIOUS_PROCESS",
+            processMembers = task.processMembers.mapValues { (_, member) ->
+                if (member.outcome == "RUNNING") member.copy(outcome = "STOPPED", reason = "INTERRUPTED_PREVIOUS_PROCESS") else member
+            })
+    }
 
     data class Row(val task: ProjectTask, val depth: Int)
 

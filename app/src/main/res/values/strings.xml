@@ -3798,4 +3798,15 @@
     <string name="workspace_model_chain_select_hint">按点击顺序启用模型，数字即使用顺序；再次点击取消，保存后从第一个模型开始。清空后使用会话模型。</string>
     <string name="workspace_model_chain_loading">正在读取模型顺序</string>
     <string name="project_create_menu">创建会话或项目</string>
+    <string name="project_process_read_full">全屏阅读执行详情</string>
+    <string name="project_process_round">已加载轮次 %1$d · 展开 / 收起</string>
+    <string name="project_process_summary">最终总结 / 最后完整回复 · 展开 / 收起</string>
+    <string name="project_process_no_summary">暂无最终完整回复；执行可能仍在进行、已中止或失败，或这条记录未返回总结。</string>
+    <string name="project_process_reasoning">模型思考（点消息中的思考过程展开）</string>
+    <string name="project_process_no_reasoning">模型未返回思考摘要。</string>
+    <string name="project_process_reply">完整回复与工具过程</string>
+    <string name="project_process_live">正在执行 · 实时思考、回复与工具</string>
+    <string name="project_main_conversation">主会话 / 规划过程</string>
+    <string name="project_main_record">主会话记录 %1$d</string>
+    <string name="project_member_status_unconfirmed">成员记录尚无终态；是否执行以实时会话为准</string>
 </resources>

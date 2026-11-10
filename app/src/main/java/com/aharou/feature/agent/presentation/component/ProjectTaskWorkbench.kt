@@ -21,6 +21,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aharou.R
 import com.aharou.core.theme.Radius
@@ -49,6 +51,10 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
     var expandedId by rememberSaveable(projectId) { mutableStateOf<String?>(null) }
     var collapsed by remember(projectId) { mutableStateOf(emptySet<String>()) }
     var overview by remember { mutableStateOf(false) }
+    var rootReader by rememberSaveable(projectId) { mutableStateOf(false) }
+    var readerId by rememberSaveable(projectId) { mutableStateOf<String?>(null) }
+    var readerSession by rememberSaveable(projectId) { mutableStateOf<String?>(null) }
+    var selectedRecords by remember(projectId) { mutableStateOf(emptyMap<String, String?>()) }
     var adding by rememberSaveable(projectId) { mutableStateOf(false) }
     var addingParentId by rememberSaveable(projectId) { mutableStateOf<String?>(null) }
     val planning = projectId in state.planningProjectIds
@@ -60,7 +66,9 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
     }
     val process: @Composable (ProjectTask) -> Unit = { task ->
         ProjectTaskProcess(task, tasks, onEdit = {}, onAccept = { viewModel.accept(task) }, conversation = conversation,
-            modifier = Modifier.fillMaxSize().padding(Spacing.sm), readOnly = true)
+            modifier = Modifier.fillMaxSize().padding(Spacing.sm), readOnly = true, acceptEnabled = !state.busy,
+            onReadFull = { session -> readerSession = session; readerId = task.id }, initialSession = selectedRecords[task.id],
+            onRecordSelected = { session -> selectedRecords = selectedRecords + (task.id to session) })
     }
     val sessionMenu = LocalProjectChatMenu.current
     val header: @Composable (@Composable (() -> Unit) -> Unit) -> Unit = { mapMenu ->
@@ -105,6 +113,9 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
                 }
             }
         }
+        TextButton(onClick = { rootReader = true }, modifier = Modifier.fillMaxWidth().testTag("project_main_conversation")) {
+            Text(stringResource(R.string.project_main_conversation))
+        }
         if (planning) Column(Modifier.fillMaxWidth().testTag("project_planning"), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
             Text(stringResource(R.string.project_planning), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
             LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -115,13 +126,29 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
         if (tasks.isEmpty() && !planning) Text(stringResource(R.string.project_created_next_step),
             style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag("project_empty_next_step"))
         state.error?.let { Text(stringResource(R.string.project_task_error, projectTaskExecutionReasonLabel(it)), color = MaterialTheme.colorScheme.error) }
+        tasks.firstOrNull { it.id == expandedId }?.let { task ->
+            TextButton(onClick = { readerSession = selectedRecords[task.id]; readerId = task.id },
+                modifier = Modifier.fillMaxWidth().testTag("task_open_reader")) {
+                Text(stringResource(R.string.project_process_read_full))
+            }
+        }
         approvals()
+        }
+    }
+    if (rootReader) Dialog(onDismissRequest = { rootReader = false },
+        properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(Modifier.fillMaxSize()) {
+            Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(Spacing.sm)) {
+                TextButton(onClick = { rootReader = false }) { Text(stringResource(R.string.project_back)) }
+                Text(stringResource(R.string.project_main_conversation), style = MaterialTheme.typography.titleMedium)
+                Box(Modifier.weight(1f).fillMaxWidth()) { rootConversation() }
+            }
         }
     }
     val dragConnection = rememberContentDragConnection(onContentDrag)
     BoxWithConstraints(Modifier.fillMaxSize().statusBarsPadding().nestedScroll(dragConnection).padding(horizontal = Spacing.sm)) {
             val processHeight = (maxHeight * 0.9f).coerceIn(240.dp, 640.dp)
-            if (viewMode == "map") ProjectTaskMap(projectId, project?.title.orEmpty(), tasks, processId = expandedId,
+            if (viewMode == "map") ProjectTaskMap(projectId, stringResource(R.string.project_main_conversation), tasks, processId = expandedId,
                 onOpenProcess = { id -> expandedId = id; viewModel.select(id) }, onDismissProcess = { expandedId = null },
                 onSupplement = {}, onAddChild = { task -> addingParentId = task?.id; adding = true }, onContentDrag = onContentDrag,
                 onOpenRoot = { toggle(rootId) }, rootConversation = rootConversation,
@@ -135,7 +162,7 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
                             .clickable { toggle(rootId) }
                             .testTag("task_node_root")) {
                         Column(Modifier.padding(Spacing.sm)) {
-                            Text(project?.title.orEmpty(), maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall)
+                            Text(stringResource(R.string.project_main_conversation), maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall)
                             Text(stringResource(R.string.project_process_hint), style = MaterialTheme.typography.labelSmall)
                         }
                     }
@@ -180,6 +207,22 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
                                 modifier = Modifier.fillMaxWidth().height(processHeight)) { process(row.task) }
                         }
                     }
+                }
+            }
+        }
+    }
+    tasks.firstOrNull { it.id == readerId }?.let { task ->
+        Dialog(onDismissRequest = { readerId = null }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+            Surface(Modifier.fillMaxSize().testTag("task_detail_reader"), color = MaterialTheme.colorScheme.background) {
+                Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing).padding(Spacing.md)) {
+                    Row(Modifier.fillMaxWidth()) {
+                        Text(task.title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f), maxLines = 2)
+                        TextButton(onClick = { readerId = null }) { Text(stringResource(R.string.project_close)) }
+                    }
+                    ProjectTaskProcess(task, tasks, onEdit = {}, onAccept = { viewModel.accept(task) }, conversation = conversation,
+                        modifier = Modifier.weight(1f).fillMaxWidth(), readOnly = true, acceptEnabled = !state.busy,
+                        initialSession = readerSession,
+                        onRecordSelected = { session -> selectedRecords = selectedRecords + (task.id to session) })
                 }
             }
         }

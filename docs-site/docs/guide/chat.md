@@ -348,6 +348,12 @@ AI 回复正文下面那一行：**统计按「本轮合计」算，只挂在每
 - **全部展开 / 全部收起**：在导图内工具组一次展开或收起所有任务。
 - 导图内工具组提供放大、缩小、适配全图和复位，不再常驻四个大文字按钮。仍可双指缩放和拖动查看离屏分支；「复位」回到项目节点，图例从视图菜单按需查看。
 
+**阅读执行记录**：展开任务后，可以从顶部操作区或过程卡片点击「全屏阅读执行详情」。详情在画布与卡片之外显示，不受导图缩放、平移和裁切影响；关闭后返回原视图，不停止后台执行。详情保持只读，沿用当前选中的历史记录；未选择时按原记录顺序显示第一条，成员执行记录仍显示成员身份和执行状态。
+
+记录内按后续用户请求划分轮次，最新轮的完整回复、实际返回的思考和工具过程默认展开；点击对应标题可以收起，切换同一阅读器内的历史记录后保留手动选择。模型未返回思考时会明确提示，不补写或推断。每次可补载 30 条更早消息；轮次编号对应已加载范围，补载或实时追加后，只要仍有共同消息，就保留该轮的展开身份。实时思考、回复与工具输出独立显示，工具按消息去重，即使历史轮次折叠也可阅读。
+
+「最终总结 / 最后完整回复」只展示最后一轮末尾实际返回的助手正文，不将工具、用户内容或内部压缩摘要当总结。执行仍活动、记录加载中或读取失败时，不标为最终完整回复；停止后的残留流式文本不代表仍在执行，也不作为最终回复；末条为失败或中止提示时也不取前面的半截内容。失败后继续执行并成功返回完整正文，可以查看恢复后的最终回复。
+
 **出错时会看到什么、怎么办**：
 
 - 「AI 拆分不可用，已按规则拆分」：模型没配置、调用失败或返回内容无法使用，任务改按需求里的编号、缩进、换行或句子机械拆分，没有依赖和负责人。流程照常可以运行，也可以手动编辑任务、调整父任务和依赖；检查模型设置后，之后追加的需求和补充会重新交给 AI 处理。
@@ -403,3 +409,7 @@ AI 回复正文下面那一行：**统计按「本轮合计」算，只挂在每
 输入栏保留思考强度。点击模型列表，按希望使用的顺序选择模型，数字表示顺序，再次点击取消；保存后从第一个模型开始，出错时按该工作区的顺序尝试。清空顺序后使用会话模型。阶段模型已移除，不再区分规划模型和执行模型。
 
 项目中若提示“模型未返回有效规划”，看到的是规则草稿，不代表 AI 已完成规划；请重试 AI 规划，或编辑并确认草稿后执行。
+
+The **主会话 / 规划过程** entry outside the task map opens the main conversation in a full-screen reader. Its history selector preserves a manually selected record; otherwise a genuinely active root takes precedence, followed by an existing root with returned assistant or tool output. Sending still targets the latest valid project root, not the historical record being read. Task-member records remain separate and never borrow reasoning from the main conversation.
+
+The latest loaded round and complete summary start expanded. Returned reasoning and tool output start expanded too, and can still be collapsed. Only an active session is labeled live; stale stream text or an old member status alone is not proof of execution. Rule-fallback planning keeps shared introductory and trailing requirements as each listed task’s background rather than inventing extra tasks; previously saved tasks are not deleted.
