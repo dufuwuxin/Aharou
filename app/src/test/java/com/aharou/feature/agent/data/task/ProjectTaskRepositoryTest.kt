@@ -140,6 +140,38 @@ class ProjectTaskRepositoryTest {
         }, any()) }
     }
 
+    @Test fun observedOverviewThenConcreteListAppendsOnlyFiveTasksAndKeepsExecutionContext() = runBlocking {
+        val overview = "生成五本小说，每本小说需要：1) 完整的书名、作者名、题材类型；2) 详细的故事大纲（起承转合）；3) 主要人物设定；4) 世界观背景；5) 分章节的详细情节设计（至少20章）；6) 开篇第一章的完整正文内容。"
+        val concrete = "请帮我生成五本小说，分别为：\n1. 《星尘纪事》- 硬科幻小说，公元2847年星际殖民时代，边缘星球发现外星遗迹，引发联邦与殖民地战争。\n2. 《青衫客》- 武侠小说，明末江湖，神秘剑客因失传剑谱卷入纷争，在忠义与爱情间抉择。\n3. 《回声小镇》- 悬疑推理小说，退休刑警回到故乡调查连环死亡案，所有案件指向废弃钟楼。\n4. 《时光当铺》- 都市奇幻小说，午夜开门的神秘当铺可用记忆换取时间，女主人公寻找父亲失踪真相。\n5. 《深海王座》- 海洋冒险小说，22世纪深海探险队在马里亚纳海沟发现失落文明，面临企业贪婪与海怪威胁。\n\n每本小说需要包含：书名、作者笔名、题材类型、完整故事大纲（起承转合）、主要人物设定（至少6位）、世界观背景设定、分章大纲（25-30章）、第一章完整正文（不少于3000字）。"
+        assertEquals(105, overview.length)
+        assertEquals(352, concrete.length)
+        val id = java.util.UUID.randomUUID().toString()
+        coEvery { workspaces.allocateProjectWorkspace(id, "/source") } returns
+            com.aharou.feature.workspace.domain.model.Workspace("owned", "/owned/$id")
+        val store = repository()
+        val project = store.createOwnedProject("Observed novels", "Writing background", "/source", id).project
+        val first = store.appendRequirements(id, overview, project.workspace)
+        assertTrue(first.ruleFallback)
+        val afterOverview = repository().load(project.workspace)
+        assertEquals(overview, afterOverview.projects.single().requirements)
+        assertTrue(afterOverview.tasks.isEmpty())
+        val second = store.appendRequirements(id, concrete, project.workspace)
+        assertTrue(second.ruleFallback)
+        val reloaded = repository().load(project.workspace)
+        val requirements = overview + "\n\n" + concrete
+        assertEquals(requirements, reloaded.projects.single().requirements)
+        assertEquals(5, reloaded.tasks.size)
+        assertEquals(concrete.lines().filter { it.matches(Regex("^[1-5]\\. .*")) }, reloaded.tasks.map { it.requirement })
+        val common = concrete.lineSequence().first() + "\n" + concrete.substringAfter("\n\n")
+        assertTrue(reloaded.tasks.all { it.parentId == null && it.background == common })
+        for (task in reloaded.tasks) {
+            val prompt = ProjectWorkflowPlan.prompt(task, reloaded.tasks, requirements)
+            assertTrue(prompt.contains("Project requirements:\n$requirements"))
+            assertTrue(prompt.contains("\nBackground:\n$common"))
+            assertTrue(prompt.contains("\nRequirement:\n${task.requirement}"))
+        }
+    }
+
     @Test fun legacySnapshotsWithoutPurposeStillLoadButEmptyAndWhitespaceRequirementsAreRejected() = runBlocking {
         val old = repository().createProject("legacy", "Keep this requirement", "/legacy-json").project
         val key = java.security.MessageDigest.getInstance("SHA-256").digest(old.workspace.toByteArray(Charsets.UTF_8))

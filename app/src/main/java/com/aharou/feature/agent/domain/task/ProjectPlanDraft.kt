@@ -14,6 +14,27 @@ object ProjectPlanDraft {
         fun indentation(line: String) = line.takeWhile { it == ' ' || it == '\t' }
             .fold(0) { total, char -> total + if (char == '\t') 4 else 1 }
         val marked = lines.indices.filter { marker.containsMatchIn(lines[it]) }
+        if (marked.isEmpty()) {
+            val allocation = Regex("(?:创建|生成|分成|拆成|拆分成|拆分为|划分为|创作|编写|制作)\\s*([0-9]+|[零〇一二两三四五六七八九十百千万]+)\\s*((?:个|份|本|篇|项|套|张|部|首|封|支|段|种|款|组)[^\\s，,。；;：:！？!?]*)")
+                .find(project.requirements)
+            if (allocation != null) {
+                val count = allocation.groupValues[1]
+                val multiple = count.toLongOrNull()?.let { it > 1 }
+                    ?: count.any { it in "二两三四五六七八九十百千万" }
+                val target = allocation.groupValues[2]
+                val sharedQualifier = Regex("每(?:一)?(?:${Regex.escape(target)}|${Regex.escape(target.take(1))}(?=都|需|应|须|必须|包含|提供|独立|[，,：:])|项(?=都|需|应|须|必须|包含|提供|独立|[，,：:]))")
+                val qualifier = sharedQualifier.find(project.requirements)
+                val beforeQualifier = project.requirements.take(qualifier?.range?.first ?: project.requirements.length)
+                val numberedItem = Regex("[（(]?(?:[0-9]+|[一二三四五六七八九十]+)[.)、）]")
+                val explicitItems = Regex("分别(?:为|是)\\s*[:：]?").find(project.requirements)?.let {
+                    numberedItem.findAll(project.requirements.substring(it.range.last + 1)).take(2).count() == 2
+                } == true
+                val inlineList = explicitItems || Regex("分别(?:为|是)?\\s*[:：]?\\s*[^，,。；;]+(?:和|与|及|、)[^，,。；;]+")
+                    .containsMatchIn(project.requirements) || numberedItem.findAll(beforeQualifier).take(2).count() == 2
+                if (multiple && !inlineList && (qualifier != null || target in listOf("个任务", "项任务")))
+                    return emptyList()
+            }
+        }
         val bodies = marked.associateWith { lines[it] }.toMutableMap()
         val sharedLines = mutableListOf<String>()
         val rootIndent = marked.minOfOrNull { indentation(lines[it]) } ?: 0

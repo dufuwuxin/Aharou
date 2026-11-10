@@ -6,10 +6,16 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import com.aharou.R
+import com.aharou.core.translation.OfflineTranslation
+import com.aharou.core.translation.TranslationEntryPoint
+import com.aharou.core.translation.TranslationModelState
 import com.aharou.feature.agent.presentation.component.ProjectRootConversation
 import com.aharou.feature.agent.presentation.component.ProjectTaskConversation
 import com.aharou.feature.agent.presentation.component.ProjectTaskProcess
 import com.aharou.feature.agent.domain.task.ProjectTask
+import dagger.hilt.internal.GeneratedComponent
+import dagger.hilt.internal.GeneratedComponentManager
+import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -22,8 +28,21 @@ import org.robolectric.annotation.ConscryptMode
 import org.robolectric.annotation.GraphicsMode
 import org.robolectric.annotation.SQLiteMode
 
+class ProjectTaskConversationTestApplication : Application(), GeneratedComponentManager<Any> {
+    private val translation = mockk<OfflineTranslation> {
+        every { enabled } returns MutableStateFlow(false)
+        every { modelState } returns MutableStateFlow(TranslationModelState.MISSING)
+        coEvery { translate(any()) } answers { firstArg<String>() }
+    }
+    private val component = object : GeneratedComponent, TranslationEntryPoint {
+        override fun translation(): OfflineTranslation = translation
+    }
+
+    override fun generatedComponent(): Any = component
+}
+
 @RunWith(RobolectricTestRunner::class)
-@Config(application = Application::class, sdk = [35], qualifiers = "w411dp-h891dp")
+@Config(application = ProjectTaskConversationTestApplication::class, sdk = [35], qualifiers = "w411dp-h891dp")
 @GraphicsMode(GraphicsMode.Mode.LEGACY)
 @SQLiteMode(SQLiteMode.Mode.LEGACY)
 @ConscryptMode(ConscryptMode.Mode.OFF)

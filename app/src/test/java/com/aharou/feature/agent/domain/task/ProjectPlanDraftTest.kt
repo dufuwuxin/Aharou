@@ -22,9 +22,8 @@ class ProjectPlanDraftTest {
         val singleLine = "生成五本小说，每本小说需要：1) 完整的书名、作者名、题材类型；2) 详细的故事大纲（起承转合）；3) 主要人物设定；4) 世界观背景；5) 分章节的详细情节设计（至少20章）；6) 开篇第一章的完整正文内容。"
         assertEquals(105, singleLine.length)
         val original = project.copy(requirements = singleLine)
-        val compatible = ProjectPlanDraft.build(original)
-        assertEquals(1, compatible.size)
-        assertEquals(singleLine, compatible.single().requirement)
+        assertTrue(ProjectPlanDraft.build(original).isEmpty())
+        assertEquals(0, ProjectPlanDraft.preview(original, singleLine))
         assertEquals(singleLine, original.requirements)
     }
     @Test fun enumeratedDeliverablesKeepSharedContextWithoutExtraTasks() {
@@ -49,6 +48,42 @@ class ProjectPlanDraftTest {
         val project = ProjectPlan(workspace = "w", title = "Plan", requirements = "请完成这份工作")
         assertEquals(listOf(project.requirements), ProjectPlanDraft.build(project).map { it.requirement })
         assertEquals(2, ProjectPlanDraft.build(project.copy(requirements = "先实现\n再验证")).size)
+    }
+    @Test fun multiDeliverableOverviewsWaitForConcreteItemsAcrossCategories() {
+        for ((overview, items) in listOf(
+            "生成2份报告，每份报告需要来源和结论" to listOf("销售报告", "成本报告"),
+            "创作三首歌曲，每首歌曲需要歌词和曲谱" to listOf("春日", "夏夜", "秋雨"),
+            "请拆成两个任务" to listOf("实现", "验证")
+        )) {
+            val project = ProjectPlan(workspace = "w", title = "Plan", requirements = overview)
+            assertTrue(ProjectPlanDraft.build(project).isEmpty())
+            assertEquals(overview, project.requirements)
+            val concrete = overview + "\n" + items.mapIndexed { index, item -> "${index + 1}. $item" }.joinToString("\n")
+            val tasks = ProjectPlanDraft.build(project.copy(requirements = concrete))
+            assertEquals(items, tasks.map { it.title })
+            assertTrue(tasks.all { it.background == overview })
+        }
+    }
+    @Test fun inlineConcreteListsKeepTheOriginalExecutableRequirement() {
+        for (text in listOf(
+            "生成2份报告，分别为销售报告和成本报告，每份报告需要来源和结论",
+            "生成2份报告，每份报告需要来源和结论，分别为销售报告和成本报告",
+            "生成2份报告，每份报告需要来源和结论，分别为：1)销售报告；2)成本报告",
+            "生成2份报告：1)销售报告2)成本报告，每份报告需要来源和结论",
+            "生成两份报告：一）销售报告二）成本报告，每份报告需要来源和结论",
+            "创作三首歌曲：一、春日 二、夏夜 三、秋雨，每首歌曲需要歌词和曲谱"
+        )) {
+            val project = ProjectPlan(workspace = "w", title = "Plan", requirements = text)
+            assertEquals(listOf(text), ProjectPlanDraft.build(project).map { it.requirement })
+            assertEquals(text, project.requirements)
+        }
+    }
+    @Test fun countsAndPerStepParametersAreStillSingleExecutableInstructions() {
+        for (text in listOf("生成一份报告，每份报告需要结论", "计算5个样本平均值",
+            "生成一份报告，每一个步骤需要说明，使用3个样本", "生成3份报告，每一个步骤需要说明", "生成3份报告", "创建1个任务")) {
+            val project = ProjectPlan(workspace = "w", title = "Plan", requirements = text)
+            assertEquals(listOf(text), ProjectPlanDraft.build(project).map { it.requirement })
+        }
     }
     @Test fun indentedContinuationBelongsOnlyToItsEnumeratedTask() {
         val text = "共同前导\n1. A\n  仅修改 a.txt\n2. B\n  仅修改 b.txt\n每个任务都要验证"
