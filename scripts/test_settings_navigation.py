@@ -135,8 +135,11 @@ class SettingsNavigationTest(unittest.TestCase):
         detail = source(SRC / "feature/agent/presentation/component/ProjectTaskDetailScreen.kt")
         self.assertNotIn("onAddChild = {}", workbench)
         self.assertIn("onAddChild = { task ->", workbench)
-        self.assertIn("viewModel.addTaskByDescription(projectId, description, parentId = addingParentId)", workbench)
-        self.assertIn("viewModel.addTaskByDescription(projectId, description, parentId = task.id)", detail)
+        self.assertIn("viewModel.createRequirementBranch(projectId, description, parentId = addingParentId)", workbench)
+        self.assertIn("viewModel.createRequirementBranch(projectId, description, parentId = task.id)", detail)
+        self.assertIn("onSelectRequirementBranch(branchId)", workbench)
+        self.assertNotIn("viewModel.addTaskByDescription(", workbench)
+        self.assertNotIn("viewModel.addTaskByDescription(", detail)
         self.assertIn('testTag("task_add_child_${row.task.id}")', workbench)
 
     def test_map_fit_and_zoom_are_not_limited_by_touch_target_size(self):
