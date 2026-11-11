@@ -3812,4 +3812,7 @@
     <string name="project_requirement_branch">需求分支</string>
     <string name="project_branch_composer">当前输入：需求分支「%1$s」</string>
     <string name="project_branch_discussion_hint">在现有输入框讨论此分支。提问不会创建任务；提交需求后，AI 只在此分支下拆分任务。</string>
+    <string name="project_branch_plan_start">规划并开始执行</string>
+    <string name="project_branch_delete">删除需求分支</string>
+    <string name="project_branch_delete_confirm">删除“%1$s”及其 %2$d 个子节点？执行将先停止并等待结束；历史会话和工作区文件会保留。若其他任务仍依赖此分支，则拒绝删除。</string>
 </resources>

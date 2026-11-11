@@ -58,6 +58,7 @@ class ProjectTaskViewModel @Inject constructor(
     // Retrying a failed link reuses the already persisted root session.
     private val pendingProjectSessions = mutableMapOf<Pair<String, String>, String>()
     private val pendingBranchSessions = mutableMapOf<Pair<String, String>, String>()
+    private val branchSessionProjects = mutableSetOf<Pair<String, String>>()
     private val executing = mutableSetOf<Pair<String, String>>()
     private val deletingProjects = mutableSetOf<Pair<String, String>>()
     private val executionJobs = mutableMapOf<Pair<String, String>, kotlinx.coroutines.Job>()
@@ -141,20 +142,25 @@ class ProjectTaskViewModel @Inject constructor(
     suspend fun ensureBranchSession(branchId: String, workspace: String): String = sessionMutex.withLock {
         val branch = repository.load(workspace).tasks.single { it.id == branchId && it.workspace == workspace && it.isRequirementBranch }
         val key = workspace to branchId
-        val candidates = (branch.sessionIds + listOfNotNull(pendingBranchSessions[key])).distinct()
-            .mapNotNull { sessions.getSessionById(it) }.filter { it.parentId == null && it.workspacePath == workspace }
-        val session = candidates.firstOrNull() ?: runner.createSessionEntity(workspace).also {
-            check(it.parentId == null && it.workspacePath == workspace)
-            sessions.upsertSession(it)
-            pendingBranchSessions[key] = it.id
-        }
-        repository.transact(workspace) { snapshot ->
-            val latest = snapshot.tasks.single { it.id == branchId && it.isRequirementBranch && it.projectId == branch.projectId }
-            if (session.id in latest.sessionIds) emptyList() else listOf(
-                com.aharou.feature.agent.domain.task.ProjectTaskChange(latest.copy(sessionIds = latest.sessionIds + session.id)))
-        }
-        pendingBranchSessions.remove(key)
-        session.id
+        val projectKey = workspace to requireNotNull(branch.projectId)
+        check(projectKey !in deletingProjects) { "PROJECT_BUSY" }
+        branchSessionProjects.add(projectKey)
+        try {
+            val candidates = (branch.sessionIds + listOfNotNull(pendingBranchSessions[key])).distinct()
+                .mapNotNull { sessions.getSessionById(it) }.filter { it.parentId == null && it.workspacePath == workspace }
+            val session = candidates.firstOrNull() ?: runner.createSessionEntity(workspace).also {
+                check(it.parentId == null && it.workspacePath == workspace)
+                sessions.upsertSession(it)
+                pendingBranchSessions[key] = it.id
+            }
+            repository.transact(workspace) { snapshot ->
+                val latest = snapshot.tasks.single { it.id == branchId && it.isRequirementBranch && it.projectId == branch.projectId }
+                if (session.id in latest.sessionIds) emptyList() else listOf(
+                    com.aharou.feature.agent.domain.task.ProjectTaskChange(latest.copy(sessionIds = latest.sessionIds + session.id)))
+            }
+            pendingBranchSessions.remove(key)
+            session.id
+        } finally { branchSessionProjects.remove(projectKey) }
     }
 
     fun createRequirementBranch(projectId: String, title: String, parentId: String? = null,
@@ -171,6 +177,48 @@ class ProjectTaskViewModel @Inject constructor(
                 mutable.update { it.copy(selectedId = branch.id) }
                 onCreated(branch.id)
             }
+        }
+    }
+
+    /** Explicit start is the only action that plans an empty requirement container. */
+    fun startRequirementBranch(projectId: String, branchId: String) {
+        val state = mutable.value
+        val branch = state.tasks.singleOrNull { it.id == branchId && it.projectId == projectId &&
+            it.workspace == state.workspace && it.isRequirementBranch } ?: return
+        if (state.busy || projectId in state.activeProjectIds) return
+        planning(projectId) { workspace ->
+            val tasks = repository.load(workspace).tasks
+            check(tasks.any { it.id == branch.id && it.projectId == projectId && it.isRequirementBranch }) { "BRANCH_NOT_FOUND" }
+            if (com.aharou.feature.agent.domain.task.ProjectTaskGraph.subtree(branchId, tasks).any { !it.isRequirementBranch }) false
+            else {
+                val current = tasks.single { it.id == branchId }
+                repository.appendBranchRequirements(branchId, current.requirement.takeIf { it.isNotBlank() } ?: current.title, workspace).ruleFallback
+            }
+        }
+    }
+
+    fun deleteRequirementBranch(projectId: String, branchId: String, onDeleted: () -> Unit = {}) {
+        val current = mutable.value
+        val key = current.workspace to projectId
+        if (current.busy || current.loading || projectId in current.planningProjectIds || key in branchSessionProjects) return
+        val branch = current.tasks.singleOrNull { it.id == branchId && it.projectId == projectId &&
+            it.workspace == current.workspace && it.isRequirementBranch } ?: return
+        operation(onSuccess = { workspace -> if (mutable.value.workspace == workspace) onDeleted() }) { workspace ->
+            check(deletingProjects.add(key)) { "PROJECT_BUSY" }
+            try {
+                val taskIds = current.tasks.filter { it.projectId == projectId }.map { it.id }.toSet()
+                val jobs = executionJobs.filterKeys { it.first == workspace && it.second in taskIds }.values.toList()
+                jobs.forEach { it.cancel() }
+                flows.withProjectStopped(projectId, workspace) {
+                    jobs.joinAll()
+                    sessionMutex.withLock {
+                        val ids = com.aharou.feature.agent.domain.task.ProjectTaskGraph.subtree(branch.id, repository.load(workspace).tasks).map { it.id }.toSet()
+                        check(repository.deleteRequirementBranch(projectId, branchId, workspace)) { "BRANCH_NOT_FOUND" }
+                        ids.forEach { pendingBranchSessions.remove(workspace to it) }
+                        mutable.update { state -> if (state.workspace == workspace) state.copy(selectedId = state.selectedId.takeUnless { it in ids }) else state }
+                    }
+                }
+            } finally { deletingProjects -= key }
         }
     }
 

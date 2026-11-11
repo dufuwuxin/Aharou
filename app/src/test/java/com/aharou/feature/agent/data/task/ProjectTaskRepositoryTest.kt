@@ -431,6 +431,32 @@ class ProjectTaskRepositoryTest {
     }
 
 
+    @Test fun branchDeletionIsAtomicScopedAndRejectsExternalDependenciesWithoutRewritingThem() = runBlocking {
+        val repo = repository()
+        repo.createProject("Project", "old task", "delete-branch-w", "p")
+        val branch = repo.createRequirementBranch("p", "Branch", "delete-branch-w")
+        repo.appendBranchRequirements(branch.id, "child work", "delete-branch-w")
+        val before = repo.load("delete-branch-w")
+        val child = before.tasks.single { it.parentId == branch.id }
+        val outside = before.tasks.single { !it.isRequirementBranch && it.parentId == null }
+        val dependent = repo.save(outside.copy(dependencyIds = listOf(child.id)))
+        val blocked = repo.load("delete-branch-w")
+        try { repo.deleteRequirementBranch("p", branch.id, "delete-branch-w"); fail("external dependency must reject") }
+        catch (expected: IllegalStateException) { assertEquals("BRANCH_EXTERNAL_DEPENDENCY", expected.message) }
+        assertEquals(blocked, repo.load("delete-branch-w"))
+        assertEquals(blocked, repository().load("delete-branch-w"))
+        try { repo.deleteRequirementBranch("foreign", branch.id, "delete-branch-w"); fail("foreign project must reject") }
+        catch (_: IllegalArgumentException) { }
+        assertEquals(blocked, repo.load("delete-branch-w"))
+        repo.save(dependent.copy(dependencyIds = emptyList()))
+        val retained = repo.load("delete-branch-w").tasks.filter { it.id != branch.id && it.id != child.id }
+        assertTrue(repo.deleteRequirementBranch("p", branch.id, "delete-branch-w"))
+        val reopened = repository().load("delete-branch-w")
+        assertEquals(retained, reopened.tasks)
+        assertEquals(before.projects, reopened.projects)
+        assertFalse(repo.deleteRequirementBranch("p", branch.id, "delete-branch-w"))
+    }
+
     @Test fun realBranchPersistenceAndExecutionPromptsNeverMixSiblingRequirements() = runBlocking {
         val repo = repository()
         repo.createProject("Scoped", "ROOT_ONLY", "isolated-w", "p")

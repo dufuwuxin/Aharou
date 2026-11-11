@@ -54,8 +54,9 @@ class ProjectCompactLayoutContract(unittest.TestCase):
         self.assertIn("onClick = { menuOpen = false; viewModel.stopProject(projectId) }", stop)
         start = region(menu, "else DropdownMenuItem", "(")
         self.assertIn("val executableTasks = tasks.filterNot { it.isRequirementBranch }", workbench)
-        self.assertIn("enabled = !state.loading && !state.busy && !planning && executableTasks.any { !ProjectWorkflowPlan.delivered(it) }", start)
-        self.assertIn("onClick = { menuOpen = false; viewModel.startProject(projectId) }", start)
+        self.assertRegex(start, r"enabled = !state.loading && !state.busy && !planning &&\s*\(selectedBranch != null && !branchHasChildren \|\| executableTasks.any \{ !ProjectWorkflowPlan.delivered\(it\) \}\)")
+        self.assertIn("if (selectedBranch != null) viewModel.startRequirementBranch(projectId, selectedBranch.id)", start)
+        self.assertIn("else viewModel.startProject(projectId)", start)
 
     def assert_search(self, task_map):
         self.assertIn("var showSearch by rememberSaveable(projectId) { mutableStateOf(false) }", task_map)

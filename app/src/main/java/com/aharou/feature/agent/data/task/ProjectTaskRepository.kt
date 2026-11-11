@@ -94,6 +94,28 @@ class ProjectTaskRepository @Inject constructor(@ApplicationContext context: Con
         return true
     }
 
+    /** Removes only the branch tree. Conversations and workspace files remain historical records. */
+    suspend fun deleteRequirementBranch(projectId: String, branchId: String, workspace: String): Boolean =
+        withContext(Dispatchers.IO) { deleteRequirementBranchLocked(projectId, branchId, workspace) }
+
+    @Synchronized
+    private fun deleteRequirementBranchLocked(projectId: String, branchId: String, workspace: String): Boolean {
+        val current = snapshot(workspace)
+        require(current.projects.any { it.id == projectId && it.workspace == workspace }) { "PROJECT_NOT_FOUND" }
+        val branch = current.tasks.singleOrNull { it.id == branchId } ?: return false
+        require(branch.projectId == projectId && branch.workspace == workspace && branch.isRequirementBranch) { "BRANCH_NOT_FOUND" }
+        val subtree = ProjectTaskGraph.subtree(branchId, current.tasks)
+        require(subtree.all { it.projectId == projectId && it.workspace == workspace }) { "CROSS_PROJECT" }
+        val removed = subtree.map { it.id }.toSet()
+        val retained = current.tasks.filterNot { it.id in removed }
+        check(retained.none { task -> task.dependencyIds.any { it in removed } }) { "BRANCH_EXTERNAL_DEPENDENCY" }
+        val next = current.copy(version = current.version + 1, tasks = retained)
+        check(ProjectTaskGraph.validate(next.tasks) == null) { "INVALID_TASK_GRAPH" }
+        persist(workspace, next)
+        mutable.value = mutable.value + (workspace to next)
+        return true
+    }
+
     suspend fun save(task: ProjectTask): ProjectTask = withContext(Dispatchers.IO) {
         transactLocked(task.workspace) { listOf(ProjectTaskChange(task)) }.single()
     }

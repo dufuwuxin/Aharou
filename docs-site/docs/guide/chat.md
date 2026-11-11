@@ -415,3 +415,11 @@ AI 回复正文下面那一行：**统计按「本轮合计」算，只挂在每
 The **主会话 / 规划过程** entry outside the task map opens the main conversation in a full-screen reader. Its history selector preserves a manually selected record; otherwise a genuinely active root takes precedence, followed by an existing root with returned assistant or tool output. 发送目标由当前选中的主会话或需求分支决定，选中分支时仍使用现有输入栏；切回主会话后使用有效项目根会话。阅读器中的历史选择不改变发送目标，关闭阅读器也不停止执行。 Task-member records remain separate and never borrow reasoning from the main conversation.
 
 The latest loaded round and complete summary start expanded. Returned reasoning and tool output start expanded too, and can still be collapsed. Only an active session is labeled live; stale stream text or an old member status alone is not proof of execution. Rule-fallback planning keeps shared introductory and trailing requirements as each listed task’s background rather than inventing extra tasks; previously saved tasks are not deleted.
+
+### Requirement branch execution and removal
+
+Creating an empty requirement branch or asking a question does not plan work. Select **Plan and start execution** to plan an empty branch explicitly: the branch requirement is used when present, otherwise its user-entered name becomes the requirement. Existing executable children reuse the normal project flow without planning again.
+
+Returning to the main conversation or opening the graph root keeps the workbench mounted and displays the original root conversation records. Branch composer context remains isolated.
+
+**Delete requirement branch** asks for confirmation and includes every descendant. Cancellation changes nothing. Confirming stops and waits for the project before atomically removing the tree; deletion is refused while planning or creating execution conversations, or when another task depends on the tree. Conversation history and workspace files are retained.

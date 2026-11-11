@@ -48,6 +48,11 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
     val project = state.projects.firstOrNull { it.id == projectId }
     val tasks = state.tasks.filter { it.projectId == projectId }
     val executableTasks = tasks.filterNot { it.isRequirementBranch }
+    val selectedBranch = tasks.singleOrNull { it.id == requirementBranchId && it.isRequirementBranch }
+    val currentBranchId by rememberUpdatedState(requirementBranchId)
+    val selectCurrentBranch by rememberUpdatedState(onSelectRequirementBranch)
+    val branchHasChildren = selectedBranch?.let { branch -> ProjectTaskGraph.subtree(branch.id, tasks).any { !it.isRequirementBranch } } == true
+    var deletingBranchId by rememberSaveable(projectId) { mutableStateOf<String?>(null) }
     val rootId = ProjectTaskMapLayout.rootId(projectId)
     var viewMode by rememberSaveable(projectId) { mutableStateOf("map") }
     var menuOpen by rememberSaveable(projectId) { mutableStateOf(false) }
@@ -104,11 +109,17 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
                         leadingIcon = { Icon(FeatherIcons.Square, null) },
                         modifier = Modifier.testTag("project_flow_stop"),
                         onClick = { menuOpen = false; viewModel.stopProject(projectId) })
-                    else DropdownMenuItem(text = { Text(stringResource(R.string.project_flow_start)) },
+                    else DropdownMenuItem(text = { Text(stringResource(if (selectedBranch != null && !branchHasChildren)
+                        R.string.project_branch_plan_start else R.string.project_flow_start)) },
                         leadingIcon = { Icon(FeatherIcons.Play, null) },
-                        enabled = !state.loading && !state.busy && !planning && executableTasks.any { !ProjectWorkflowPlan.delivered(it) },
+                        enabled = !state.loading && !state.busy && !planning &&
+                            (selectedBranch != null && !branchHasChildren || executableTasks.any { !ProjectWorkflowPlan.delivered(it) }),
                         modifier = Modifier.testTag("project_flow_start"),
-                        onClick = { menuOpen = false; viewModel.startProject(projectId) })
+                        onClick = {
+                            menuOpen = false
+                            if (selectedBranch != null) viewModel.startRequirementBranch(projectId, selectedBranch.id)
+                            else viewModel.startProject(projectId)
+                        })
                     DropdownMenuItem(text = { Text(stringResource(R.string.project_task_overview)) },
                         onClick = { menuOpen = false; overview = true })
                     DropdownMenuItem(
@@ -129,6 +140,10 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
         tasks.firstOrNull { it.id == requirementBranchId && it.isRequirementBranch }?.let { selected ->
             Text(stringResource(R.string.project_branch_composer, selected.title),
                 style = MaterialTheme.typography.labelMedium, modifier = Modifier.testTag("project_branch_composer"))
+        }
+        if (selectedBranch != null) TextButton(enabled = !state.busy && !planning,
+            modifier = Modifier.testTag("project_branch_delete"), onClick = { deletingBranchId = selectedBranch.id }) {
+            Text(stringResource(R.string.project_branch_delete))
         }
         if (planning) Column(Modifier.fillMaxWidth().testTag("project_planning"), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
             Text(stringResource(R.string.project_planning), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
@@ -151,7 +166,7 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
     }
     if (rootReader) Dialog(onDismissRequest = { rootReader = false },
         properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Surface(Modifier.fillMaxSize()) {
+        Surface(Modifier.fillMaxSize().testTag("project_main_reader")) {
             Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(Spacing.sm)) {
                 TextButton(onClick = { rootReader = false }) { Text(stringResource(R.string.project_back)) }
                 Text(stringResource(R.string.project_main_conversation), style = MaterialTheme.typography.titleMedium)
@@ -260,6 +275,21 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
                 }
             }
         }
+    }
+    tasks.singleOrNull { it.id == deletingBranchId && it.isRequirementBranch }?.let { branch ->
+        AlertDialog(onDismissRequest = { deletingBranchId = null },
+            title = { Text(stringResource(R.string.project_branch_delete)) },
+            text = { Text(stringResource(R.string.project_branch_delete_confirm, branch.title,
+                ProjectTaskGraph.subtree(branch.id, tasks).size - 1)) },
+            confirmButton = { TextButton(enabled = !state.busy && !planning, modifier = Modifier.testTag("project_branch_delete_confirm"),
+                onClick = {
+                    val removedIds = ProjectTaskGraph.subtree(branch.id, tasks).map { it.id }.toSet()
+                    viewModel.deleteRequirementBranch(projectId, branch.id) {
+                        if (currentBranchId in removedIds) selectCurrentBranch(null)
+                    }
+                    deletingBranchId = null
+                }) { Text(stringResource(R.string.project_branch_delete)) } },
+            dismissButton = { TextButton(onClick = { deletingBranchId = null }) { Text(stringResource(android.R.string.cancel)) } })
     }
     if (adding) ProjectTaskAddSheet(parentTitle = tasks.firstOrNull { it.id == addingParentId }?.title,
         busy = state.busy, onSubmit = { description ->

@@ -99,7 +99,8 @@ data class AgentDefinition(
         return if (allowedTools.isEmpty()) {
             afterDeny
         } else {
-            afterDeny.filter { name -> allowedTools.any { matches(it, name) } }
+            // Discovery and workspace-scoped process reads are baseline read-only capabilities; explicit deny still wins.
+            afterDeny.filter { name -> name in setOf("tool_search", "sessions") || allowedTools.any { matches(it, name) } }
         }
     }
 

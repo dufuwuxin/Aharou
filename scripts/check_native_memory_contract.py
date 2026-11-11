@@ -163,21 +163,22 @@ def violations(root: Path) -> list[str]:
     for field in ("name", "description"):
         require(TEAMS, executable(listing), rf"\.\s*{field}\b", f"team listing missing {field}")
 
-    # Rejecting member callers alone does not hide member targets from the main
-    # agent. Check every target-reading path as well as the root-only list query.
     session = texts[SESSIONS]
     require(SESSIONS, executable(reachable(session, "listSessions")),
-            r"\.getRootSessionsByWorkspaceOnce\s*\(", "list must query root sessions only")
+            r"\.getAllSessionsByWorkspaceOnce\s*\(\s*workspace\s*\)",
+            "list must include member sessions in the current workspace")
     search = executable(reachable(session, "searchMessages"))
     for pattern in (r"\.(?:filter|filterNot|mapNotNull)\b", r"\.getSessionById\s*\(",
-                    r"\.parent(?:Session)?Id\s*(?:==|!=)\s*null"):
-        require(SESSIONS, search, pattern, "search must filter member targets, not only member callers")
+                    r"\.workspacePath\s*==\s*workspace"):
+        require(SESSIONS, search, pattern, "search must verify target workspace")
     for handler in ("readSession", "inspectSession"):
         target = executable(reachable(session, handler))
         require(SESSIONS, target, r"\.getSessionById\s*\(", f"{handler} must resolve target ownership")
         require(SESSIONS, target,
-                r"if\s*\([^)]*\.parent(?:Session)?Id\s*!=\s*null[^)]*\)\s*(?:\{\s*)?return\s+ToolResult\.Error\s*\(",
-                f"{handler} must deny member target before messages/tool_calls/context access")
+                r"if\s*\([^)]*\.workspacePath\s*!=\s*workspace[^)]*\)\s*(?:\{\s*)?return\s+ToolResult\.Error\s*\(",
+                f"{handler} must reject cross-workspace targets")
+        forbid(SESSIONS, target, r"\.parent(?:Session)?Id\s*!=\s*null",
+               f"{handler} must allow saved member process access")
 
     settings = texts[SETTINGS]
     menu_source = settings + texts[MENU] + texts[GROUPS]

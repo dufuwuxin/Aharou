@@ -81,13 +81,23 @@ class ProjectRequirementBranchTest {
             state.value = state.value.copy(tasks = listOf(branch))
             arg<(String) -> Unit>(3)(branch.id)
         }
+        val panelOwner = object : ViewModelStoreOwner {
+            override val viewModelStore = ViewModelStore().apply {
+                put("androidx.lifecycle.ViewModelProvider.DefaultKey:${StewardPanelViewModel::class.java.canonicalName}",
+                    StewardPanelViewModel(StewardController(StewardSettingsStore.Noop, mockk()),
+                        StewardSettingsStore.Noop, mockk()))
+            }
+        }
         var binding: ProjectChatBinding? = null
         compose.setContent {
             MaterialTheme {
                 binding = rememberProjectChatBinding(agent, projects, {}, {}, "p")
                 Column {
                     Text(binding?.sessionId.orEmpty(), Modifier.testTag("actual_binding_session"))
-                    binding?.body?.invoke({})
+                    CompositionLocalProvider(LocalViewModelStoreOwner provides panelOwner) {
+                        com.aharou.feature.agent.presentation.component.ProjectChatMenuHost(binding?.sessionId,
+                            {}, {}, {}, {}, {}, {}, {}, null, 0, 0) { binding?.body?.invoke({}) }
+                    }
                 }
             }
         }
@@ -111,6 +121,15 @@ class ProjectRequirementBranchTest {
         }
         verify(exactly = 1) { projects.createRequirementBranch("p", "Named branch", null, any()) }
         verify(exactly = 0) { projects.addTaskByDescription(any(), any(), any()) }
+        compose.onNodeWithContentDescription(compose.activity.getString(R.string.project_view_actions)).performClick()
+        compose.onNodeWithTag("project_flow_start").assertIsEnabled().performClick()
+        verify(exactly = 1) { projects.startRequirementBranch("p", "branch") }
+        compose.onNodeWithTag("project_branch_delete").performClick()
+        compose.onNodeWithTag("project_branch_delete_confirm").assertExists()
+        compose.onNodeWithText(compose.activity.getString(android.R.string.cancel)).performClick()
+        compose.onNodeWithTag("project_branch_delete_confirm").assertDoesNotExist()
+        verify(exactly = 0) { projects.deleteRequirementBranch(any(), any(), any()) }
+        compose.runOnIdle { assertEquals(1, state.value.tasks.size) }
         // Unrelated root activity must not steal the explicitly selected branch/composer.
         compose.runOnIdle { sessions.value = listOf(main.copy(updatedAt = 999), discussion) }
         compose.waitForIdle()
@@ -126,6 +145,58 @@ class ProjectRequirementBranchTest {
         compose.onNodeWithTag("project_main_conversation").performClick()
         compose.waitForIdle()
         compose.runOnIdle { assertEquals("main", binding?.sessionId) }
+        compose.onNodeWithTag("project_main_reader").assertExists()
+        verify(atLeast = 1) { agent.processMessages("main", any()) }
+        compose.onNodeWithText(compose.activity.getString(R.string.project_back)).performClick()
+        compose.onNodeWithTag("project_main_reader").assertDoesNotExist()
+        // Re-enter a branch, then open the root through the real tree callback.
+        compose.onNodeWithTag("project_tree_body").performScrollToNode(hasTestTag("task_node_branch"))
+        compose.onNodeWithTag("task_node_branch").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithTag("actual_binding_session").assertTextEquals("discussion")
+        compose.onNodeWithTag("project_tree_body").performScrollToNode(hasTestTag("task_node_root"))
+        compose.onNodeWithTag("task_node_root").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithTag("project_root_record_main").assertExists()
+        compose.onNodeWithTag("actual_binding_session").assertTextEquals("main")
+        compose.onNodeWithTag("project_tree_body").performScrollToNode(hasTestTag("task_node_branch"))
+        compose.onNodeWithTag("task_node_branch").performClick()
+        compose.waitForIdle()
+        var deletionFinished: (() -> Unit)? = null
+        every { projects.deleteRequirementBranch("p", "branch", any()) } answers {
+            deletionFinished = arg<() -> Unit>(2)
+        }
+        compose.onNodeWithTag("project_branch_delete").performClick()
+        compose.onNodeWithTag("project_branch_delete_confirm").performClick()
+        compose.runOnIdle {
+            state.value = state.value.copy(tasks = state.value.tasks + ProjectTask(id = "sibling", workspace = "w",
+                projectId = "p", title = "Sibling", requirement = "", sessionIds = listOf("sibling-session"), isRequirementBranch = true))
+        }
+        coEvery { projects.ensureBranchSession("sibling", "w") } returns "sibling-session"
+        compose.onNodeWithTag("project_tree_body").performScrollToNode(hasTestTag("task_node_sibling"))
+        compose.onNodeWithTag("task_node_sibling").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithTag("project_branch_composer").assertTextContains("Sibling")
+        compose.runOnIdle {
+            state.value = state.value.copy(tasks = state.value.tasks.filterNot { it.id == "branch" || it.id == "child" })
+            requireNotNull(deletionFinished).invoke()
+        }
+        compose.waitForIdle()
+        compose.onNodeWithTag("project_branch_composer").assertTextContains("Sibling")
+        compose.onNodeWithTag("project_main_conversation").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithTag("project_main_reader").assertExists()
+        compose.onNodeWithText(compose.activity.getString(R.string.project_back)).performClick()
+        compose.onNodeWithTag("actual_binding_session").assertTextEquals("main")
+        compose.runOnIdle { assertEquals(listOf("sibling"), state.value.tasks.map { it.id }) }
+        verify(exactly = 1) { projects.deleteRequirementBranch("p", "branch", any()) }
+        compose.onNodeWithContentDescription(compose.activity.getString(R.string.project_view_actions)).performClick()
+        compose.onNodeWithTag("project_mode_toggle").performClick()
+        compose.onNodeWithTag("map_node_project:p").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithTag("map_process_sheet").assertExists()
+        compose.onNodeWithTag("project_root_record_main").assertExists()
+        compose.runOnIdle { panelOwner.viewModelStore.clear() }
     }
 
     @Test fun actualPanelInputAndSendKeepQuestionsReadOnlyAndPlanFiveChildrenInTheSelectedBranch() {

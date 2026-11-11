@@ -69,8 +69,7 @@ FIXTURES = {
     }''',
     SESSIONS: '''class SessionTool {
         fun executeWithContext(args: Args, context: AgentContext): ToolResult {
-            if (context.agentDefinition != null) return ToolResult.Error("members hidden", "DENIED")
-            return when (action) {
+                        return when (action) {
                 "list" -> listSessions(workspace)
                 "search" -> searchMessages(workspace)
                 "read" -> readSession(workspace)
@@ -79,19 +78,19 @@ FIXTURES = {
             }
         }
         fun listSessions(workspace: String): ToolResult {
-            return chatSessionDao.getRootSessionsByWorkspaceOnce(workspace)
+            return chatSessionDao.getAllSessionsByWorkspaceOnce(workspace)
         }
         fun searchMessages(workspace: String): ToolResult {
-            return hits.filter { hit -> sessionUseCase.getSessionById(hit.sessionId)?.parentSessionId == null }
+            return hits.filter { hit -> sessionUseCase.getSessionById(hit.sessionId)?.workspacePath == workspace }
         }
         fun readSession(workspace: String): ToolResult {
             val session = sessionUseCase.getSessionById(id)
-            if (session.parentSessionId != null) return ToolResult.Error("member target", "DENIED")
+            if (session.workspacePath != workspace) return ToolResult.Error("foreign target", "DENIED")
             return readMessages(id)
         }
         fun inspectSession(workspace: String): ToolResult {
             val session = sessionUseCase.getSessionById(id)
-            if (session.parentSessionId != null) return ToolResult.Error("member target", "DENIED")
+            if (session.workspacePath != workspace) return ToolResult.Error("foreign target", "DENIED")
             return inspect(id)
         }
     }''',
@@ -220,21 +219,21 @@ class NativeMemoryContractTest(unittest.TestCase):
         self.assertTrue(any('top-level menu must not duplicate' in error for error in errors), errors)
         self.assertTrue(any('expected one configuration memory entry' in error for error in errors), errors)
 
-    def test_session_target_guards_not_only_caller(self) -> None:
-        self.mutate(SESSIONS, 'if (session.parentSessionId != null) return ToolResult.Error("member target", "DENIED")',
+    def test_session_target_workspace_guards_not_only_caller(self) -> None:
+        self.mutate(SESSIONS, 'if (session.workspacePath != workspace) return ToolResult.Error("foreign target", "DENIED")',
                     'if (context.agentDefinition != null) return ToolResult.Error("caller only", "DENIED")',
-                    'readSession must deny member target')
+                    'readSession must reject cross-workspace targets')
 
-    def test_session_search_filters_member_targets(self) -> None:
-        self.mutate(SESSIONS, 'sessionUseCase.getSessionById(hit.sessionId)?.parentSessionId == null',
-                    'true', 'search must filter member targets')
+    def test_session_search_filters_foreign_targets(self) -> None:
+        self.mutate(SESSIONS, 'sessionUseCase.getSessionById(hit.sessionId)?.workspacePath == workspace',
+                    'true', 'search must verify target workspace')
 
-    def test_session_inspection_filters_member_targets(self) -> None:
+    def test_session_inspection_filters_foreign_targets(self) -> None:
         text = FIXTURES[SESSIONS]
-        needle = 'if (session.parentSessionId != null) return ToolResult.Error("member target", "DENIED")'
+        needle = 'if (session.workspacePath != workspace) return ToolResult.Error("foreign target", "DENIED")'
         prefix, tail = text.rsplit(needle, 1)
         self.write(SESSIONS, prefix + tail)
-        self.assertTrue(any('inspectSession must deny member target' in e for e in violations(self.root)))
+        self.assertTrue(any('inspectSession must reject cross-workspace targets' in e for e in violations(self.root)))
 
     def test_duplicate_settings_entry(self) -> None:
         self.mutate(SETTINGS, 'open(SettingsSection.AiGroup)', 'open(SettingsSection.Memory)',

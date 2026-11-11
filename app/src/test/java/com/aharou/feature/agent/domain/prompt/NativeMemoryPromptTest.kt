@@ -30,6 +30,7 @@ class NativeMemoryPromptTest {
     private val teams = mockk<AgentTeamRepository>()
     private val dao = mockk<ChatSessionDao>()
     private val context = AgentContext(null, null, "", null)
+    private val registry = com.aharou.feature.agent.domain.tool.ToolRegistry()
 
     @Before fun setup() {
         val store = mockk<AharouMemoryStore>()
@@ -38,7 +39,7 @@ class NativeMemoryPromptTest {
             mockk<ContainerInstaller>(), mockk<ProjectAharouRoot>(), mockk<MemoryUsageStore>(relaxed = true)))
         provider = SystemPromptProvider(mockk(), mockk(), PromptFileResolver(mockk(), mockk(), library),
             mockk(), mockk(), teams, mockk(), dao, mockk(), mockk(), mockk(), mockk(),
-            InjectedContextStore(), library)
+            InjectedContextStore(), library, dagger.Lazy { registry })
     }
 
     private fun add(title: String, body: String, category: ContextCategory, folder: String = "",
@@ -112,6 +113,23 @@ class NativeMemoryPromptTest {
         assertFalse(rendered.contains("LARGE_DIRECTORY_ENTRY"))
         assertTrue(rendered.contains("摘要"))
         assertTrue(rendered.length <= ContextLibraryPlanner.INDEX_TOTAL_CHARS)
+    }
+
+    @Test fun largeToolDirectoryKeepsItsNativeEntryAndDiscoveryLocationWithinBudget() {
+        val tools = (0..99).map { index -> object : com.aharou.feature.agent.domain.tool.AgentTool() {
+            override val name = "tool-$index"
+            override val description = "tool description $index ".repeat(100)
+            override val parameters = emptyMap<String, com.aharou.feature.agent.domain.tool.ToolParameter>()
+        } }
+        registry.bindDiscoveryTools(tools, context)
+        add("工具目录", "先选工具再发现真实参数：\n{{AICODE_TOOLS}}", ContextCategory.MAIN_INJECTED)
+        val rendered = provider.build(context)
+        assertTrue(rendered.contains("tool_search(query=\"\", offset=0)"))
+        assertTrue(rendered.contains("tool-0: tool description"))
+        assertTrue(rendered.length <= ContextLibraryPlanner.FULL_ENTRY_CHARS)
+        val entry = library.list(null).single()
+        assertTrue(library.save(entry.copy(loading = ContextLoad.OFF), null))
+        assertEquals("", provider.build(context))
     }
 
     @Test fun allResolverMethodsReadSameEditableNativeRequestAndHonorOffAndDeletion() {

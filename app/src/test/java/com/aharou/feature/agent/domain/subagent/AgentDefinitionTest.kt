@@ -186,6 +186,13 @@ class AgentDefinitionTest {
         assertEquals(listOf("Bash"), def(allowed = listOf("bash")).filterToolNames(allTools))
     }
 
+    @Test fun strictRolesRetainDiscoveryButExplicitDenyStillWins() {
+        val names = listOf("readFile", "writeFile", "memory", "tool_search", "sessions")
+        assertEquals(listOf("readFile", "tool_search", "sessions"), def(allowed = listOf("Read")).filterToolNames(names))
+        assertEquals(listOf("readFile"), def(allowed = listOf("Read"),
+            disallowed = listOf("tool_search", "sessions")).filterToolNames(names))
+    }
+
     /** 同名定义项目级覆盖全局，结果按名称排序。 */
     @Test
     fun mergeAll_projectOverridesGlobal() {

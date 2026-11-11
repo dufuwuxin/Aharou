@@ -24,13 +24,13 @@ class SessionObservabilityTest {
     private val context = AgentContext(null, null, "/w", null, sessionId = "current")
     private fun session(id: String, workspace: String = "/w") = ChatSessionEntity(id, id, 0, 0, workspacePath = workspace)
 
-    @Test fun memberTargetsAreRejectedBeforeMessagesReceiptsOrContextAreRead() = runBlocking {
+    @Test fun memberContextRemainsPrivateWithoutBlockingSavedProcessReads() = runBlocking {
         coEvery { sessions.getSessionById("current") } returns session("current")
         coEvery { sessions.getSessionById("member") } returns session("member").copy(parentId = "current")
-        for (action in listOf("read", "tool_calls", "context")) {
+        for (action in listOf("context")) {
             val result = tool.executeWithContext(mapOf("action" to JsonPrimitive(action),
                 "session_id" to JsonPrimitive("member")), context)
-            assertEquals(action, "MEMBER_SESSION_DENIED", (result as ToolResult.Error).code)
+            assertEquals(action, "CROSS_SESSION_DENIED", (result as ToolResult.Error).code)
         }
         coVerify(exactly = 0) { receipts.querySession(any(), any(), any(), any(), any(), any(), any(), any()) }
     }

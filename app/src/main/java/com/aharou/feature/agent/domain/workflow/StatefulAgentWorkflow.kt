@@ -316,6 +316,7 @@ class StatefulAgentWorkflow @Inject constructor(
             session?.parentId != null -> allTools // 子代理可再派子代理，递归由 MAX_SUBAGENT_DEPTH 兜底
             else -> allTools.filterNot { it.name == AgentDefinition.PARENT_MESSAGE_TOOL }
         }, null, toolSnapshot)
+        toolRegistry.bindDiscoveryTools(tools, context)
         val compactionProvider = resolveCompactionFallbackProvider(sessionId) ?: provider
         val reuseMainPrefix = compactionProvider.providerId == provider.providerId && compactionProvider.model == provider.model  // 前缀缓存只同 provider 同 model 内生效，配了独立压缩模型就不复用主前缀
         return contextCompactor.compactIfNeeded(history, compactionProvider, sessionId, force = true, windowProvider = provider,
@@ -426,6 +427,7 @@ class StatefulAgentWorkflow @Inject constructor(
         var currentContext = context
         var state = AgentSessionState()
         var currentTools = tools
+        toolRegistry.bindDiscoveryTools(tools, context)
         // 执行期只认「本次运行允许的工具集」：toolRegistry 是全量的，回落过去等于把所有黑白名单
         // （子代理禁 task、messageParent 方向限制、定义里的 allowedTools/disallowedTools）全部作废——
         // 模型只要发出一个不在清单里的调用就能绕过（2026-10-05 实测：子代理真的派出了子代理）。
@@ -551,7 +553,7 @@ class StatefulAgentWorkflow @Inject constructor(
     /** 会话是否收到了「用户打断」：peek 到就打勾并 ack 掉（一次性消费），主循环与收流两处共用。 */
     /** 随请求发送的工具（延迟加载的 MCP 工具要 tool_search 展开过）；压缩与预算估算共用此口径。 */
     private fun requestTools(tools: List<AgentTool>, context: AgentContext) =
-        tools.filter { !it.deferredLoading || toolRegistry.isActivated(it.name, context) }
+        toolRegistry.requestTools(tools, context)
 
     private fun consumeUserInterrupt(sessionId: String?): Boolean {
         if (sessionId == null) return false

@@ -140,21 +140,21 @@ class BuiltinContextEntriesTest {
     @Test fun firstUpgradeAdoptsRenamedAndDeletedLegacyDefaultsWithoutReceipt() {
         val memory = memories()
         val default = seeds().defaults()
-        val request = default.first { it.requestKey != null }
-        val removed = default.first { it.category == ContextCategory.MAIN_INJECTED }
+        val request = default.single { it.id == "title-request" }
+        val removed = default.single { it.id == "main-foundation" }
         File(temp.root, "renamed-request.md").writeText(MemoryParser.format("改名请求", "自定义", "用户正文",
             contextCategory = ContextCategory.RULE, contextLoad = ContextLoad.OFF,
             contextFolder = "requests/${request.requestKey}"))
-        val injection = default.first { it.category == ContextCategory.ROLE_INJECTED }
+        val injection = default.single { it.id == "member-foundation" }
         File(temp.root, "renamed-injection.md").writeText(MemoryParser.format("改名注入", "自定义", "保留正文",
             contextCategory = injection.category, contextLoad = ContextLoad.OFF, contextFolder = "内置默认"))
         val entries = ContextLibraryRepository(memory, seeds()).list(null)
         assertFalse(entries.any { it.title == request.title || it.title == injection.title || it.title == removed.title })
-        assertEquals(2, entries.size)
+        assertEquals(4, entries.size)
         assertEquals(request.requestKey, entries.single { it.title == "改名请求" }.requestKey)
         assertEquals("辅助请求", entries.single { it.title == "改名请求" }.folder)
         assertEquals(ContextLoad.OFF, entries.single { it.title == "改名注入" }.loading)
-        assertEquals(setOf(request.id, injection.id, removed.id),
+        assertEquals(setOf(request.id, injection.id, removed.id, "main-tool-directory", "member-tool-directory"),
             File(temp.root, ".context-defaults-v1").readLines().drop(1).toSet())
         val bytes = File(temp.root, "renamed-request.md").readText()
         ContextLibraryRepository(memory, seeds()).list(null)
@@ -168,12 +168,12 @@ class BuiltinContextEntriesTest {
             contextCategory = ContextCategory.RULE, contextLoad = ContextLoad.OFF,
             contextFolder = "requests/${request.requestKey}"))
         val first = ContextLibraryRepository(memory, seeds()).list(null)
-        assertEquals(listOf("仅存规则"), first.map { it.title })
-        assertTrue(first.none { it.category.isInjection })
+        assertEquals(setOf("仅存规则", "主代理工具目录", "成员工具目录"), first.map { it.title }.toSet())
+        assertEquals(2, first.count { it.category.isInjection })
         val second = ContextLibraryRepository(memory, seeds()).list(null)
         assertEquals(first.map { it.title }, second.map { it.title })
-        assertTrue(second.none { it.category.isInjection })
-        assertEquals(setOf("main-foundation", "member-foundation", "title-request"),
+        assertEquals(2, second.count { it.category.isInjection })
+        assertEquals(setOf("main-foundation", "member-foundation", "title-request", "main-tool-directory", "member-tool-directory"),
             File(temp.root, ".context-defaults-v1").readLines().drop(1).toSet())
     }
 
@@ -216,6 +216,23 @@ class BuiltinContextEntriesTest {
         val edited = library.list(null).single { it.title == "改名" }
         assertTrue(library.save(edited.copy(loading = ContextLoad.OFF), null))
         assertEquals("", library.resolvePrompt(request.requestKey!!))
+    }
+
+    @Test fun legacyToolDirectoryIsAddedOnceWithoutRestoringDeletedOrDisabledEntries() {
+        val memory = memories()
+        File(temp.root, ".context-defaults-v1").writeText("version=1-legacy\nmain-foundation\nmember-foundation\ntitle-request\n")
+        val library = ContextLibraryRepository(memory, seeds())
+        val first = library.list(null)
+        assertEquals(setOf("主代理工具目录", "成员工具目录"), first.map { it.title }.toSet())
+        val entry = first.first()
+        assertTrue(library.save(entry.copy(content = "用户目录", loading = ContextLoad.OFF), null))
+        val other = library.list(null).single { it.id != entry.id }
+        assertTrue(library.delete(other, null))
+        val next = ContextLibraryRepository(memory, seeds()).list(null)
+        assertEquals(1, next.size)
+        assertEquals("用户目录", next.single().content)
+        assertEquals(ContextLoad.OFF, next.single().loading)
+        assertEquals("version=1-legacy", File(temp.root, ".context-defaults-v1").readLines().first())
     }
 
 }

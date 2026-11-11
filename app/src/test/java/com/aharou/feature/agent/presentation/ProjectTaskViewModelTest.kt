@@ -637,6 +637,52 @@ class ProjectTaskViewModelTest {
     }
 
 
+    @Test fun explicitEmptyBranchStartPlansItsTitleOnceThenUsesTheExistingFlow() = runTest(dispatcher) {
+        val project = ProjectPlan("p", "/first", "p", "r")
+        val branch = projectTask.copy(id = "b", projectId = "p", title = "Build feature", requirement = "", isRequirementBranch = true)
+        var snapshot = ProjectTaskSnapshot(projects = listOf(project), tasks = listOf(branch))
+        val stores = repository.snapshots as MutableStateFlow<Map<String, ProjectTaskSnapshot>>
+        stores.value = mapOf("/first" to snapshot)
+        coEvery { repository.load("/first") } coAnswers { snapshot }
+        coEvery { repository.appendBranchRequirements("b", "Build feature", "/first") } coAnswers {
+            snapshot = snapshot.copy(tasks = listOf(branch, projectTask.copy(projectId = "p", parentId = "b")))
+            stores.value = mapOf("/first" to snapshot)
+            ProjectPlanOutcome(project, false)
+        }
+        coEvery { workflow.run("p", "/first") } returns Unit
+        viewModel.workspace("/first"); runCurrent(); viewModel.select("b")
+        viewModel.startRequirementBranch("p", "b"); viewModel.startRequirementBranch("p", "b"); runCurrent()
+        coVerify(exactly = 1) { repository.appendBranchRequirements("b", "Build feature", "/first") }
+        coVerify(exactly = 1) { workflow.run("p", "/first") }
+        viewModel.startRequirementBranch("p", "b"); runCurrent()
+        coVerify(exactly = 1) { repository.appendBranchRequirements(any(), any(), any()) }
+        coVerify(exactly = 2) { workflow.run("p", "/first") }
+    }
+
+    @Test fun branchDeletionWaitsForFlowAndRetainsConversationHistory() = runTest(dispatcher) {
+        val project = ProjectPlan("p", "/first", "p", "r")
+        val branch = projectTask.copy(id = "b", projectId = "p", requirement = "text", isRequirementBranch = true)
+        val child = projectTask.copy(projectId = "p", parentId = "b")
+        val snapshot = ProjectTaskSnapshot(projects = listOf(project), tasks = listOf(branch, child))
+        (repository.snapshots as MutableStateFlow<Map<String, ProjectTaskSnapshot>>).value = mapOf("/first" to snapshot)
+        coEvery { repository.load("/first") } returns snapshot
+        coEvery { repository.deleteRequirementBranch("p", "b", "/first") } returns true
+        val finish = kotlinx.coroutines.CompletableDeferred<Unit>()
+        coEvery { workflow.run("p", "/first") } coAnswers {
+            try { kotlinx.coroutines.awaitCancellation() } finally {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { finish.await() }
+            }
+        }
+        viewModel.workspace("/first"); runCurrent(); viewModel.selectProject("p"); viewModel.select("b")
+        viewModel.startProject("p"); runCurrent()
+        viewModel.deleteRequirementBranch("p", "b"); runCurrent()
+        coVerify(exactly = 0) { repository.deleteRequirementBranch(any(), any(), any()) }
+        finish.complete(Unit); runCurrent()
+        coVerify(exactly = 1) { repository.deleteRequirementBranch("p", "b", "/first") }
+        org.junit.Assert.assertNull(viewModel.state.value.selectedId)
+        coVerify(exactly = 0) { sessions.deleteSession(any()) }
+    }
+
     @Test fun requirementBranchCountsExcludeOnlyContainersAndSessionsStaySeparateAcrossWorkspaces() = runTest(dispatcher) {
         fun branch(id: String, workspace: String, project: String) =
             com.aharou.feature.agent.domain.task.ProjectTask(id = id, workspace = workspace, projectId = project,

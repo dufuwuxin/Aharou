@@ -14,6 +14,7 @@ import com.aharou.feature.agent.presentation.MessageRole
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.addJsonObject
 import kotlinx.serialization.json.buildJsonArray
@@ -72,7 +73,8 @@ class SessionTool @Inject constructor(
         "task_ids" to ToolParameter("task_ids", ParameterType.ARRAY, "Task ids; brief requires an explicit nonempty batch", false, itemsSchema = mapOf("type" to "string")),
         "since_version" to ToolParameter("since_version", ParameterType.INTEGER, "Only tasks changed after this version", false),
         "page_version" to ToolParameter("page_version", ParameterType.INTEGER, "Required on later pages; use first page highWatermark, restart on STALE_TASK_PAGE", false),
-        "offset" to ToolParameter("offset", ParameterType.INTEGER, "Offset for index/brief pagination", false),
+        "offset" to ToolParameter("offset", ParameterType.INTEGER, "Offset for index/brief/read pagination (read: newest first)", false),
+        "content_offset" to ToolParameter("content_offset", ParameterType.INTEGER, "read: character offset into saved fields; keep message offset fixed until nextContentOffset is null", false),
         "session_id" to ToolParameter(
             "session_id", ParameterType.STRING,
             "read 专用：目标会话 id（取自 list 结果）", false,
@@ -148,9 +150,9 @@ class SessionTool @Inject constructor(
             ?: context.projectRoot.takeIf { it.isNotBlank() }
     }
 
-    /** 列出当前工作区的根会话。 */
+    /** 列出当前工作区的会话（含成员）。 */
     private suspend fun listSessions(workspace: String, limit: Int?): ToolResult {
-        val sessions = chatSessionDao.getRootSessionsByWorkspaceOnce(workspace)
+        val sessions = chatSessionDao.getAllSessionsByWorkspaceOnce(workspace)
             .take((limit ?: DEFAULT_LIST_LIMIT).coerceIn(1, MAX_LIMIT))
         return ToolResult.Success(
             buildJsonObject {
@@ -179,7 +181,7 @@ class SessionTool @Inject constructor(
             workspace, query, (limit ?: DEFAULT_LIST_LIMIT).coerceIn(1, MAX_LIMIT)
         ).filter { hit ->
             val session = sessionUseCase.getSessionById(hit.sessionId)
-            session != null && session.workspacePath == workspace && session.parentId == null
+            session != null && session.workspacePath == workspace
         }
         return ToolResult.Success(
             buildJsonObject {
@@ -210,7 +212,6 @@ class SessionTool @Inject constructor(
         val session = sessionUseCase.getSessionById(id)
             ?: return ToolResult.Error("Session not found", "SESSION_NOT_FOUND")
         if (session.workspacePath != workspace) return ToolResult.Error("Session not visible", "CROSS_WORKSPACE_DENIED")
-        if (session.parentId != null) return ToolResult.Error("成员执行记录不向主代理开放", "MEMBER_SESSION_DENIED")
         if (action == "context") {
             if (id != context.sessionId) return ToolResult.Error("Context snapshots are current-session only", "CROSS_SESSION_DENIED")
             val snapshot = injectedContexts.snapshot(id)
@@ -264,25 +265,40 @@ class SessionTool @Inject constructor(
         if (session.workspacePath != workspace) {
             return ToolResult.Error("只能读取当前工作区的会话（跨工作区不可见）", "CROSS_WORKSPACE_DENIED")
         }
-        if (session.parentId != null) return ToolResult.Error("成员消息不向主代理开放", "MEMBER_SESSION_DENIED")
+        val offset = (args["offset"] as? JsonPrimitive)?.intOrNull ?: 0
+        val contentOffset = (args["content_offset"] as? JsonPrimitive)?.intOrNull ?: 0
+        if (offset < 0 || contentOffset < 0) return ToolResult.Error("Offsets must be nonnegative", "INVALID_ARGS")
         val messages = messagePersistenceUseCase.getMessagesOnce(sessionId)
             .filter {
-                (it.role == MessageRole.USER.name || it.role == MessageRole.ASSISTANT.name) &&
-                    !it.isCompacted && !it.isContextSummary && !it.isCompactionMarker
+                (it.role == MessageRole.USER.name || it.role == MessageRole.ASSISTANT.name || it.role == MessageRole.TOOL.name) &&
+                    !it.isContextSummary && !it.isCompactionMarker
             }
         val take = (limit ?: DEFAULT_READ_LIMIT).coerceIn(1, MAX_LIMIT)
+        val page = messagePersistenceUseCase.restoreAll(messages.asReversed().drop(offset).take(take))
         return ToolResult.Success(
             buildJsonObject {
                 put("id", session.id)
                 put("title", session.title)
                 put("workspace", session.workspacePath)
                 put("totalMessages", messages.size)
+                put("offset", offset)
+                put("nextOffset", if (offset.toLong() + page.size < messages.size) JsonPrimitive(offset + page.size) else JsonNull)
                 put("messages", buildJsonArray {
-                    messages.takeLast(take).forEach { m ->
+                    page.forEach { m ->
                         addJsonObject {
                             put("role", m.role)
                             put("timestamp", m.timestamp)
-                            put("content", m.content.take(READ_CONTENT_MAX))
+                            put("id", m.id)
+                            val fields = mapOf("content" to m.content, "reasoning" to m.reasoning,
+                                "toolCalls" to m.toolCallsJson, "toolArgs" to m.toolArgs)
+                            fields.forEach { (key, text) ->
+                                put(key, text?.let { JsonPrimitive(it.drop(contentOffset).take(READ_CONTENT_MAX)) } ?: JsonNull)
+                            }
+                            put("toolName", m.toolName?.let(::JsonPrimitive) ?: JsonNull)
+                            put("toolCallId", m.toolCallId?.let(::JsonPrimitive) ?: JsonNull)
+                            put("isError", m.isError)
+                            val next = contentOffset.toLong() + READ_CONTENT_MAX
+                            put("nextContentOffset", if (fields.values.any { (it?.length ?: 0) > next }) JsonPrimitive(next) else JsonNull)
                         }
                     }
                 })

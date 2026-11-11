@@ -41,6 +41,7 @@ class SystemPromptProvider @Inject constructor(
     private val projectTaskContext: ProjectTaskContext,
     private val injectedContextStore: InjectedContextStore,
     private val contextLibrary: ContextLibraryRepository,
+    private val toolRegistry: dagger.Lazy<com.aharou.feature.agent.domain.tool.ToolRegistry>? = null,
 ) {
     interface PromptSource { fun build(ctx: AgentContext): String? }
 
@@ -76,6 +77,14 @@ class SystemPromptProvider @Inject constructor(
                 "SKILLS" -> skillRepository.listSkillsForAgent(ctx.agentDefinition, ctx.currentUserText,
                     ctx.agentDefinition?.let { InjectPart.SKILLS in it.inject } ?: true)
                     .joinToString("\n") { "- ${it.name}: ${it.description} [loadSkill: ${it.name}]" }
+                "TOOLS" -> buildString {
+                    append("完整目录：tool_search(query=\"\", offset=0)，只列名称与描述；选中后以工具名查询展开参数。\n")
+                    for (tool in toolRegistry?.get()?.getDeferredTools(ctx).orEmpty()) {
+                        val line = "- ${tool.name}: ${tool.description.lineSequence().joinToString(" ").take(60)}\n"
+                        if (length + line.length > 600) break
+                        append(line)
+                    }
+                }
                 "TEAMS" -> if (member) "" else agentTeamRepository.listAll().joinToString("\n") {
                     "- ${it.team.name}: ${it.team.description}"
                 }

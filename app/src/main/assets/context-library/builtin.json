@@ -2,6 +2,24 @@
   "version": 1,
   "entries": [
     {
+      "id": "main-tool-directory",
+      "title": "主代理工具目录",
+      "description": "工具位置：tool_search(query=空字符串) 分页列名称与描述，选择后按工具名加载参数；sessions 可读当前工作区已保存过程。",
+      "content": "先从目录选择工具，再调用 tool_search(query=工具名) 获取真实参数；普通工具不默认展开全部参数，激活仅限当前会话与工作区。tool_search 为基础发现入口；memory 仍按当前角色权限提供。目录不授予权限，关闭、关键词及角色限制仍由执行端决定。\n{{AICODE_TOOLS}}",
+      "category": "MAIN_INJECTED",
+      "loading": "FULL",
+      "folder": "主代理注入"
+    },
+    {
+      "id": "member-tool-directory",
+      "title": "成员工具目录",
+      "description": "工具位置：tool_search(query=空字符串) 分页列名称与描述，选择后按工具名加载参数；sessions 可读当前工作区已保存过程。",
+      "content": "先从目录选择工具，再调用 tool_search(query=工具名) 获取真实参数；普通工具不默认展开全部参数，激活仅限当前会话与工作区。tool_search 为基础发现入口；memory 仍按当前角色权限提供。目录不授予权限，关闭、关键词及角色限制仍由执行端决定。\n{{AICODE_TOOLS}}",
+      "category": "ROLE_INJECTED",
+      "loading": "FULL",
+      "folder": "角色注入"
+    },
+    {
       "id": "main-foundation",
       "title": "主代理工作约定",
       "description": "主代理默认工作方式，可编辑、停用或删除。",

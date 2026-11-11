@@ -20,33 +20,33 @@ internal fun ProjectChatMenuHost(
     connectionState: ConnectionState?, inputTokens: Int, outputTokens: Int,
     content: @Composable () -> Unit
 ) {
-    key(sessionId) {
-        var stewardOpen by remember { mutableStateOf(false) }
-        val stewardViewModel: StewardPanelViewModel = hiltViewModel()
-        val menu: @Composable (() -> Unit) -> Unit = { dismiss ->
-            HorizontalDivider()
-            DropdownMenuItem(text = { Text(stringResource(R.string.steward_entry_title)) },
-                enabled = sessionId != null, onClick = { dismiss(); stewardOpen = true })
-            HorizontalDivider()
-            listOf(
-                R.string.chat_open_sandbox to onSandbox,
-                R.string.chat_open_shared to onShared,
-                R.string.chat_open_observe to onObserve,
-                R.string.chat_open_git to onGit,
-                R.string.chat_open_terminal to onTerminal,
-                R.string.chat_open_browser to onBrowser,
-                R.string.chat_open_activity to onActivity
-            ).forEach { (label, action) ->
-                DropdownMenuItem(text = { Text(stringResource(label)) }, onClick = { dismiss(); action() })
-            }
-            if (connectionState != null) {
-                HorizontalDivider()
-                DropdownMenuItem(text = { ConnectionIndicator(connectionState) }, enabled = false, onClick = {})
-                DropdownMenuItem(text = { TokenStats(inputTokens, outputTokens) }, enabled = false, onClick = {})
-            }
-            ScheduledTaskPill(sessionId = sessionId)
+    var stewardOpen by remember(sessionId) { mutableStateOf(false) }
+    val stewardViewModel: StewardPanelViewModel = hiltViewModel()
+    val menu: @Composable (() -> Unit) -> Unit = { dismiss ->
+        HorizontalDivider()
+        DropdownMenuItem(text = { Text(stringResource(R.string.steward_entry_title)) },
+            enabled = sessionId != null, onClick = { dismiss(); stewardOpen = true })
+        HorizontalDivider()
+        listOf(
+            R.string.chat_open_sandbox to onSandbox,
+            R.string.chat_open_shared to onShared,
+            R.string.chat_open_observe to onObserve,
+            R.string.chat_open_git to onGit,
+            R.string.chat_open_terminal to onTerminal,
+            R.string.chat_open_browser to onBrowser,
+            R.string.chat_open_activity to onActivity
+        ).forEach { (label, action) ->
+            DropdownMenuItem(text = { Text(stringResource(label)) }, onClick = { dismiss(); action() })
         }
-        CompositionLocalProvider(LocalProjectChatMenu provides menu) { content() }
+        if (connectionState != null) {
+            HorizontalDivider()
+            DropdownMenuItem(text = { ConnectionIndicator(connectionState) }, enabled = false, onClick = {})
+            DropdownMenuItem(text = { TokenStats(inputTokens, outputTokens) }, enabled = false, onClick = {})
+        }
+        ScheduledTaskPill(sessionId = sessionId)
+    }
+    CompositionLocalProvider(LocalProjectChatMenu provides menu) { content() }
+    key(sessionId) {
         if (stewardOpen && sessionId != null) StewardSheet(
             sessionId, stewardViewModel
         ) { stewardOpen = false }

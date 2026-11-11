@@ -39,7 +39,7 @@ class ToolSearchTool @Inject constructor(
 
     override val description =
         "搜索按需加载的工具目录（含 MCP 与代码结构查询，要靠它展开）。" +
-            "query 传关键词，多个词用空格分隔且需全部命中；留空则列出目录里的全部工具。" +
+            "query 传关键词，多个词用空格分隔且需全部命中；留空按 offset 分页列标题和描述，不激活。" +
             "命中的工具仅在当前会话工作区展开，从下一轮起可直接调用。"
 
     // 纯目录查询，不改动任何外部状态，无需逐次过用户审核。
@@ -51,16 +51,29 @@ class ToolSearchTool @Inject constructor(
             type = ParameterType.STRING,
             description = "搜索关键词（工具名或用途），多个词用空格分隔；留空列出全部。",
             required = false
-        )
+        ),
+        "offset" to ToolParameter("offset", ParameterType.INTEGER, "空 query 目录分页起点，默认 0；每页最多 10 个。", false)
     )
 
     override suspend fun executeWithContext(args: Map<String, JsonElement>, context: AgentContext): ToolResult {
         val query = args["query"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
-        val catalog = toolRegistry.get().getDeferredTools()
+        val catalog = toolRegistry.get().getDeferredTools(context)
         if (catalog.isEmpty()) {
             return ToolResult.Success(JsonPrimitive("按需加载的工具目录是空的。"))
         }
 
+        val offset = (args["offset"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull() ?: 0
+        if (offset < 0) return ToolResult.Error("offset must be nonnegative", "INVALID_ARGS")
+        if (query.isBlank()) {
+            val page = catalog.drop(offset).take(MAX_RESULTS)
+            val text = buildString {
+                append("工具目录，共 ${catalog.size} 个；当前位置 $offset。只提供标题与描述，未激活任何工具。")
+                page.forEach { append("\n- ${it.name}: ${it.description}") }
+                if (offset.toLong() + page.size < catalog.size) append("\n下一页：tool_search(query=\"\", offset=${offset + page.size})")
+                append("\n选中后用 query=工具名查询，才展开真实参数。")
+            }
+            return ToolResult.Success(JsonPrimitive(text))
+        }
         val terms = query.lowercase().split(Regex("\\s+")).filter { it.isNotBlank() }
         val matched = if (terms.isEmpty()) {
             catalog

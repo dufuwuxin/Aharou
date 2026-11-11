@@ -176,12 +176,12 @@ Android 参数是一个任务名，必须按实际项目修改；项目的构建
 
 ## 注入方式：三种状态
 
-每个工具单独设置，决定「这一轮要不要把它交给模型」。
+每个工具单独设置，决定「这一轮是否允许被发现和使用」。普通工具不默认展开全部参数；主代理与成员从记忆库启用的工具目录选择名称，再按需发现真实参数。记忆与工具发现保留基础调用入口，但不会绕过关闭、关键词和角色限制。
 
 | 状态 | 语义 |
 | --- | --- |
-| 每轮注入 | 进每轮的工具列表（默认） |
-| 关键词注入 | 当前这轮**用户消息**（不含 AI 自己说过的话）命中任一关键词时才注入 |
+| 每轮注入 | 每轮允许按需发现（默认）；发现后才展开参数 |
+| 关键词注入 | 当前这轮**用户消息**（不含 AI 自己说过的话）命中任一关键词时才允许发现和调用 |
 | 关闭 | 不进工具列表 |
 
 关键词的匹配口径：
@@ -250,6 +250,12 @@ Android 参数是一个任务名，必须按实际项目修改；项目的构建
 脚本工具继续使用原有脚本定义与配置通道；自定义命令工具使用本页的参数表与命令模板，两者互不覆盖。
 
 
+## 会话过程读取
+
+助手可以列出、搜索并读取当前工作区的主会话与成员会话。过程只包含已保存的正文、提供商已返回并保存的思考文本、工具调用与结果，不包含未提供的内部推理、加密思考块或签名。跨工作区仍拒绝，运行中的上下文构成仍仅当前会话可查看。
+
+过程从新到旧分页；一页读完后继续下一页。单条字段超过长度上限时，按返回的续读位置继续读取该条消息。新消息可能改变分页位置，读取期间应核对消息标识。
+
 ## Session observability
 
 `sessions` adds `action=tool_calls` for redacted persisted tool receipts in a session belonging to the current workspace. Supply `session_id` (defaults to the current session), optional exact `tool`, `status` (`SUCCESS`, `ERROR`, `PARTIAL`), inclusive epoch-millisecond `after` / `before`, `limit` (up to 200) and nonnegative `offset`. Results include `nextOffset`; `null` means the final page. Newest-first offset pagination is live, so concurrent new calls may shift pages. Receipts are retained for the existing 30-day window; they are not a complete permanent audit history. Denied calls have an empty status and remain visible without a status filter. Full output and build-authorization bodies are not returned by this action.
@@ -259,3 +265,5 @@ Android 参数是一个任务名，必须按实际项目修改；项目的构建
 ## Project controls
 
 Project tasks open in map view. The overflow menu includes start/stop, tree/map, search, fit, and conversation actions. Delete removes project/task records only; stop running work first. Workspace files and conversations are retained.
+
+工具目录为空查询时只按 `offset` 分页返回名称和描述，不会自动激活；以工具名或用途查询后才展开选中的参数。严格工具白名单成员仍有只读发现和本工作区过程查询入口，显式黑名单、关闭和关键词策略优先。目录在默认原生记忆中显示有界摘要和完整目录入口，不因工具数量超过单条记忆预算而失去入口。

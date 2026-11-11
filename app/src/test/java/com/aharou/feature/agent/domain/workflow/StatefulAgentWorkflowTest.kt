@@ -605,6 +605,19 @@ class StatefulAgentWorkflowTest {
         verify(exactly = 0) { outputStore.process(any(), any(), any()) }
     }
 
+    @Test fun strictRoleDiscoversOrdinaryToolsBeforeTheirSchemasReachTheProvider() = runTest {
+        val discovery = com.aharou.feature.agent.domain.tool.ToolSearchTool(Lazy { registry })
+        val read = FakeEchoTool()
+        registry.register(discovery.name, discovery)
+        registry.register(read.name, read)
+        val definition = AgentDefinition(name = "strict", description = "reader", allowedTools = listOf("echo"), prompt = "")
+        val turn = runToolBatchTurn(discovery, listOf(ToolCall("discover", discovery.name,
+            mapOf("query" to JsonPrimitive("echo")))), context.copy(agentDefinition = definition), listOf(read))
+        assertEquals(listOf("tool_search"), turn.schemas.first().map { it.name })
+        assertEquals(setOf("tool_search", "echo"), turn.schemas.last().map { it.name }.toSet())
+        assertFalse(turn.finished.single().isError)
+    }
+
     @Test
     fun manualCompactionWithoutDefinitionIncludesNestedTask() = runTest {
         verifyManualToolFiltering(parentId = "parent", expectedNames = listOf("readFile", "task", "messageParent"))
@@ -630,6 +643,7 @@ class StatefulAgentWorkflowTest {
             AgentMessage.UserMessage(content = "three"))
         // ToolRegistry.getAvailableTools() 按名字排序返回（工具列表是前缀缓存最靠前的一段，顺序必须稳定），
         // 所以这里不能按注册顺序断言。
+        registry.activate(allTools.map { it.name }, context)
         val expectedTools = allTools.filter { it.name in expectedNames }.sortedBy { it.name }
         coEvery { compactor.compactIfNeeded(any(), provider, "session", true, provider,
             "system", expectedTools, 0, any()) } answers { CompactionResult(firstArg(), true) }
@@ -652,6 +666,7 @@ class StatefulAgentWorkflowTest {
         }
         registry.register("readFile", readTool)
         registry.register("task", taskTool)
+        registry.activate(listOf("readFile", "task"), context)
         coEvery { sessions.getSessionById("session") } returns ChatSessionEntity("session", "Session", 0, 0,
             workspacePath = "/workspace", providerId = "provider", model = "model", mode = "AUTO",
             parentId = "parent", subagentType = "disabled-agent")
@@ -921,8 +936,9 @@ class StatefulAgentWorkflowTest {
      * 跑一轮「LLM 返回一批工具调用 → 执行 → 再问一次 LLM」的真实循环。
      * 首轮响应带 [calls]，次轮收尾成普通文本；返回的工具完成事件与第二轮请求消息可供断言。
      */
-    private suspend fun runToolBatchTurn(tool: AgentTool, calls: List<ToolCall>, runContext: AgentContext = context, configure: () -> Unit = {}): ToolBatchTurn {
+    private suspend fun runToolBatchTurn(tool: AgentTool, calls: List<ToolCall>, runContext: AgentContext = context, additionalTools: List<AgentTool> = emptyList(), configure: () -> Unit = {}): ToolBatchTurn {
         val sentMessages = mutableListOf<List<AgentMessage>>()
+        val schemas = mutableListOf<List<AgentTool>>()
         var round = 0
         prepare(flow {})
         // 策略放行 + 工具默认 AUTO_APPROVE：本批直接进入并行执行，不经过弹窗。
@@ -931,12 +947,15 @@ class StatefulAgentWorkflowTest {
         every { outputStore.process(any(), any(), any()) } answers { arg<ToolResult>(2) }
         every { provider.completeStream(any(), any(), any(), any()) } answers {
             sentMessages.add(arg<List<AgentMessage>>(1))
+            schemas.add(arg<List<AgentTool>>(2))
             val response = if (round++ == 0) AIResponse("", calls) else AIResponse("done")
             flow { emit(AIStreamChunk.Final(response)) }
         }
         configure()
         val finished = mutableListOf<AgentEvent.ToolCallFinished>()
-        workflow.executeEvents("request", runContext, listOf(tool)).collect { event ->
+        val offered = listOf(tool) + additionalTools
+        val allowed = runContext.agentDefinition?.filterToolNames(offered.map { it.name }) ?: offered.map { it.name }
+        workflow.executeEvents("request", runContext, offered.filter { it.name in allowed }).collect { event ->
             when (event) {
                 is AgentEvent.AssistantText -> event.persisted?.complete(Unit)
                 is AgentEvent.ToolCallFinished -> {
@@ -947,13 +966,13 @@ class StatefulAgentWorkflowTest {
             }
         }
         assertEquals("用例应恰好跑两轮 LLM 调用", 2, sentMessages.size)
-        return ToolBatchTurn(finished, sentMessages[1])
+        return ToolBatchTurn(finished, sentMessages[1], schemas)
     }
 
     private class ToolBatchTurn(
         val finished: List<AgentEvent.ToolCallFinished>,
         /** 第二轮请求发给模型的完整消息列表：用来核对 tool 结果条数与顺序。 */
-        val secondRoundMessages: List<AgentMessage>
+        val secondRoundMessages: List<AgentMessage>, val schemas: List<List<AgentTool>>
     )
 
     /**

@@ -17,6 +17,21 @@ class ToolRegistry @Inject constructor(
     private val tools = Collections.synchronizedMap(LinkedHashMap<String, AgentTool>())
 
     private val activated = LinkedHashMap<Pair<String, String>, MutableSet<String>>(16, 0.75f, true)
+    private val discoveryTools = LinkedHashMap<Triple<String, String, String>, List<AgentTool>>(16, 0.75f, true)
+
+    private fun discoveryScope(context: AgentContext) =
+        Triple(context.sessionId ?: context.inputMessageId, context.projectRoot, context.inputMessageId)
+
+    /** The workflow supplies its already role/policy-filtered execution list, never the global registry. */
+    fun bindDiscoveryTools(allowed: List<AgentTool>, context: AgentContext) {
+        synchronized(discoveryTools) {
+            discoveryTools[discoveryScope(context)] = allowed.toList()
+            while (discoveryTools.size > 128) discoveryTools.remove(discoveryTools.keys.first())
+        }
+    }
+
+    fun requestTools(allowed: List<AgentTool>, context: AgentContext): List<AgentTool> =
+        allowed.filter { it.name == "memory" || it.name == "tool_search" || isActivated(it.name, context) }
 
     private fun scope(context: AgentContext) =
         (context.sessionId ?: context.inputMessageId) to context.projectRoot
@@ -63,13 +78,9 @@ class ToolRegistry @Inject constructor(
 
     private fun customTools(): List<AgentTool> = customToolSource?.customTools().orEmpty().map { guard?.wrap(it) ?: it }
 
-    /** 延迟加载工具的目录（名称 + 描述），供 `tool_search` 检索。 */
-    fun getDeferredTools(): List<AgentTool> {
-        synchronized(tools) {
-            // 同样排序：tool_search 的目录顺序稳定，模型两次检索看到的结果才一致。
-            return tools.values.filter { it.deferredLoading }.sortedBy { it.name }
-        }
-    }
+    /** Discovery is limited to the current turn's execution snapshot, including ordinary/custom tools. */
+    fun getDeferredTools(context: AgentContext): List<AgentTool> =
+        synchronized(discoveryTools) { discoveryTools[discoveryScope(context)].orEmpty() }
 
     /** 展开一批延迟加载工具，使其进入后续每轮的 tools 数组。 */
     fun activate(names: Collection<String>, context: AgentContext) {

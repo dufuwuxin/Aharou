@@ -58,6 +58,8 @@ class BuiltinContextEntries internal constructor(
     internal fun ensureSeeded(memories: MemoryRepository) = synchronized(MemoryFileStorage.lock) {
         // A separate durable receipt survives user rename/delete/OFF; a missing memory is not a migration request.
         val defaults = defaults()
+        var legacyAdoption = false
+        val toolDirectoryIds = setOf("main-tool-directory", "member-tool-directory")
         val done = if (ledger.exists()) {
             val lines = try { ledger.readLines() } catch (e: Exception) {
                 FileLogger.w("BuiltinContextEntries", "读取默认收据失败", e)
@@ -69,8 +71,7 @@ class BuiltinContextEntries internal constructor(
                 FileLogger.w("BuiltinContextEntries", "默认收据损坏，保留现有条目并暂停初始化")
                 return@synchronized
             }
-            // Legacy adoption is terminal: later defaults must not be installed into an upgraded library.
-            if (header == "version=1-legacy") return@synchronized
+            legacyAdoption = header == "version=1-legacy"
             lines.drop(1).toMutableSet()
         } else {
             val existing = memories.listMemoriesInScope(MemoryScope.GLOBAL, null)
@@ -83,11 +84,11 @@ class BuiltinContextEntries internal constructor(
                 FileLogger.w("BuiltinContextEntries", "默认认领收据写入失败，保留原文")
                 return@synchronized
             }
-            if (adopted.isNotEmpty()) return@synchronized
+            legacyAdoption = adopted.isNotEmpty()
             adopted
         }
         for (entry in defaults) {
-            if (entry.id in done) continue
+            if (entry.id in done || legacyAdoption && entry.id !in toolDirectoryIds) continue
             val result = memories.writeMemory(entry.title, entry.description, entry.content,
                 MemoryScope.GLOBAL, null, expectedVersion = MemorySource.VERSION_NEW,
                 contextKind = ContextKind.INSTRUCTION, contextLoad = entry.loading,
@@ -96,7 +97,7 @@ class BuiltinContextEntries internal constructor(
             check(result == MemoryWriteResult.Success || result is MemoryWriteResult.VersionConflict) {
                 "Native context default write failed: ${entry.id}"
             }
-            if (!writeReceipt((done + entry.id).toList())) {
+            if (!writeReceipt((done + entry.id).toList(), legacyAdoption)) {
                 if (result == MemoryWriteResult.Success) memories.deleteMemory(entry.title, MemoryScope.GLOBAL, null)
                 return@synchronized
             }
