@@ -187,6 +187,7 @@ class ProjectRequirementBranchTest {
         every { agent.pendingPlanApprovalSessionTitle } returns MutableStateFlow("")
         every { agent.rewindPreviewFiles } returns MutableStateFlow(0)
         every { agent.rewindUndoRecords } returns MutableStateFlow(emptyList())
+        every { agent.rewindConflicts } returns MutableStateFlow(emptyList())
         every { agent.subAgentCardBridge } returns com.aharou.feature.agent.presentation.component.SubAgentCardBridge(
             MutableStateFlow(emptyMap()), {}, {})
         every { agent.processMessages(any(), any()) } returns MutableStateFlow(emptyList())
