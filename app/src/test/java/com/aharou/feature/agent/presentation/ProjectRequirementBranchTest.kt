@@ -9,6 +9,8 @@ import androidx.lifecycle.ViewModelStore
 import androidx.lifecycle.ViewModelStoreOwner
 import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
 import com.aharou.feature.agent.domain.prompt.InjectedContextStore
+import com.aharou.feature.agent.domain.steward.StewardController
+import com.aharou.feature.agent.domain.steward.StewardSettingsStore
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.*
@@ -235,6 +237,9 @@ class ProjectRequirementBranchTest {
             override val viewModelStore = ViewModelStore().apply {
                 put("androidx.lifecycle.ViewModelProvider.DefaultKey:${InjectedContextViewModel::class.java.canonicalName}",
                     InjectedContextViewModel(InjectedContextStore()))
+                put("androidx.lifecycle.ViewModelProvider.DefaultKey:${StewardPanelViewModel::class.java.canonicalName}",
+                    StewardPanelViewModel(StewardController(StewardSettingsStore.Noop, mockk()),
+                        StewardSettingsStore.Noop, mockk()))
             }
         }
         try {
