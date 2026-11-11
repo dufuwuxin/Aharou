@@ -4,6 +4,11 @@ import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.Column
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.lifecycle.ViewModelStore
+import androidx.lifecycle.ViewModelStoreOwner
+import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
+import com.aharou.feature.agent.domain.prompt.InjectedContextStore
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.*
@@ -114,7 +119,8 @@ class ProjectRequirementBranchTest {
         }
         compose.onNodeWithContentDescription(compose.activity.getString(R.string.project_view_actions)).performClick()
         compose.onNodeWithTag("project_mode_toggle").performClick()
-        compose.onNodeWithTag("task_row_child").assertExists()
+        compose.onNodeWithTag("project_tree_body").performScrollToNode(hasTestTag("task_node_child"))
+        compose.onNodeWithTag("task_node_child").assertExists()
         compose.onNodeWithTag("project_main_conversation").performClick()
         compose.waitForIdle()
         compose.runOnIdle { assertEquals("main", binding?.sessionId) }
@@ -225,11 +231,20 @@ class ProjectRequirementBranchTest {
                 assertTrue(result is com.aharou.feature.agent.domain.tool.ToolResult.Success)
             }
         }
+        val panelOwner = object : ViewModelStoreOwner {
+            override val viewModelStore = ViewModelStore().apply {
+                put("androidx.lifecycle.ViewModelProvider.DefaultKey:${InjectedContextViewModel::class.java.canonicalName}",
+                    InjectedContextViewModel(InjectedContextStore()))
+            }
+        }
+        try {
         compose.setContent {
             MaterialTheme {
                 val binding = rememberProjectChatBinding(agent, projects, {}, {}, "p")!!
-                com.aharou.feature.agent.presentation.component.AIChatPanel(viewModel = agent, bodyOverride = binding.body,
-                    floatingComposer = true, composerSessionId = binding.sessionId, projectChatContext = binding.context)
+                CompositionLocalProvider(LocalViewModelStoreOwner provides panelOwner) {
+                    com.aharou.feature.agent.presentation.component.AIChatPanel(viewModel = agent, bodyOverride = binding.body,
+                        floatingComposer = true, composerSessionId = binding.sessionId, projectChatContext = binding.context)
+                }
             }
         }
         compose.waitForIdle()
@@ -258,6 +273,9 @@ class ProjectRequirementBranchTest {
         }
         io.mockk.coVerify(exactly = 1) { repository.appendBranchRequirements("branch", "Plan five tasks", "w") }
         io.mockk.coVerify(exactly = 0) { repository.appendRequirements(any(), any(), any()) }
+        } finally {
+            compose.runOnIdle { panelOwner.viewModelStore.clear() }
+        }
     }
 
     @Test fun actualDetailChildActionCreatesAContainerAndContainerHasNoExecutionOrEditActions() {
