@@ -76,8 +76,8 @@ class TranslationWebEngine @Inject constructor(
             settings.allowFileAccess = false
             settings.allowContentAccess = false
             settings.domStorageEnabled = false
-                @Suppress("DEPRECATION")
-                databaseEnabled = false
+            @Suppress("DEPRECATION")
+            settings.databaseEnabled = false
             settings.blockNetworkLoads = true
             settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
             addJavascriptInterface(ResultBridge(), "TranslationResult")
