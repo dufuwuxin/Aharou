@@ -14,7 +14,7 @@
 
 - 本地 JavaScript 纯计算：`eval_javascript` 经原生注册器与 `tool_search` 按需发现，使用原有工具授权系统，不增加默认注入或宿主权限。返回最后表达式的 JSON 值及 console 日志；源码、输出、日志、内存、栈与原生执行时限均有界，不提供 DOM/Node/Java/网络/文件/进程桥。没有独立脚本运行 UI，不增加影子屏；手机端加载、执行和性能尚未验证。QuickJS 1.0.15 需要 Kotlin 2.4 元数据；编译器已同步升级至 2.3.21、R8 至已发布的 9.1.57，仍需真实构建与 JNI 测试验收。
 
-- 原生记忆库：配置页是唯一入口，`ContextLibrarySection` 仅保留内容库与注入预览；规则、临时存放、长期、角色注入、主代理注入五类支持文件夹与搜索编辑，不提供旧页面跳转或来源开关。应用管理的注入文字（含内置默认文字）先写入原生库，用户可查看、编辑、停用与删除，不从旧提示文件或角色正文回退。
+- 原生记忆库：配置页是唯一入口，`ContextLibrarySection` 提供内容库、注入预览及关系图谱；规则、临时存放、长期、角色注入、主代理注入五类支持文件夹与搜索编辑，不提供旧页面跳转或来源开关。应用管理的注入文字（含内置默认文字）先写入原生库，用户可查看、编辑、停用与删除，不从旧提示文件或角色正文回退。
 - 原生条目工具：`memory` 的 `library_list/library_search/library_read/library_save/library_delete` 使用条目ID和版本；`save` 支持 `category/folder/context_kind/context_load`，临时内容绑定真实调用会话，待确认状态保留。
 - 配置同权：`context_library.entries.<hash>.category/loading/kind/folder/session_id` 与页面共用仓库，`context_library.folders` 可新增空文件夹。加载只有 FULL/INDEX/SEARCH/OFF；预览是规划结果，不是历史请求记录。
 - 使用边界：新库只读写原生记忆，不聚合其他持久来源或 sidecar；不机械导入旧提示文件，不删除用户数据。项目绑定、编辑版本、会话隔离和注入预算继续生效。不声称保存即跨设备同步。
@@ -284,7 +284,7 @@ WeChat, Feishu, QQ and Telegram bot settings, services, startup restoration, con
 - 删除帮助关于及更新检查链路、连接挂载同步与 FTP 服务及其配置注册；保留既有 SSH 工作区和历史连接数据所需的共用类型。
 - 宿主命令只使用 Shizuku，不再探测或调用 `su`。
 
-### 固定中文与霞橙
+### 固定中文与澄蓝
 
 应用不再提供语言、皮肤、自定义配色或动态取色选择，config 同步移除 `app.language`、`appearance.theme_preset`、`appearance.dynamic_color` 与 `appearance.skins`；旧备份不能恢复这些能力。保留 `appearance.theme_mode` 的自动/深/浅模式及独立终端设置。
 
