@@ -9,7 +9,9 @@ import com.aharou.feature.agent.domain.model.AgentMessage
 import com.aharou.feature.agent.domain.model.CONTEXT_COMPACTION_MARKER
 import com.aharou.feature.agent.domain.model.CONTEXT_SUMMARY_LEGACY_PREFIX
 import com.aharou.feature.agent.domain.tool.ToolCall
+import com.aharou.feature.agent.domain.tool.KEEP_RECENT_TOOL_RESULTS
 import com.aharou.feature.agent.domain.tool.boundedJsonForParse
+import com.aharou.feature.agent.domain.tool.foldStoredToolResults
 import com.aharou.feature.agent.presentation.AgentAttachment
 import com.aharou.feature.agent.presentation.DIRECTORY_MIME_TYPE
 import com.aharou.feature.agent.presentation.MessageRole
@@ -21,6 +23,10 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import java.util.LinkedHashMap
 import java.util.UUID
 import javax.inject.Inject
@@ -52,14 +58,18 @@ class MessagePersistenceUseCase @Inject constructor(
     private class HistoryEntry(
         val version: Long,
         val pendingToolMarker: String,
-        val messages: List<AgentMessage>
+        val messages: List<AgentMessage>,
+        val retainedBytes: Long
     )
 
     init {
         agentDatabase.invalidationTracker.addObserver(
             object : androidx.room.InvalidationTracker.Observer(arrayOf("agent_messages")) {
                 override fun onInvalidated(tables: Set<String>) {
-                    dbVersion.incrementAndGet()
+                    synchronized(historyCache) {
+                        dbVersion.incrementAndGet()
+                        historyCache.clear()
+                    }
                 }
             }
         )
@@ -199,9 +209,9 @@ class MessagePersistenceUseCase @Inject constructor(
     }
 
     fun invalidateHistory(sessionId: String) {
-        dbVersion.incrementAndGet()
         synchronized(historyCache) {
-            historyCache.remove(sessionId)
+            dbVersion.incrementAndGet()
+            historyCache.clear()
         }
     }
 
@@ -280,6 +290,7 @@ class MessagePersistenceUseCase @Inject constructor(
 
         /** 历史消息缓存保留的会话数：按最近访问淘汰，不设上限时内存只增不减。 */
         private const val MAX_CACHED_HISTORY_SESSIONS = 8
+        private const val MAX_HISTORY_CACHE_BYTES = 8L * 1024 * 1024
         /** 图片 base64 缓存总字节上限（base64 为原始大小的 ~4/3，48MB 约可存 36MB 原始图片）。 */
         private const val MAX_IMAGE_CACHE_BYTES = 48L * 1024 * 1024
 
@@ -339,21 +350,56 @@ class MessagePersistenceUseCase @Inject constructor(
         // 版本化缓存：agent_messages 表无变更且 marker 相同时直接复用上次重建结果，
         // 避免工具循环中每轮 LLM 调用都全量读库 + 多次遍历 + JSON 解码。
         // InvalidationTracker 覆盖所有写路径（含 rewind 删除、压缩标记、冷启动清理），不会漏失效。
-        val version = dbVersion.get()
-        synchronized(historyCache) {
+        val version = synchronized(historyCache) {
+            val currentVersion = dbVersion.get()
+            historyCache.entries.removeAll { it.value.version != currentVersion }
             historyCache[sessionId]?.let { cached ->
-                if (cached.version == version && cached.pendingToolMarker == pendingToolMarker) {
+                if (cached.version == currentVersion && cached.pendingToolMarker == pendingToolMarker) {
                     return cached.messages
                 }
             }
+            currentVersion
         }
         val messages = withContext(Dispatchers.IO) {
             buildHistoryUncached(sessionId, pendingToolMarker)
         }
+        val retainedBytes = withContext(Dispatchers.Default) { historyRetainedBytes(messages) }
         synchronized(historyCache) {
-            historyCache[sessionId] = HistoryEntry(version, pendingToolMarker, messages)
+            if (dbVersion.get() == version && retainedBytes <= MAX_HISTORY_CACHE_BYTES) {
+                historyCache[sessionId] = HistoryEntry(version, pendingToolMarker, messages, retainedBytes)
+                while (historyCache.values.sumOf { it.retainedBytes } > MAX_HISTORY_CACHE_BYTES) {
+                    val oldest = historyCache.entries.iterator()
+                    oldest.next()
+                    oldest.remove()
+                }
+            }
         }
         return messages
+    }
+
+    private fun historyRetainedBytes(messages: List<AgentMessage>): Long {
+        fun text(value: String) = 48L + value.length.toLong() * 2
+        fun jsonValue(value: JsonElement): Long = when (value) {
+            is JsonPrimitive -> 48L + text(value.content)
+            is JsonArray -> 48L + value.sumOf { 8L + jsonValue(it) }
+            is JsonObject -> 48L + value.entries.sumOf { 64L + text(it.key) + jsonValue(it.value) }
+        }
+        return messages.sumOf { message ->
+            128L + when (message) {
+                is AgentMessage.UserMessage -> text(message.id) + text(message.content) +
+                    message.images.sumOf { 64L + text(it.mimeType) + text(it.base64Data) + text(it.path) }
+                is AgentMessage.AssistantMessage -> text(message.id) + text(message.content) +
+                    text(message.reasoning) + text(message.signature) + text(message.thinkingBlocksJson) +
+                    message.images.sumOf { 64L + text(it.mimeType) + text(it.base64Data) + text(it.path) } +
+                    message.toolCalls.sumOf { call ->
+                        64L + text(call.id) + text(call.name) +
+                            call.arguments.entries.sumOf { 64L + text(it.key) + jsonValue(it.value) }
+                    }
+                is AgentMessage.ToolResultMessage -> text(message.id) + text(message.messageId) +
+                    text(message.toolName) + text(message.result) + (message.modelResult?.let { text(it) } ?: 0L) +
+                    message.images.sumOf { 64L + text(it.mimeType) + text(it.base64Data) + text(it.path) }
+            }
+        }
     }
 
     private suspend fun buildHistoryUncached(sessionId: String, pendingToolMarker: String): List<AgentMessage> {
@@ -362,12 +408,14 @@ class MessagePersistenceUseCase @Inject constructor(
             .filter { !it.isCompacted && !it.isContextExcluded }
         // 回放只要「解析得动、拼得进上下文」的量：超长字段有界读回（带截断标记），
         // 否则几千条消息的会话会在每轮 LLM 调用前把档案里所有大字段同时拉上堆。
-        val entities = stored.map { messageArchiveStore.restoreBounded(it, MAX_HISTORY_FIELD_BYTES) }
-
         // 第一遍：求 assistant 声明的 toolCallId 与 tool 结果 toolCallId 的交集。
         val declaredIds = mutableSetOf<String>()
         val resultIds = mutableSetOf<String>()
-        for (e in entities) {
+        for (storedEntity in stored) {
+            val e = if (storedEntity.role == MessageRole.ASSISTANT.name && storedEntity.toolCallsJson != null) {
+                messageArchiveStore.restoreBounded(storedEntity.copy(content = "", reasoning = null,
+                    signature = null, thinkingBlocksJson = null, attachmentsJson = null), MAX_HISTORY_FIELD_BYTES)
+            } else storedEntity
             when (MessageRole.valueOf(e.role)) {
                 MessageRole.ASSISTANT -> e.toolCallsJson?.let {
                     runCatching { json.decodeFromString<List<ToolCall>>(boundedJsonForParse(it)) }
@@ -388,7 +436,10 @@ class MessagePersistenceUseCase @Inject constructor(
 
         // 第二遍：构建消息，过滤掉无法配对的工具调用 / 工具结果。
         val result = mutableListOf<AgentMessage>()
-        for (e in entities) {
+        var remainingTools = stored.count { it.role == MessageRole.TOOL.name && it.toolCallId in validIds }
+        for (storedEntity in stored) {
+            if (storedEntity.role == MessageRole.TOOL.name && storedEntity.toolCallId !in validIds) continue
+            val e = messageArchiveStore.restoreBounded(storedEntity, MAX_HISTORY_FIELD_BYTES)
             when (MessageRole.valueOf(e.role)) {
                 MessageRole.USER -> {
                     val rawContent = if (e.isCompactionMarker) CONTEXT_COMPACTION_MARKER else e.content
@@ -463,14 +514,16 @@ class MessagePersistenceUseCase @Inject constructor(
                 MessageRole.TOOL -> {
                     val tcId = e.toolCallId
                     if (tcId != null && tcId in validIds) {
-                        result.add(
-                            AgentMessage.ToolResultMessage(
-                                id = tcId,
-                                messageId = e.id,
-                                toolName = e.toolName ?: "unknown",
-                                result = e.content
-                            )
+                        val message = AgentMessage.ToolResultMessage(
+                            id = tcId,
+                            messageId = e.id,
+                            toolName = e.toolName ?: "unknown",
+                            result = e.content
                         )
+                        remainingTools--
+                        result.add(if (remainingTools >= KEEP_RECENT_TOOL_RESULTS) {
+                            foldStoredToolResults(listOf(message), keepRecent = 0).single()
+                        } else message)
                     }
                 }
             }

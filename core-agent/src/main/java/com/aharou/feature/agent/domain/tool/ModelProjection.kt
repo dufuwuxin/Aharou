@@ -12,7 +12,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
 /** 折叠时保留原样的“最近工具结果”条数：更早的才换成引用。 */
-private const val KEEP_RECENT_TOOL_RESULTS = 8
+const val KEEP_RECENT_TOOL_RESULTS = 8
 
 /**
  * 交给 JSON 解析器之前的单值上限（字符数）。
