@@ -3341,8 +3341,8 @@
     <string name="tools_empty">还没有工具。点右上角「＋」新建一个自定义工具。</string>
     <string name="tools_no_description">未填写描述</string>
     <string name="tools_add">新建工具</string>
-    <string name="tools_inject_every_round">每轮注入</string>
-    <string name="tools_inject_keyword">关键词注入</string>
+    <string name="tools_inject_every_round">按需发现</string>
+    <string name="tools_inject_keyword">关键词发现</string>
     <string name="tools_inject_off">关闭</string>
     <string name="tools_delete_title">删除自定义工具</string>
     <string name="tools_delete_confirm">确定删除「%1$s」？删除后该工具会从工具列表里消失，模型再也调不到它。</string>
@@ -3371,9 +3371,9 @@
     <string name="tools_timeout">超时（秒）</string>
     <string name="tools_timeout_hint">1~600 秒，超时会被强制终止。</string>
     <string name="tools_injection">注入方式</string>
-    <string name="tools_injection_hint">每轮注入：每轮都进工具列表；关键词注入：当前这条用户消息命中关键词才进；关闭：不进列表。</string>
+    <string name="tools_injection_hint">按需发现：目录可见，选中后才加载参数；关键词发现：当前用户消息命中关键词才可发现；关闭：不进入发现目录。不会每轮注入全部工具参数。</string>
     <string name="tools_keywords">关键词</string>
-    <string name="tools_keywords_hint">逗号或空格分隔，大小写不敏感。留空等同「每轮注入」，避免工具永远不出现。</string>
+    <string name="tools_keywords_hint">逗号或空格分隔，大小写不敏感。留空等同「按需发现」，不会自动展开全部参数。</string>
     <string name="tools_schema">参数 Schema（只读）</string>
     <string name="tools_schema_hint">内置与 MCP 工具的 schema 由代码或服务端提供，这里只能改描述与注入方式。</string>
     <string name="steward_per_session_note">托管按会话独立：开关、轮数与状态只对当前会话生效，切到别的会话互不影响。</string>
