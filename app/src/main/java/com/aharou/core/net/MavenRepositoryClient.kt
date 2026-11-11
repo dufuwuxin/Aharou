@@ -24,7 +24,7 @@ import javax.inject.Singleton
  */
 @Singleton
 class MavenRepositoryClient @Inject constructor(
-    @ApplicationContext private val context: Context
+    @param:ApplicationContext private val context: Context
 ) {
 
     sealed class MetadataResult {

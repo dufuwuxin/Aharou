@@ -463,7 +463,7 @@ class StatefulAgentWorkflow @Inject constructor(
         // 预算基线与两个「本轮只试一次」的开关都只在 LLM 调用分支用到，收成一个可变对象，
         // 让该分支抽成独立函数后不必在主循环里再留 4 个跨挂起点局部变量。
         val llmBudget = LlmCallBudgetState(providerKey = "${aiProvider.providerId.length}:${aiProvider.providerId}:${aiProvider.model}",
-            baselineEstimate = withContext(Dispatchers.Default) { ContextTokenEstimator.estimate(systemPrompt,
+            baselineEstimate = withContext(Dispatchers.Default) { ContextTokenEstimator.estimate(appendMiddlewarePrompt(aiProvider.providerId, systemPrompt),
                 currentContext.history.take(lastAssistantIndex.coerceAtLeast(0)), requestTools(currentTools, currentContext)) },
             baselineUsage = if (currentContext.lastInputTokens > 0 && lastAssistantIndex >= 0) {
                 (currentContext.history[lastAssistantIndex] as AgentMessage.AssistantMessage).inputTokens
@@ -594,7 +594,8 @@ class StatefulAgentWorkflow @Inject constructor(
         val providerInUse = workspaceModelChain.current(currentContext.sessionId)?.let { createStandaloneProvider(it, currentContext.sessionId) } ?: aiProvider
         budget.selectProvider("${providerInUse.providerId.length}:${providerInUse.providerId}:${providerInUse.model}")
         val callMetadata = modelMetadataService.configureChatModel(providerInUse)
-        val inputBudget = ModelContextPolicy.effectiveInputBudget(callMetadata)
+        val inputBudget = ContextWatermarks.from(ModelContextPolicy.effectiveInputBudget(callMetadata),
+            generalSettingsRepository.softCompactionThresholdPercent(), generalSettingsRepository.compactionThresholdPercent()).maxTokens
         val requestVersion = injectedContexts.beginRequest(currentContext.sessionId)
         val requestSystemPrompt = appendMiddlewarePrompt(providerInUse.providerId, systemPrompt)
         val promptTools = requestTools(currentTools, currentContext)
@@ -608,7 +609,7 @@ class StatefulAgentWorkflow @Inject constructor(
         var sendProjection = keepNewestImages(sanitizeImagesForModel(state.messages, supportsVision)).trimToRecentRounds(trimRounds)
         if (!budget.compactionAttemptFailed) {
             telemetry.compactionStart()
-            val estimate = withContext(Dispatchers.Default) { ContextTokenEstimator.estimate(systemPrompt, sendProjection, promptTools) }
+            val estimate = withContext(Dispatchers.Default) { ContextTokenEstimator.estimate(requestSystemPrompt, sendProjection, promptTools) }
             val predictedInput = ContextTokenEstimator.calibrated(estimate, budget.baselineEstimate, budget.baselineUsage)
             val compaction = contextCompactor.compactIfNeeded(state.messages, compactionProvider, currentContext.sessionId,
                 windowProvider = providerInUse, systemPrompt = if (reuseMainPrefix) requestSystemPrompt else "", tools = if (reuseMainPrefix) promptTools else emptyList(),
@@ -626,7 +627,7 @@ class StatefulAgentWorkflow @Inject constructor(
         }
         // 压缩真的改写过消息时内容变了，投影得按新的那份重算；源没变就沿用上面那份（同一个对象）。
         if (compactedMessages !== initialState.messages) sendProjection = keepNewestImages(sanitizeImagesForModel(compactedMessages, supportsVision)).trimToRecentRounds(trimRounds)
-        val requestEstimate = withContext(Dispatchers.Default) { ContextTokenEstimator.estimate(systemPrompt, sendProjection, promptTools) }
+        val requestEstimate = withContext(Dispatchers.Default) { ContextTokenEstimator.estimate(requestSystemPrompt, sendProjection, promptTools) }
         val predictedInput = ContextTokenEstimator.calibrated(requestEstimate, budget.baselineEstimate, budget.baselineUsage)
         emit(AgentEvent.ContextUsage(predictedInput, inputBudget, true))
         if (predictedInput >= inputBudget) {

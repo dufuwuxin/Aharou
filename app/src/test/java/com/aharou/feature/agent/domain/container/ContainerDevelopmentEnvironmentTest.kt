@@ -48,8 +48,8 @@ class ContainerDevelopmentEnvironmentTest {
     }
 
     @Test fun consumerSourceWiringUsesBothWrappersAndDoesNotLogThePayload() {
-        var root = File(System.getProperty("user.dir"))
-        while (!File(root, "app/src/main").isDirectory && root.parentFile != null) root = root.parentFile
+        var root = File(requireNotNull(System.getProperty("user.dir")))
+        while (!File(root, "app/src/main").isDirectory && root.parentFile != null) root = checkNotNull(root.parentFile)
         val source = File(root, "app/src/main/java/com/aharou/feature/agent/domain/container/LinuxContainerEngine.kt").readText()
         assertEquals(2, Regex("ContainerDevelopmentEnvironment\\.wrap\\(").findAll(source).count())
         assertTrue(source.contains("envVarRepository.asMap() + profile.env + extraEnv"))

@@ -88,9 +88,9 @@ class ConfigEnvFields @Inject constructor(
                 throw ConfigError.InvalidValue("变量名保留：$name")
             }
             if (entry(name) != null) throw ConfigError.InvalidValue("环境变量已存在：$name")
-            val value = (payload as? ConfigValue.Obj)?.value?.get("value")
+            val value = payload.value["value"]
                 ?.let { (it as? ConfigValue.Str)?.value }.orEmpty()
-            val secret = (payload as? ConfigValue.Obj)?.value?.get("secret")
+            val secret = payload.value["secret"]
                 ?.let { (it as? ConfigValue.Bool)?.value } ?: true
             envVars.upsert(name, value, secret)
             return name

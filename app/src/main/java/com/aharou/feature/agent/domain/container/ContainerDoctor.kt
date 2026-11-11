@@ -122,7 +122,7 @@ data class HealthReport(
 class ContainerDoctor @Inject constructor(
     private val engine: LinuxContainerEngine,
     private val runtimeProcessStore: RuntimeProcessStore,
-    @ApplicationContext private val context: Context,
+    @param:ApplicationContext private val context: Context,
 ) {
     suspend fun check(): HealthReport = withContext(Dispatchers.IO) {
         HealthReport(

@@ -21,7 +21,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Divider
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -574,7 +574,7 @@ internal fun MemberPickerSheet(
                     }
                 }
             }
-            Divider(color = MaterialTheme.colorScheme.outlineVariant)
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             Button(
                 onClick = { onConfirm(picked.toList()); onDismiss() },
                 enabled = canConfirm,
@@ -761,7 +761,7 @@ private fun ProcessNodeCard(
             )
         }
         if (expanded) {
-            Divider(modifier = Modifier.padding(start = 36.dp, end = Spacing.md))
+            HorizontalDivider(modifier = Modifier.padding(start = 36.dp, end = Spacing.md))
             StageEditor(
                 index = index - 1,
                 stage = stage,

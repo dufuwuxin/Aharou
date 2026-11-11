@@ -275,7 +275,6 @@ class EditorLspManager @Inject constructor(
         editors.clear()
         // 正常关闭后扫一遍残留：closeAllEditors 走 killProcessTree，个别子进程可能漏网。
         scope.launch { runCatching { reapOrphanServers() } }
-        Unit
     }
 
     /**

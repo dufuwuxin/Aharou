@@ -5,6 +5,10 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ProjectWorkflowPlanTest {
+    private companion object {
+        val JSON = Json { ignoreUnknownKeys = true }
+    }
+
     private fun task(id: String, order: Long = 0) = ProjectTask(id = id, workspace = "w", projectId = "p",
         title = id, requirement = id, order = order, createdAt = 1, version = 1)
 
@@ -41,7 +45,7 @@ class ProjectWorkflowPlanTest {
     }
 
     @Test fun tasksSavedBeforeSupplementsExistDecodeWithEmptySupplements() {
-        val old = Json { ignoreUnknownKeys = true }.decodeFromString(ProjectTask.serializer(),
+        val old = JSON.decodeFromString(ProjectTask.serializer(),
             """{"id":"t","workspace":"w","title":"old","requirement":"old","status":"REVIEW","requirementsVersion":3,"legacyField":1}""")
         assertTrue(old.supplements.isEmpty())
         assertNull(old.createdBySessionId)

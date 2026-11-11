@@ -30,6 +30,18 @@ object AgentDefinitionParser {
             ?: fileName.substringBeforeLast('.')
         val description = (frontmatter["description"]?.toString() ?: "").take(MAX_DESC_CHARS)
 
+        val rawTags = frontmatter["tags"]
+        val tagStrings = when (rawTags) {
+            null -> emptyList()
+            is String -> rawTags.split(',')
+            is List<*> -> if (rawTags.all { it is String }) rawTags.filterIsInstance<String>() else return null
+            else -> return null
+        }
+        val tags = AgentDefinition.normalizeTags(tagStrings)
+        if (!AgentDefinition.validTags(tags)) {
+            FileLogger.w(TAG, "Invalid role tags: $filePath")
+            return null
+        }
         return AgentDefinition(
             name = name,
             description = description,
@@ -44,7 +56,8 @@ object AgentDefinitionParser {
             inject = parseInject(frontmatter["inject"]),
             keywordInjections = parseKeywordInjections(frontmatter["keywordInjection"]),
             prompt = prompt,
-            filePath = filePath
+            filePath = filePath,
+            tags = tags
         )
     }
 
@@ -112,8 +125,10 @@ object AgentDefinitionParser {
         skills: List<String> = emptyList(),
         keywordInjections: List<KeywordInjection> = emptyList(),
         inject: Set<InjectPart>,
-        prompt: String
+        prompt: String,
+        tags: List<String> = emptyList()
     ): String = buildString {
+        require(AgentDefinition.validTags(tags)) { "Invalid role tags (maximum 24 tags, 64 characters each; no commas or control characters)" }
         appendLine("---")
         appendLine("name: ${Frontmatter.quote(name)}")
         appendLine("description: ${Frontmatter.quote(description)}")
@@ -124,6 +139,7 @@ object AgentDefinitionParser {
         if (allowedTools.isNotEmpty()) appendLine("tools: [${allowedTools.joinToString(", ")}]")
         if (disallowedTools.isNotEmpty()) appendLine("disallowedTools: [${disallowedTools.joinToString(", ")}] ")
         if (skills.isNotEmpty()) appendLine("skills: [${skills.joinToString(", ") { Frontmatter.quote(it) }}]")
+        if (tags.isNotEmpty()) appendLine("tags: [${AgentDefinition.normalizeTags(tags).joinToString(", ") { Frontmatter.quote(it) }}]")
         if (keywordInjections.isNotEmpty()) {
             appendLine("keywordInjection:")
             for (k in keywordInjections) {

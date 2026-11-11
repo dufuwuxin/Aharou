@@ -92,6 +92,7 @@ private object LatexBitmapCache {
     private val bitmaps = object : LinkedHashMap<Key, Deferred<Bitmap?>>(MAX, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Key, Deferred<Bitmap?>>?): Boolean = size > MAX
     }
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     fun getOrStartBitmap(
         link: String,
         colorArgb: Int,

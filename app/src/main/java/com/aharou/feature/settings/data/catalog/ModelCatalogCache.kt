@@ -19,7 +19,7 @@ import javax.inject.Singleton
 // 写盘一律「写临时文件 -> fsync -> rename」，避免进程被杀时留下半份正文让解析整份失败。
 @Singleton
 class ModelCatalogCache @Inject constructor(
-    @param:ApplicationContext context: Context
+    @ApplicationContext context: Context
 ) {
     data class Snapshot(val body: String, val etag: String?, val fetchedAt: Long)
 

@@ -668,8 +668,8 @@ private fun isIgnoringBatteryOptimizations(context: android.content.Context): Bo
 /** [Aharou] 权限总览行定义。 */
 private data class RuntimePermRow(
     val permission: String,
-    @StringRes val titleRes: Int,
-    @StringRes val descRes: Int,
+    @param:StringRes val titleRes: Int,
+    @param:StringRes val descRes: Int,
     val icon: androidx.compose.ui.graphics.vector.ImageVector,
 )
 

@@ -33,6 +33,7 @@ import com.aharou.core.theme.Spacing
 import com.aharou.core.ui.AppSwitch
 import com.aharou.core.ui.AppTextField
 import com.aharou.core.ui.dialogTextFieldColors
+import com.aharou.feature.agent.domain.memory.CloudMemorySearch
 import com.aharou.feature.settings.presentation.MemorySyncViewModel
 import compose.icons.FeatherIcons
 import compose.icons.feathericons.Zap
@@ -49,6 +50,10 @@ internal fun MemorySyncSection(viewModel: MemorySyncViewModel = hiltViewModel())
     val syncing by viewModel.syncing.collectAsStateWithLifecycle()
     val outcome by viewModel.outcome.collectAsStateWithLifecycle()
 
+    val cloudConfiguration by viewModel.cloudSearchConfiguration.collectAsStateWithLifecycle()
+    val cloudEndpoint = cloudConfiguration.endpoint
+    val cloudEnabled = cloudConfiguration.enabled
+    var editingCloudEndpoint by remember { mutableStateOf(false) }
     var repoUrl by remember { mutableStateOf(viewModel.repoUrl()) }
     var lastResult by remember { mutableStateOf(viewModel.lastResult()) }
     var autoSync by remember { mutableStateOf(viewModel.autoSyncEnabled()) }
@@ -72,6 +77,26 @@ internal fun MemorySyncSection(viewModel: MemorySyncViewModel = hiltViewModel())
     }
 
     Column(modifier = Modifier.fillMaxWidth()) {
+        SettingsGroupHeader(text = stringResource(R.string.memory_cloud_search_header))
+        SettingsGroup {
+            SettingsRow(
+                icon = FeatherIcons.Zap,
+                title = stringResource(R.string.memory_cloud_search_enabled),
+                subtitle = stringResource(R.string.memory_cloud_search_privacy),
+                trailing = {
+                    AppSwitch(checked = cloudEnabled, onCheckedChange = {
+                        viewModel.setCloudSearchEnabled(it)
+                    })
+                },
+            )
+            SettingsDivider()
+            SettingsRow(
+                icon = FeatherIcons.Zap,
+                title = stringResource(R.string.memory_cloud_search_endpoint),
+                subtitle = cloudEndpoint.ifBlank { stringResource(R.string.memory_cloud_search_unconfigured) },
+                onClick = { editingCloudEndpoint = true },
+            )
+        }
         SettingsGroupHeader(text = stringResource(R.string.memory_sync_header))
         SettingsGroup {
             SettingsRow(
@@ -167,6 +192,43 @@ internal fun MemorySyncSection(viewModel: MemorySyncViewModel = hiltViewModel())
                 }
             }
         }
+    }
+
+    if (editingCloudEndpoint) {
+        val originalEndpoint = remember { viewModel.cloudSearchEndpoint() }
+        var draft by remember { mutableStateOf(originalEndpoint) }
+        val valid = draft.isBlank() || CloudMemorySearch.endpointUrl(draft.trim()) != null
+        AlertDialog(
+            onDismissRequest = { editingCloudEndpoint = false },
+            title = { Text(stringResource(R.string.memory_cloud_search_endpoint)) },
+            text = {
+                Column {
+                    AppTextField(
+                        value = draft,
+                        onValueChange = { draft = it },
+                        label = stringResource(R.string.memory_cloud_search_endpoint_hint),
+                        singleLine = true,
+                        colors = dialogTextFieldColors(),
+                    )
+                    if (cloudEndpoint != originalEndpoint) Text(
+                        stringResource(R.string.memory_cloud_search_changed), color = MaterialTheme.colorScheme.error)
+                    if (!valid) Text(
+                        text = stringResource(R.string.memory_cloud_search_invalid_endpoint),
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(enabled = valid && cloudEndpoint == originalEndpoint, onClick = {
+                    if (viewModel.saveCloudSearchEndpoint(draft, originalEndpoint)) editingCloudEndpoint = false
+                }) { Text(stringResource(R.string.memory_edit_save)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { editingCloudEndpoint = false }) {
+                    Text(stringResource(R.string.common_cancel))
+                }
+            },
+        )
     }
 
     if (editingRepo) {

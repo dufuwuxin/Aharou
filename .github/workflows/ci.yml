@@ -5,7 +5,7 @@ name: CI
 # 打 v* tag 的发版构建走 android-release.yml，不在这里。
 on:
   push:
-    branches: [ master, main ]
+    branches: [ master, main, feat/operit2-major-upgrade ]
     # 纯文档/资源改动不影响构建产物，跳过 CI 省时间（public 仓库虽不扣额度，但省 11 分钟等待）。
     # 注意：只要本次 push 含任一非忽略路径的改动，CI 仍会触发。
     paths-ignore:
@@ -45,21 +45,21 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           # versionCode 由 build.gradle.kts 的 gitCommitCount() 在配置阶段取
           # git rev-list --count HEAD，浅克隆（默认 depth=1）会得到 1，必须拉完整历史。
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Set up JDK 17
-        uses: actions/setup-java@v6
+      - name: Set up JDK 21
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '21'
 
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v5
+        uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5
         with:
           # PR 用只读缓存，仅 master 的 push 写回缓存，避免被 PR 污染。
           cache-read-only: ${{ github.ref != 'refs/heads/master' }}
@@ -68,7 +68,7 @@ jobs:
       # ~/.m2/repository，不在 setup-gradle 的缓存范围内。不缓存则每次跑单测都要重下一遍，
       # 网络抖动会让 MigrationTest 在类初始化就挂（MavenArtifactFetcher FileNotFoundException）。
       - name: Cache Robolectric runtime
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ~/.m2/repository/org/robolectric
           key: robolectric-${{ runner.os }}-${{ hashFiles('app/build.gradle.kts') }}
@@ -156,7 +156,7 @@ jobs:
 
       - name: Upload unit test log
         if: always() && steps.unit_tests.outcome != 'skipped'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: unit-test-log
           path: /tmp/unit.log
@@ -211,7 +211,7 @@ jobs:
 
       - name: Upload test report
         if: always() && steps.unit_tests.outcome != 'skipped'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: unit-test-results
           path: |

@@ -109,7 +109,8 @@ interface MemorySource {
         contextCategory: ContextCategory? = null,
         contextFolder: String? = null,
         contextSessionId: String? = null,
-        contextRequest: String? = null
+        contextRequest: String? = null,
+        worldbook: WorldbookRules? = null,
     ): MemoryWriteResult =
         if (saveMemory(name, description, content, type, expiresAt, pending, keywords)) {
             MemoryWriteResult.Success
@@ -172,7 +173,8 @@ interface MemorySource {
             }
             val payload = MemoryParser.format(
                 memory.name, memory.description, content, memory.type, memory.keywords,
-                memory.expiresAt, memory.pending, memory.contextKind, memory.contextLoad, memory.contextCategory, memory.contextFolder, memory.contextSessionId, memory.contextRequest
+                memory.expiresAt, memory.pending, memory.contextKind, memory.contextLoad, memory.contextCategory, memory.contextFolder, memory.contextSessionId, memory.contextRequest, memory.worldbook,
+                memory.graphId, memory.graphAliases
             )
             if (MemoryFileStorage.write(file, payload)) MemoryEditResult.Success
             else MemoryEditResult.Error("EDIT_WRITE_FAILED", "写入记忆文件失败，原文未修改")

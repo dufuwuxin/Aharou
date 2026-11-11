@@ -435,6 +435,7 @@ class ContextCompactorTest {
     }
 
     @Test
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     fun hangingSummaryTimesOutAndKeepsHistoryWithoutCommitting() = runTest {
         compactor.backgroundDispatcher = StandardTestDispatcher(testScheduler)
         // 裁剪/软裁剪/forceTrim 也走虚拟调度器（生产默认 Dispatchers.IO 不变），消除本地/CI 时序漂移
@@ -454,6 +455,7 @@ class ContextCompactorTest {
     }
 
     @Test
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     fun metadataAndSettingsShareTheSummaryDeadline() = runTest {
         compactor.backgroundDispatcher = StandardTestDispatcher(testScheduler)
         // 裁剪/软裁剪/forceTrim 也走虚拟调度器（生产默认 Dispatchers.IO 不变），消除本地/CI 时序漂移
@@ -473,6 +475,7 @@ class ContextCompactorTest {
     }
 
     @Test
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     fun metadataAndSettingsCompleteBeforeSummaryAndLeaveOneDeadline() = runTest {
         compactor.backgroundDispatcher = StandardTestDispatcher(testScheduler)
         // 裁剪/软裁剪/forceTrim 也走虚拟调度器（生产默认 Dispatchers.IO 不变），消除本地/CI 时序漂移
@@ -500,6 +503,7 @@ class ContextCompactorTest {
     }
 
     @Test
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     fun outputStarvedRetrySharesTheOriginalDeadline() = runTest {
         compactor.backgroundDispatcher = StandardTestDispatcher(testScheduler)
         // 裁剪/软裁剪/forceTrim 也走虚拟调度器（生产默认 Dispatchers.IO 不变），消除本地/CI 时序漂移
@@ -521,6 +525,7 @@ class ContextCompactorTest {
     }
 
     @Test
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     fun persistedHistoryPreparationAlsoTimesOut() = runTest {
         compactor.backgroundDispatcher = StandardTestDispatcher(testScheduler)
         // 裁剪/软裁剪/forceTrim 也走虚拟调度器（生产默认 Dispatchers.IO 不变），消除本地/CI 时序漂移

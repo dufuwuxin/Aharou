@@ -30,9 +30,7 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
-    }
+
 
     buildTypes {
         create("benchmark") {
@@ -58,3 +56,5 @@ baselineProfile {
     // 不接管 app 模块已有的 profile 依赖，只在需要时重新生成。
     useConnectedDevices = true
 }
+
+kotlin { compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) } }

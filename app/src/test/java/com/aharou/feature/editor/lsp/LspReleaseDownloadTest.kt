@@ -17,7 +17,7 @@ class LspReleaseDownloadTest {
         try {
             val home = root.resolve("home").apply { mkdirs() }
             val fixture = root.resolve("fixture").apply { mkdirs() }
-            fixture.resolve("bin/server").apply { parentFile.mkdirs(); writeText("#!/bin/sh\necho verified\n"); setExecutable(true) }
+            fixture.resolve("bin/server").apply { requireNotNull(parentFile).mkdirs(); writeText("#!/bin/sh\necho verified\n"); setExecutable(true) }
             val archive = root.resolve("archive.tgz")
             assertEquals(0, ProcessBuilder("tar", "-czf", archive.path, "-C", fixture.path, "bin").start().waitFor())
             val digest = java.security.MessageDigest.getInstance("SHA-256").digest(archive.readBytes()).joinToString("") { "%02x".format(it) }
@@ -27,7 +27,7 @@ class LspReleaseDownloadTest {
                 writeText("#!/bin/sh\nwhile [ \"\$1\" != '-o' ]; do shift; done\ncase \"\$2\" in */release.json) cp \"\$TEST_ROOT/release.json\" \"\$2\";; *) cp \"\$TEST_ROOT/archive.tgz\" \"\$2\";; esac\n")
                 setExecutable(true)
             }
-            val launcher = home.resolve(".aharou/bin/server").apply { parentFile.mkdirs(); writeText("OLD-INSTALL") }
+            val launcher = home.resolve(".aharou/bin/server").apply { requireNotNull(parentFile).mkdirs(); writeText("OLD-INSTALL") }
             val script = root.resolve("install.sh").apply { writeText(LspReleaseDownload.script(spec())!!) }
             fun run(metadata: String): Pair<Int, String> {
                 root.resolve("release.json").writeText(metadata)

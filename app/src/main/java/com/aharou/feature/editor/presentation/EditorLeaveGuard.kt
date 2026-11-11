@@ -11,7 +11,7 @@ import androidx.compose.runtime.setValue
  * [confirmLabelRes] 是未保存提示里确认键的文案：关编辑页是「保存并退出」，
  * 大屏右栏换个文件接着看是「保存并切换」。
  */
-internal data class PendingLeave(@StringRes val confirmLabelRes: Int, val action: () -> Unit)
+internal data class PendingLeave(@param:StringRes val confirmLabelRes: Int, val action: () -> Unit)
 
 /**
  * 大屏右栏「换文件前先确认」的通道。

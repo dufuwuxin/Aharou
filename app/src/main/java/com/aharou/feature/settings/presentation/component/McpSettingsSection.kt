@@ -380,7 +380,7 @@ internal fun McpServerRow(
     val typeText = if (server.isStdio) stringResource(R.string.mcp_type_stdio) else "HTTP"
     // HTTP 未连接时不再展示完整地址：URL 很长，在列表里只能看到一截断的头，占位而无信息量。
     val infoText = when {
-        isConnected -> stringResource(R.string.mcp_tools_count, status?.toolCount ?: 0)
+        isConnected -> stringResource(R.string.mcp_tools_count, status.toolCount)
         server.isStdio -> server.command.orEmpty().ifEmpty { "stdio" }
         else -> null
     }

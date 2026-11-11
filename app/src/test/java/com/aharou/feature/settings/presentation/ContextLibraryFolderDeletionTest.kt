@@ -141,7 +141,7 @@ class ContextLibraryFolderDeletionTest {
                 category.name, "说明", "$category-body", contextCategory = category, contextFolder = "内置默认"))
         }
         val marker = File(temp.root, "aharou-global/memory/.context-folders.json")
-        marker.parentFile.mkdirs()
+        requireNotNull(marker.parentFile).mkdirs()
         marker.writeText("""{"__global__":{"ROLE_INJECTED":["内置默认"],"INJECTED":["内置默认"]}}""")
         for (run in 1..2) {
             val state = snapshot()

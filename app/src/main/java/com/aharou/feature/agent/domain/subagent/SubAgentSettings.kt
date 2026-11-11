@@ -40,7 +40,7 @@ fun interface CommunicationEnabledSource {
  */
 @Singleton
 class SubAgentSettings @Inject constructor(
-    @param:ApplicationContext context: Context,
+    @ApplicationContext context: Context,
 ) : MaxRunningSource, CommunicationEnabledSource {
 
     private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)

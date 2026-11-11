@@ -350,8 +350,8 @@ class ContextCompactor @Inject constructor(
                 val imageProjected = projectImagesForEstimate(messages, sendsImages)
                 val estimatedTokens = CompactionText.estimateRequest(systemPrompt, tools, imageProjected)
                 val currentTokens = currentInputTokens.takeIf { it > 0 } ?: estimatedTokens
-                val hardThresholdPercent = generalSettingsRepository.compactionThresholdPercent()
-                val threshold = (inputBudget * hardThresholdPercent / 100.0).toInt()
+                val limits = ContextWatermarks.from(inputBudget, generalSettingsRepository.softCompactionThresholdPercent(), generalSettingsRepository.compactionThresholdPercent())
+                val threshold = limits.maxTokens
                 // 系统提示与工具定义压不掉，必须先扣掉再算目标：不扣的话小窗口模型
                 // （或窗口元数据落到兜底值时）目标会被它们吃满，摘要写出来照样过不了校验。
                 // 基准取「触发线」而不是「窗口」：压缩后整请求 = 固定开销 + 摘要 + 保留段，
@@ -359,7 +359,7 @@ class ContextCompactor @Inject constructor(
                 val fixedOverhead = CompactionText.estimateRequest(systemPrompt, tools, emptyList())
                 val squeezableBudget = (threshold - fixedOverhead).coerceAtLeast(0)
                 val targetTokens = (squeezableBudget * COMPACTION_TARGET_PERCENT / 100.0).toInt()
-                val softThreshold = (inputBudget * generalSettingsRepository.softCompactionThresholdPercent() / 100.0).toInt()
+                val softThreshold = limits.warnTokens
                 val reachedHard = currentTokens >= threshold || currentTokens >= inputBudget
                 // 分级裁剪先试一遍：按成本从低到高逐级裁（清 reasoning → 落盘换引用 → 骨架化），够用就直接返回，
                 // 既不调模型、也不改写历史正文——旧消息的字节与上一轮一致，供应商的前缀缓存仍能命中。

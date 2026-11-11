@@ -34,7 +34,7 @@ import kotlinx.coroutines.launch
  */
 @Singleton
 class EventTriggerBus @Inject constructor(
-    @ApplicationContext private val context: Context,
+    @param:ApplicationContext private val context: Context,
     private val dao: ScheduledTaskDao,
     private val scheduler: ScheduledTaskScheduler,
 ) {

@@ -61,6 +61,13 @@ object MemoryParser {
             contextFolder = frontmatter["context_folder"]?.toString().orEmpty(),
             contextSessionId = frontmatter["context_session_id"]?.toString()?.takeIf { it.isNotBlank() },
             contextRequest = frontmatter["context_request"]?.toString()?.takeIf { it.isNotBlank() },
+            worldbook = frontmatter["worldbook"]?.let { raw ->
+                runCatching { WorldbookRules.fromJson(raw.toString()) }.getOrElse { WorldbookRules(enabled = false) }
+            } ?: WorldbookRules(),
+            graphId = frontmatter["metadata_graph_id"]?.toString()?.takeIf {
+                com.aharou.feature.agent.domain.context.ContextGraphIdentity.valid(it)
+            },
+            graphAliases = (frontmatter["metadata_graph_aliases"] as? List<*>)?.mapNotNull { it as? String }.orEmpty(),
             hasContextMetadata = loadValue(frontmatter["context_load"]) != null &&
                 enumValue<ContextKind>(frontmatter["context_kind"]) != null &&
                 ContextCategory.from(frontmatter["context_category"]?.toString()) != null
@@ -70,7 +77,8 @@ object MemoryParser {
     fun format(memory: Memory): String = format(
         memory.name, memory.description, memory.content, memory.type, memory.keywords, memory.expiresAt,
         memory.pending, memory.contextKind, memory.contextLoad, memory.contextCategory,
-        memory.contextFolder, memory.contextSessionId, memory.contextRequest
+        memory.contextFolder, memory.contextSessionId, memory.contextRequest, memory.worldbook,
+        memory.graphId, memory.graphAliases
     )
 
     fun format(
@@ -86,7 +94,10 @@ object MemoryParser {
         contextCategory: ContextCategory = ContextCategory.LONG_TERM,
         contextFolder: String = "",
         contextSessionId: String? = null,
-        contextRequest: String? = null
+        contextRequest: String? = null,
+        worldbook: WorldbookRules = WorldbookRules(),
+        graphId: String? = null,
+        graphAliases: List<String> = emptyList(),
     ): String {
         val safeName = yamlScalar(name)
         val safeDesc = yamlScalar(description)
@@ -99,6 +110,9 @@ object MemoryParser {
         if (contextFolder.isNotBlank()) head.append("context_folder: ${yamlScalar(contextFolder)}\n")
         contextSessionId?.let { head.append("context_session_id: ${yamlScalar(it)}\n") }
         contextRequest?.let { head.append("context_request: ${yamlScalar(it)}\n") }
+        if (worldbook != WorldbookRules()) head.append("worldbook: ${yamlScalar(worldbook.toJson())}\n")
+        graphId?.let { head.append("metadata_graph_id: ${yamlScalar(it)}\n") }
+        if (graphAliases.isNotEmpty()) head.append("metadata_graph_aliases: [${graphAliases.joinToString(", ") { yamlScalar(it) }}]\n")
         head.append("---\n")
         return head.toString() + content
     }

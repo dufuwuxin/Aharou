@@ -120,7 +120,7 @@ class ContextFolderStoreTest {
         val root = Files.createTempDirectory("corrupt-folders-").toFile()
         try {
             val file = File(root, "aharou-global/memory/.context-folders.json")
-            file.parentFile.mkdirs()
+            requireNotNull(file.parentFile).mkdirs()
             file.writeText("{corrupt")
             val store = store(root)
             assertNull(store.snapshot(null))
@@ -135,7 +135,7 @@ class ContextFolderStoreTest {
         val root = Files.createTempDirectory("legacy-folders-").toFile()
         try {
             val file = File(root, "aharou-global/memory/.context-folders.json")
-            file.parentFile.mkdirs()
+            requireNotNull(file.parentFile).mkdirs()
             file.writeText("""{"__global__":{"RULE":["requests","requests/agent","requests/agent/custom.md"],"ROLE_INJECTED":["内置默认"],"INJECTED":["内置默认"]}}""")
             val store = store(root)
             assertEquals(listOf("辅助请求"), store.list(null).getValue(ContextCategory.RULE))

@@ -117,16 +117,24 @@ internal object MemoryFileStorage {
             val currentText = source.readText()
             if (conflictOf(original.name, expectedVersion, currentText) != null) return@synchronized false
             val current = MemoryParser.parse(source, original.scope) ?: return@synchronized false
+            val claimedAliases = root.listFiles().orEmpty().filter { it != source && it.extension == "md" }
+                .flatMap { MemoryParser.parse(it, original.scope)?.graphAliases.orEmpty() }.toSet()
+            val aliases = (current.graphAliases + updated.graphAliases + current.name).distinct()
+                .filter { it in current.graphAliases || it !in claimedAliases }
             val target = MemorySource.resolveMemoryFile(root, updated.name)
             if (target.canonicalFile == source.canonicalFile) {
                 if (MemorySource.archiveExistingFile(root, original.name) == null) return@synchronized false
                 return@synchronized write(source, MemoryParser.format(updated.copy(
-                    type = current.type, keywords = current.keywords, expiresAt = current.expiresAt, pending = current.pending
+                    type = current.type, keywords = current.keywords, expiresAt = current.expiresAt, pending = current.pending,
+                    graphId = com.aharou.feature.agent.domain.context.ContextGraphIdentity.raw(current),
+                    graphAliases = aliases
                 )), expectedVersion)
             }
             if (target.exists()) return@synchronized false
             val payload = MemoryParser.format(updated.copy(
-                type = current.type, keywords = current.keywords, expiresAt = current.expiresAt, pending = current.pending
+                type = current.type, keywords = current.keywords, expiresAt = current.expiresAt, pending = current.pending,
+                    graphId = com.aharou.feature.agent.domain.context.ContextGraphIdentity.raw(current),
+                    graphAliases = aliases
             ))
             temporary = File.createTempFile(".memory-rename-", ".tmp", root)
             FileOutputStream(temporary).use { output ->
@@ -236,7 +244,7 @@ internal object MemoryFileStorage {
     ): Boolean = synchronized(lock) {
         if (group.size < 2 || group.any { it.pending || it.file == null }) return@synchronized false
         val first = group.first()
-        if (group.any { it.scope != first.scope || it.type != first.type || it.expiresAt != first.expiresAt || it.contextKind != first.contextKind || it.contextLoad != first.contextLoad || it.contextCategory != first.contextCategory || it.contextFolder != first.contextFolder || it.contextSessionId != first.contextSessionId || it.contextRequest != first.contextRequest }) {
+        if (group.any { it.scope != first.scope || it.type != first.type || it.expiresAt != first.expiresAt || it.contextKind != first.contextKind || it.contextLoad != first.contextLoad || it.contextCategory != first.contextCategory || it.contextFolder != first.contextFolder || it.contextSessionId != first.contextSessionId || it.contextRequest != first.contextRequest || it.worldbook != first.worldbook }) {
             return@synchronized false
         }
         val root = first.file?.parentFile ?: return@synchronized false
@@ -256,7 +264,7 @@ internal object MemoryFileStorage {
         }
         val payload = MemoryParser.format(
             name, description, content, type ?: first.type, group.flatMap { it.keywords }.distinct(), first.expiresAt, first.pending,
-            first.contextKind, first.contextLoad, first.contextCategory, first.contextFolder, first.contextSessionId, first.contextRequest
+            first.contextKind, first.contextLoad, first.contextCategory, first.contextFolder, first.contextSessionId, first.contextRequest, first.worldbook
         )
         if (!write(target, payload)) return@synchronized false
         var deleted = true
@@ -301,7 +309,8 @@ internal object MemoryFileStorage {
         contextCategory: ContextCategory? = null,
         contextFolder: String? = null,
         contextSessionId: String? = null,
-        contextRequest: String? = null
+        contextRequest: String? = null,
+        worldbook: WorldbookRules? = null,
     ): MemoryWriteResult = synchronized(lock) {
         try {
             val file = MemorySource.resolveMemoryFile(root, name)
@@ -336,7 +345,10 @@ internal object MemoryFileStorage {
                 contextCategory ?: existing?.contextCategory ?: ContextCategory.LONG_TERM,
                 folder,
                 contextSessionId ?: existing?.contextSessionId,
-                contextRequest ?: existing?.contextRequest
+                contextRequest ?: existing?.contextRequest,
+                worldbook ?: existing?.worldbook ?: WorldbookRules(),
+                existing?.let(com.aharou.feature.agent.domain.context.ContextGraphIdentity::raw) ?: java.util.UUID.randomUUID().toString(),
+                existing?.graphAliases.orEmpty()
             )
             if (currentText == payload) return@synchronized MemoryWriteResult.Success
             if (currentText != null && MemorySource.archiveExistingFile(root, name) == null) {

@@ -48,10 +48,11 @@ class GlobalMemorySource @Inject constructor(
         contextCategory: ContextCategory?,
         contextFolder: String?,
         contextSessionId: String?,
-        contextRequest: String?
+        contextRequest: String?,
+        worldbook: WorldbookRules?,
     ): MemoryWriteResult = MemoryFileStorage.saveChecked(
         memoryRoot, MemoryScope.GLOBAL, name, description, content, type, expiresAt, pending,
-        keywords, expectedVersion, contextKind, contextLoad, contextCategory, contextFolder, contextSessionId, contextRequest
+        keywords, expectedVersion, contextKind, contextLoad, contextCategory, contextFolder, contextSessionId, contextRequest, worldbook
     )
 
     override fun archiveContent(

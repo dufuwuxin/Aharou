@@ -70,6 +70,8 @@ import com.aharou.feature.agent.domain.tool.custom.CustomToolSource
 import com.aharou.feature.agent.domain.tool.custom.ToolInjectionGate
 import com.aharou.feature.agent.domain.tool.custom.ToolStorageLocator
 import com.aharou.feature.agent.domain.tool.ToolRegistry
+import com.aharou.feature.agent.domain.tool.javascript.JavascriptTool
+import com.aharou.feature.agent.domain.tool.memory.CloudMemorySearchTool
 import com.aharou.feature.agent.domain.tool.ToolSearchTool
 import com.aharou.feature.agent.domain.tool.ToolOutputStore
 import com.aharou.feature.settings.data.remote.ModelMetadataService
@@ -441,6 +443,8 @@ object AgentModule {
         askUserQuestionTool: AskUserQuestionTool,
         manageMcpTool: ManageMcpTool,
         toolSearchTool: ToolSearchTool,
+        javascriptTool: JavascriptTool,
+        cloudMemorySearchTool: CloudMemorySearchTool,
         webSearchTool: WebSearchTool,
         webFetchTool: WebFetchTool,
         planModeTool: PlanModeTool,
@@ -484,6 +488,8 @@ object AgentModule {
             register("askUserQuestion", askUserQuestionTool)
             register("manageMcp", manageMcpTool)
             register("tool_search", toolSearchTool)
+            register("eval_javascript", javascriptTool)
+            register("memory_cloud_search", cloudMemorySearchTool)
             register("websearch", webSearchTool)
             register("webfetch", webFetchTool)
             register("planMode", planModeTool)

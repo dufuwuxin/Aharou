@@ -10,10 +10,13 @@ import com.aharou.feature.extension.domain.InstalledExtensionAggregator
 import com.aharou.feature.plugin.domain.PluginManager
 import com.aharou.feature.plugin.domain.market.PluginMarketEntry
 import com.aharou.feature.plugin.domain.market.PluginMarketRepository
+import com.aharou.feature.plugin.presentation.marketVersionState
+import com.aharou.feature.plugin.presentation.MarketVersionState
 import com.aharou.feature.plugin.presentation.PluginEvent
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -71,6 +74,9 @@ class ExtensionsViewModel @Inject constructor(
 
     private val _installedVersions = MutableStateFlow<Map<String, String>>(emptyMap())
     val installedVersions: StateFlow<Map<String, String>> = _installedVersions.asStateFlow()
+    private val _installedVersionsReady = MutableStateFlow(false)
+    val installedVersionsReady = _installedVersionsReady.asStateFlow()
+    private var refreshGeneration = 0L
 
     private val _event = MutableStateFlow<PluginEvent?>(null)
     val event: StateFlow<PluginEvent?> = _event.asStateFlow()
@@ -102,15 +108,29 @@ class ExtensionsViewModel @Inject constructor(
 
     /** 重新聚合已装扩展，并刷新插件版本表（市场条目据此标「已安装 / 可更新」）。 */
     fun refresh() {
+        val generation = ++refreshGeneration
+        _installedVersionsReady.value = false
         viewModelScope.launch {
             _loading.value = true
             _error.value = null
-            runCatching { withContext(Dispatchers.IO) { aggregator.installed() } }
-                .onSuccess { _entries.value = it }
-                .onFailure { _error.value = it.message ?: it::class.java.simpleName }
-            runCatching { withContext(Dispatchers.IO) { market.installedVersions() } }
-                .onSuccess { _installedVersions.value = it }
-            _loading.value = false
+            try {
+                runCatching { withContext(Dispatchers.IO) { aggregator.installed() } }
+                    .onSuccess { _entries.value = it }
+                    .onFailure {
+                        if (it is CancellationException) throw it
+                        _error.value = it.message ?: it::class.java.simpleName
+                    }
+                runCatching { withContext(Dispatchers.IO) { market.installedVersions() } }
+                    .onSuccess {
+                        if (generation == refreshGeneration) {
+                            _installedVersions.value = it
+                            _installedVersionsReady.value = true
+                        }
+                    }
+                    .onFailure { if (it is CancellationException) throw it }
+            } finally {
+                _loading.value = false
+            }
         }
     }
 
@@ -125,34 +145,62 @@ class ExtensionsViewModel @Inject constructor(
     /** 拉插件市场索引。源取清单里的第一个（目前只有官方一个源）。 */
     fun loadMarket() {
         if (_marketLoading.value) return
+        _marketLoading.value = true
         viewModelScope.launch {
-            _marketLoading.value = true
-            val sources = withContext(Dispatchers.IO) { market.sources() }
-            val sourceId = sources.keys.firstOrNull()
-            val listing = withContext(Dispatchers.IO) {
-                // 源清单为空与取不到是两回事，但对用户都没得点，统一记「没取到」
-                sourceId?.let { market.listPlugins(it) }
+            try {
+                val sources = withContext(Dispatchers.IO) { market.sources() }
+                val sourceId = sources.keys.firstOrNull()
+                _marketSourceLabel.value = sourceId?.let { sources[it]?.displayName(language) }.orEmpty()
+                val listing = withContext(Dispatchers.IO) {
+                    sourceId?.let { market.listPlugins(it) }
+                }
+                _marketPlugins.value = listing?.plugins.orEmpty()
+                _marketFailed.value = listing == null || listing.failed
+                _marketLoaded.value = true
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                _marketFailed.value = true
+                _marketLoaded.value = true
+            } finally {
+                _marketLoading.value = false
             }
-            _marketSourceLabel.value = sourceId?.let { sources[it]?.displayName(language) } ?: sourceId.orEmpty()
-            _marketPlugins.value = listing?.plugins.orEmpty()
-            _marketFailed.value = listing == null || listing.failed
-            _marketLoaded.value = true
-            _marketLoading.value = false
         }
     }
 
     /** 安装市场里的一个插件；装完刷新已装列表与版本表。 */
-    fun installMarketPlugin(entry: PluginMarketEntry) {
+    fun installMarketPlugin(entry: PluginMarketEntry, allowUnknownVersion: Boolean = false) {
         if (_busyId.value != null) return
+        _busyId.value = MARKET_BUSY_PREFIX + entry.id
+        ++refreshGeneration
+        _event.value = null
         viewModelScope.launch {
-            _busyId.value = MARKET_BUSY_PREFIX + entry.id
-            val result = withContext(Dispatchers.IO) { market.install(entry) }
-            _busyId.value = null
-            _event.value = result.fold(
-                onSuccess = { PluginEvent.Installed(it.name, it.version) },
-                onFailure = { PluginEvent.Failed(it.message ?: it::class.java.simpleName) },
-            )
-            refresh()
+            try {
+                val versions = withContext(Dispatchers.IO) { market.installedVersions() }
+                _installedVersions.value = versions
+                _installedVersionsReady.value = true
+                val state = marketVersionState(entry.version, versions[entry.id])
+                if (state == MarketVersionState.LOCAL_NEWER || state == MarketVersionState.INSTALLED ||
+                    (state == MarketVersionState.UNKNOWN && !allowUnknownVersion)) {
+                    _event.value = PluginEvent.Failed("Installed version changed; review the current state before installing")
+                    return@launch
+                }
+                val result = withContext(Dispatchers.IO) { market.install(entry) }
+                _event.value = result.fold(
+                    onSuccess = { PluginEvent.Installed(it.name, it.version) },
+                    onFailure = {
+                        if (it is CancellationException) throw it
+                        PluginEvent.Failed(it.message ?: it::class.java.simpleName)
+                    },
+                )
+                refresh()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _event.value = PluginEvent.Failed(e.message ?: e::class.java.simpleName)
+            } finally {
+                _busyId.value = null
+            }
         }
     }
 

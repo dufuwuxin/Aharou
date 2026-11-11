@@ -27,7 +27,7 @@ import kotlin.coroutines.resumeWithException
 
 @Singleton
 class TranslationWebEngine @Inject constructor(
-    @ApplicationContext private val context: Context,
+    @param:ApplicationContext private val context: Context,
     private val models: TranslationModelFiles,
 ) {
     private val main = Handler(Looper.getMainLooper())
@@ -76,7 +76,8 @@ class TranslationWebEngine @Inject constructor(
             settings.allowFileAccess = false
             settings.allowContentAccess = false
             settings.domStorageEnabled = false
-            settings.databaseEnabled = false
+                @Suppress("DEPRECATION")
+                databaseEnabled = false
             settings.blockNetworkLoads = true
             settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
             addJavascriptInterface(ResultBridge(), "TranslationResult")

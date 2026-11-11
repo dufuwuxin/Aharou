@@ -271,7 +271,7 @@ object AppProxy {
             val parts = s.split(".")
             parts.size == 4 && parts.all { it.isNotEmpty() && it.length <= 3 && it.all(Char::isDigit) }
         }
-        if (isLiteral) java.net.InetAddress.getByName(s)?.address else null
+        if (isLiteral) java.net.InetAddress.getByName(s).address else null
     } catch (e: Exception) {
         null
     }

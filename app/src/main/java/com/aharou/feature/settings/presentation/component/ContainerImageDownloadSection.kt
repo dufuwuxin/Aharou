@@ -616,7 +616,7 @@ private fun ImageDetailSheet(
                             Text(stringResource(R.string.container_download_redownload))
                         }
                         Button(
-                            onClick = { onImport(record!!.fileUri) },
+                            onClick = { onImport(record.fileUri) },
                             modifier = Modifier.weight(1f).height(44.dp),
                             shape = RoundedCornerShape(12.dp)
                         ) {

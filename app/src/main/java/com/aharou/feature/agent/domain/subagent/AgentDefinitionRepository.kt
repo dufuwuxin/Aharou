@@ -61,6 +61,7 @@ class AgentDefinitionRepository @Inject constructor(
     ): AgentSaveError? = synchronized(com.aharou.feature.agent.domain.skill.SkillParser) {
         val name = form.name.trim()
         if (!isValidName(name)) return@synchronized AgentSaveError.INVALID_NAME
+        if (!AgentDefinition.validTags(form.tags)) return@synchronized AgentSaveError.INVALID_TAGS
         if (form.prompt.isBlank()) return@synchronized AgentSaveError.EMPTY_PROMPT
         if (form.skills.isNotEmpty()) {
             try {
@@ -108,7 +109,8 @@ class AgentDefinitionRepository @Inject constructor(
             skills = form.skills,
             keywordInjections = form.keywordInjections,
             inject = form.inject,
-            prompt = form.prompt
+            prompt = form.prompt,
+            tags = AgentDefinition.normalizeTags(form.tags)
         )
 
         return@synchronized try {
@@ -133,6 +135,21 @@ class AgentDefinitionRepository @Inject constructor(
             FileLogger.e(TAG, "保存子代理定义失败: $name", e)
             AgentSaveError.IO_FAILED
         }
+    }
+
+    fun setTags(name: String, tags: List<String>, expectedScope: AgentDefinitionScope,
+                expectedPath: String?): AgentSaveError? = synchronized(com.aharou.feature.agent.domain.skill.SkillParser) {
+        val current = listAll().firstOrNull { it.definition.name == name }
+            ?: return@synchronized AgentSaveError.IO_FAILED
+        val role = current.definition
+        if (current.scope != expectedScope || role.filePath != expectedPath) return@synchronized AgentSaveError.IO_FAILED
+        save(AgentDefinitionForm(
+            name = role.name, description = role.description, providerId = role.providerId,
+            model = role.model, reasoningEffort = role.reasoningEffort, mode = role.mode,
+            allowedTools = role.allowedTools, disallowedTools = role.disallowedTools,
+            skills = role.skills, inject = role.inject, keywordInjections = role.keywordInjections,
+            prompt = role.prompt, tags = tags
+        ), current.scope, originalName = role.name, requireExisting = true)
     }
 
     fun setSkillBinding(
@@ -160,7 +177,8 @@ class AgentDefinitionRepository @Inject constructor(
                 skills = skills,
                 inject = definition.inject,
                 keywordInjections = definition.keywordInjections,
-                prompt = definition.prompt
+                prompt = definition.prompt,
+                tags = definition.tags
             ),
             scope,
             originalName = definition.name,

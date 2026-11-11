@@ -159,6 +159,7 @@ export default defineConfig({
           items: [
             { text: 'AI 供应商与模型', link: '/guide/providers' },
             { text: '默认与专用模型', link: '/guide/default-models' },
+            { text: '端侧本地模型', link: '/guide/local-models' },
             { text: 'Token 统计与费用', link: '/guide/token-stats' }
           ]
         },

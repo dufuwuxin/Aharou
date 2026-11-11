@@ -18,6 +18,7 @@ internal fun ProjectChatMenuHost(
     onTerminal: () -> Unit, onGit: () -> Unit, onBrowser: () -> Unit,
     onSandbox: () -> Unit, onShared: () -> Unit, onObserve: () -> Unit, onActivity: () -> Unit,
     connectionState: ConnectionState?, inputTokens: Int, outputTokens: Int,
+    onConversationMap: (() -> Unit)? = null,
     content: @Composable () -> Unit
 ) {
     var stewardOpen by remember(sessionId) { mutableStateOf(false) }
@@ -37,6 +38,10 @@ internal fun ProjectChatMenuHost(
             R.string.chat_open_activity to onActivity
         ).forEach { (label, action) ->
             DropdownMenuItem(text = { Text(stringResource(label)) }, onClick = { dismiss(); action() })
+        }
+        if (onConversationMap != null) {
+            DropdownMenuItem(text = { Text(stringResource(R.string.conversation_map_title)) },
+                onClick = { dismiss(); onConversationMap() })
         }
         if (connectionState != null) {
             HorizontalDivider()

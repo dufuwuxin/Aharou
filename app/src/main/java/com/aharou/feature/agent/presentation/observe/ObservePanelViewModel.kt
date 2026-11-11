@@ -233,7 +233,10 @@ class ObservePanelViewModel @Inject constructor(
      * 树快照：低频轮询。候选成员列表与各自运行态每次重算（状态本来就会变），
      * 只有「看谁」与「看多深」变化时才重启循环。
      */
-    private val treeFlow: Flow<TreeSnapshot> = combine(
+    private val treeFlow: Flow<TreeSnapshot> = observeTree()
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    private fun observeTree(): Flow<TreeSnapshot> = combine(
         _selfId,
         _direction,
         _depth,
@@ -257,7 +260,10 @@ class ObservePanelViewModel @Inject constructor(
      * 被观察成员的消息流：走聊天页同一个数据入口（含隐身内存缓冲），
      * 再用 [MessagePersistenceUseCase.restoreAll] 做归档恢复，最后压成只读展示单元。
      */
-    private val messagesFlow: Flow<List<ObserveMessage>> = combine(
+    private val messagesFlow: Flow<List<ObserveMessage>> = observeMessages()
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    private fun observeMessages(): Flow<List<ObserveMessage>> = combine(
         _selfId,
         _selectedMemberId
     ) { selfId, selected -> selected ?: selfId }

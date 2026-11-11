@@ -230,7 +230,7 @@ class MobileOperator @Inject constructor(
                     val lastHadNoEffect = last != null && last.before != null && last.after != null &&
                         last.before.sameContent(last.after)
                     val noFingerprint = last != null && (last.before == null || last.after == null)
-                    if (same && (lastHadNoEffect || (noFingerprint && last!!.repeats >= 2))) {
+                    if (same && (lastHadNoEffect || (noFingerprint && last.repeats >= 2))) {
                         progress.add("$entry; Note: 同一个动作已经连续做了几次，屏幕没有变化——换一种做法，或用 terminate(status=\"failure\") 结束")
                         trace.step(stepNo, obs.caption, obs.image, step.thought, step.action, step.arguments, decision.raw, decision.latencyMs,
                             "空转（同动作且屏未变）", dispatched = planned.args, before = before, after = before)
@@ -247,7 +247,7 @@ class MobileOperator @Inject constructor(
                         res.message.takeIf { !res.ok }, dispatched = planned.args, before = before, after = after)
                     if (res.ok) {
                         idle = 0
-                        lastAction = Attempt(planned.args, before, after, if (same) last!!.repeats + 1 else 1)
+                        lastAction = Attempt(planned.args, before, after, if (same) last.repeats + 1 else 1)
                         progress.add(entry)
                     } else {
                         progress.add("$entry; Result: ${res.message}")
@@ -443,7 +443,7 @@ class MobileOperator @Inject constructor(
             if (!boundProvider.isNullOrBlank()) {
                 val config = aiProviderRepository.getProviderById(boundProvider)
                 if (config != null && config.isEnabled && config.hasUsableApiKey) {
-                    val boundModel = session?.model
+                    val boundModel = session.model
                     if (boundModel.isNullOrBlank() || boundModel in config.models) {
                         return if (boundModel.isNullOrBlank()) config else config.copy(selectedModel = boundModel)
                     }

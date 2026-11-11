@@ -19,7 +19,7 @@ import kotlinx.coroutines.launch
 /** 设置页「定时任务」分区的状态与操作入口。 */
 @HiltViewModel
 class ScheduledTasksViewModel @Inject constructor(
-    @ApplicationContext private val context: Context,
+    @param:ApplicationContext private val context: Context,
     private val repository: ScheduledTaskRepository,
     private val scheduler: ScheduledTaskScheduler,
     chatSessionDao: ChatSessionDao

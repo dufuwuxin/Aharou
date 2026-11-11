@@ -6,7 +6,7 @@ plugins {
     kotlin("android")
 
     kotlin("plugin.compose")
-    kotlin("plugin.serialization") version "2.2.21"
+    kotlin("plugin.serialization") version "2.3.21"
     id("com.google.dagger.hilt.android")
     id("com.google.devtools.ksp")
     // 声明本模块是 baseline profile 的被测方：插件会把 benchmark 模块产出的 profile
@@ -115,7 +115,6 @@ android {
     defaultConfig {
         applicationId = "com.aharou.agent.fork"
         minSdk = 26
-        resourceConfigurations += listOf("zh")
         // targetSdk 从 28 升到 35：28 是当年为了绕开 proot 的 W^X / SELinux 限制而锁的，后来 proot 全套
         // 改由 jniLibs 装进 nativeLibraryDir（apk_data_file，允许 execve），就不再需要锁这么低。
         //   · 34 的门槛：前台服务必须声明类型并申请对应权限（否则 startForeground 抛异常）、
@@ -195,9 +194,7 @@ android {
         isCoreLibraryDesugaringEnabled = true
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
-    }
+    androidResources { localeFilters += "zh" }
 
     buildFeatures {
         compose = true
@@ -274,7 +271,7 @@ android {
             // MockK 调用 ByteBuddyAgent.install() 时检测到 agent 已就位、直接短路，不再尝试 self-attach。
             // 标准 Linux/CI 上 agent 本来就能 attach，加这个无副作用。
             // 保留 allowAttachSelf 兜底：个别环境只开了 attach 但 agent 预挂未命中的场景。
-            it.jvmArgs("-Djdk.attach.allowAttachSelf=true")
+            it.jvmArgs("-Djdk.attach.allowAttachSelf=true", "-Xshare:off")
             it.jvmArgumentProviders += object : org.gradle.process.CommandLineArgumentProvider {
                 override fun asArguments(): Iterable<String> =
                     it.classpath.files
@@ -301,9 +298,16 @@ android {
 
 // 彻底禁用 lintVital<Flavor>Release 任务（三 flavor 各一个），
 // 使其不进入 assembleRelease 的任务图——比 lint.checkReleaseBuilds=false 更省构建开销与内存。
+kotlin { compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) } }
+
 // 仅在 release 任务图执行前禁用，避免影响开发期 debug lint。
 gradle.projectsEvaluated {
     tasks.matching { it.name.startsWith("lintVital") }.configureEach { enabled = false }
+}
+
+// Hilt 2.58 keeps AGP 8 support; its parser must also read the runtime dependency metadata.
+configurations.matching { it.name.startsWith("hiltAnnotationProcessor") }.configureEach {
+    resolutionStrategy.force("org.jetbrains.kotlin:kotlin-metadata-jvm:2.4.21")
 }
 
 dependencies {
@@ -337,8 +341,8 @@ dependencies {
     implementation("androidx.navigation:navigation-compose:2.9.0")
 
     // Hilt 依赖注入
-    implementation("com.google.dagger:hilt-android:2.56.1")
-    ksp("com.google.dagger:hilt-compiler:2.56.1")
+    implementation("com.google.dagger:hilt-android:2.58")
+    ksp("com.google.dagger:hilt-compiler:2.58")
     implementation("androidx.hilt:hilt-navigation-compose:1.2.0")
 
     // Room 数据库
@@ -368,6 +372,9 @@ dependencies {
 
     // Kotlin 序列化
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.1")
+
+    // Native-only pure-computation JavaScript; no Android/Java host bindings are installed.
+    implementation("io.github.dokar3:quickjs-kt:1.0.15")
 
     // YAML 解析 (用于 Skill Frontmatter)
     implementation("org.yaml:snakeyaml:2.2")
@@ -451,6 +458,9 @@ dependencies {
 
     // Testing
     testImplementation("junit:junit:4.13.2")
+    testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
+    testImplementation("com.squareup.okhttp3:okhttp-tls:4.12.0")
+    testRuntimeOnly("io.github.dokar3:quickjs-kt-jvm:1.0.15") { isTransitive = false }
     testImplementation("androidx.compose.ui:ui-test-junit4")
     testImplementation("org.json:json:20240303")
     // 迁移测试：MigrationTestHelper + Robolectric（在 JVM 上跑 Room 迁移，需真实 resources）

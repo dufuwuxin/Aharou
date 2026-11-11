@@ -22,7 +22,7 @@ data class ContainerGradleHeapUiState(
 @HiltViewModel
 class ContainerGradleHeapViewModel @Inject constructor(
     private val containerSettings: ContainerSettingsRepository,
-    @param:ApplicationContext context: Context,
+    @ApplicationContext context: Context,
 ) : ViewModel() {
 
     private val deviceMemMb = ContainerSettingsRepository.deviceTotalMemMb(context)

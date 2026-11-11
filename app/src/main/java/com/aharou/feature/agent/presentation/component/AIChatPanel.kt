@@ -52,6 +52,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -291,6 +292,7 @@ fun AIChatPanel(
     var messageForMenu by remember { mutableStateOf<AgentUIMessage?>(null) }
     var crossCheckMessage by remember { mutableStateOf<AgentUIMessage?>(null) }
     var showActivity by remember { mutableStateOf(false) }
+    var showConversationMap by remember(currentSessionId) { mutableStateOf(false) }
     val quoteReplyEnabled = rememberQuoteReplyEnabled()
     var editingMessage by remember { mutableStateOf<AgentUIMessage?>(null) }
     var queuedEditing by remember { mutableStateOf<QueuedRequest?>(null) }
@@ -824,7 +826,7 @@ fun AIChatPanel(
             // 否则贴底那一下会把视口拽回底部（嵌套拖动后弹回）。
             val movedOuter = start == null || start.index != listState.firstVisibleItemIndex ||
                 start.offset != listState.firstVisibleItemScrollOffset
-            followBottom = if (movedOuter) isAtBottom else start?.following == true
+            followBottom = if (movedOuter) isAtBottom else start.following
         }
     }
 
@@ -1197,6 +1199,7 @@ fun AIChatPanel(
                     onNavigateToObserve()
                 },
                 onOpenActivity = { showActivity = true },
+                onConversationMap = { showConversationMap = true },
                 connectionState = connectionState?.takeIf { isRemote },
                 terminalActive = terminalActive,
                 gitActive = gitActive,
@@ -1226,7 +1229,7 @@ fun AIChatPanel(
             Box(modifier = Modifier.weight(1f)) {
                 if (bodyOverride != null) {
                     Box(Modifier.fillMaxSize().padding(bottom = with(LocalDensity.current) { floatingLayerHeightPx.toDp() })) {
-                        ProjectChatMenuHost(sessionId = currentSessionId?.takeIf { sessionReady && currentSession?.parentId == null }, onTerminal = onNavigateToTerminal, onGit = onNavigateToGit, onBrowser = onNavigateToBrowser, onSandbox = onNavigateToSandbox, onShared = onNavigateToShared, onObserve = { currentSessionId?.let { ObserveTargetHolder.sessionId = it }; onNavigateToObserve() }, onActivity = { showActivity = true }, connectionState = connectionState?.takeIf { isRemote }, inputTokens = sessionInputTokens, outputTokens = sessionOutputTokens) { bodyOverride(composer::collapse) }
+                        ProjectChatMenuHost(sessionId = currentSessionId?.takeIf { sessionReady && currentSession?.parentId == null }, onTerminal = onNavigateToTerminal, onGit = onNavigateToGit, onBrowser = onNavigateToBrowser, onSandbox = onNavigateToSandbox, onShared = onNavigateToShared, onObserve = { currentSessionId?.let { ObserveTargetHolder.sessionId = it }; onNavigateToObserve() }, onActivity = { showActivity = true }, onConversationMap = { showConversationMap = true }, connectionState = connectionState?.takeIf { isRemote }, inputTokens = sessionInputTokens, outputTokens = sessionOutputTokens) { bodyOverride(composer::collapse) }
                     }
                 } else if (!messagesReady) {
                     // 远程模式连接未就绪时显示连接状态占位，避免空白或旧工作区记录闪烁
@@ -1786,6 +1789,23 @@ fun AIChatPanel(
             }
 
             crossCheckMessage?.let { message -> CrossCheckSheet(message, currentSessionId) { crossCheckMessage = null } }
+            key(currentSessionId) {
+                val conversationMapScope = rememberCoroutineScope()
+                if (showConversationMap) ConversationMapSheet(
+                    currentSessionId, currentSession, messagesState, bodyOverride == null,
+                    canLocate = { findChatMessageIndex(chatItems, it) >= 0 },
+                    onJump = { id ->
+                        val index = findChatMessageIndex(chatItems, id)
+                        val valid = messagesReady && bodyOverride == null && index >= 0 && viewModel.currentSessionId.value == currentSessionId
+                        if (valid) {
+                            followBottom = false
+                            conversationMapScope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { if (viewModel.currentSessionId.value == currentSessionId) listState.scrollToItem(index) }
+                        }
+                        valid
+                    },
+                    onDismiss = { showConversationMap = false }
+                )
+            }
             if (showActivity) {
                 val receipts by viewModel.currentSessionReceipts.collectAsStateWithLifecycle()
                 ActivityTimelineSheet(receipts = receipts, onDismiss = { showActivity = false })

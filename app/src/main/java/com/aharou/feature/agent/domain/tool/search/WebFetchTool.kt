@@ -189,7 +189,7 @@ class WebFetchTool @Inject constructor() : AgentTool() {
         // 为了避免 Jsoup 的 .text() 把所有行挤在一起，给块级元素加上换行符
         doc.select("p, h1, h2, h3, h4, h5, h6, li, div, br").append("\\n")
         
-        val rawText = doc.body()?.text() ?: ""
+        val rawText = doc.body().text()
         
         // 还原换行符，并清理多余的空行
         return rawText.replace("\\n", "\n")

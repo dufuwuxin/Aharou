@@ -39,6 +39,10 @@ data class ContextEntry(
     val sessionId: String? = null,
     val workspaceRoot: String? = null,
     val requestKey: String? = null,
+    val keywords: List<String> = emptyList(),
+    val worldbook: WorldbookRules = WorldbookRules(),
+    val graphId: String = "",
+    val graphAliases: List<String> = emptyList(),
 )
 
 data class ContextPreview(
@@ -46,7 +50,8 @@ data class ContextPreview(
     val indexed: List<ContextEntry>,
     val omitted: List<Pair<ContextEntry, String>>,
     val rendered: String,
-    val renderedEntries: Map<String, String> = emptyMap()
+    val renderedEntries: Map<String, String> = emptyMap(),
+    val explanations: Map<String, String> = emptyMap(),
 )
 
 internal object ContextFolderPath {

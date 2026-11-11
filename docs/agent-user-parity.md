@@ -4,6 +4,16 @@
 
 ## 本轮新增能力
 
+- 世界书记忆：原生条目内持久化触发/排除、匹配方式、受众与精确角色/标签、优先级、用户标注的可信度与重要性、检索标签和关键词/标签/关系权重；预览与请求同选择器，未命中/停用/跨会话不注入。结构化表单与高级 JSON 写回同一原生条目；config 通过 `context_library.entries.<id>.worldbook` 读写。
+- 记忆关系图谱：唯一可见目标解析、歧义/缺失显式显示；稳定身份保留改名引用，Canvas 有限绘制与分页关系列表不造节点，不改变权限或激活。
+- 云端查询：`memory_cloud_search` 为默认关闭的显式 HTTPS 公共端点查询；`memory.cloud_search.enabled/endpoint` 与原设置页共享可观察状态。只外发明确 query/limit，不外发全库、聊天、路径或凭据；结果始终标为未核验参考，不自动保存或注入。
+- 角色标签：原定义 YAML、编辑器和 `subagent.roles.<id>.tags` 共用角色保存入口；标签只收窄世界书受众，不赋予工具权限，旧 allow/deny 与脚本身份仍有效。
+- 对话地图与详情：普通聊天顶部与项目菜单可访问当前会话已加载记录的轮次地图，hasMore 明确披露；普通正文可定位锚点，项目替换正文仅查看。会话详情使用真实会话字段，不查询凭据。
+- 原生包市场：原插件页增加已安装/包市场，首源搜索/真实详情/明确安装确认/更新状态，保留导入启停卸载；安装前重查本地版本，未知状态不当作未安装，远端 ID 不参与缓存路径。
+- WARN/MAX：预警先精简工具历史，MAX 触发压缩且在实际发送前拒绝仍超限的请求；不删除持久历史。模型目录新增官方单文件 Qwen2.5 3B Q4_K_M、7B Q3_K_M，未设备推理不冒充已测。
+
+- 本地 JavaScript 纯计算：`eval_javascript` 经原生注册器与 `tool_search` 按需发现，使用原有工具授权系统，不增加默认注入或宿主权限。返回最后表达式的 JSON 值及 console 日志；源码、输出、日志、内存、栈与原生执行时限均有界，不提供 DOM/Node/Java/网络/文件/进程桥。没有独立脚本运行 UI，不增加影子屏；手机端加载、执行和性能尚未验证。QuickJS 1.0.15 需要 Kotlin 2.4 元数据；编译器已同步升级至 2.3.21、R8 至已发布的 9.1.57，仍需真实构建与 JNI 测试验收。
+
 - 原生记忆库：配置页是唯一入口，`ContextLibrarySection` 仅保留内容库与注入预览；规则、临时存放、长期、角色注入、主代理注入五类支持文件夹与搜索编辑，不提供旧页面跳转或来源开关。应用管理的注入文字（含内置默认文字）先写入原生库，用户可查看、编辑、停用与删除，不从旧提示文件或角色正文回退。
 - 原生条目工具：`memory` 的 `library_list/library_search/library_read/library_save/library_delete` 使用条目ID和版本；`save` 支持 `category/folder/context_kind/context_load`，临时内容绑定真实调用会话，待确认状态保留。
 - 配置同权：`context_library.entries.<hash>.category/loading/kind/folder/session_id` 与页面共用仓库，`context_library.folders` 可新增空文件夹。加载只有 FULL/INDEX/SEARCH/OFF；预览是规划结果，不是历史请求记录。
@@ -21,9 +31,9 @@
 
 ## 0. 工具集合与事实来源
 
-- 内置工具的唯一注册点是 `app/src/main/java/com/aharou/di/AgentModule.kt:471-509`，共 **40 个**：`readFile` `sendFile` `sendToChat` `viewImage` `writeFile` `editFile` `generateImage` `Bash` `Shizuku` `terminal` `list` `search` `loadSkill` `loadRule` `knowledge_search` `askUserQuestion` `manageMcp` `tool_search` `websearch` `webfetch` `planMode` `todo` `memory` `task` `messageParent` `observe` `browser` `config` `vscreen` `a11y` `open_app` `check_dependencies` `sessions` `project_tasks` `device` `personal_context` `petAvatar` `diagnostics` `git_blame` `code_structure`。
+- 内置工具的唯一注册点是 `app/src/main/java/com/aharou/di/AgentModule.kt`，共 **40 个**：`readFile` `sendFile` `viewImage` `writeFile` `editFile` `generateImage` `Bash` `Shizuku` `terminal` `list` `search` `loadSkill` `loadRule` `knowledge_search` `askUserQuestion` `manageMcp` `tool_search` `websearch` `webfetch` `planMode` `todo` `memory` `task` `messageParent` `observe` `browser` `config` `vscreen` `a11y` `open_app` `check_dependencies` `sessions` `project_tasks` `device` `personal_context` `petAvatar` `diagnostics` `git_blame` `code_structure` `eval_javascript`。
 - MCP 工具在连接时动态注册（`feature/agent/domain/mcp/McpManager.kt:266`，卸载见 `:272` / `:354`）。
-- 每轮注入：工具集经成员允许清单、`ToolInjectionGate` 的 every_round/keyword/off 策略过滤，并应用兼容的描述与 schema 说明覆盖；不能把注册工具总数当作每轮实际可见数量。MCP 与代码结构工具的延迟加载由原有检索链路（`tool_search`）处理，展开记录限定当前会话和工作区，重启或较久未使用后可重新发现。
+- 每轮注入：工具集经成员允许清单、`ToolInjectionGate` 的 every_round/keyword/off 策略过滤，并应用兼容的描述与 schema 说明覆盖；不能把注册工具总数当作每轮实际可见数量。MCP、代码结构与 JavaScript 计算工具的延迟加载由原有检索链路（`tool_search`）处理，展开记录限定当前会话和工作区，重启或较久未使用后可重新发现。
 - `config`（`di/AgentModule.kt:475`，实现 `feature/agent/domain/tool/config/ConfigTool.kt`）是一层**通用配置接口**：agent 能改什么，取决于 `ConfigRegistry` 里注册了哪些字段，注册入口集中在 `AIEditorApp.kt:409-434`（24 个 `Config*Fields`）。下文写“config `path`”即指这条路径。
 - 权限档只影响“执行时要不要弹确认”（`ToolPermissionPolicyEngine`），**不影响工具有没有**；本表只统计有没有。
 

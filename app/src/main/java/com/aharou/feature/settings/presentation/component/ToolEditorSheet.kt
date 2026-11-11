@@ -107,7 +107,7 @@ internal fun ToolEditorSheet(
     val savingNow by rememberUpdatedState(saving)
     var choosingTemplate by remember { mutableStateOf(false) }
     val isNew = entry == null
-    val isCustom = isNew || entry?.source == ToolSource.CUSTOM
+    val isCustom = isNew || entry.source == ToolSource.CUSTOM
 
     var name by remember(entry, template) { mutableStateOf(entry?.name ?: template?.name.orEmpty()) }
     var description by remember(entry, template) { mutableStateOf(entry?.description ?: template?.description.orEmpty()) }
@@ -252,7 +252,7 @@ internal fun ToolEditorSheet(
                 )
             } else {
                 Text(stringResource(R.string.tools_schema_original), style = MaterialTheme.typography.labelLarge)
-                SchemaViewer(schemaJson = entry?.originalSchemaJson.orEmpty())
+                SchemaViewer(schemaJson = entry.originalSchemaJson.orEmpty())
                 AppTextField(
                     value = schemaText,
                     onValueChange = { schemaText = it },
@@ -265,7 +265,7 @@ internal fun ToolEditorSheet(
                     supportingText = { Text(stringResource(if (schemaValid) R.string.tools_schema_metadata_hint else R.string.tools_schema_invalid)) },
                     textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace)
                 )
-                TextButton(onClick = { schemaText = entry?.originalSchemaJson.orEmpty() }, enabled = !saving) {
+                TextButton(onClick = { schemaText = entry.originalSchemaJson.orEmpty() }, enabled = !saving) {
                     Text(stringResource(R.string.tools_schema_reset))
                 }
                 AppTextField(
@@ -328,7 +328,7 @@ internal fun ToolEditorSheet(
                                 keywords
                             )
                         } else {
-                            entry?.let { onSaveSettings(it.name, description.trim().takeIf { text -> text.isNotEmpty() }, mode, keywords,
+                            entry.let { onSaveSettings(it.name, description.trim().takeIf { text -> text.isNotEmpty() }, mode, keywords,
                                 schemaText.takeUnless { text -> text == it.originalSchemaJson }) }
                         }
                     }

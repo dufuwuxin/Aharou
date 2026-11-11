@@ -280,7 +280,6 @@ class SessionTreeObserver @Inject constructor(
 
         is JsonArray -> "[${value.size} 项]"
         is JsonObject -> "{${value.keys.size} 个字段}"
-        else -> "…"
     }
 
     /** 压成单行并截断，保留「被截了」的信号。 */

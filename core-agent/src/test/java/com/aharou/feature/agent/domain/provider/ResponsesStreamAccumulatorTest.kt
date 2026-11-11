@@ -444,7 +444,7 @@ class ResponsesStreamAccumulatorTest {
         val resp = acc.toResponse()
         assertEquals("正文", resp.content)
         assertEquals("思考总结", resp.reasoning)
-        assertTrue(resp.thinkingBlocksJson != null && resp.thinkingBlocksJson!!.contains("gAAAAABtest_stream"))
+        assertTrue(resp.thinkingBlocksJson != null && resp.thinkingBlocksJson.contains("gAAAAABtest_stream"))
     }
 
     private fun imageItem(id: String, result: String, outputFormat: String = "png"): JsonObject =

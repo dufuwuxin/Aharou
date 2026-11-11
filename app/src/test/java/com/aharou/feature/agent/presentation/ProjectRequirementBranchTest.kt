@@ -11,6 +11,7 @@ import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
 import com.aharou.feature.agent.domain.prompt.InjectedContextStore
 import com.aharou.feature.agent.domain.steward.StewardController
 import com.aharou.feature.agent.domain.steward.StewardSettingsStore
+import com.aharou.feature.settings.presentation.ScheduledTasksViewModel
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.*
@@ -83,6 +84,11 @@ class ProjectRequirementBranchTest {
         }
         val panelOwner = object : ViewModelStoreOwner {
             override val viewModelStore = ViewModelStore().apply {
+                put("androidx.lifecycle.ViewModelProvider.DefaultKey:${ScheduledTasksViewModel::class.java.canonicalName}",
+                    mockk<ScheduledTasksViewModel>(relaxed = true).also { scheduled ->
+                        every { scheduled.tasks } returns MutableStateFlow(emptyList())
+                        every { scheduled.sessions } returns MutableStateFlow(emptyList())
+                    })
                 put("androidx.lifecycle.ViewModelProvider.DefaultKey:${StewardPanelViewModel::class.java.canonicalName}",
                     StewardPanelViewModel(StewardController(StewardSettingsStore.Noop, mockk()),
                         StewardSettingsStore.Noop, mockk()))
@@ -176,13 +182,13 @@ class ProjectRequirementBranchTest {
         compose.onNodeWithTag("project_tree_body").performScrollToNode(hasTestTag("task_node_sibling"))
         compose.onNodeWithTag("task_node_sibling").performClick()
         compose.waitForIdle()
-        compose.onNodeWithTag("project_branch_composer").assertTextContains("Sibling")
+        compose.onNodeWithTag("project_branch_composer").assertTextEquals(compose.activity.getString(R.string.project_branch_composer, "Sibling"))
         compose.runOnIdle {
             state.value = state.value.copy(tasks = state.value.tasks.filterNot { it.id == "branch" || it.id == "child" })
             requireNotNull(deletionFinished).invoke()
         }
         compose.waitForIdle()
-        compose.onNodeWithTag("project_branch_composer").assertTextContains("Sibling")
+        compose.onNodeWithTag("project_branch_composer").assertTextEquals(compose.activity.getString(R.string.project_branch_composer, "Sibling"))
         compose.onNodeWithTag("project_main_conversation").performClick()
         compose.waitForIdle()
         compose.onNodeWithTag("project_main_reader").assertExists()
@@ -194,7 +200,7 @@ class ProjectRequirementBranchTest {
         compose.onNodeWithTag("project_mode_toggle").performClick()
         compose.onNodeWithTag("map_node_project:p").performClick()
         compose.waitForIdle()
-        compose.onNodeWithTag("map_process_sheet").assertExists()
+        compose.onNodeWithTag("map_root_conversation").assertExists()
         compose.onNodeWithTag("project_root_record_main").assertExists()
         compose.runOnIdle { panelOwner.viewModelStore.clear() }
     }
@@ -309,6 +315,11 @@ class ProjectRequirementBranchTest {
             override val viewModelStore = ViewModelStore().apply {
                 put("androidx.lifecycle.ViewModelProvider.DefaultKey:${InjectedContextViewModel::class.java.canonicalName}",
                     InjectedContextViewModel(InjectedContextStore()))
+                put("androidx.lifecycle.ViewModelProvider.DefaultKey:${ScheduledTasksViewModel::class.java.canonicalName}",
+                    mockk<ScheduledTasksViewModel>(relaxed = true).also { scheduled ->
+                        every { scheduled.tasks } returns MutableStateFlow(emptyList())
+                        every { scheduled.sessions } returns MutableStateFlow(emptyList())
+                    })
                 put("androidx.lifecycle.ViewModelProvider.DefaultKey:${StewardPanelViewModel::class.java.canonicalName}",
                     StewardPanelViewModel(StewardController(StewardSettingsStore.Noop, mockk()),
                         StewardSettingsStore.Noop, mockk()))

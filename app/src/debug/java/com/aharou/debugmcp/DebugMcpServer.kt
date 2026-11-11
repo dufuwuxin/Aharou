@@ -65,13 +65,13 @@ object DebugMcpServer {
         if (!started.compareAndSet(false, true)) return
         // applicationContext 运行时总是 Application，但静态类型是 Context；拿不到就不注册活动栈
         // （工具层会取不到 AIAgentViewModel），并复位启动标记，留给下次再试。
-        val app = context.applicationContext as? android.app.Application ?: run {
+        val app = context.applicationContext as? Application ?: run {
             started.set(false)
             return
         }
         appContext = app
         // 记录活动栈，供工具线程取「当前 Activity 的 AIAgentViewModel」（ViewModel 非单例，只能从 Activity 拿）。
-        if (app is Application) DebugMcpActivityTracker.register(app)
+        DebugMcpActivityTracker.register(app)
         // 端口解析（可能读盘）与 socket 绑定都放后台线程，避免拖慢启动主线程。
         Thread({ acceptLoop(resolvePort(app)) }, "debug-mcp-server").apply { isDaemon = true }.start()
     }

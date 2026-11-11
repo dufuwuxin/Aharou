@@ -59,7 +59,7 @@ data class AgentPermissionReply(val sessionId: String, val text: String)
  */
 @Singleton
 class AgentPermissionNotifier @Inject constructor(
-    @ApplicationContext private val context: Context,
+    @param:ApplicationContext private val context: Context,
     private val toolPermissionManager: ToolPermissionManager,
     private val sessionUseCase: SessionUseCase
 ) {

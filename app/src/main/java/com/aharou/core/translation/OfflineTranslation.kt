@@ -18,7 +18,7 @@ enum class TranslationModelState { CHECKING, MISSING, DOWNLOADING, READY, FAILED
 
 @Singleton
 class OfflineTranslation @Inject constructor(
-    @param:ApplicationContext context: Context,
+    @ApplicationContext context: Context,
     private val models: TranslationModelFiles,
     private val engine: TranslationWebEngine,
 ) {

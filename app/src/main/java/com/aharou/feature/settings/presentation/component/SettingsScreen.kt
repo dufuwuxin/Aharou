@@ -413,7 +413,6 @@ fun SettingsScreen(
         SettingsSection.SubAgents -> (configHome ?: SettingsSection.AiGroup)
         SettingsSection.SubAgentEditor -> subAgentEditorReturn
         SettingsSection.ContainerDownloads, SettingsSection.ContainerSources -> SettingsSection.Container
-        else -> if (expanded) null else SettingsSection.Menu
     }
 
     // 有上一层时系统返回键先回上一层；没有则交还给上层导航。

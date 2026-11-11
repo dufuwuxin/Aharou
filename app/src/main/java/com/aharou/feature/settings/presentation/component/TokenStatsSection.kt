@@ -815,14 +815,14 @@ private fun ModelStatsRow(
         Row(modifier = Modifier.fillMaxWidth()) {
             Box(
                 modifier = Modifier
-                    .weight((m.inputTokens + 1f).toFloat())
+                    .weight((m.inputTokens + 1f))
                     .height(6.dp)
                     .background(INPUT_COLOR, RoundedCornerShape(3.dp))
             )
             Spacer(Modifier.width(2.dp))
             Box(
                 modifier = Modifier
-                    .weight((m.outputTokens + 1f).toFloat())
+                    .weight((m.outputTokens + 1f))
                     .height(6.dp)
                     .background(OUTPUT_COLOR, RoundedCornerShape(3.dp))
             )

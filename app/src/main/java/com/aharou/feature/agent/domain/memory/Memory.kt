@@ -40,7 +40,10 @@ data class Memory(
     val contextFolder: String = "",
     val contextSessionId: String? = null,
     val hasContextMetadata: Boolean = true,
-    val contextRequest: String? = null
+    val contextRequest: String? = null,
+    val worldbook: WorldbookRules = WorldbookRules(),
+    val graphId: String? = null,
+    val graphAliases: List<String> = emptyList(),
 )
 
 enum class MemoryScope {

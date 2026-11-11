@@ -17,10 +17,6 @@
     "app/src/main/java/com/aharou/feature/settings/presentation/component/ContainerSettingsSection.kt": 1261,
     "app/src/main/java/com/aharou/feature/agent/presentation/component/ChatInputBar.kt": 1355,
     "app/src/main/java/com/aharou/feature/agent/presentation/component/AdaptiveCardRenderer.kt": 1194,
-    "app/src/main/java/com/aharou/AIEditorApp.kt": 1025,
-    "app/src/main/java/com/aharou/feature/settings/presentation/component/DefaultModelsSection.kt": 1004,
-    "app/src/main/java/com/aharou/feature/agent/domain/prompt/SystemPromptProvider.kt": 1008,
-    "app/src/main/java/com/aharou/feature/agent/domain/workflow/ContextCompactor.kt": 1012,
     "app/src/main/java/com/aharou/feature/backup/data/BackupManagerImpl.kt": 1001
   },
   "bannedImports": {

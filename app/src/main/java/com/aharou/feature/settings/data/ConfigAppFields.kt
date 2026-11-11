@@ -151,8 +151,8 @@ class ConfigAppFields @Inject constructor(
         registry.register(
             DataStoreIntField(
                 path = "app.compaction_threshold_percent",
-                displayName = "自动压缩阈值（%）",
-                description = "上下文用量达到该百分比时自动压缩历史。默认 90。",
+                displayName = "MAX 硬上限（%）",
+                description = "达到该比例时压缩历史；压缩后仍达到 MAX 的请求不发送。默认 90。",
                 flow = generalSettings.compactionThresholdPercentFlow,
                 setter = { generalSettings.setCompactionThresholdPercent(it) },
             ),
@@ -181,8 +181,8 @@ class ConfigAppFields @Inject constructor(
         registry.register(
             DataStoreIntField(
                 path = "app.soft_compaction_threshold_percent",
-                displayName = "软精简阈值（%）",
-                description = "上下文用量达到该百分比时先精简历史里的超长工具输出，不调用摘要模型。默认 55。",
+                displayName = "WARN 预警线（%）",
+                description = "达到该比例时先精简历史工具输出，不调用摘要模型；实际预警线不高于 MAX。",
                 flow = generalSettings.softCompactionThresholdPercentFlow,
                 setter = { generalSettings.setSoftCompactionThresholdPercent(it) },
             ),

@@ -30,8 +30,8 @@ enum class ScheduledTaskTemplateCategory {
  */
 data class ScheduledTaskTemplate(
     val id: String,
-    @StringRes val nameRes: Int,
-    @StringRes val descriptionRes: Int,
+    @param:StringRes val nameRes: Int,
+    @param:StringRes val descriptionRes: Int,
     val category: ScheduledTaskTemplateCategory,
     val prompt: String,
     val scheduleType: String = ScheduledTaskEntity.TYPE_DAILY,
@@ -40,7 +40,7 @@ data class ScheduledTaskTemplate(
     /** 周期分钟数；只有 [ScheduledTaskEntity.TYPE_INTERVAL] 用（低于下限会被调度层收敛）。 */
     val intervalMinutes: Int = 24 * 60,
     /** 非空表示 prompt 里留了 [ScheduledTaskTemplates.TOPIC_PLACEHOLDER]，建任务前要填主题。 */
-    @StringRes val topicHintRes: Int? = null,
+    @param:StringRes val topicHintRes: Int? = null,
     val topicDefault: String = "",
 )
 

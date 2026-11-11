@@ -55,6 +55,7 @@ import compose.icons.feathericons.Eye
 import compose.icons.feathericons.GitBranch
 import compose.icons.feathericons.Globe
 import compose.icons.feathericons.HardDrive
+import compose.icons.feathericons.Map
 import compose.icons.feathericons.Terminal
 
 @Composable
@@ -76,7 +77,8 @@ internal fun ChatHeader(
     connectionState: com.aharou.feature.agent.domain.container.ConnectionState? = null,
     terminalActive: Boolean = false,
     gitActive: Boolean = false,
-    browserActive: Boolean = false
+    browserActive: Boolean = false,
+    onConversationMap: (() -> Unit)? = null
 ) {
     // 顶栏工具收纳：Git / 终端 / 浏览器 收进一个按钮，展开时在原位覆盖成那三个入口，
     // 替出来的格子给智能托管。展开态只改这一段，不弹浮层也不撑开新行。
@@ -109,6 +111,12 @@ internal fun ChatHeader(
                     Spacer(modifier = Modifier.width(Spacing.sm))
                 }
                 Spacer(modifier = Modifier.weight(1f))
+                if (onConversationMap != null) {
+                    IconButton(onClick = onConversationMap, modifier = Modifier.size(48.dp)) {
+                        Icon(FeatherIcons.Map, contentDescription = stringResource(R.string.conversation_map_title),
+                            tint = MaterialTheme.colorScheme.primary)
+                    }
+                }
 
                 if (toolsExpanded) {
                     // 展开态：只有工具三入口 + 收起，其余一律让位

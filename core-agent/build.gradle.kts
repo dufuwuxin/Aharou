@@ -2,7 +2,7 @@ plugins {
     // 不带版本：Kotlin Gradle Plugin 已由 :app 的 kotlin("android") 带进根 classpath，
     // 这里再写 version 会报「already on the classpath」。
     kotlin("jvm")
-    kotlin("plugin.serialization") version "2.2.21"
+    kotlin("plugin.serialization") version "2.3.21"
 }
 
 java {
@@ -17,6 +17,7 @@ kotlin {
 }
 
 tasks.withType<Test>().configureEach {
+    jvmArgs("-Xshare:off")
     val runtimeClasspath = classpath
     // PRoot 无法 self-attach；与 app 单测一样在 JVM 启动时安装 MockK agent。
     jvmArgumentProviders += org.gradle.process.CommandLineArgumentProvider {

@@ -11,6 +11,7 @@ import com.aharou.feature.agent.domain.context.ContextLibraryRepository
 import com.aharou.feature.agent.domain.context.ContextLoad
 import com.aharou.feature.agent.domain.context.ContextOrigin
 import com.aharou.feature.agent.domain.context.ContextPreview
+import com.aharou.feature.agent.domain.context.ContextSearch
 import com.aharou.feature.agent.domain.memory.MemoryScope
 import com.aharou.feature.workspace.data.repository.WorkspaceRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -89,10 +90,11 @@ class ContextLibraryViewModel @Inject constructor(
         sessionId: String?,
         expectedRoot: String?,
         onSaved: () -> Unit,
+        worldbook: com.aharou.feature.agent.domain.context.WorldbookRules = com.aharou.feature.agent.domain.context.WorldbookRules(),
     ) = write(onSaved) { root ->
         if (root != expectedRoot || (scope == MemoryScope.PROJECT && root == null)) false
         else library.create(name.trim(), description.trim(), content, scope, kind, loading, root,
-            category = category, folder = folder.trim(), sessionId = sessionId)
+            category = category, folder = folder.trim(), sessionId = sessionId, worldbook = worldbook)
     }
 
     fun delete(entry: ContextEntry, expectedRoot: String?, onDeleted: () -> Unit) = write(onDeleted) { root ->
@@ -173,16 +175,12 @@ internal fun filterContextEntries(
     category: ContextCategory? = null,
     folder: String? = null,
 ): List<ContextEntry> {
-    val terms = query.trim().lowercase().split(Regex("\\s+")).filter(String::isNotBlank)
-    return entries.filter { entry ->
+    val filtered = entries.filter { entry ->
         (category == null || entry.category == category) &&
             (folder == null || entry.folder == folder) &&
             (scope == null || entry.scope == scope) &&
             (loading == null || entry.loading == loading) &&
-            (origin == null || entry.origin == origin) &&
-            terms.all { term ->
-                listOf(entry.title, entry.description, entry.content, entry.sourceLabel)
-                    .any { term in it.lowercase() }
-            }
+            (origin == null || entry.origin == origin)
     }
+    return ContextSearch.search(filtered, query, includeSource = true)
 }

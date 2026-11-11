@@ -285,7 +285,6 @@ class ConfigProviderFields @Inject constructor(
                                 ))
                             }
                         }
-                        null
                     },
                 ),
                 str(

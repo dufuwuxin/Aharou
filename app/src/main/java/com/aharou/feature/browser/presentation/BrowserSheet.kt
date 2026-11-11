@@ -293,7 +293,7 @@ fun BrowserSheet(
                     if (isLoading) {
                         Spacer(modifier = Modifier.width(4.dp))
                         IconButton(
-                            onClick = { selectedTab?.manager?.stopLoading() },
+                            onClick = { selectedTab.manager.stopLoading() },
                             modifier = Modifier.size(28.dp),
                         ) {
                             Icon(
@@ -455,7 +455,7 @@ fun BrowserSheet(
                         contentDesc = stringResource(R.string.browser_stop),
                         enabled = !isAgentBusy,
                         tint = accent,
-                        onClick = { selectedTab?.manager?.stopLoading() },
+                        onClick = { selectedTab.manager.stopLoading() },
                     )
                 } else {
                     ToolbarIcon(
@@ -525,7 +525,7 @@ fun BrowserSheet(
     pendingJsDialog?.let { dialog ->
         BrowserJsDialogHost(
             dialog = dialog,
-            onResolve = { accept, text -> selectedTab?.manager?.resolvePendingJsDialog(accept, text) },
+            onResolve = { accept, text -> selectedTab.manager.resolvePendingJsDialog(accept, text) },
         )
     }
 }
