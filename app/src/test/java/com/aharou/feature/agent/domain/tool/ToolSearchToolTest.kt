@@ -60,6 +60,25 @@ class ToolSearchToolTest {
         assertFalse(registry.requestTools(allowed, context.copy(sessionId = "b")).contains(ordinary))
     }
 
+    @Test fun largeSchemaIsNeverPresentedAsTruncatedJson() = runTest {
+        val large = object : AgentTool() {
+            override val name = "large_schema"
+            override val description = "large parameter schema fixture"
+            override val parameters = mapOf("required_tail" to ToolParameter(
+                "required_tail", ParameterType.STRING, "parameter ".repeat(200), true))
+        }
+        registry.register(large.name, large)
+        registry.bindDiscoveryTools(registry.getAvailableTools(), context)
+        val result = tool.executeWithContext(mapOf("query" to JsonPrimitive(large.name)), context) as ToolResult.Success
+        val text = result.data.toString()
+        assertFalse(text.contains("参数 schema："))
+        assertTrue(text.contains("完整参数"))
+        val activated = registry.requestTools(registry.getAvailableTools(), context).single { it.name == large.name }
+        assertEquals(large.toJsonSchema(), activated.toJsonSchema())
+        assertTrue(activated.parameters.getValue("required_tail").required)
+        assertFalse(registry.isActivated(large.name, context.copy(sessionId = "other")))
+    }
+
     @Test fun searchCannotDiscoverOrActivateToolsOutsideTheAllowedSnapshot() = runTest {
         registry.bindDiscoveryTools(emptyList(), context)
         tool.executeWithContext(mapOf("query" to JsonPrimitive("code_structure")), context)

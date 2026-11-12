@@ -59,7 +59,9 @@ class BuiltinContextEntries internal constructor(
         // A separate durable receipt survives user rename/delete/OFF; a missing memory is not a migration request.
         val defaults = defaults()
         var legacyAdoption = false
-        val toolDirectoryIds = setOf("main-tool-directory", "member-tool-directory")
+        // Only new IDs may join a legacy library; old defaults remain user-owned even when absent.
+        val legacyAdditionIds = setOf("main-tool-directory", "member-tool-directory",
+            "main-execution-contract", "member-execution-contract", "execution-source-map")
         val done = if (ledger.exists()) {
             val lines = try { ledger.readLines() } catch (e: Exception) {
                 FileLogger.w("BuiltinContextEntries", "读取默认收据失败", e)
@@ -88,14 +90,14 @@ class BuiltinContextEntries internal constructor(
             adopted
         }
         for (entry in defaults) {
-            if (entry.id in done || legacyAdoption && entry.id !in toolDirectoryIds) continue
+            if (entry.id in done || legacyAdoption && entry.id !in legacyAdditionIds) continue
             val result = memories.writeMemory(entry.title, entry.description, entry.content,
                 MemoryScope.GLOBAL, null, expectedVersion = MemorySource.VERSION_NEW,
                 contextKind = ContextKind.INSTRUCTION, contextLoad = entry.loading,
                 contextCategory = entry.category, contextFolder = entry.folder, contextRequest = entry.requestKey)
             // An existing user-owned name wins, even if its body or metadata differs from our default.
             check(result == MemoryWriteResult.Success || result is MemoryWriteResult.VersionConflict) {
-                "Native context default write failed: ${entry.id}"
+                "Native context default write failed: ${entry.id}: $result"
             }
             if (!writeReceipt((done + entry.id).toList(), legacyAdoption)) {
                 if (result == MemoryWriteResult.Success) memories.deleteMemory(entry.title, MemoryScope.GLOBAL, null)
