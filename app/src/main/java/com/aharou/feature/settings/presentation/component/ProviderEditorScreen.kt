@@ -163,6 +163,10 @@ fun ProviderEditorScreen(
 ) {
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
+    val accountManager = rememberAccountProviderManager()
+    val providerId = androidx.compose.runtime.saveable.rememberSaveable { initialProvider?.id ?: System.currentTimeMillis().toString() }
+    val accountPreset = presetPrefill?.id?.takeIf { it.startsWith("account-") }?.removePrefix("account-")
+        ?.let { com.aharou.feature.settings.data.account.AccountProviderKind.fromWireId(it) }
     val presetType by remember {
         mutableStateOf(presetPrefill?.type?.let { runCatching { ProviderType.valueOf(it) }.getOrNull() })
     }
@@ -176,7 +180,10 @@ fun ProviderEditorScreen(
     var keySwitchStatusCodes by remember {
         mutableStateOf(initialProvider?.keySwitchStatusCodes?.joinToString(",") ?: "")
     }
-    var baseUrl by remember { mutableStateOf(initialProvider?.baseUrl ?: presetPrefill?.baseUrl ?: "") }
+    var baseUrl by remember {
+        mutableStateOf(initialProvider?.baseUrl ?: accountPreset?.let { accountManager.baseUrl(it, providerId) } ?: presetPrefill?.baseUrl ?: "")
+    }
+    val accountKind = accountManager.kind(baseUrl)
     var useFullUrl by remember { mutableStateOf(initialProvider?.useFullUrl ?: false) }
     var useResponseApi by remember { mutableStateOf(initialProvider?.useResponseApi ?: presetPrefill?.useResponseApi ?: false) }
     var anthropicCacheBreakpoints by remember { mutableStateOf(initialProvider?.anthropicCacheBreakpoints ?: true) }
@@ -200,7 +207,6 @@ fun ProviderEditorScreen(
     var proxyPassword by remember { mutableStateOf(initialProvider?.proxyPassword ?: "") }
     var isEnabled by remember { mutableStateOf(initialProvider?.isEnabled ?: true) }
     var type by remember { mutableStateOf(initialProvider?.type ?: presetType ?: ProviderType.OPENAI) }
-    val providerId = remember { initialProvider?.id ?: System.currentTimeMillis().toString() }
     // 自定义图标：相册导入后存本地绝对路径，也可以直接是图片链接。
     var customIcon by remember { mutableStateOf(initialProvider?.customIcon ?: "") }
     // 备用模型链：按列表顺序轮询（失败切下一条），空列表表示不回退。
@@ -319,7 +325,7 @@ fun ProviderEditorScreen(
         customMetadata = customMetadataStore.all()
     }
 
-    fun currentConfig() = AIProviderConfig(
+    fun currentConfig() = accountManager.normalizeConfig(AIProviderConfig(
         id = providerId,
         name = name.ifEmpty { context.getString(R.string.provider_new) },
         type = type,
@@ -332,9 +338,9 @@ fun ProviderEditorScreen(
         baseUrl = baseUrl.ifBlank { defaultProviderBaseUrl(type) },
         useFullUrl = useFullUrl,
         isEnabled = isEnabled,
-        defaultModel = initialProvider?.defaultModel ?: "",
+        defaultModel = if (accountKind != null) initialProvider?.defaultModel?.takeIf { it in models } ?: models.firstOrNull().orEmpty() else initialProvider?.defaultModel ?: "",
         models = models.toList(),
-        selectedModel = initialProvider?.selectedModel ?: "",
+        selectedModel = if (accountKind != null) initialProvider?.selectedModel?.takeIf { it in models } ?: models.firstOrNull().orEmpty() else initialProvider?.selectedModel ?: "",
         useResponseApi = useResponseApi,
         anthropicCacheBreakpoints = anthropicCacheBreakpoints,
         openaiChatCacheKey = openaiChatCacheKey,
@@ -354,7 +360,7 @@ fun ProviderEditorScreen(
         fallbackChain = fallbackChain.toList(),
         fallbackProviderId = fallbackChain.firstOrNull()?.providerId ?: "",
         fallbackModel = fallbackChain.firstOrNull()?.model ?: ""
-    ).sanitized()
+    ).sanitized())
 
     // 新建场景下判断用户是否填写了实质内容：名称、API Key、Base URL 任一非空白，或已添加模型 / DIY 脚本参数。
     // 全空白时退出编辑页（防止新建一个名为「默认供应商」的空记录）。
@@ -501,7 +507,6 @@ fun ProviderEditorScreen(
                             .padding(bottom = 70.dp),
                         verticalArrangement = Arrangement.spacedBy(Spacing.sm)
                     ) {
-                    // ── 基本信息 ──
                     ProviderBasicGroup(
                         name = name,
                         onNameChange = { name = it },
@@ -516,7 +521,14 @@ fun ProviderEditorScreen(
                         onOpenHeaders = { showHeadersSheet = true },
                         typeLabel = providerTypeLabel(type),
                         onOpenType = { showTypeSheet = true },
+                        accountMode = accountKind != null,
                     )
+                    accountKind?.let { kind ->
+                        ProviderAccountGroup(accountManager, currentConfig(), kind) { remoteModels ->
+                            models.clear()
+                            models.addAll(remoteModels)
+                        }
+                    }
 
                     // ── 选项 ──
                     SettingsGroupHeader(text = stringResource(R.string.provider_section_options))
@@ -543,7 +555,7 @@ fun ProviderEditorScreen(
                         )
                         SettingsDivider()
                         // 端侧模型不走 HTTP：完整 URL、新版端点、缓存这些开关对它们没有意义。
-                        if (type != ProviderType.LOCAL) {
+                        if (type != ProviderType.LOCAL && accountKind == null) {
                         ProviderSwitchRow(
                             title = stringResource(R.string.provider_full_url),
                             subtitle = stringResource(R.string.provider_full_url_desc),
@@ -551,7 +563,7 @@ fun ProviderEditorScreen(
                             onCheckedChange = { useFullUrl = it }
                         )
                         }
-                        ProviderServiceTierRow(type, customHeaders, useResponseApi) { useResponseApi = it }
+                        if (accountKind == null) ProviderServiceTierRow(type, customHeaders, useResponseApi) { useResponseApi = it }
                         if (type == ProviderType.OPENAI) {
                             SettingsDivider()
                             ProviderSwitchRow(

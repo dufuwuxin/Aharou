@@ -40,6 +40,7 @@ internal fun ProviderBasicGroup(
     onOpenHeaders: () -> Unit,
     typeLabel: String,
     onOpenType: () -> Unit,
+    accountMode: Boolean = false,
 ) {
     SettingsGroupHeader(text = stringResource(R.string.provider_section_basic))
     SettingsGroup(
@@ -50,6 +51,13 @@ internal fun ProviderBasicGroup(
             value = name,
             onValueChange = onNameChange
         )
+        if (accountMode) {
+            SettingsRow(
+                title = stringResource(R.string.provider_account_login_badge),
+                subtitle = stringResource(R.string.provider_account_connection_hint),
+            )
+            return@SettingsGroup
+        }
         if (!multiKeyEnabled) {
             ProviderTextFieldRow(
                 label = stringResource(R.string.provider_api_key),

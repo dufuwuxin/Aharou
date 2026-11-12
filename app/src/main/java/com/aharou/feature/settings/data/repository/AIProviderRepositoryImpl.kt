@@ -30,7 +30,8 @@ import javax.inject.Singleton
 @Singleton
 class AIProviderRepositoryImpl @Inject constructor(
     private val aiProviderDao: AIProviderDao,
-    private val agentDatabase: AgentDatabase
+    private val agentDatabase: AgentDatabase,
+    private val accounts: com.aharou.feature.settings.data.account.AccountProviderManager,
 ) : AIProviderRepository {
 
     private companion object {
@@ -77,7 +78,7 @@ class AIProviderRepositoryImpl @Inject constructor(
             val current = aiProviderDao.getProviderById(provider.id)
             val sortOrder = current?.sortOrder ?: (aiProviderDao.getMaxSortOrder() + 1)
             FileLogger.i(TAG, "保存提供商 id=${provider.id} name=${provider.name} sortOrder=$sortOrder")
-            aiProviderDao.insertProvider(provider.copy(sortOrder = sortOrder).sanitized().toEntity())
+            aiProviderDao.insertProvider(accounts.normalizeConfig(provider.copy(sortOrder = sortOrder).sanitized()).toEntity())
         }
     }
 
@@ -92,9 +93,10 @@ class AIProviderRepositoryImpl @Inject constructor(
         }
     }
 
-    override suspend fun deleteProvider(id: String) {
+    override suspend fun deleteProvider(id: String) = withContext(Dispatchers.IO) {
         FileLogger.i(TAG, "删除提供商 id=$id")
         aiProviderDao.deleteProvider(id)
+        accounts.logout(id)
     }
 
     override suspend fun setSelectedModel(id: String, model: String) {
@@ -112,10 +114,11 @@ class AIProviderRepositoryImpl @Inject constructor(
         aiProviderDao.setProviderEnabled(id, isEnabled)
     }
 
-    override suspend fun deleteProviders(ids: List<String>) {
-        if (ids.isEmpty()) return
+    override suspend fun deleteProviders(ids: List<String>) = withContext(Dispatchers.IO) {
+        if (ids.isEmpty()) return@withContext
         FileLogger.i(TAG, "批量删除提供商 共 ${ids.size} 个")
         aiProviderDao.deleteProviders(ids)
+        ids.forEach(accounts::logout)
     }
 
     override suspend fun setProvidersEnabled(ids: List<String>, isEnabled: Boolean) {
@@ -126,7 +129,7 @@ class AIProviderRepositoryImpl @Inject constructor(
 
     private fun AIProviderEntity.toDomainModel(): AIProviderConfig {
         val modelList = models.split("\n").map { it.substringBefore('|').trim() }.filter { it.isNotEmpty() }
-        return AIProviderConfig(
+        return accounts.normalizeConfig(AIProviderConfig(
             id = id,
             name = name,
             type = try { ProviderType.valueOf(type) } catch (e: Exception) { ProviderType.OPENAI },
@@ -164,7 +167,7 @@ class AIProviderRepositoryImpl @Inject constructor(
             fallbackModel = fallbackModel,
             fallbackChain = parseFallbackChain(fallbackChain),
             requestMiddleware = requestMiddleware
-        ).sanitized()
+        ).sanitized())
     }
 
     private fun AIProviderConfig.toEntity(): AIProviderEntity {

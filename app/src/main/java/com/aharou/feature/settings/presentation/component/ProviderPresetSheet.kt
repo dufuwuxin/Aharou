@@ -54,7 +54,16 @@ internal fun ProviderPresetSheet(
     val context = LocalContext.current
     val uriHandler = LocalUriHandler.current
     // 纯本地内存/磁盘/assets 同步直读，零延迟零等待，绝无任何网络加载与转圈
-    val officialPresets = remember { ProviderPresetLibrary.loadOfficial(context) }
+    val accountPresets = com.aharou.feature.settings.data.account.AccountProviderKind.entries.map { kind ->
+        ProviderPreset(
+            id = "account-${kind.wireId}",
+            name = accountProviderName(kind),
+            type = "OPENAI",
+            baseUrl = "https://accounts.aharou.invalid/${kind.wireId}/preset/v1",
+            badge = stringResource(R.string.provider_account_login_badge),
+        )
+    }
+    val officialPresets = accountPresets + remember { ProviderPresetLibrary.loadOfficial(context) }
     val screenHeight = LocalConfiguration.current.screenHeightDp.dp
     val sheetContentHeight = screenHeight * 0.85f
     AdaptiveModalBottomSheet(

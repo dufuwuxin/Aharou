@@ -50,6 +50,7 @@ class ConfigProviderFields @Inject constructor(
     @param:ApplicationContext private val context: Context,
     private val modelMetadataStore: CustomModelMetadataStore,
     private val providers: AIProviderRepository,
+    private val accounts: com.aharou.feature.settings.data.account.AccountProviderManager,
 ) {
 
     fun registerInto(registry: ConfigRegistry) {
@@ -106,6 +107,7 @@ class ConfigProviderFields @Inject constructor(
                 desc: String,
                 schema: ConfigSchema = ConfigSchema.Str(),
                 risk: ConfigRisk = ConfigRisk.NORMAL,
+                revertable: Boolean = true,
                 read: (AIProviderConfig) -> String,
                 write: (AIProviderConfig, String) -> AIProviderConfig,
             ) = ClosureField(
@@ -114,7 +116,7 @@ class ConfigProviderFields @Inject constructor(
                 description = desc,
                 valueSchema = schema,
                 risk = risk,
-                revertable = true,
+                revertable = revertable,
                 reader = { ConfigValue.Str(snapshot(forId)?.let(read).orEmpty()) },
                 writer = { v ->
                     val s = (v as? ConfigValue.Str)?.value ?: throw ConfigError.TypeMismatch("string")
@@ -189,6 +191,24 @@ class ConfigProviderFields @Inject constructor(
             if (!exists) return emptyList()
 
             return listOf(
+                str(
+                    field = "account_service",
+                    name = "账号供应商",
+                    desc = "账号接入：trae / workbuddy / raccoon。设置后改用本机原生账号连接；登录须由用户在供应商页完成。",
+                    revertable = false,
+                    read = { accounts.kind(it.baseUrl)?.wireId.orEmpty() },
+                    write = { p, s ->
+                        val kind = com.aharou.feature.settings.data.account.AccountProviderKind.fromWireId(s)
+                            ?: throw ConfigError.InvalidValue("未知账号供应商")
+                        if (accounts.kind(p.baseUrl) != null && accounts.kind(p.baseUrl) != kind && accounts.isLoggedIn(p.id)) {
+                            throw ConfigError.InvalidValue("请先退出原供应商账号再切换")
+                        }
+                        p.copy(type = ProviderType.OPENAI, baseUrl = accounts.baseUrl(kind, p.id),
+                            apiKey = "", apiKeys = emptyList(), multiKeyEnabled = false,
+                            useFullUrl = false, useResponseApi = false, customHeaders = emptyMap(),
+                            models = emptyList(), defaultModel = "", selectedModel = "")
+                    },
+                ),
                 str(
                     field = "name",
                     name = "显示名",

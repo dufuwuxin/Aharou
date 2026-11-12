@@ -19,7 +19,9 @@ class AIProviderFallbackCompatibilityTest {
         try {
             every { KeystoreCipher.encryptString(any()) } answers { firstArg() }
             every { KeystoreCipher.decryptString(any()) } answers { firstArg() }
-            val repo = AIProviderRepositoryImpl(mockk(), mockk())
+            val accounts = mockk<com.aharou.feature.settings.data.account.AccountProviderManager>()
+            every { accounts.normalizeConfig(any()) } answers { firstArg() }
+            val repo = AIProviderRepositoryImpl(mockk(), mockk(), accounts)
             val toEntity = AIProviderRepositoryImpl::class.java.getDeclaredMethod("toEntity", AIProviderConfig::class.java)
                 .apply { isAccessible = true }
             val toDomain = AIProviderRepositoryImpl::class.java.getDeclaredMethod("toDomainModel", AIProviderEntity::class.java)

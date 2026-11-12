@@ -204,7 +204,10 @@ object AgentModule {
 
     @Provides
     @Singleton
-    fun provideOkHttpClient(@ApplicationContext context: Context): OkHttpClient {
+    fun provideOkHttpClient(
+        @ApplicationContext context: Context,
+        accounts: com.aharou.feature.settings.data.account.AccountProviderManager,
+    ): OkHttpClient {
         // 统一 UA 为 aicode/<版本> (Android)；请求已带显式 UA（如用户自定义头）时不覆盖。
         // 版本号走 PackageManager（项目未开启 BuildConfig），dev 构建为 1.x.y-dev.N+hash 天然可溯源。
         val userAgent = runCatching {
@@ -214,6 +217,7 @@ object AgentModule {
         // 流式 SSE 下读超时是「相邻数据块之间」的等待上限，设为 0（无限制），
         // 慢生成不会因块间隔超时被掐断；首字节前的卡死由上层 watchdog（RetryPolicy）兜底。
         return OkHttpClient.Builder()
+            .addInterceptor(accounts.interceptor())
             .connectTimeout(120, TimeUnit.SECONDS)
             .readTimeout(0, TimeUnit.SECONDS)
             .writeTimeout(120, TimeUnit.SECONDS)
