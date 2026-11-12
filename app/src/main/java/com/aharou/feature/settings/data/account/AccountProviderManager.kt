@@ -66,7 +66,6 @@ class AccountProviderManager internal constructor(
     private val refreshLocks = ConcurrentHashMap<String, Any>()
     private val logins = ConcurrentHashMap<String, AccountLogin>()
     private val activeCalls = ConcurrentHashMap<String, MutableSet<Call>>()
-    private fun cancelAccountCalls(id: String) { activeCalls.remove(id)?.forEach { it.cancel() } }
     private val operations = ThreadLocal<Operation?>()
     private val parentCalls = ThreadLocal<Call?>()
     private val accountRevision = ThreadLocal<Pair<String, Long>?>()
@@ -172,12 +171,13 @@ class AccountProviderManager internal constructor(
 
     fun logout(id: String) {
         validateId(id)
-        synchronized(state) {
+        val (previousCalls, previousLogin) = synchronized(state) {
             revisions[id] = revision(id) + 1
             vault.write(id, null)
+            activeCalls.remove(id)?.toList().orEmpty() to logins.remove(id)
         }
-        cancelAccountCalls(id)
-        logins.remove(id)?.close()
+        previousCalls.forEach { it.cancel() }
+        previousLogin?.close()
     }
 
     internal fun exportCredentials(id: String): String = synchronized(state) {
@@ -191,12 +191,13 @@ class AccountProviderManager internal constructor(
         val declared = value.text("kind")
         if (declared != null && declared != kind.wireId) throw AccountProviderException("account_mismatch", "Imported account provider does not match", 400)
         val credential = parseCredential(kind, value)
-        synchronized(state) {
+        val (previousCalls, previousLogin) = synchronized(state) {
             revisions[id] = revision(id) + 1
             vault.write(id, credential.json().toString())
+            activeCalls.remove(id)?.toList().orEmpty() to logins.remove(id)
         }
-        cancelAccountCalls(id)
-        logins.remove(id)?.close()
+        previousCalls.forEach { it.cancel() }
+        previousLogin?.close()
     }
 
     internal fun parseCredential(kind: AccountProviderKind, response: JsonObject, previous: AccountCredential? = null, deviceId: String? = null): AccountCredential {
