@@ -123,6 +123,11 @@
 # ---- DataStore / security-crypto（内部反射）----
 -dontwarn androidx.security.**
 
+# SnakeYAML uses Class.getPackage().getName() in these static initializers.
+# Android returns null after R8 moves a class into the unnamed package.
+-keepnames class org.yaml.snakeyaml.TypeDescription
+-keepnames class org.yaml.snakeyaml.introspector.PropertySubstitute
+
 # ---- SnakeYAML / EdDSA 等第三方库在 Android 环境下的 JRE 缺失类告警忽略 ----
 -dontwarn java.beans.**
 -dontwarn sun.security.x509.**

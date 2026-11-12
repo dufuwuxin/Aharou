@@ -180,6 +180,9 @@ jobs:
           python3 scripts/test_background_shell.py
           ./gradlew :core-agent:test :app:testArmsoloDebugUnitTest
 
+      - name: Verify minified YAML package reflection
+        run: python3 scripts/test_release_yaml.py
+
       # 只构建 ARM64 安装包：
       # --stacktrace：构建失败时输出完整调用栈，便于在 CI 定位 OOM/内存类根因。
       - name: Restore build JDK 17

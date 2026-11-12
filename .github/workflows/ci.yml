@@ -155,6 +155,9 @@ jobs:
           ./gradlew :core-agent:test :app:testArmsoloDebugUnitTest \
             --console=plain 2>&1 | tee /tmp/unit.log
 
+      - name: Verify minified YAML package reflection
+        run: python3 scripts/test_release_yaml.py
+
       - name: Upload unit test log
         if: always() && steps.unit_tests.outcome != 'skipped'
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
