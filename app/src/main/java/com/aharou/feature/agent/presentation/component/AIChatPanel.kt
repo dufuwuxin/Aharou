@@ -194,7 +194,7 @@ fun AIChatPanel(
     val entryScheduler = remember(currentSessionId) { MessageEntryScheduler() }
     val messageEntryDelays = remember(messages, entryScheduler) { entryScheduler.schedule(messages) }
     val currentSessionState by viewModel.currentSessionState.collectAsStateWithLifecycle()
-    val currentSession = currentSessionState
+    val currentSession = currentSessionState?.takeIf { it.id == currentSessionId }
     val sessionInputTokens = currentSession?.totalInputTokens ?: 0
     val sessionOutputTokens = currentSession?.totalOutputTokens ?: 0
     val sessionLastInputTokens = currentSession?.lastInputTokens ?: 0
@@ -291,8 +291,7 @@ fun AIChatPanel(
     var uploadingCount by remember { mutableStateOf(0) }
     var messageForMenu by remember { mutableStateOf<AgentUIMessage?>(null) }
     var crossCheckMessage by remember { mutableStateOf<AgentUIMessage?>(null) }
-    var showActivity by remember { mutableStateOf(false) }
-    var showConversationMap by remember(currentSessionId) { mutableStateOf(false) }
+    var showSessionDiagnostics by remember(currentSessionId) { mutableStateOf(false) }
     val quoteReplyEnabled = rememberQuoteReplyEnabled()
     var editingMessage by remember { mutableStateOf<AgentUIMessage?>(null) }
     var queuedEditing by remember { mutableStateOf<QueuedRequest?>(null) }
@@ -1193,13 +1192,7 @@ fun AIChatPanel(
                 onNavigateToBrowser = onNavigateToBrowser,
                 onNavigateToSandbox = onNavigateToSandbox,
                 onNavigateToShared = onNavigateToShared,
-                onNavigateToObserve = {
-                    // 把「看哪棵树」先存好再跳转：面板只负责展示，不关心入口在哪。
-                    currentSessionId?.let { ObserveTargetHolder.sessionId = it }
-                    onNavigateToObserve()
-                },
-                onOpenActivity = { showActivity = true },
-                onConversationMap = { showConversationMap = true },
+                onSessionDiagnostics = { showSessionDiagnostics = true },
                 connectionState = connectionState?.takeIf { isRemote },
                 terminalActive = terminalActive,
                 gitActive = gitActive,
@@ -1229,7 +1222,11 @@ fun AIChatPanel(
             Box(modifier = Modifier.weight(1f)) {
                 if (bodyOverride != null) {
                     Box(Modifier.fillMaxSize().padding(bottom = with(LocalDensity.current) { floatingLayerHeightPx.toDp() })) {
-                        ProjectChatMenuHost(sessionId = currentSessionId?.takeIf { sessionReady && currentSession?.parentId == null }, onTerminal = onNavigateToTerminal, onGit = onNavigateToGit, onBrowser = onNavigateToBrowser, onSandbox = onNavigateToSandbox, onShared = onNavigateToShared, onObserve = { currentSessionId?.let { ObserveTargetHolder.sessionId = it }; onNavigateToObserve() }, onActivity = { showActivity = true }, onConversationMap = { showConversationMap = true }, connectionState = connectionState?.takeIf { isRemote }, inputTokens = sessionInputTokens, outputTokens = sessionOutputTokens) { bodyOverride(composer::collapse) }
+                        ProjectChatMenuHost(sessionId = currentSessionId?.takeIf { sessionReady && currentSession?.parentId == null }, onTerminal = onNavigateToTerminal, onGit = onNavigateToGit, onBrowser = onNavigateToBrowser, onSandbox = onNavigateToSandbox, onShared = onNavigateToShared, onDiagnostics = { showSessionDiagnostics = true }, connectionState = connectionState?.takeIf { isRemote }, inputTokens = sessionInputTokens, outputTokens = sessionOutputTokens, contextStatus = {
+                            SessionContextStatus(sessionContextMetrics(contextUsages[currentSessionId], sessionLastInputTokens,
+                                activeModelMetadata?.let { com.aharou.feature.settings.domain.model.ModelContextPolicy.effectiveInputBudget(it) } ?: 0),
+                                onClick = { showSessionDiagnostics = true })
+                        }) { bodyOverride(composer::collapse) }
                     }
                 } else if (!messagesReady) {
                     // 远程模式连接未就绪时显示连接状态占位，避免空白或旧工作区记录闪烁
@@ -1791,8 +1788,12 @@ fun AIChatPanel(
             crossCheckMessage?.let { message -> CrossCheckSheet(message, currentSessionId) { crossCheckMessage = null } }
             key(currentSessionId) {
                 val conversationMapScope = rememberCoroutineScope()
-                if (showConversationMap) ConversationMapSheet(
-                    currentSessionId, currentSession, messagesState, bodyOverride == null,
+                if (showSessionDiagnostics) {
+                    val receipts by viewModel.currentSessionReceipts.collectAsStateWithLifecycle()
+                    SessionDiagnosticsSheet(currentSessionId, currentSession, messagesState, receipts,
+                        sessionContextMetrics(contextUsages[currentSessionId], sessionLastInputTokens,
+                            activeModelMetadata?.let { com.aharou.feature.settings.domain.model.ModelContextPolicy.effectiveInputBudget(it) } ?: 0),
+                        injectedContextText, bodyOverride == null,
                     canLocate = { findChatMessageIndex(chatItems, it) >= 0 },
                     onJump = { id ->
                         val index = findChatMessageIndex(chatItems, id)
@@ -1803,12 +1804,8 @@ fun AIChatPanel(
                         }
                         valid
                     },
-                    onDismiss = { showConversationMap = false }
-                )
-            }
-            if (showActivity) {
-                val receipts by viewModel.currentSessionReceipts.collectAsStateWithLifecycle()
-                ActivityTimelineSheet(receipts = receipts, onDismiss = { showActivity = false })
+                    onDismiss = { showSessionDiagnostics = false })
+                }
             }
             editingMessage?.let { message ->
                 EditMessageDialog(

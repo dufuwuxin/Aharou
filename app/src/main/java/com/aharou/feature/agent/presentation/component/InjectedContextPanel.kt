@@ -65,8 +65,8 @@ internal fun InjectedContextButton(text: String) {
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun InjectedContextSheet(text: String, onDismiss: () -> Unit) {
-    AdaptiveModalBottomSheet(onDismissRequest = onDismiss) {
+internal fun InjectedContextSheet(text: String, onDismiss: () -> Unit, embedded: Boolean = false) {
+    SessionDiagnosticContainer(embedded, onDismiss) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -90,9 +90,9 @@ private fun InjectedContextSheet(text: String, onDismiss: () -> Unit) {
                 }.getOrNull() else null
             }
             val body = if (metadata == null) text else text.substringAfter('\n')
-            Text(stringResource(R.string.chat_context_estimate,
-                metadata?.get("characters")?.toString()?.toIntOrNull() ?: 0,
-                metadata?.get("estimatedTokens")?.toString()?.toIntOrNull() ?: 0),
+            if (metadata != null) Text(stringResource(R.string.chat_context_estimate,
+                metadata["characters"]?.toString()?.toIntOrNull() ?: 0,
+                metadata["estimatedTokens"]?.toString()?.toIntOrNull() ?: 0),
                 style = MaterialTheme.typography.bodySmall)
             metadata?.let {
                 Text(stringResource(R.string.chat_context_request_metadata,

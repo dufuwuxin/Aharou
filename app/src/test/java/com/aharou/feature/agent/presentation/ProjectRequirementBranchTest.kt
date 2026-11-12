@@ -102,7 +102,7 @@ class ProjectRequirementBranchTest {
                     Text(binding?.sessionId.orEmpty(), Modifier.testTag("actual_binding_session"))
                     CompositionLocalProvider(LocalViewModelStoreOwner provides panelOwner) {
                         com.aharou.feature.agent.presentation.component.ProjectChatMenuHost(binding?.sessionId,
-                            {}, {}, {}, {}, {}, {}, {}, null, 0, 0) { binding?.body?.invoke({}) }
+                            {}, {}, {}, {}, {}, {}, null, 0, 0) { binding?.body?.invoke({}) }
                     }
                 }
             }
@@ -294,6 +294,7 @@ class ProjectRequirementBranchTest {
             com.aharou.feature.agent.data.task.ProjectPlanOutcome(project, false)
         }
         val tool = com.aharou.feature.agent.domain.tool.session.ProjectTaskTool(repository, mockk(relaxed = true))
+        every { agent.currentSessionReceipts } returns MutableStateFlow(emptyList())
         val sent = mutableListOf<Pair<String, String?>>()
         every { agent.enqueueAgentRequest(any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) } answers {
             val request = arg<String>(0)
@@ -335,6 +336,13 @@ class ProjectRequirementBranchTest {
                 }
             }
         }
+        compose.waitForIdle()
+        compose.onNodeWithTag("project_context_status").assertExists().performClick()
+        compose.onNodeWithTag("session_diagnostics").assertExists()
+        compose.onNodeWithText(compose.activity.getString(R.string.session_context_no_snapshot)).assertExists()
+        compose.onNodeWithTag("diagnostics_tab_ACTIVITY").performClick()
+        compose.onNodeWithText(compose.activity.getString(R.string.activity_sheet_empty)).assertExists()
+        compose.onNodeWithText(compose.activity.getString(R.string.conversation_map_close)).performClick()
         compose.waitForIdle()
         fun send(text: String) {
             if (compose.onAllNodesWithTag("project_composer_capsule").fetchSemanticsNodes().isNotEmpty())

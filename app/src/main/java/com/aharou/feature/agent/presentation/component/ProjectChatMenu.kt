@@ -16,9 +16,9 @@ internal val LocalProjectChatMenu = staticCompositionLocalOf<@Composable (() -> 
 internal fun ProjectChatMenuHost(
     sessionId: String?,
     onTerminal: () -> Unit, onGit: () -> Unit, onBrowser: () -> Unit,
-    onSandbox: () -> Unit, onShared: () -> Unit, onObserve: () -> Unit, onActivity: () -> Unit,
+    onSandbox: () -> Unit, onShared: () -> Unit, onDiagnostics: () -> Unit,
     connectionState: ConnectionState?, inputTokens: Int, outputTokens: Int,
-    onConversationMap: (() -> Unit)? = null,
+    contextStatus: @Composable () -> Unit = {},
     content: @Composable () -> Unit
 ) {
     var stewardOpen by remember(sessionId) { mutableStateOf(false) }
@@ -31,17 +31,12 @@ internal fun ProjectChatMenuHost(
         listOf(
             R.string.chat_open_sandbox to onSandbox,
             R.string.chat_open_shared to onShared,
-            R.string.chat_open_observe to onObserve,
+            R.string.session_diagnostics_title to onDiagnostics,
             R.string.chat_open_git to onGit,
             R.string.chat_open_terminal to onTerminal,
-            R.string.chat_open_browser to onBrowser,
-            R.string.chat_open_activity to onActivity
+            R.string.chat_open_browser to onBrowser
         ).forEach { (label, action) ->
             DropdownMenuItem(text = { Text(stringResource(label)) }, onClick = { dismiss(); action() })
-        }
-        if (onConversationMap != null) {
-            DropdownMenuItem(text = { Text(stringResource(R.string.conversation_map_title)) },
-                onClick = { dismiss(); onConversationMap() })
         }
         if (connectionState != null) {
             HorizontalDivider()
@@ -50,7 +45,9 @@ internal fun ProjectChatMenuHost(
         }
         ScheduledTaskPill(sessionId = sessionId)
     }
-    CompositionLocalProvider(LocalProjectChatMenu provides menu) { content() }
+    CompositionLocalProvider(LocalProjectChatMenu provides menu) {
+        androidx.compose.foundation.layout.Column { contextStatus(); content() }
+    }
     key(sessionId) {
         if (stewardOpen && sessionId != null) StewardSheet(
             sessionId, stewardViewModel

@@ -60,7 +60,8 @@ internal fun ConversationMapSheet(
     bodyVisible: Boolean,
     canLocate: (String) -> Boolean,
     onJump: (String) -> Boolean,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    embedded: Boolean = false,
 ) {
     val ready = sessionId != null && messagesState.loaded && messagesState.sessionId == sessionId
     val matchedSession = session?.takeIf { it.id == sessionId }
@@ -74,8 +75,8 @@ internal fun ConversationMapSheet(
         projection.nodes.withIndex().filter { query.isBlank() || it.value.userSummary.orEmpty().contains(query.trim(), ignoreCase = true) }
     }
     val expandedState = stringResource(if (detailsExpanded) R.string.conversation_map_expanded else R.string.conversation_map_collapsed)
-    AdaptiveModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(Modifier.fillMaxWidth().fillMaxHeight(0.88f).imePadding().testTag("conversation_map_sheet")) {
+    SessionDiagnosticContainer(embedded, onDismiss) {
+        Column(Modifier.fillMaxWidth().fillMaxHeight(if (embedded) 1f else 0.88f).imePadding().testTag("conversation_map_sheet")) {
             Row(Modifier.fillMaxWidth().padding(horizontal = Spacing.lg), verticalAlignment = Alignment.CenterVertically) {
                 Text(stringResource(R.string.conversation_map_title), Modifier.weight(1f).semantics { heading() },
                     style = MaterialTheme.typography.titleLarge)
