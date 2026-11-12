@@ -97,7 +97,7 @@ internal fun ProviderAccountGroup(
         val ids = result.models.map { it.id }
         val current = repository.getProviderById(providerId) ?: providerState.value
         manager.requireAccountVersion(providerId, version)
-        repository.saveProvider(current.copy(models = ids,
+        manager.persistSnapshot(providerId, version, repository, current.copy(models = ids,
             defaultModel = current.defaultModel.takeIf { it in ids } ?: ids.firstOrNull().orEmpty(),
             selectedModel = current.selectedModel.takeIf { it in ids } ?: ids.firstOrNull().orEmpty()))
         manager.requireAccountVersion(providerId, version)
@@ -160,7 +160,8 @@ internal fun ProviderAccountGroup(
         SettingsDivider()
         SettingsRow(
             title = stringResource(R.string.provider_account_points),
-            subtitle = snapshot?.balance ?: stringResource(R.string.provider_account_unknown),
+            subtitle = if (snapshot?.balanceError != null) stringResource(R.string.provider_account_balance_failed)
+                else snapshot?.balance ?: stringResource(R.string.provider_account_unknown),
             trailing = {
                 TextButton(enabled = loggedIn && !busy, onClick = { launchOperation { refresh() } }) {
                     Text(stringResource(if (busy) R.string.provider_account_loading else R.string.provider_account_refresh))

@@ -65,6 +65,8 @@ class AccountProviderManager internal constructor(
     private val revisions = HashMap<String, Long>()
     private val refreshLocks = ConcurrentHashMap<String, Any>()
     private val logins = ConcurrentHashMap<String, AccountLogin>()
+    private val activeCalls = ConcurrentHashMap<String, MutableSet<Call>>()
+    private fun cancelAccountCalls(id: String) { activeCalls.remove(id)?.forEach { it.cancel() } }
     private val operations = ThreadLocal<Operation?>()
     private val parentCalls = ThreadLocal<Call?>()
     private val accountRevision = ThreadLocal<Pair<String, Long>?>()
@@ -73,12 +75,28 @@ class AccountProviderManager internal constructor(
         val previous = accountRevision.get()
         val pin = previous?.takeIf { it.first == id } ?: synchronized(state) { id to revision(id) }
         accountRevision.set(pin)
-        try { checkRevision(id); return block().also { checkRevision(id) } } finally { accountRevision.set(previous) }
+        try {
+            checkRevision(id)
+            val result = block()
+            try { checkRevision(id) } catch (error: Exception) { (result as? java.io.Closeable)?.close(); throw error }
+            return result
+        } finally { accountRevision.set(previous) }
     }
 
     internal fun accountVersion(id: String): Long = synchronized(state) { revision(id) }
     internal fun requireAccountVersion(id: String, expected: Long) = synchronized(state) {
         if (revision(id) != expected) throw AccountProviderException("account_changed", "Account changed while the request was running", 409)
+    }
+
+    internal suspend fun persistSnapshot(
+        id: String, expected: Long,
+        repository: com.aharou.feature.settings.domain.repository.AIProviderRepository,
+        config: com.aharou.feature.settings.domain.model.AIProviderConfig,
+    ) = network {
+        synchronized(state) {
+            requireAccountVersion(id, expected)
+            kotlinx.coroutines.runBlocking { repository.saveProvider(config) }
+        }
     }
 
     private fun checkRevision(id: String) {
@@ -158,6 +176,7 @@ class AccountProviderManager internal constructor(
             revisions[id] = revision(id) + 1
             vault.write(id, null)
         }
+        cancelAccountCalls(id)
         logins.remove(id)?.close()
     }
 
@@ -176,6 +195,7 @@ class AccountProviderManager internal constructor(
             revisions[id] = revision(id) + 1
             vault.write(id, credential.json().toString())
         }
+        cancelAccountCalls(id)
         logins.remove(id)?.close()
     }
 
@@ -220,13 +240,21 @@ class AccountProviderManager internal constructor(
         val call = selectedClient.newCall(builder.build())
         val operation = operations.get()
         val parent = parentCalls.get()
+        val pinnedAccount = accountRevision.get()
+        if (pinnedAccount != null) synchronized(state) {
+            requireAccountVersion(pinnedAccount.first, pinnedAccount.second)
+            activeCalls.computeIfAbsent(pinnedAccount.first) { ConcurrentHashMap.newKeySet<Call>() }.add(call)
+        }
         operation?.calls?.add(call)
         val timer = if (parent != null) java.util.Timer("AccountCallCancellation", true).apply {
             schedule(object : java.util.TimerTask() {
                 override fun run() { if (parent.isCanceled()) call.cancel() }
             }, 0L, 100L)
         } else null
-        fun finish() { timer?.cancel(); operation?.calls?.remove(call) }
+        fun finish() {
+            timer?.cancel(); operation?.calls?.remove(call)
+            pinnedAccount?.let { activeCalls[it.first]?.remove(call) }
+        }
         try {
             operation?.check()
             val response = call.execute()
@@ -238,8 +266,12 @@ class AccountProviderManager internal constructor(
             val source = object : ForwardingSource(raw.source()) {
                 override fun read(sink: okio.Buffer, byteCount: Long): Long = try {
                     operation?.check()
-                    super.read(sink, byteCount).also { if (it == -1L) finish() }
-                } catch (error: Exception) { finish(); throw error }
+                    pinnedAccount?.let { requireAccountVersion(it.first, it.second) }
+                    super.read(sink, byteCount).also {
+                        pinnedAccount?.let { pin -> requireAccountVersion(pin.first, pin.second) }
+                        if (it == -1L) finish()
+                    }
+                } catch (error: Exception) { try { super.close() } finally { finish() }; throw error }
                 override fun close() { try { super.close() } finally { finish() } }
             }.buffer()
             return response.newBuilder().body(object : ResponseBody() {
@@ -312,10 +344,11 @@ class AccountProviderManager internal constructor(
             AccountProviderKind.WORKBUDDY -> endpoints.workbuddyBilling + "/v2/billing/meter/get-user-resource" to "POST"
             AccountProviderKind.TRAE -> endpoints.traeAccount + "/trae/api/v2/pay/ide_user_ent_usage" to "POST"
         }
+        var balanceError: String? = null
         val balance = try { AccountProviderProtocol.balance(kind, readJson(authorized(id, kind, url, method))) }
-            catch (error: AccountProviderException) { if (error.errorCode == "account_changed") throw error else null }
-            catch (_: IOException) { null }
-        AccountSnapshot(models, balance, System.currentTimeMillis())
+            catch (error: AccountProviderException) { if (error.errorCode == "account_changed") throw error; balanceError = error.errorCode; null }
+            catch (_: IOException) { balanceError = "network_error"; null }
+        AccountSnapshot(models, balance, System.currentTimeMillis(), balanceError)
     } }
 
     suspend fun beginLogin(id: String, kind: AccountProviderKind): AccountLogin {

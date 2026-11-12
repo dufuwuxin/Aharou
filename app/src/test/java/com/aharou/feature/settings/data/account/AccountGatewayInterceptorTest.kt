@@ -20,7 +20,7 @@ class AccountGatewayInterceptorTest {
     }
 
     private fun manager(server: MockWebServer, vault: Vault = Vault()): AccountProviderManager =
-        AccountProviderManager(vault, OkHttpClient.Builder().followRedirects(false).followSslRedirects(false).build(), AccountEndpoints(raccoon = server.url("/").toString().trimEnd('/')))
+        AccountProviderManager(vault, OkHttpClient.Builder().connectionSpecs(listOf(okhttp3.ConnectionSpec.CLEARTEXT)).followRedirects(false).followSslRedirects(false).build(), AccountEndpoints(raccoon = server.url("/").toString().trimEnd('/')))
 
     private fun seed(manager: AccountProviderManager) {
         manager.importCredentials("id", AccountProviderKind.RACCOON, """{"accessToken":"fixture-access","refreshToken":"fixture-refresh"}""")
@@ -32,7 +32,7 @@ class AccountGatewayInterceptorTest {
             seed(manager)
             server.enqueue(MockResponse().setBody("""{"data":{"categories":[{"type":"chat","models":[{"name":"m"}]}]}}"""))
             server.enqueue(MockResponse().setHeader("Content-Type", "text/event-stream").setBody("data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\ndata: [DONE]\n\n"))
-            val client = OkHttpClient.Builder().addInterceptor(manager.interceptor()).build()
+            val client = OkHttpClient.Builder().connectionSpecs(listOf(okhttp3.ConnectionSpec.CLEARTEXT)).addInterceptor(manager.interceptor()).build()
             val request = Request.Builder().url(manager.baseUrl(AccountProviderKind.RACCOON, "id") + "/chat/completions").post("""{"model":"m","stream":true,"messages":[{"role":"tool","tool_call_id":"c","content":"result"}]}""".toRequestBody()).build()
             client.newCall(request).execute().use { assertTrue(it.body!!.string().contains("[DONE]")) }
             val catalog = server.takeRequest(1, TimeUnit.SECONDS)!!
@@ -48,7 +48,7 @@ class AccountGatewayInterceptorTest {
             val manager = manager(server)
             seed(manager)
             server.enqueue(MockResponse().setBody("""{"data":{"categories":[]}}"""))
-            val client = OkHttpClient.Builder().addInterceptor(manager.interceptor()).build()
+            val client = OkHttpClient.Builder().connectionSpecs(listOf(okhttp3.ConnectionSpec.CLEARTEXT)).addInterceptor(manager.interceptor()).build()
             val request = Request.Builder().url(manager.baseUrl(AccountProviderKind.RACCOON, "id") + "/chat/completions").post("""{"model":"unknown","messages":[]}""".toRequestBody()).build()
             client.newCall(request).execute().use { assertEquals(400, it.code) }
             assertEquals(1, server.requestCount)

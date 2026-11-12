@@ -30,7 +30,7 @@ class AccountLoginFlowTest {
             server.enqueue(MockResponse().setBody("""{"code":0,"data":{"accessToken":"fixture-token","refreshToken":"fixture-refresh","domain":"saas","expiresIn":3600}}"""))
             server.enqueue(MockResponse().setBody("""{"code":0,"data":{"uid":"fixture-user","enterpriseId":"fixture-enterprise"}}"""))
             val base = server.url("/").toString().trimEnd('/')
-            val manager = AccountProviderManager(Vault(), OkHttpClient.Builder().followRedirects(false).build(), AccountEndpoints(workbuddy = base, workbuddyBilling = base))
+            val manager = AccountProviderManager(Vault(), OkHttpClient.Builder().connectionSpecs(listOf(okhttp3.ConnectionSpec.CLEARTEXT)).followRedirects(false).build(), AccountEndpoints(workbuddy = base, workbuddyBilling = base))
             val login = manager.beginLogin("one", AccountProviderKind.WORKBUDDY)
             try {
                 manager.awaitLogin(login)
@@ -92,6 +92,53 @@ class AccountLoginFlowTest {
             TraeAccountProtocol.responseBody(ResponseBody.create("text/event-stream".toMediaType(), events), "m", false)
             fail("A trailing business error must not become success")
         } catch (error: AccountProviderException) { assertEquals("upstream_error", error.errorCode) }
+    }
+
+    @Test fun balanceFailureDoesNotDiscardCatalog() = runBlocking {
+        MockWebServer().use { server ->
+            val base = server.url("/").toString().trimEnd('/')
+            val manager = AccountProviderManager(Vault(), OkHttpClient.Builder().connectionSpecs(listOf(okhttp3.ConnectionSpec.CLEARTEXT)).followRedirects(false).build(), AccountEndpoints(raccoon = base))
+            manager.importCredentials("id", AccountProviderKind.RACCOON, """{"accessToken":"fixture-access"}""")
+            server.enqueue(MockResponse().setBody("""{"data":{"categories":[{"type":"chat","models":[{"name":"available"}]}]}}"""))
+            server.enqueue(MockResponse().setResponseCode(403).setBody("""{"code":11140}"""))
+            val result = manager.snapshot("id", AccountProviderKind.RACCOON)
+            assertEquals(listOf("available"), result.models.map { it.id })
+            assertNull(result.balance)
+            assertEquals("account_restricted", result.balanceError)
+        }
+    }
+
+    @Test fun logoutInvalidatesDetachedResponseBodyAndClosesBoundaryResult() {
+        MockWebServer().use { server ->
+            val base = server.url("/").toString().trimEnd('/')
+            val manager = AccountProviderManager(Vault(), OkHttpClient.Builder().connectionSpecs(listOf(okhttp3.ConnectionSpec.CLEARTEXT)).followRedirects(false).build(), AccountEndpoints(raccoon = base))
+            manager.importCredentials("id", AccountProviderKind.RACCOON, """{"accessToken":"fixture-access"}""")
+            server.enqueue(MockResponse().setBody("fixture-body"))
+            val response = manager.withAccountRevision("id") { manager.authorized("id", AccountProviderKind.RACCOON, base + "/stream") }
+            manager.logout("id")
+            try { response.use { it.body!!.string() }; fail("Detached reads after logout must fail") }
+            catch (error: AccountProviderException) { assertEquals("account_changed", error.errorCode) }
+            var closed = false
+            try {
+                manager.withAccountRevision("id") {
+                    manager.logout("id")
+                    java.io.Closeable { closed = true }
+                }
+                fail("Boundary result cannot survive a changed account")
+            } catch (error: AccountProviderException) { assertEquals("account_changed", error.errorCode) }
+            assertTrue(closed)
+        }
+    }
+
+    @Test fun staleSnapshotCannotPersistModels() = runBlocking {
+        val manager = AccountProviderManager(Vault(), OkHttpClient.Builder().connectionSpecs(listOf(okhttp3.ConnectionSpec.CLEARTEXT)).build())
+        val version = manager.accountVersion("id")
+        manager.logout("id")
+        val repository = io.mockk.mockk<com.aharou.feature.settings.domain.repository.AIProviderRepository>()
+        val config = com.aharou.feature.settings.domain.model.AIProviderConfig("id", "Account", com.aharou.feature.settings.domain.model.ProviderType.OPENAI, "", baseUrl = manager.baseUrl(AccountProviderKind.RACCOON, "id"), defaultModel = "m")
+        try { manager.persistSnapshot("id", version, repository, config); fail("Stale models cannot be saved") }
+        catch (error: AccountProviderException) { assertEquals("account_changed", error.errorCode) }
+        io.mockk.coVerify(exactly = 0) { repository.saveProvider(any()) }
     }
 
     @Test fun restrictedAccountIsNotClassifiedAsExpiredLogin() {

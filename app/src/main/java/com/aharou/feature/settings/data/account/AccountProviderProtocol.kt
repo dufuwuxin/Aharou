@@ -24,7 +24,7 @@ data class AccountProviderModel(
     internal val modelName: String? = null,
 )
 
-data class AccountSnapshot(val models: List<AccountProviderModel>, val balance: String?, val fetchedAt: Long)
+data class AccountSnapshot(val models: List<AccountProviderModel>, val balance: String?, val fetchedAt: Long, val balanceError: String? = null)
 
 class AccountProviderException(val errorCode: String, message: String, val httpStatus: Int = 502) : IOException(message)
 

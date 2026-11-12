@@ -4010,6 +4010,7 @@
     <string name="provider_account_sign_out_hint">清除本机该供应商的登录凭据，不注销远端账号。</string>
     <string name="provider_account_points">当前积分／周期额度</string>
     <string name="provider_account_unknown">未知，请登录后刷新</string>
+    <string name="provider_account_balance_failed">余额查询失败，当前积分未知；模型目录已单独更新。</string>
     <string name="provider_account_refresh">刷新</string>
     <string name="provider_account_loading">查询中</string>
     <string name="provider_account_updated">最近成功查询：%1$s；失败时保留旧值，不代表当前余额。</string>
