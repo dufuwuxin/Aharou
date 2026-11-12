@@ -56,4 +56,26 @@ This increment is not completion of the rows above. Checkboxes in `.aharou/task-
 
 ### Latest development checkpoint
 
-The wave13 local Debug build and integrated targeted run succeeded: 28 JUnit suites, 235 tests, zero failures/errors/skips. This includes role tags, real QuickJS JNI and controlled HTTPS transport, native memory file/rename/graph cases, map projection and package version-state tests, and all three ProjectRequirementBranchTest real Compose consumers. The last log contained zero Kotlin warning lines; it reused configuration cache and does not establish a fresh clean-build zero-warning guarantee. A subsequent review restored the explicit legacy WebSQL-disabled setting with a single-call deprecation annotation; that final setting still needs CI compilation. This is a development checkpoint for x86 full CI, not a completed-major-release claim. No requirement checkbox is marked complete merely to permit publication.
+The wave13 local Debug build and integrated targeted run succeeded: 28 JUnit suites, 235 tests, zero failures/errors/skips. This includes role tags, real QuickJS JNI and controlled HTTPS transport, native memory file/rename/graph cases, map projection and package version-state tests, and all three ProjectRequirementBranchTest real Compose consumers. The last log contained zero Kotlin warning lines; it reused configuration cache and does not establish a fresh clean-build zero-warning guarantee. A subsequent review restored the explicit legacy WebSQL-disabled setting with a single-call deprecation annotation. Its corrected checkpoint `96646566` passed the CI Debug compilation, but not the full test run. This is a development checkpoint for x86 full CI, not a completed-major-release claim. No requirement checkbox is marked complete merely to permit publication.
+
+### Re-audit after the failed CI
+
+Official run `43094694158`, attempt 1, push event, revision `96646566fc201b81dbb57ba8e9fd55edbce0beb1`, finished with `failure`: https://github.com/dufuwuxin/Aharou/actions/runs/43094694158 . The App task executed 2,443 tests with four failures, all in `BackupTargetRepositoryTest`. Each failed while its fixture constructed a real OkHttp client (`Not a Conscrypt trust manager: sun.security.ssl.X509TrustManagerImpl`), before storage assertions. Both artifact uploads separately failed because CreateArtifact received HTML rather than JSON; the service/network root cause is unverified. The apparent successful unit-test step captured the Gradle failure and delayed job rejection; it did not prove passing tests.
+
+The candidate correction isolates the unused HTTP dependency in the repository tests with an existing strict MockK mock, retains every storage/encryption assertion, and lets the test pipeline fail directly while keeping always-run diagnostics. Kotlin lexer checks and shell exit-code fixtures are not substitutes for the corrected revision's CI.
+
+| Original request | Re-audited result at `96646566` |
+| --- | --- |
+| UI and color design as the highest priority | Partial: blue theme tokens, project home, memory forms/graph and conversation map exist; coherent global chat/settings/workflow redesign and visual fluidity are not established. |
+| Workflow | Existing project/team execution retained; a newly improved editable workflow and complete recovery chain are not established. Do not equate this request with every Operit node. |
+| Role and shared memory libraries | Shared native library exists; role tags filter its audience. Independent role-owned libraries and inheritance are not implemented. |
+| Worldbook in native memory | Basic trigger/exclusion/priority and role filtering are connected to native entries. This is not the full reference worldbook semantics. |
+| Graph, credibility, importance and keyword weights | Stable relations and deterministic lexical/edge ranking are connected. Credibility is a user annotation, not automatic factual verification. |
+| Cloud lookup | Explicit opt-in endpoint configuration and a tool consumer exist; controlled transport tests do not prove a user's live cloud service. |
+| Role tags and tool/script bindings | Tags reach worldbook activation; existing registered-tool permissions and script registration remain. All binding combinations and script execution are not fully accepted. |
+| Package market | Search/details/install/version checks are connected to existing consumers; real install/upgrade/removal and recovery lifecycle remain unproven. |
+| More local models | Two verified catalog entries were added. Device loading/inference is unproven; no additional inference backend is claimed. |
+| JavaScript, context WARN/MAX, conversation map and session details | Implementations and targeted tests exist; the map covers loaded messages, not the entire unloaded history. No device interaction claim follows. |
+| Preserve existing functionality and data; no errors/warnings | Targeted preservation tests are only partial evidence. Failed full CI and remaining release-build messages preclude acceptance. |
+
+No scope checkbox was closed by this re-audit. Device verification remains prohibited by the user; missing device evidence must not be replaced by shadow-screen use or a request that the user perform it.

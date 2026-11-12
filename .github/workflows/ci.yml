@@ -153,7 +153,7 @@ jobs:
         run: |
           set -o pipefail
           ./gradlew :core-agent:test :app:testArmsoloDebugUnitTest \
-            --console=plain 2>&1 | tee /tmp/unit.log || touch /tmp/unit-tests-failed
+            --console=plain 2>&1 | tee /tmp/unit.log
 
       - name: Upload unit test log
         if: always() && steps.unit_tests.outcome != 'skipped'
@@ -221,7 +221,3 @@ jobs:
             app/build/outputs/apk/armsolo/debug/*.apk
           retention-days: 7
           if-no-files-found: warn
-
-      - name: Fail when unit tests failed
-        if: always() && steps.unit_tests.outcome != 'skipped'
-        run: test ! -f /tmp/unit-tests-failed

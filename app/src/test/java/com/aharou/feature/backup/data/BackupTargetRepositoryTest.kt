@@ -5,11 +5,11 @@ import com.aharou.feature.backup.data.local.entity.BackupTargetEntity
 import com.aharou.feature.backup.domain.remote.BackupTarget
 import com.aharou.feature.backup.domain.remote.BackupTargetType
 import com.aharou.feature.backup.domain.remote.RemoteSecretCipher
+import io.mockk.mockk
 import java.util.Base64
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.runTest
-import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -53,7 +53,7 @@ class BackupTargetRepositoryTest {
             else String(Base64.getDecoder().decode(value.removePrefix(PREFIX)), Charsets.UTF_8)
     }
 
-    private fun repository(dao: FakeDao) = BackupTargetRepository(dao, OkHttpClient(), FakeCipher)
+    private fun repository(dao: FakeDao) = BackupTargetRepository(dao, mockk(), FakeCipher)
 
     @Test
     fun save_storesEncryptedSecrets_andReadsBackPlain() = runTest {
