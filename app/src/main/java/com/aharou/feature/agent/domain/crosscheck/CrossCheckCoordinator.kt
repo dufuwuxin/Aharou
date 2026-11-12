@@ -97,7 +97,7 @@ class CrossCheckCoordinator @Inject constructor(
             if (!boundId.isNullOrBlank()) {
                 val bound = aiProviderRepository.getProviderById(boundId)
                 if (bound != null && bound.isEnabled && bound.hasUsableApiKey) {
-                    val boundModel = session?.model
+                    val boundModel = session.model
                     return if (boundModel.isNullOrBlank()) bound else bound.copy(selectedModel = boundModel)
                 }
             }

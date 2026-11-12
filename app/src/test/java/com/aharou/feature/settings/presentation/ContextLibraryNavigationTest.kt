@@ -86,13 +86,21 @@ class ContextLibraryNavigationTest {
         val entry = com.aharou.feature.agent.domain.context.ContextEntry("id", "改名", "摘要", "正文",
             MemoryScope.GLOBAL, com.aharou.feature.agent.domain.context.ContextKind.INSTRUCTION, ContextLoad.OFF,
             com.aharou.feature.agent.domain.context.ContextOrigin.MEMORY, "/native/request.md",
-            folder = "任意/目录", requestKey = "agent/custom.md")
+            folder = "任意/目录", requestKey = "agent/custom.md", keywords = listOf("arm64", "构建"))
         val scope = object : androidx.compose.runtime.saveable.SaverScope {
             override fun canBeSaved(value: Any) = true
         }
         val saver = com.aharou.feature.settings.presentation.component.ContextEntryStateSaver
         val fields = with(saver) { scope.save(entry) }!!
         assertEquals(entry, saver.restore(fields))
-        assertNull(saver.restore(ArrayList(fields.take(17)))!!.requestKey)
+        val legacy = arrayListOf(entry.id, entry.title, entry.description, entry.content,
+            entry.scope.name, entry.kind.name, entry.loading.name, entry.origin.name,
+            entry.sourceLabel, entry.version, entry.editable.toString(), entry.pending.toString(),
+            entry.enabled.toString(), entry.category.name, entry.folder, "", "")
+        assertNull(saver.restore(legacy)!!.requestKey)
+        assertEquals(emptyList<String>(), saver.restore(legacy)!!.keywords)
+        assertEquals(emptyList<String>(), saver.restore(ArrayList(legacy + "agent/custom.md"))!!.keywords)
+        assertEquals("agent/custom.md", saver.restore(ArrayList(legacy + "agent/custom.md"))!!.requestKey)
+        assertNull(saver.restore(arrayListOf()))
     }
 }

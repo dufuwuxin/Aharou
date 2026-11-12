@@ -172,6 +172,40 @@ class ProjectListScreenTest {
         verify(exactly = 1) { viewModel.createProject(project.title, project.purpose) }
     }
 
+    @Test fun emptyHomeProvidesAnActionableCreateWithoutStartingTheModel() {
+        mount()
+        initialize()
+        compose.onNodeWithTag("project_home_heading").assertExists()
+        compose.onNodeWithTag("project_empty_state").assertExists()
+        compose.onNodeWithTag("project_empty_create").assertIsEnabled().performClick()
+        compose.onAllNodes(hasSetTextAction()).assertCountEquals(2)
+        verify(exactly = 0) { viewModel.createProject(any(), any()) }
+        compose.runOnIdle { assertEquals(emptyList<String>(), opened) }
+    }
+
+    @Test fun emptyHomeSubmitUsesTheExistingCreationAndCompletionFlow() {
+        mount()
+        initialize()
+        compose.onNodeWithTag("project_empty_create").performClick()
+        compose.onAllNodes(hasSetTextAction())[0].performTextInput(project.title)
+        compose.onAllNodes(hasSetTextAction())[1].performTextInput(project.purpose)
+        compose.onNodeWithTag("save_project_drafts").performClick()
+        compose.onNodeWithTag("save_project_drafts").assertIsNotEnabled()
+        persistAndSelect()
+        publish(state.value.copy(busy = false))
+        assertOpenedOnce()
+    }
+
+    @Test fun emptyHomeCreateIsUnavailableWhileBusyOrLoading() {
+        mount()
+        initialize()
+        publish(state.value.copy(busy = true))
+        compose.onNodeWithTag("project_empty_create").assertIsNotEnabled()
+        publish(state.value.copy(busy = false, loading = true))
+        compose.onNodeWithTag("project_empty_create").assertDoesNotExist()
+        verify(exactly = 0) { viewModel.createProject(any(), any()) }
+    }
+
     @Test fun firstLauncherNavigationInCreatedCollectsInitializationAfterStartedWithoutLeavingPage() {
         mount(Lifecycle.State.CREATED)
         compose.runOnIdle { assertEquals(Lifecycle.State.CREATED, nav.currentBackStackEntry!!.lifecycle.currentState) }

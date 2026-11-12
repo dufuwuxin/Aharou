@@ -1,11 +1,14 @@
 package com.aharou.feature.agent.data
 
+import com.aharou.core.config.ConfigCollection
+import com.aharou.core.config.ConfigField
 import com.aharou.core.config.ConfigError
 import com.aharou.core.config.ConfigRegistry
 import com.aharou.core.config.ConfigSchema
 import com.aharou.core.config.ConfigValue
 import com.aharou.core.config.fields.ClosureField
 import com.aharou.feature.agent.domain.subagent.SubAgentEventBus
+import com.aharou.feature.agent.domain.subagent.AgentDefinitionRepository
 import com.aharou.feature.agent.domain.subagent.SubAgentSettings
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -19,9 +22,11 @@ import javax.inject.Singleton
 @Singleton
 class ConfigSubAgentFields @Inject constructor(
     private val subAgentSettings: SubAgentSettings,
+    private val definitions: AgentDefinitionRepository,
 ) {
 
     fun registerInto(registry: ConfigRegistry) = with(registry) {
+        register(RoleTags())
         register(
             ClosureField(
                 path = "subagent.max_running",
@@ -56,5 +61,39 @@ class ConfigSubAgentFields @Inject constructor(
                 },
             ),
         )
+    }
+
+    private inner class RoleTags : ConfigCollection {
+        override val basePath = "subagent.roles"
+        override val displayName = "Role tags"
+        override val description = "Effective roles; project definitions override global ones. IDs escape % as %25 and dot as %2E; original role names stay unchanged. Tags never grant tools."
+        override val addable = false
+        override val removable = false
+        private fun roleId(name: String) = name.replace("%", "%25").replace(".", "%2E")
+        override fun childIds(): List<String> = definitions.listAll().map { roleId(it.definition.name) }
+        private fun entry(id: String) = definitions.listAll().firstOrNull { roleId(it.definition.name) == id }
+            ?: throw ConfigError.InvalidValue("Unknown role")
+
+        override fun fields(forId: String): List<ConfigField> {
+            if (forId !in childIds()) return emptyList()
+            return listOf(ClosureField(
+                path = "$basePath.$forId.tags",
+                displayName = "Role tags",
+                description = "Case-sensitive audience tags. Maximum 24 tags, 64 characters each; no commas or control characters. Empty clears. Does not rename or grant tools.",
+                valueSchema = ConfigSchema.Array(ConfigSchema.Str(maxLength = 64)),
+                reader = { ConfigValue.Arr(entry(forId).definition.tags.map { ConfigValue.Str(it) }) },
+                writer = { value ->
+                    val tags = (value as? ConfigValue.Arr)?.value?.map {
+                        (it as? ConfigValue.Str)?.value ?: throw ConfigError.TypeMismatch("string")
+                    } ?: throw ConfigError.TypeMismatch("array")
+                    val current = entry(forId)
+                    val role = current.definition
+                    val error = definitions.setTags(role.name, tags, current.scope, role.filePath)
+                    if (error != null) throw ConfigError.InvalidValue("Role tag save failed: $error")
+                }
+            ))
+        }
+        override fun add(payload: ConfigValue): String = throw ConfigError.PermissionDenied("Edit existing role tags only")
+        override fun remove(id: String) { throw ConfigError.PermissionDenied("Clear the tags array instead") }
     }
 }

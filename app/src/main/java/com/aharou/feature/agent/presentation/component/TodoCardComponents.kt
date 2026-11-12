@@ -91,7 +91,7 @@ internal fun parseTodoResult(content: String): ParsedTodoResult? {
         val completed = obj["completed"]?.toString()?.toIntOrNull() ?: 0
         val itemsArr = obj["items"]?.jsonArray ?: return null
         val items = itemsArr.mapNotNull { item ->
-            val itemObj = item?.jsonObject ?: return@mapNotNull null
+            val itemObj = item.jsonObject
             ParsedTodoItem(
                 id = itemObj["id"]?.jsonPrimitive?.content ?: return@mapNotNull null,
                 subject = itemObj["subject"]?.jsonPrimitive?.content ?: return@mapNotNull null,

@@ -39,7 +39,7 @@ internal data class LiveUpdateContent(
  */
 @Singleton
 internal class LiveUpdateNotifier @Inject constructor(
-    @ApplicationContext private val context: Context,
+    @param:ApplicationContext private val context: Context,
 ) {
 
     /** 上一次真正投出去的内容，内容不变就不再 notify——系统只有检测到变化才重渲染胶囊。 */

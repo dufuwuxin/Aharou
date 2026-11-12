@@ -215,7 +215,7 @@ class BuiltinContextEntriesTest {
         assertEquals("route-body", ContextLibraryRepository(memory, seeds()).resolvePrompt(request.requestKey!!))
         val edited = library.list(null).single { it.title == "改名" }
         assertTrue(library.save(edited.copy(loading = ContextLoad.OFF), null))
-        assertEquals("", library.resolvePrompt(request.requestKey!!))
+        assertEquals("", library.resolvePrompt(request.requestKey))
     }
 
     @Test fun legacyToolDirectoryIsAddedOnceWithoutRestoringDeletedOrDisabledEntries() {

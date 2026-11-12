@@ -161,7 +161,7 @@ fun AskUserQuestionPanel(
                             selected = selectedMap[idx] ?: mutableListOf(),
                             customText = customTexts[idx] ?: "",
                             onSelectionChanged = { newSelection ->
-                                selectedMap[idx] = newSelection.toMutableList() as MutableList<String>
+                                selectedMap[idx] = newSelection.toMutableList()
                             },
                             onCustomTextChanged = { customTexts[idx] = it }
                         )

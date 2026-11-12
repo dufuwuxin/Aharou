@@ -2,7 +2,7 @@ plugins {
     // 版本同 :core-agent：KGP 已由 :app 的 kotlin("android") 带进 classpath，不重复声明
     kotlin("jvm")
     kotlin("plugin.compose")
-    kotlin("plugin.serialization") version "2.2.21"
+    kotlin("plugin.serialization") version "2.3.21"
     id("org.jetbrains.compose") version "1.10.3"
 }
 
@@ -27,7 +27,7 @@ dependencies {
     implementation(project(":core-storage"))
 
     implementation(compose.desktop.currentOs)
-    implementation(compose.material3)
+    implementation("org.jetbrains.compose.material3:material3:1.9.0")
     // 纯 Swing 的代码编辑器，用 SwingPanel 嵌进 Compose；比嵌 Chromium 轻得多
     implementation("com.fifesoft:rsyntaxtextarea:3.4.0")
 

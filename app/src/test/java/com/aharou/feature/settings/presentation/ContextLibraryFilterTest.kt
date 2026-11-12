@@ -36,6 +36,13 @@ class ContextLibraryFilterTest {
         assertEquals(items, listOf(item))
     }
 
+    @Test fun storedKeywordsRankAboveBodyWithoutHidingDisabledEntriesFromManagement() {
+        val body = entry("body", ContextCategory.LONG_TERM, "").copy(content = "needle")
+        val keyword = entry("keyword", ContextCategory.RULE, "").copy(keywords = listOf("needle"), loading = ContextLoad.OFF)
+        assertEquals(listOf(keyword, body), filterContextEntries(listOf(body, keyword), "needle", null, null, null))
+        assertEquals(listOf(body), filterContextEntries(listOf(body, keyword), "needle", null, ContextLoad.SEARCH, null))
+    }
+
     @Test fun loadingFilterDoesNotAssumeCategoryDefaults() {
         val item = entry("disabled-rule", ContextCategory.RULE, "").copy(loading = ContextLoad.OFF)
         assertEquals(listOf(item), filterContextEntries(listOf(item), "", null, ContextLoad.OFF, null))

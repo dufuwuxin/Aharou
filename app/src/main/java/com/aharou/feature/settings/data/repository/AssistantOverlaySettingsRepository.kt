@@ -30,7 +30,7 @@ private val Context.assistantOverlayDataStore by preferencesDataStore(
  */
 @Singleton
 class AssistantOverlaySettingsRepository @Inject constructor(
-    @param:ApplicationContext context: Context
+    @ApplicationContext context: Context
 ) {
     private val dataStore = context.assistantOverlayDataStore
     private val screenTextKey = booleanPreferencesKey("assistant_overlay_screen_text")

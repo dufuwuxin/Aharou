@@ -21,7 +21,8 @@ data class SubAgentUiEntry(
     val inject: Set<InjectPart>,
     val keywordInjections: List<KeywordInjection> = emptyList(),
     val prompt: String,
-    val filePath: String?
+    val filePath: String?,
+    val tags: List<String> = emptyList()
 )
 
 data class SkillBindingSaveState(

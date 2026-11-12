@@ -883,7 +883,7 @@ class SettingsViewModel @Inject constructor(
                         keywordInjections = entry.definition.keywordInjections,
                         inject = entry.definition.inject,
                         prompt = entry.definition.prompt,
-                        filePath = entry.definition.filePath
+                        filePath = entry.definition.filePath, tags = entry.definition.tags
                     )
                 }
             }

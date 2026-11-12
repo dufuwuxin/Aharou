@@ -250,9 +250,8 @@ class MemoryTool @Inject constructor(
         }
         if (action == "library_list" || action == "library_search") {
             val query = value("query").orEmpty()
-            val found = if (action == "library_list") all else all.filter {
-                query.isNotBlank() && "${it.title} ${it.description} ${it.content}".contains(query, ignoreCase = true)
-            }
+            val found = if (action == "library_list") all else if (query.isBlank()) emptyList()
+                else ContextSearch.search(all, query)
             return ToolResult.Success(JsonPrimitive(ContextLibraryPlanner.safe(found.joinToString("\n") {
                 "${it.id} | ${it.title} | ${it.kind}/${it.loading} | ${it.category}/${it.folder} | pending=${it.pending} | version=${it.version} | ${it.description}"
             })))

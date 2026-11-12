@@ -92,6 +92,9 @@ internal fun SubAgentEditorScreen(
     var model by rememberSaveable { mutableStateOf(initial?.model ?: "") }
     var effort by rememberSaveable { mutableStateOf(initial?.reasoningEffort ?: "") }
     var mode by rememberSaveable { mutableStateOf(initial?.mode?.name ?: "") }
+    var tagsRaw by rememberSaveable { mutableStateOf(initial?.tags?.joinToString("\n") ?: "") }
+    val tags = AgentDefinition.normalizeTags(tagsRaw.split(',', '\n'))
+    val tagsValid = AgentDefinition.validTags(tags)
     var prompt by rememberSaveable { mutableStateOf(initial?.prompt ?: "") }
     var scopeIsGlobal by rememberSaveable {
         mutableStateOf(initial?.scope?.let { it == AgentDefinitionScope.GLOBAL } ?: true)
@@ -123,7 +126,7 @@ internal fun SubAgentEditorScreen(
     BackHandler { onNavigateBack() }
 
     val scope = if (scopeIsGlobal) AgentDefinitionScope.GLOBAL else AgentDefinitionScope.PROJECT
-    val canSave = name.isNotBlank() && prompt.isNotBlank()
+    val canSave = name.isNotBlank() && prompt.isNotBlank() && tagsValid
 
     Scaffold(
         containerColor = settingsPageBackground(),
@@ -169,7 +172,8 @@ internal fun SubAgentEditorScreen(
                                         KeywordInjection(keywords, content)
                                     },
                                     inject = injectTokens.mapNotNull { InjectPart.fromToken(it) }.toSet(),
-                                    prompt = prompt.trim()
+                                    prompt = prompt.trim(),
+                                    tags = tags
                                 ),
                                 scope
                             )
@@ -226,6 +230,18 @@ internal fun SubAgentEditorScreen(
                         singleLine = false,
                         minLines = 2,
                         maxLines = 4
+                    )
+                    AppTextField(
+                        value = tagsRaw,
+                        onValueChange = { tagsRaw = it },
+                        label = stringResource(R.string.subagent_editor_tags),
+                        placeholder = stringResource(R.string.subagent_editor_tags_hint),
+                        singleLine = false,
+                        maxLines = 4,
+                        isError = !tagsValid,
+                        supportingText = {
+                            Text(stringResource(if (tagsValid) R.string.subagent_editor_tags_help else R.string.subagent_editor_error_invalid_tags))
+                        }
                     )
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -671,6 +687,7 @@ private fun ValueText(text: String) {
 }
 
 private fun AgentSaveError.messageRes(): Int = when (this) {
+    AgentSaveError.INVALID_TAGS -> R.string.subagent_editor_error_invalid_tags
     AgentSaveError.INVALID_NAME -> R.string.subagent_editor_error_invalid_name
     AgentSaveError.EMPTY_PROMPT -> R.string.subagent_editor_error_empty_prompt
     AgentSaveError.NAME_CONFLICT -> R.string.subagent_editor_error_name_conflict

@@ -92,7 +92,7 @@ private val Context.containerSourcesDataStore by preferencesDataStore(
  */
 @Singleton
 class ContainerSourcesRepository @Inject constructor(
-    @param:ApplicationContext context: Context
+    @ApplicationContext context: Context
 ) {
     private val dataStore = context.containerSourcesDataStore
     private val mirrorKey = stringPreferencesKey("mirror_mode")

@@ -109,8 +109,9 @@ internal class MemorySyncFiles {
 
     fun atomicWrite(target: File, bytes: ByteArray, beforeMove: () -> Unit = {}) {
         checked(target)
-        directory(target.parentFile ?: throw IOException("invalid_parent"))
-        val temporary = checked(target.parentFile, ".sync-${UUID.randomUUID()}.tmp")
+        val parent = target.parentFile ?: throw IOException("invalid_parent")
+        directory(parent)
+        val temporary = checked(parent, ".sync-${UUID.randomUUID()}.tmp")
         try {
             Files.createFile(temporary.toPath())
             FileOutputStream(temporary).use { output ->

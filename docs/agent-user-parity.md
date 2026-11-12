@@ -4,7 +4,17 @@
 
 ## 本轮新增能力
 
-- 原生记忆库：配置页是唯一入口，`ContextLibrarySection` 仅保留内容库与注入预览；规则、临时存放、长期、角色注入、主代理注入五类支持文件夹与搜索编辑，不提供旧页面跳转或来源开关。应用管理的注入文字（含内置默认文字）先写入原生库，用户可查看、编辑、停用与删除，不从旧提示文件或角色正文回退。
+- 世界书记忆：原生条目内持久化触发/排除、匹配方式、受众与精确角色/标签、优先级、用户标注的可信度与重要性、检索标签和关键词/标签/关系权重；预览与请求同选择器，未命中/停用/跨会话不注入。结构化表单与高级 JSON 写回同一原生条目；config 通过 `context_library.entries.<id>.worldbook` 读写。
+- 记忆关系图谱：唯一可见目标解析、歧义/缺失显式显示；稳定身份保留改名引用，Canvas 有限绘制与分页关系列表不造节点，不改变权限或激活。
+- 云端查询：`memory_cloud_search` 为默认关闭的显式 HTTPS 公共端点查询；`memory.cloud_search.enabled/endpoint` 与原设置页共享可观察状态。只外发明确 query/limit，不外发全库、聊天、路径或凭据；结果始终标为未核验参考，不自动保存或注入。
+- 角色标签：原定义 YAML、编辑器和 `subagent.roles.<id>.tags` 共用角色保存入口；标签只收窄世界书受众，不赋予工具权限，旧 allow/deny 与脚本身份仍有效。
+- 会话诊断：普通聊天与项目页面统一提供上下文、对话地图、活动回执、上下级成员四页签；项目常显上下文状态栏，不依赖普通聊天头部。占用与预算来自同次请求，当前模型预算另列；实际注入来自最终请求快照，缺快照明确说明。地图仍只覆盖已加载记录，普通正文可定位、项目替换正文只读；成员观察与回执不合并成虚构消息，按会话身份隔离。
+- 原生包市场：原插件页保留已安装/Aharou包市场与导入启停卸载；新增Operit2公开市场页签，真实分页/类型筛选/当前页搜索/详情/最新版本资产及校验和，文件通过系统文档选择器保存；技能复用GLOBAL导入且不覆盖同名，取消选择不下载。ToolPkg、脚本及MCP只下载，不冒称具备Operit宿主API或已安装运行。没有发布资产时显式区分GitHub指定分支/子目录的源码ZIP，不冒充市场发布版本；缺校验和标未核验。
+- WARN/MAX：预警先精简工具历史，MAX 触发压缩且在实际发送前拒绝仍超限的请求；不删除持久历史。模型目录新增官方单文件 Qwen2.5 3B Q4_K_M、7B Q3_K_M，未设备推理不冒充已测。
+
+- 本地 JavaScript 纯计算：`eval_javascript` 经原生注册器与 `tool_search` 按需发现，使用原有工具授权系统，不增加默认注入或宿主权限。返回最后表达式的 JSON 值及 console 日志；源码、输出、日志、内存、栈与原生执行时限均有界，不提供 DOM/Node/Java/网络/文件/进程桥。没有独立脚本运行 UI，不增加影子屏；手机端加载、执行和性能尚未验证。QuickJS 1.0.15 需要 Kotlin 2.4 元数据；编译器已同步升级至 2.3.21、R8 至已发布的 9.1.57，仍需真实构建与 JNI 测试验收。
+
+- 原生记忆库：配置页是唯一入口，`ContextLibrarySection` 提供内容库、注入预览及关系图谱；规则、临时存放、长期、角色注入、主代理注入五类支持文件夹与搜索编辑，不提供旧页面跳转或来源开关。应用管理的注入文字（含内置默认文字）先写入原生库，用户可查看、编辑、停用与删除，不从旧提示文件或角色正文回退。
 - 原生条目工具：`memory` 的 `library_list/library_search/library_read/library_save/library_delete` 使用条目ID和版本；`save` 支持 `category/folder/context_kind/context_load`，临时内容绑定真实调用会话，待确认状态保留。
 - 配置同权：`context_library.entries.<hash>.category/loading/kind/folder/session_id` 与页面共用仓库，`context_library.folders` 可新增空文件夹。加载只有 FULL/INDEX/SEARCH/OFF；预览是规划结果，不是历史请求记录。
 - 使用边界：新库只读写原生记忆，不聚合其他持久来源或 sidecar；不机械导入旧提示文件，不删除用户数据。项目绑定、编辑版本、会话隔离和注入预算继续生效。不声称保存即跨设备同步。
@@ -21,9 +31,9 @@
 
 ## 0. 工具集合与事实来源
 
-- 内置工具的唯一注册点是 `app/src/main/java/com/aharou/di/AgentModule.kt:471-509`，共 **40 个**：`readFile` `sendFile` `sendToChat` `viewImage` `writeFile` `editFile` `generateImage` `Bash` `Shizuku` `terminal` `list` `search` `loadSkill` `loadRule` `knowledge_search` `askUserQuestion` `manageMcp` `tool_search` `websearch` `webfetch` `planMode` `todo` `memory` `task` `messageParent` `observe` `browser` `config` `vscreen` `a11y` `open_app` `check_dependencies` `sessions` `project_tasks` `device` `personal_context` `petAvatar` `diagnostics` `git_blame` `code_structure`。
+- 内置工具的唯一注册点是 `app/src/main/java/com/aharou/di/AgentModule.kt`，共 **40 个**：`readFile` `sendFile` `viewImage` `writeFile` `editFile` `generateImage` `Bash` `Shizuku` `terminal` `list` `search` `loadSkill` `loadRule` `knowledge_search` `askUserQuestion` `manageMcp` `tool_search` `websearch` `webfetch` `planMode` `todo` `memory` `task` `messageParent` `observe` `browser` `config` `vscreen` `a11y` `open_app` `check_dependencies` `sessions` `project_tasks` `device` `personal_context` `petAvatar` `diagnostics` `git_blame` `code_structure` `eval_javascript`。
 - MCP 工具在连接时动态注册（`feature/agent/domain/mcp/McpManager.kt:266`，卸载见 `:272` / `:354`）。
-- 每轮注入：工具集经成员允许清单、`ToolInjectionGate` 的 every_round/keyword/off 策略过滤，并应用兼容的描述与 schema 说明覆盖；不能把注册工具总数当作每轮实际可见数量。MCP 与代码结构工具的延迟加载由原有检索链路（`tool_search`）处理，展开记录限定当前会话和工作区，重启或较久未使用后可重新发现。
+- 每轮注入：工具集经成员允许清单、`ToolInjectionGate` 的 every_round/keyword/off 策略过滤，并应用兼容的描述与 schema 说明覆盖；不能把注册工具总数当作每轮实际可见数量。MCP、代码结构与 JavaScript 计算工具的延迟加载由原有检索链路（`tool_search`）处理，展开记录限定当前会话和工作区，重启或较久未使用后可重新发现。
 - `config`（`di/AgentModule.kt:475`，实现 `feature/agent/domain/tool/config/ConfigTool.kt`）是一层**通用配置接口**：agent 能改什么，取决于 `ConfigRegistry` 里注册了哪些字段，注册入口集中在 `AIEditorApp.kt:409-434`（24 个 `Config*Fields`）。下文写“config `path`”即指这条路径。
 - 权限档只影响“执行时要不要弹确认”（`ToolPermissionPolicyEngine`），**不影响工具有没有**；本表只统计有没有。
 
@@ -274,7 +284,7 @@ WeChat, Feishu, QQ and Telegram bot settings, services, startup restoration, con
 - 删除帮助关于及更新检查链路、连接挂载同步与 FTP 服务及其配置注册；保留既有 SSH 工作区和历史连接数据所需的共用类型。
 - 宿主命令只使用 Shizuku，不再探测或调用 `su`。
 
-### 固定中文与霞橙
+### 固定中文与澄蓝
 
 应用不再提供语言、皮肤、自定义配色或动态取色选择，config 同步移除 `app.language`、`appearance.theme_preset`、`appearance.dynamic_color` 与 `appearance.skins`；旧备份不能恢复这些能力。保留 `appearance.theme_mode` 的自动/深/浅模式及独立终端设置。
 

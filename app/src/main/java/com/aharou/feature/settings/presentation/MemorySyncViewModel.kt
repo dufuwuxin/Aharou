@@ -35,6 +35,19 @@ class MemorySyncViewModel @Inject constructor(
     private val _outcome = MutableStateFlow<MemorySyncOutcome?>(null)
     val outcome: StateFlow<MemorySyncOutcome?> = _outcome.asStateFlow()
 
+    val cloudSearchConfiguration = settings.cloudSearchConfiguration
+
+    fun cloudSearchEndpoint(): String = settings.cloudSearchEndpoint
+
+    fun cloudSearchEnabled(): Boolean = settings.cloudSearchEnabled
+
+    fun setCloudSearchEnabled(enabled: Boolean) {
+        settings.cloudSearchEnabled = enabled
+    }
+
+    fun saveCloudSearchEndpoint(endpoint: String, expectedEndpoint: String? = null): Boolean =
+        settings.updateCloudSearchEndpoint(endpoint, expectedEndpoint)
+
     fun repoUrl(): String = settings.repoUrl
 
     fun saveRepoUrl(url: String) {

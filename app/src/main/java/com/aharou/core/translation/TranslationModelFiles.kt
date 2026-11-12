@@ -25,7 +25,7 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
 @Singleton
-class TranslationModelFiles @Inject constructor(@ApplicationContext private val context: Context) {
+class TranslationModelFiles @Inject constructor(@param:ApplicationContext private val context: Context) {
     data class Artifact(val path: String, val size: Long, val sha256: String)
     private val manifest = JSONObject(context.assets.open("translation/model-manifest.json").bufferedReader().use { it.readText() })
     val model: String = manifest.getString("model")

@@ -139,10 +139,8 @@ fun WorkflowTab(
     modifier: Modifier = Modifier
 ) {
     // 点分支即切到那个会话：看详情、派子代理都在会话里做，抽屉不当第二个操作面板。
-    // `?.let` 会返回可空，显式收尾成 Unit，否则推断出的是 (WorkflowTreeNode) -> Unit?。
     val pick: (WorkflowTreeNode) -> Unit = { node ->
         sessions.firstOrNull { it.id == node.id }?.let(onSelect)
-        Unit
     }
     val root = remember(sessions, currentSessionId) {
         var cursor = sessions.firstOrNull { it.id == currentSessionId }

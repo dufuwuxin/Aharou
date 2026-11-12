@@ -15,7 +15,7 @@ import javax.inject.Singleton
  */
 @Singleton
 class GitHubTokenStore @Inject constructor(
-    @param:ApplicationContext context: Context
+    @ApplicationContext context: Context
 ) {
     private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 

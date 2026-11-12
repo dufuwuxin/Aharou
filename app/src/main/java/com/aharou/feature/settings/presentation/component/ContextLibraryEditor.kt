@@ -1,6 +1,8 @@
 package com.aharou.feature.settings.presentation.component
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -11,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -21,17 +24,24 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import com.aharou.R
 import com.aharou.core.theme.Spacing
+import com.aharou.core.ui.AdaptiveModalBottomSheet
+import com.aharou.core.ui.AppSwitch
 import com.aharou.core.ui.AppTextField
 import com.aharou.feature.agent.domain.context.ContextCategory
 import com.aharou.feature.agent.domain.context.ContextEntry
 import com.aharou.feature.agent.domain.context.ContextKind
 import com.aharou.feature.agent.domain.context.ContextLoad
+import com.aharou.feature.agent.domain.context.WorldbookRules
 import com.aharou.feature.agent.domain.memory.MemoryScope
 import com.aharou.feature.settings.presentation.ContextEditorDraft
 import com.aharou.feature.settings.presentation.ContextLibraryState
@@ -43,15 +53,25 @@ internal fun ContextLibraryEditor(
     initialFolder: String,
     state: ContextLibraryState,
     onBack: () -> Unit,
-    onSave: (String, String, String, MemoryScope, ContextKind, ContextLoad, ContextCategory, String, String?) -> Unit,
+    onSave: (String, String, String, MemoryScope, ContextKind, ContextLoad, ContextCategory, String, String?, WorldbookRules) -> Unit,
     onDelete: (() -> Unit)?,
 ) {
     val editorKey = entry?.id ?: "new-${initialCategory.name}"
-    val original = ContextEditorDraft.from(entry, initialCategory, initialFolder, state.hasWorkspace)
+    val original = remember(entry, initialCategory, initialFolder, state.hasWorkspace) {
+        ContextEditorDraft.from(entry, initialCategory, initialFolder, state.hasWorkspace)
+    }
     var draft by rememberSaveable(editorKey, stateSaver = ContextEditorDraftSaver) { mutableStateOf(original) }
+    var showRules by rememberSaveable(editorKey) { mutableStateOf(false) }
+    var showAdvanced by rememberSaveable(editorKey) { mutableStateOf(false) }
     var showPlacement by rememberSaveable(editorKey) { mutableStateOf(false) }
     var confirmDelete by rememberSaveable(editorKey) { mutableStateOf(false) }
     var confirmBack by rememberSaveable(editorKey) { mutableStateOf(false) }
+    val worldbook = remember(draft.worldbookJson) { runCatching { WorldbookRules.fromJson(draft.worldbookJson) }.getOrNull() }
+    if (showRules && worldbook != null) WorldbookStructuredEditor(
+        worldbook, enabled = !state.writing,
+        onDismiss = { showRules = false },
+        onApply = { draft = draft.copy(worldbookJson = it.toJson()); showRules = false },
+    )
     val dirty = draft != original
     val back = { if (!state.writing) { if (dirty) confirmBack = true else onBack() } }
     BackHandler(enabled = true) { back() }
@@ -98,6 +118,27 @@ internal fun ContextLibraryEditor(
                 singleLine = false, minLines = 5, enabled = !state.writing)
         }
         com.aharou.core.translation.TranslationPreview(draft.content)
+        SettingsGroup {
+            Column(Modifier.padding(Spacing.lg), verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                Text(stringResource(R.string.context_worldbook_title), style = MaterialTheme.typography.titleMedium)
+                Text(stringResource(R.string.context_worldbook_help), style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                TextButton(enabled = !state.writing && worldbook != null, onClick = { showRules = true }) {
+                    Text(stringResource(R.string.context_worldbook_edit_rules))
+                }
+                TextButton(enabled = !state.writing, onClick = { showAdvanced = !showAdvanced }) {
+                    Text(stringResource(if (showAdvanced) R.string.context_worldbook_hide_json else R.string.context_worldbook_show_json))
+                }
+                if (showAdvanced || worldbook == null) {
+                    if (worldbook == null) ContextNotice(stringResource(R.string.context_worldbook_recover), error = true)
+                    AppTextField(value = draft.worldbookJson, onValueChange = { draft = draft.copy(worldbookJson = it) },
+                        label = stringResource(R.string.context_worldbook_field), singleLine = false, minLines = 4, enabled = !state.writing)
+                    TextButton(enabled = !state.writing && worldbook != null, onClick = {
+                        worldbook?.let { draft = draft.copy(worldbookJson = it.toJson()) }
+                    }) { Text(stringResource(R.string.context_worldbook_validate)) }
+                }
+            }
+        }
         TextButton(enabled = !state.writing, onClick = { showPlacement = !showPlacement }) {
             Text(stringResource(if (showPlacement) R.string.context_hide_placement else R.string.context_show_placement))
         }
@@ -128,10 +169,13 @@ internal fun ContextLibraryEditor(
             if (draft.category != ContextCategory.RULE) ContextChoiceRow(ContextKind.entries.map { stringResource(it.label()) }, draft.kind.ordinal,
                 { draft = draft.copy(kind = ContextKind.entries[it]) }, !state.writing)
         }
-        Button(modifier = Modifier.fillMaxWidth(), enabled = !state.writing && draft.name.isNotBlank() && draft.content.isNotBlank() &&
+        if (worldbook == null) ContextNotice(stringResource(R.string.context_worldbook_invalid), error = true)
+        Button(modifier = Modifier.fillMaxWidth(), enabled = !state.writing && worldbook != null && draft.name.isNotBlank() && draft.content.isNotBlank() &&
             (draft.category != ContextCategory.TEMPORARY || draft.sessionId != null), onClick = {
-                onSave(draft.name, draft.description, draft.content, draft.scope, draft.kind, draft.loading,
-                    draft.category, draft.folder, draft.sessionId)
+                worldbook?.let { rules ->
+                    onSave(draft.name, draft.description, draft.content, draft.scope, draft.kind, draft.loading,
+                        draft.category, draft.folder, draft.sessionId, rules)
+                }
             }) { Text(stringResource(if (state.writing) R.string.context_saving else R.string.common_save)) }
     }
 }
@@ -153,6 +197,10 @@ internal fun ContextLibraryPreview(state: ContextLibraryState, onRun: (String, S
             Text(stringResource(R.string.context_preview_summary, preview.full.size, preview.indexed.size, preview.omitted.size), style = MaterialTheme.typography.titleMedium)
             preview.full.forEach { ContextNotice(stringResource(R.string.context_preview_full_entry, it.title)) }
             preview.indexed.forEach { Text(stringResource(R.string.context_preview_index_entry, it.title), style = MaterialTheme.typography.bodyMedium) }
+            (preview.full + preview.indexed).filter { it.worldbook != WorldbookRules() }.forEach { entry ->
+                Text(stringResource(R.string.context_worldbook_explanation, entry.title, preview.explanations[entry.id].orEmpty()),
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             if (preview.rendered.isNotBlank()) SelectionContainer { Text(preview.rendered, style = MaterialTheme.typography.bodySmall) }
             if (preview.omitted.isNotEmpty()) {
                 Text(stringResource(R.string.context_preview_omitted), style = MaterialTheme.typography.titleSmall)
@@ -161,5 +209,96 @@ internal fun ContextLibraryPreview(state: ContextLibraryState, onRun: (String, S
                 }
             }
         }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun WorldbookStructuredEditor(
+    rules: WorldbookRules,
+    enabled: Boolean,
+    onDismiss: () -> Unit,
+    onApply: (WorldbookRules) -> Unit,
+) {
+    var triggers by rememberSaveable { mutableStateOf(rules.triggers.joinToString("\n")) }
+    var excludes by rememberSaveable { mutableStateOf(rules.excludes.joinToString("\n")) }
+    var roles by rememberSaveable { mutableStateOf(rules.roles.joinToString("\n")) }
+    var active by rememberSaveable { mutableStateOf(rules.enabled) }
+    var matchAll by rememberSaveable { mutableStateOf(rules.matchAll) }
+    var caseSensitive by rememberSaveable { mutableStateOf(rules.caseSensitive) }
+    var priority by rememberSaveable { mutableStateOf(rules.priority.toString()) }
+    var confidence by rememberSaveable { mutableStateOf(rules.confidence?.toString().orEmpty()) }
+    var importance by rememberSaveable { mutableStateOf(rules.importance?.toString().orEmpty()) }
+    var advanced by rememberSaveable { mutableStateOf(false) }
+    val priorityValue = priority.toIntOrNull()
+    val confidenceValue = confidence.toDoubleOrNull()
+    val importanceValue = importance.toIntOrNull()
+    val priorityError = priorityValue == null
+    val confidenceError = confidence.isNotBlank() &&
+        (confidenceValue == null || !confidenceValue.isFinite() || confidenceValue !in 0.0..1.0)
+    val importanceError = importance.isNotBlank() && (importanceValue == null || importanceValue !in 0..100)
+    val valid = !priorityError && !confidenceError && !importanceError
+    AdaptiveModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(Modifier.fillMaxWidth().imePadding().verticalScroll(rememberScrollState()).padding(Spacing.lg),
+            verticalArrangement = Arrangement.spacedBy(Spacing.lg)) {
+            Text(stringResource(R.string.context_worldbook_edit_rules), style = MaterialTheme.typography.titleLarge)
+            ContextNotice(stringResource(R.string.context_worldbook_form_help))
+            SettingsGroup {
+                Column(Modifier.padding(Spacing.lg), verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
+                    WorldbookToggle(stringResource(R.string.context_worldbook_enabled), active, enabled) { active = it }
+                    AppTextField(triggers, { triggers = it }, label = stringResource(R.string.context_worldbook_triggers),
+                        singleLine = false, minLines = 2, enabled = enabled)
+                    AppTextField(excludes, { excludes = it }, label = stringResource(R.string.context_worldbook_excludes),
+                        singleLine = false, minLines = 2, enabled = enabled)
+                    Text(stringResource(R.string.context_worldbook_match), style = MaterialTheme.typography.labelLarge)
+                    ContextChoiceRow(listOf(stringResource(R.string.context_worldbook_any), stringResource(R.string.context_worldbook_all)),
+                        if (matchAll) 1 else 0, { matchAll = it == 1 }, enabled)
+                    AppTextField(priority, { priority = it }, label = stringResource(R.string.context_worldbook_priority),
+                        isError = priorityError, supportingText = {
+                            Text(stringResource(if (priorityError) R.string.context_worldbook_integer_error else R.string.context_worldbook_priority_help))
+                        }, enabled = enabled)
+                }
+            }
+            TextButton(onClick = { advanced = !advanced }) {
+                Text(stringResource(if (advanced) R.string.context_worldbook_less else R.string.context_worldbook_more))
+            }
+            if (advanced) SettingsGroup {
+                Column(Modifier.padding(Spacing.lg), verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
+                    AppTextField(roles, { roles = it }, label = stringResource(R.string.context_worldbook_roles),
+                        supportingText = { Text(stringResource(R.string.context_worldbook_roles_help)) },
+                        singleLine = false, minLines = 2, enabled = enabled)
+                    WorldbookToggle(stringResource(R.string.context_worldbook_case), caseSensitive, enabled) { caseSensitive = it }
+                    AppTextField(confidence, { confidence = it }, label = stringResource(R.string.context_worldbook_confidence),
+                        isError = confidenceError, supportingText = {
+                            Text(stringResource(if (confidenceError) R.string.context_worldbook_confidence_error else R.string.context_worldbook_metadata_help))
+                        }, enabled = enabled)
+                    AppTextField(importance, { importance = it }, label = stringResource(R.string.context_worldbook_importance),
+                        isError = importanceError, supportingText = {
+                            Text(stringResource(if (importanceError) R.string.context_worldbook_importance_error else R.string.context_worldbook_metadata_help))
+                        }, enabled = enabled)
+                }
+            }
+            if (!valid) ContextNotice(stringResource(R.string.context_worldbook_numeric_error), error = true)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_cancel)) }
+                Button(enabled = enabled && valid, onClick = {
+                    onApply(rules.copy(enabled = active, triggers = worldbookLines(triggers), excludes = worldbookLines(excludes),
+                        matchAll = matchAll, caseSensitive = caseSensitive, priority = requireNotNull(priorityValue),
+                        roles = worldbookLines(roles), confidence = confidenceValue, importance = importanceValue))
+                }) { Text(stringResource(R.string.context_worldbook_apply)) }
+            }
+        }
+    }
+}
+
+private fun worldbookLines(value: String): List<String> = value.lines().map(String::trim).filter(String::isNotEmpty)
+
+@Composable
+private fun WorldbookToggle(label: String, checked: Boolean, enabled: Boolean, onChange: (Boolean) -> Unit) {
+    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp)
+        .toggleable(value = checked, enabled = enabled, role = Role.Switch, onValueChange = onChange),
+        horizontalArrangement = Arrangement.spacedBy(Spacing.md), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+        AppSwitch(checked, onCheckedChange = null, enabled = enabled)
     }
 }

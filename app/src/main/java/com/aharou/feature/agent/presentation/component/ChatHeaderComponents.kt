@@ -55,6 +55,7 @@ import compose.icons.feathericons.Eye
 import compose.icons.feathericons.GitBranch
 import compose.icons.feathericons.Globe
 import compose.icons.feathericons.HardDrive
+import compose.icons.feathericons.Map
 import compose.icons.feathericons.Terminal
 
 @Composable
@@ -70,9 +71,7 @@ internal fun ChatHeader(
     onNavigateToBrowser: () -> Unit = {},
     onNavigateToSandbox: () -> Unit = {},
     onNavigateToShared: () -> Unit = {},
-    /** 打开只读观察面板：看本会话树里的上/下级在干什么。 */
-    onNavigateToObserve: () -> Unit = {},
-    onOpenActivity: () -> Unit = {},
+    onSessionDiagnostics: () -> Unit = {},
     connectionState: com.aharou.feature.agent.domain.container.ConnectionState? = null,
     terminalActive: Boolean = false,
     gitActive: Boolean = false,
@@ -109,6 +108,10 @@ internal fun ChatHeader(
                     Spacer(modifier = Modifier.width(Spacing.sm))
                 }
                 Spacer(modifier = Modifier.weight(1f))
+                IconButton(onClick = onSessionDiagnostics, modifier = Modifier.size(48.dp)) {
+                    Icon(FeatherIcons.Map, contentDescription = stringResource(R.string.session_diagnostics_title),
+                        tint = MaterialTheme.colorScheme.primary)
+                }
 
                 if (toolsExpanded) {
                     // 展开态：只有工具三入口 + 收起，其余一律让位
@@ -129,12 +132,6 @@ internal fun ChatHeader(
                         contentDescription = stringResource(R.string.chat_open_browser),
                         active = browserActive,
                         onClick = onNavigateToBrowser
-                    )
-                    WorkbenchIconButton(
-                        icon = FeatherIcons.Clock,
-                        contentDescription = stringResource(R.string.chat_open_activity),
-                        active = false,
-                        onClick = onOpenActivity
                     )
                     IconButton(onClick = { toolsExpanded = false }) {
                         Icon(
@@ -157,12 +154,6 @@ internal fun ChatHeader(
                         active = false,
                         onClick = onNavigateToShared
                     )
-                    IconButton(onClick = onNavigateToObserve) {
-                        Icon(
-                            FeatherIcons.Eye,
-                            contentDescription = stringResource(R.string.chat_open_observe),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
                     IconButton(onClick = { toolsExpanded = true }) {
                         Icon(
                             FeatherIcons.Archive,

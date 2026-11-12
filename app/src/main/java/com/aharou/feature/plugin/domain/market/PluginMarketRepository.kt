@@ -11,6 +11,7 @@ import java.io.File
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
@@ -18,6 +19,10 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import okhttp3.Request
+
+/** 缓存文件名不接受市场条目的任何字段，避免远端 id 改变落盘路径。 */
+internal fun createMarketPackageTempFile(cacheDir: File): File =
+    File.createTempFile("plugin-market-", ".txplugin", cacheDir)
 
 /**
  * 插件市场的读写：拉源里的索引、下载插件包、交给 [PluginManager] 安装、比对版本查更新。
@@ -71,18 +76,19 @@ class PluginMarketRepository @Inject constructor(
                 ?: error("插件包下载失败")
 
             // 落 cacheDir 而不是插件目录：importPackage 期望一个完整文件，装完即删，别污染插件根目录
-            val tmp = File(context.cacheDir, "plugin-market/${entry.id}.txplugin").apply {
-                parentFile?.mkdirs()
-                writeBytes(bytes)
-            }
+            val tmp = createMarketPackageTempFile(context.cacheDir)
             try {
+                tmp.writeBytes(bytes)
                 val manifest = pluginManager.importPackage(tmp).getOrThrow()
                 pluginManager.install(manifest.id).getOrThrow()
                 manifest
             } finally {
                 tmp.delete()
             }
-        }.onFailure { FileLogger.e(TAG, "安装市场插件失败：${entry.id}", it) }
+        }.onFailure {
+            if (it is CancellationException) throw it
+            FileLogger.e(TAG, "安装市场插件失败：${entry.id} (${it::class.java.simpleName})")
+        }
     }
 
     /** 已装插件的版本表（id → 版本），市场列表据此标「已安装 / 有新版」。 */

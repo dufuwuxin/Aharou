@@ -62,7 +62,7 @@ class RepoDataFetcher(
 
         // 1. 本地缓存仍在有效期内，直接返回
         if (isCacheFresh) {
-            return@withContext FetchResult.Success(cachedContent!!, fromCache = true)
+            return@withContext FetchResult.Success(cachedContent, fromCache = true)
         }
 
         val cachedEtag = if (etagFile.isFile) runCatching { etagFile.readText(Charsets.UTF_8).trim() }.getOrNull() else null

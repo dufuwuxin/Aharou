@@ -62,9 +62,10 @@ private val StatusDotSize = Spacing.md
 @Composable
 fun ActivityTimelineSheet(
     receipts: List<ToolCallReceiptEntity>,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    embedded: Boolean = false,
 ) {
-    AdaptiveModalBottomSheet(onDismissRequest = onDismiss) {
+    SessionDiagnosticContainer(embedded, onDismiss) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()

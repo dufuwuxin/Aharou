@@ -188,7 +188,7 @@ object TombstoneParser {
                     else -> false
                 }
             }
-            if (value != null) out[key] = value!!
+            if (value != null) out[key] = value
         }
 
         private fun parseThread(p: Parser): ThreadInfo {

@@ -1,5 +1,6 @@
 package com.aharou.feature.agent.domain.inbox
 
+import android.os.Build
 import android.os.FileObserver
 import com.aharou.core.util.FileLogger
 import com.aharou.feature.agent.domain.container.ContainerInstaller
@@ -26,12 +27,25 @@ class SharedInboxWatcher @Inject constructor(
     fun start() {
         if (observer != null) return
         val dir = File(containerInstaller.sharedDir, INBOX_DIR).apply { mkdirs() }
-        observer = object : FileObserver(dir.absolutePath, MASK) {
-            override fun onEvent(event: Int, path: String?) {
-                events.notifyChanged()
+        observer = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            object : FileObserver(dir, MASK) {
+                override fun onEvent(event: Int, path: String?) {
+                    events.notifyChanged()
+                }
             }
-        }.also { it.startWatching() }
+        } else {
+            legacyObserver(dir)
+        }
+        observer?.startWatching()
         FileLogger.d(TAG, "开始监听共享区信箱: ${dir.absolutePath}")
+    }
+
+    // File-based constructors require API 29; API 26–28 only expose the path constructor.
+    @Suppress("DEPRECATION")
+    private fun legacyObserver(dir: File): FileObserver = object : FileObserver(dir.absolutePath, MASK) {
+        override fun onEvent(event: Int, path: String?) {
+            events.notifyChanged()
+        }
     }
 
     private companion object {

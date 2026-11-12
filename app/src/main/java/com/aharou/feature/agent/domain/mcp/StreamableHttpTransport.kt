@@ -137,7 +137,7 @@ class StreamableHttpTransport(
                     response.close()
                     return
                 }
-                cont.resume(response, null)
+                cont.resume(response) { _, cancelledResponse, _ -> cancelledResponse.close() }
             }
         })
     }

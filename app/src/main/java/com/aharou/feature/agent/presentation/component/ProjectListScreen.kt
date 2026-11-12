@@ -1,5 +1,6 @@
 package com.aharou.feature.agent.presentation.component
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
@@ -14,6 +15,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
@@ -56,25 +58,53 @@ fun ProjectListScreen(viewModel: ProjectTaskViewModel, createRequested: Boolean,
     Box(Modifier.fillMaxSize()) {
     Column(Modifier.fillMaxSize()
         .padding(Spacing.lg), verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
+        Column(verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+            Text(stringResource(R.string.project_home_heading), style = MaterialTheme.typography.headlineSmall,
+                modifier = Modifier.testTag("project_home_heading"))
+            Text(stringResource(R.string.project_home_description), style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-            FilterChip(selected = !showSessions, onClick = { showSessions = false }, label = { Text(stringResource(R.string.project_home)) })
-            FilterChip(selected = showSessions, onClick = { showSessions = true }, label = { Text(stringResource(R.string.project_sessions)) })
+            FilterChip(selected = !showSessions, onClick = { showSessions = false },
+                modifier = Modifier.heightIn(min = 48.dp), label = { Text(stringResource(R.string.project_home)) })
+            FilterChip(selected = showSessions, onClick = { showSessions = true },
+                modifier = Modifier.heightIn(min = 48.dp), label = { Text(stringResource(R.string.project_sessions)) })
         }
         if (showSessions) Box(Modifier.weight(1f)) { sessionsContent() }
         else {
         state.error?.let { Text(stringResource(R.string.project_task_error, projectTaskExecutionReasonLabel(it)), color = MaterialTheme.colorScheme.error) }
         LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 80.dp), verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
+            if (state.projects.isEmpty() && !state.loading) item {
+                Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surface,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    modifier = Modifier.fillMaxWidth().testTag("project_empty_state")) {
+                    Column(Modifier.padding(Spacing.xl), verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
+                        Text(stringResource(R.string.project_empty_title), style = MaterialTheme.typography.titleLarge)
+                        Text(stringResource(R.string.project_empty_description), style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Button(onClick = { creating = true; showSessions = false },
+                            enabled = !state.busy && state.workspace.isNotBlank(),
+                            modifier = Modifier.heightIn(min = 48.dp).testTag("project_empty_create")) {
+                            Text(stringResource(R.string.project_create))
+                        }
+                    }
+                }
+            }
             items(state.projects, key = { it.id }) { project ->
                 Box {
-                Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceContainer,
+                Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surface,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                     modifier = Modifier.fillMaxWidth().testTag("project_${project.id}").combinedClickable(
                         onClick = { onOpenProject(project.id) },
                         onLongClickLabel = stringResource(R.string.project_delete),
                         onLongClick = { menuProject = project }
                     )) {
-                    Column(Modifier.padding(Spacing.md)) {
-                        Text(project.title, style = MaterialTheme.typography.titleMedium)
-                        Text(stringResource(if (project.workspaceOwnership == "owned") R.string.project_workspace_owned else R.string.project_workspace_legacy, project.workspace))
+                    Column(Modifier.padding(Spacing.lg), verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                        Text(project.title, style = MaterialTheme.typography.titleLarge,
+                            maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text(stringResource(if (project.workspaceOwnership == "owned") R.string.project_workspace_owned else R.string.project_workspace_legacy, project.workspace),
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2, overflow = TextOverflow.Ellipsis)
                         project.continuationSourceProjectId?.let { Text(stringResource(R.string.project_workspace_continuation_source, it)) }
                         if (project.workspaceOwnership == "legacy_shared") TextButton(
                             onClick = { continuationId = project.id },
@@ -84,7 +114,8 @@ fun ProjectListScreen(viewModel: ProjectTaskViewModel, createRequested: Boolean,
                         }
                         if (project.purpose.isNotBlank()) {
                             Text(stringResource(R.string.project_purpose), style = MaterialTheme.typography.labelMedium)
-                            Text(project.purpose, maxLines = 2, style = MaterialTheme.typography.bodySmall)
+                            Text(project.purpose, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                                style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         if (project.requirements.isNotBlank()) Text(project.requirements, maxLines = 2, style = MaterialTheme.typography.bodySmall)
                         Text(stringResource(R.string.project_task_count, state.projectTaskCounts[project.id] ?: 0))
@@ -113,7 +144,7 @@ fun ProjectListScreen(viewModel: ProjectTaskViewModel, createRequested: Boolean,
     Box(Modifier.align(Alignment.BottomEnd).padding(Spacing.lg)) {
         FloatingActionButton(onClick = { createMenu = true }, shape = CircleShape,
             modifier = Modifier.width(80.dp).height(52.dp).semantics { contentDescription = createLabel }.testTag("create_project_or_session")) {
-            Text("+", style = MaterialTheme.typography.headlineMedium)
+            Text(stringResource(R.string.project_add_content), style = MaterialTheme.typography.labelLarge)
         }
         DropdownMenu(expanded = createMenu, onDismissRequest = { createMenu = false }) {
             DropdownMenuItem(text = { Text(stringResource(R.string.chat_new_session)) },

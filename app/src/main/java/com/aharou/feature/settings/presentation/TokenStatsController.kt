@@ -56,6 +56,7 @@ class TokenStatsController @Inject constructor(
     @Volatile
     private var providerCache: List<AIProviderConfig> = emptyList()
 
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     fun ensureStarted() {
         if (started) return
         started = true

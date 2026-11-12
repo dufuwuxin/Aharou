@@ -95,7 +95,7 @@ class ToolboxViewModel @Inject constructor(
     private val registry: ToolRegistry,
     private val engine: CommandEngine,
     private val workspace: WorkspaceRepository,
-    @ApplicationContext private val context: Context,
+    @param:ApplicationContext private val context: Context,
     private val policy: ToolPermissionPolicyEngine,
 ) : ViewModel() {
     private val _state = MutableStateFlow(ToolboxUiState())

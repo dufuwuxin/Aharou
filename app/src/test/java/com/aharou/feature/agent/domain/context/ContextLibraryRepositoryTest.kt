@@ -32,9 +32,9 @@ class ContextLibraryRepositoryTest {
             directory(scope).listFiles().orEmpty().filter { it.extension == "md" }.mapNotNull { MemoryParser.parse(it, scope) }
         }
         every { memories.writeMemory(any(), any(), any(), any(), any(), expectedVersion = any(),
-            contextKind = any(), contextLoad = any(), contextCategory = any(), contextFolder = any(), contextSessionId = any(), contextRequest = any()) } answers {
+            contextKind = any(), contextLoad = any(), contextCategory = any(), contextFolder = any(), contextSessionId = any(), contextRequest = any(), worldbook = any()) } answers {
             MemoryFileStorage.saveChecked(directory(arg(3)), arg(3), arg(0), arg(1), arg(2),
-                arg(5), arg(6), arg(7), arg(8), arg(9), arg(10), arg(11), arg(12), arg(13), arg(14), arg(15))
+                arg(5), arg(6), arg(7), arg(8), arg(9), arg(10), arg(11), arg(12), arg(13), arg(14), arg(15), arg(16))
         }
         library = ContextLibraryRepository(memories)
     }
@@ -48,6 +48,18 @@ class ContextLibraryRepositoryTest {
     private fun ctx(session: String = "s1") = AgentContext(null, null, project.path, null, sessionId = session)
     private fun rendered(session: String = "s1"): String = library.withPromptSnapshot(ctx(session)) {
         library.render(project.path, session, ContextOrigin.MEMORY)
+    }
+
+    @Test fun persistedKeywordsReachSearchWithoutChangingRetrievalBoundaries() {
+        File(global, "keyword.md").writeText(MemoryParser.format("keyword", "summary", "body", MemoryType.FACT,
+            keywords = listOf("needle"), contextLoad = ContextLoad.SEARCH))
+        File(global, "body.md").writeText(MemoryParser.format("body", "summary", "needle ".repeat(20), MemoryType.FACT,
+            contextLoad = ContextLoad.SEARCH))
+        val result = library.search("needle", project.path)
+        assertEquals(listOf("keyword", "body"), result.map { it.title })
+        assertEquals(listOf("needle"), result.first().keywords)
+        assertTrue(library.search("  ", project.path).isEmpty())
+        assertFalse(rendered().contains("needle"))
     }
 
     @Test fun offNeverOutputsAndPreviewAgrees() {
@@ -100,7 +112,8 @@ class ContextLibraryRepositoryTest {
 
     @Test fun memberWithoutMemoryCannotReadOrdinaryEntries() {
         memory("context", "private-native-body", ContextLoad.FULL)
-        val member = mockk<AgentDefinition>()
+        val member = mockk<AgentDefinition>().also { every { it.tags } returns emptyList() }
+        every { member.name } returns "fixture-role"
         every { member.inject } returns emptySet()
         val memberContext = ctx().copy(agentDefinition = member)
         val denied = library.withPromptSnapshot(memberContext) { library.render(project.path, "s1", ContextOrigin.MEMORY) }
@@ -154,7 +167,7 @@ class ContextLibraryRepositoryTest {
         memory("main", "main-private-body", ContextLoad.FULL, category = ContextCategory.MAIN_INJECTED)
         memory("normal", "ordinary-private-body", ContextLoad.FULL)
         listOf("builder", "reviewer").forEach { name ->
-            val member = mockk<AgentDefinition>()
+            val member = mockk<AgentDefinition>().also { every { it.tags } returns emptyList() }
             every { member.name } returns name
             every { member.inject } returns emptySet()
             val result = library.withPromptSnapshot(ctx().copy(agentDefinition = member)) {
@@ -192,7 +205,8 @@ class ContextLibraryRepositoryTest {
     @Test fun nestedPreviewRoleAndFailureRestoreMainSnapshotWithoutVersionPollution() {
         memory("main", "first-main-payload", ContextLoad.FULL, category = ContextCategory.MAIN_INJECTED)
         memory("role", "first-role-payload", ContextLoad.FULL, category = ContextCategory.ROLE_INJECTED)
-        val member = mockk<AgentDefinition>()
+        val member = mockk<AgentDefinition>().also { every { it.tags } returns emptyList() }
+        every { member.name } returns "fixture-role"
         every { member.inject } returns emptySet()
         library.withPromptSnapshot(ctx()) {
             val initial = library.render(project.path, "s1", ContextOrigin.MEMORY)
@@ -242,7 +256,8 @@ class ContextLibraryRepositoryTest {
     @Test fun roleInjectionDoesNotUnlockAnotherSessionsTemporaryMemory() {
         memory("role", "role-shared-payload", ContextLoad.FULL, category = ContextCategory.ROLE_INJECTED)
         memory("temporary", "session-one-only", ContextLoad.FULL, category = ContextCategory.TEMPORARY, session = "s1")
-        val member = mockk<AgentDefinition>()
+        val member = mockk<AgentDefinition>().also { every { it.tags } returns emptyList() }
+        every { member.name } returns "fixture-role"
         every { member.inject } returns setOf(InjectPart.MEMORY)
         listOf("s1", "s2").forEach { session ->
             val text = library.withPromptSnapshot(ctx(session).copy(agentDefinition = member)) {
@@ -256,7 +271,8 @@ class ContextLibraryRepositoryTest {
     @Test fun failedTopLevelRoleSnapshotIsRemovedBeforeFollowingMainRender() {
         memory("role", "role-only-payload", ContextLoad.FULL, category = ContextCategory.ROLE_INJECTED)
         memory("main", "main-only-payload", ContextLoad.FULL, category = ContextCategory.MAIN_INJECTED)
-        val member = mockk<AgentDefinition>()
+        val member = mockk<AgentDefinition>().also { every { it.tags } returns emptyList() }
+        every { member.name } returns "fixture-role"
         every { member.inject } returns emptySet()
         try {
             library.withPromptSnapshot(ctx().copy(agentDefinition = member)) {

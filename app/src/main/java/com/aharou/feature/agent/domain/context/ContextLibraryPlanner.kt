@@ -12,7 +12,8 @@ object ContextLibraryPlanner {
 
     fun plan(entries: List<ContextEntry>, sessionId: String? = null, onlyOrigin: ContextOrigin? = null,
              injectionCategory: ContextCategory = ContextCategory.MAIN_INJECTED,
-             memoryAllowed: Boolean = true): ContextPreview {
+             memoryAllowed: Boolean = true, userText: String = "", roleName: String? = null,
+             roleTags: List<String> = emptyList()): ContextPreview {
         val full = mutableListOf<ContextEntry>()
         val indexed = mutableListOf<ContextEntry>()
         val omitted = mutableListOf<Pair<ContextEntry, String>>()
@@ -20,7 +21,8 @@ object ContextLibraryPlanner {
         val renderedEntries = linkedMapOf<String, String>()
         var fullChars = 0
         var indexChars = 0
-        for (entry in entries.distinctBy { it.id }) {
+        val audience = if (injectionCategory == ContextCategory.ROLE_INJECTED) WorldbookAudience.ROLE else WorldbookAudience.MAIN
+        for (entry in entries.distinctBy { it.id }.sortedByDescending { it.worldbook.priority }) {
             // Filter before charging budgets: another audience must not crowd out this one.
             if (entry.category.isInjection && entry.category != injectionCategory) {
                 omitted += entry to "different injection audience"
@@ -40,6 +42,11 @@ object ContextLibraryPlanner {
             }
             if (entry.loading == ContextLoad.SEARCH) {
                 omitted += entry to "search only: explicit retrieval required"
+                continue
+            }
+            val reason = entry.worldbook.omission(userText, audience, roleName, roleTags)
+            if (reason != null) {
+                omitted += entry to reason
                 continue
             }
             val header = safe("[context ${entry.kind.name} ${entry.id}] ${entry.title}")
@@ -67,6 +74,7 @@ object ContextLibraryPlanner {
                 } else omitted += entry to "index budget exceeded"
             }
         }
-        return ContextPreview(full.filter { onlyOrigin == null || it.origin == onlyOrigin }, indexed.filter { onlyOrigin == null || it.origin == onlyOrigin }, omitted.filter { onlyOrigin == null || it.first.origin == onlyOrigin }, output.joinToString("\n\n"), renderedEntries)
+        return ContextPreview(full.filter { onlyOrigin == null || it.origin == onlyOrigin }, indexed.filter { onlyOrigin == null || it.origin == onlyOrigin }, omitted.filter { onlyOrigin == null || it.first.origin == onlyOrigin }, output.joinToString("\n\n"), renderedEntries,
+            (full + indexed).associate { it.id to it.worldbook.explanation() })
     }
 }

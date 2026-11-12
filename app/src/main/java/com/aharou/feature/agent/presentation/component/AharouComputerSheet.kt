@@ -1,5 +1,7 @@
 package com.aharou.feature.agent.presentation.component
 
+import android.content.ClipData
+
 import android.graphics.Bitmap
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -36,6 +38,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -43,9 +46,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -65,6 +68,7 @@ import compose.icons.feathericons.Copy
 import compose.icons.feathericons.Globe
 import compose.icons.feathericons.Terminal
 import compose.icons.feathericons.X
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import org.json.JSONObject
 
@@ -181,7 +185,8 @@ internal fun AharouComputerSheet(
 /** 右上角动作钮：随工具类型分发（终端预填 / 打开浏览器 / 复制结果）。 */
 @Composable
 private fun ComputerActionButton(message: AgentUIMessage?) {
-    val clipboard = LocalClipboardManager.current
+    val clipboard = LocalClipboard.current
+    val copyScope = rememberCoroutineScope()
     val browserOpener = LocalBrowserOpener.current
     val terminalOpener = LocalTerminalOpener.current
     var copyDone by remember { mutableStateOf(false) }
@@ -214,8 +219,10 @@ private fun ComputerActionButton(message: AgentUIMessage?) {
         }
         else -> {
             IconButton(onClick = {
-                clipboard.setText(AnnotatedString(message?.content.orEmpty()))
-                copyDone = true
+                copyScope.launch {
+                    clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("", message?.content.orEmpty())))
+                    copyDone = true
+                }
             }) {
                 Icon(
                     if (copyDone) FeatherIcons.Check else FeatherIcons.Copy,

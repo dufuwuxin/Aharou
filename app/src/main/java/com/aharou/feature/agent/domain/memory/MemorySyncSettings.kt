@@ -1,6 +1,9 @@
 package com.aharou.feature.agent.domain.memory
 
 import android.content.Context
+import android.content.SharedPreferences
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -16,11 +19,46 @@ class MemorySyncSettings @Inject constructor(
     @param:ApplicationContext private val context: Context
 ) {
     private val prefs = context.getSharedPreferences("aharou_memory_sync", Context.MODE_PRIVATE)
+    data class CloudSearchConfiguration(val enabled: Boolean, val endpoint: String)
+    private fun cloudConfiguration() = CloudSearchConfiguration(
+        prefs.getBoolean(KEY_CLOUD_SEARCH_ENABLED, false), prefs.getString(KEY_CLOUD_SEARCH_ENDPOINT, "").orEmpty())
+    private val cloudState = MutableStateFlow(cloudConfiguration())
+    val cloudSearchConfiguration = cloudState.asStateFlow()
+    private val cloudListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        if (key == KEY_CLOUD_SEARCH_ENABLED || key == KEY_CLOUD_SEARCH_ENDPOINT) cloudState.value = cloudConfiguration()
+    }.also { prefs.registerOnSharedPreferenceChangeListener(it) }
+
 
     /** 用户自己的记忆仓库地址；空串表示没配过，此时不提供同步。 */
     var repoUrl: String
         get() = prefs.getString(KEY_REPO_URL, "").orEmpty()
         set(value) = prefs.edit().putString(KEY_REPO_URL, value.trim()).apply()
+
+    /** Independent from Git sync: enabling this never schedules or sends a request. */
+    var cloudSearchEnabled: Boolean
+        get() = prefs.getBoolean(KEY_CLOUD_SEARCH_ENABLED, false)
+        set(value) {
+            prefs.edit().putBoolean(KEY_CLOUD_SEARCH_ENABLED, value).apply()
+            cloudState.value = cloudConfiguration()
+        }
+
+    /** Public unauthenticated HTTPS API; empty means unconfigured. */
+    var cloudSearchEndpoint: String
+        get() = prefs.getString(KEY_CLOUD_SEARCH_ENDPOINT, "").orEmpty()
+        set(value) = synchronized(prefs) {
+            val endpoint = value.trim()
+            require(endpoint.isEmpty() || CloudMemorySearch.endpointUrl(endpoint) != null) {
+                "Endpoint must be HTTPS without credentials, query or fragment"
+            }
+            prefs.edit().putString(KEY_CLOUD_SEARCH_ENDPOINT, endpoint).apply()
+            cloudState.value = cloudConfiguration()
+        }
+
+    fun updateCloudSearchEndpoint(endpoint: String, expected: String?): Boolean = synchronized(prefs) {
+        if (expected != null && cloudSearchEndpoint != expected) return@synchronized false
+        cloudSearchEndpoint = endpoint
+        true
+    }
 
     /** 推送分支，默认 main。 */
     var branch: String
@@ -68,6 +106,8 @@ class MemorySyncSettings @Inject constructor(
         /** WorkManager 周期任务允许的最小周期。 */
         const val MIN_INTERVAL_MINUTES = 15
 
+        const val KEY_CLOUD_SEARCH_ENABLED = "cloud_search_enabled"
+        const val KEY_CLOUD_SEARCH_ENDPOINT = "cloud_search_endpoint"
         const val KEY_REPO_URL = "repo_url"
         const val KEY_BRANCH = "branch"
         const val KEY_LAST_SYNC_AT = "last_sync_at"

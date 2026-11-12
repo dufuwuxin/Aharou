@@ -28,7 +28,7 @@ import kotlinx.coroutines.launch
  */
 @Singleton
 internal class LiveUpdateCoordinator @Inject constructor(
-    @ApplicationContext private val context: Context,
+    @param:ApplicationContext private val context: Context,
     private val notifier: LiveUpdateNotifier,
     private val terminalSessionProvider: TerminalSessionProvider,
 ) {

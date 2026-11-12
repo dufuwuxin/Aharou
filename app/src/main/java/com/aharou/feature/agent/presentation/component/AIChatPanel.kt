@@ -52,6 +52,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -184,6 +185,7 @@ fun AIChatPanel(
     }
     val currentSessionId by viewModel.currentSessionId.collectAsStateWithLifecycle()
     val modelSelectionSessionId = currentSessionId
+    val diagnosticsSessionId = diagnosticSessionId(currentSessionId, bodyOverride != null, composerSessionId)
     // 顶栏中轴展示的会话标题：取当前会话在会话列表里的标题，未命中（新会话未命名）则不显示。
     val allSessions by viewModel.sessions.collectAsStateWithLifecycle()
     // 软打断后 agentState 立即回到 Idle，但协程仍在后台跑当前这一步；长按强打断的入口要靠它保底。
@@ -193,7 +195,7 @@ fun AIChatPanel(
     val entryScheduler = remember(currentSessionId) { MessageEntryScheduler() }
     val messageEntryDelays = remember(messages, entryScheduler) { entryScheduler.schedule(messages) }
     val currentSessionState by viewModel.currentSessionState.collectAsStateWithLifecycle()
-    val currentSession = currentSessionState
+    val currentSession = currentSessionState?.takeIf { it.id == currentSessionId }
     val sessionInputTokens = currentSession?.totalInputTokens ?: 0
     val sessionOutputTokens = currentSession?.totalOutputTokens ?: 0
     val sessionLastInputTokens = currentSession?.lastInputTokens ?: 0
@@ -290,7 +292,7 @@ fun AIChatPanel(
     var uploadingCount by remember { mutableStateOf(0) }
     var messageForMenu by remember { mutableStateOf<AgentUIMessage?>(null) }
     var crossCheckMessage by remember { mutableStateOf<AgentUIMessage?>(null) }
-    var showActivity by remember { mutableStateOf(false) }
+    var showSessionDiagnostics by remember(diagnosticsSessionId) { mutableStateOf(false) }
     val quoteReplyEnabled = rememberQuoteReplyEnabled()
     var editingMessage by remember { mutableStateOf<AgentUIMessage?>(null) }
     var queuedEditing by remember { mutableStateOf<QueuedRequest?>(null) }
@@ -370,7 +372,7 @@ fun AIChatPanel(
         sessionId = currentSessionId,
         turnKeys = turnKeys,
     )
-    val injectedContextText = rememberInjectedContextText(currentSessionId)
+    val injectedContextText = rememberInjectedContextText(diagnosticsSessionId)
     val lastUserMessageId = remember(chatItems) { chatItems.lastOrNull { it.message.role == MessageRole.USER }?.message?.id }
     // 每轮任务的总耗时（用户发送 → 本轮 AI 收工）与 token 合计，都只挂在轮末助手气泡下方
     val taskDurations = remember(messages, isBusy) {
@@ -824,7 +826,7 @@ fun AIChatPanel(
             // 否则贴底那一下会把视口拽回底部（嵌套拖动后弹回）。
             val movedOuter = start == null || start.index != listState.firstVisibleItemIndex ||
                 start.offset != listState.firstVisibleItemScrollOffset
-            followBottom = if (movedOuter) isAtBottom else start?.following == true
+            followBottom = if (movedOuter) isAtBottom else start.following
         }
     }
 
@@ -1191,12 +1193,7 @@ fun AIChatPanel(
                 onNavigateToBrowser = onNavigateToBrowser,
                 onNavigateToSandbox = onNavigateToSandbox,
                 onNavigateToShared = onNavigateToShared,
-                onNavigateToObserve = {
-                    // 把「看哪棵树」先存好再跳转：面板只负责展示，不关心入口在哪。
-                    currentSessionId?.let { ObserveTargetHolder.sessionId = it }
-                    onNavigateToObserve()
-                },
-                onOpenActivity = { showActivity = true },
+                onSessionDiagnostics = { showSessionDiagnostics = true },
                 connectionState = connectionState?.takeIf { isRemote },
                 terminalActive = terminalActive,
                 gitActive = gitActive,
@@ -1226,7 +1223,11 @@ fun AIChatPanel(
             Box(modifier = Modifier.weight(1f)) {
                 if (bodyOverride != null) {
                     Box(Modifier.fillMaxSize().padding(bottom = with(LocalDensity.current) { floatingLayerHeightPx.toDp() })) {
-                        ProjectChatMenuHost(sessionId = currentSessionId?.takeIf { sessionReady && currentSession?.parentId == null }, onTerminal = onNavigateToTerminal, onGit = onNavigateToGit, onBrowser = onNavigateToBrowser, onSandbox = onNavigateToSandbox, onShared = onNavigateToShared, onObserve = { currentSessionId?.let { ObserveTargetHolder.sessionId = it }; onNavigateToObserve() }, onActivity = { showActivity = true }, connectionState = connectionState?.takeIf { isRemote }, inputTokens = sessionInputTokens, outputTokens = sessionOutputTokens) { bodyOverride(composer::collapse) }
+                        ProjectChatMenuHost(sessionId = diagnosticsSessionId?.takeIf { sessionReady && currentSession?.parentId == null }, onTerminal = onNavigateToTerminal, onGit = onNavigateToGit, onBrowser = onNavigateToBrowser, onSandbox = onNavigateToSandbox, onShared = onNavigateToShared, onDiagnostics = { showSessionDiagnostics = true }, connectionState = connectionState?.takeIf { isRemote }, inputTokens = sessionInputTokens, outputTokens = sessionOutputTokens, contextStatus = {
+                            SessionContextStatus(sessionContextMetrics(contextUsages[diagnosticsSessionId], if (diagnosticsSessionId == null) 0 else sessionLastInputTokens,
+                                activeModelMetadata?.takeIf { diagnosticsSessionId != null }?.let { com.aharou.feature.settings.domain.model.ModelContextPolicy.effectiveInputBudget(it) } ?: 0),
+                                onClick = { showSessionDiagnostics = true })
+                        }) { bodyOverride(composer::collapse) }
                     }
                 } else if (!messagesReady) {
                     // 远程模式连接未就绪时显示连接状态占位，避免空白或旧工作区记录闪烁
@@ -1786,9 +1787,26 @@ fun AIChatPanel(
             }
 
             crossCheckMessage?.let { message -> CrossCheckSheet(message, currentSessionId) { crossCheckMessage = null } }
-            if (showActivity) {
-                val receipts by viewModel.currentSessionReceipts.collectAsStateWithLifecycle()
-                ActivityTimelineSheet(receipts = receipts, onDismiss = { showActivity = false })
+            key(diagnosticsSessionId) {
+                val conversationMapScope = rememberCoroutineScope()
+                if (showSessionDiagnostics) {
+                    val receipts by viewModel.currentSessionReceipts.collectAsStateWithLifecycle()
+                    SessionDiagnosticsSheet(diagnosticsSessionId, currentSession?.takeIf { it.id == diagnosticsSessionId }, messagesState, receipts,
+                        sessionContextMetrics(contextUsages[diagnosticsSessionId], if (diagnosticsSessionId == null) 0 else sessionLastInputTokens,
+                            activeModelMetadata?.takeIf { diagnosticsSessionId != null }?.let { com.aharou.feature.settings.domain.model.ModelContextPolicy.effectiveInputBudget(it) } ?: 0),
+                        injectedContextText, bodyOverride == null,
+                    canLocate = { findChatMessageIndex(chatItems, it) >= 0 },
+                    onJump = { id ->
+                        val index = findChatMessageIndex(chatItems, id)
+                        val valid = messagesReady && bodyOverride == null && index >= 0 && viewModel.currentSessionId.value == currentSessionId
+                        if (valid) {
+                            followBottom = false
+                            conversationMapScope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { if (viewModel.currentSessionId.value == currentSessionId) listState.scrollToItem(index) }
+                        }
+                        valid
+                    },
+                    onDismiss = { showSessionDiagnostics = false })
+                }
             }
             editingMessage?.let { message ->
                 EditMessageDialog(

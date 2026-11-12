@@ -1,6 +1,8 @@
 package com.aharou.feature.settings.presentation.component
 
+import android.content.ClipData
 import android.content.Intent
+import kotlinx.coroutines.launch
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -11,10 +13,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aharou.R
@@ -41,7 +43,8 @@ private fun ToolboxScreen(
     state: ToolboxUiState, viewModel: ToolboxViewModel,
     onOpenEditor: (() -> Unit)?,
 ) {
-    val clipboard = LocalClipboardManager.current
+    val clipboard = LocalClipboard.current
+    val copyScope = rememberCoroutineScope()
     val context = LocalContext.current
     Column(
         Modifier.fillMaxWidth().imePadding().verticalScroll(rememberScrollState()).padding(Spacing.lg),
@@ -105,7 +108,11 @@ private fun ToolboxScreen(
             SettingsGroupHeader(text = stringResource(R.string.toolbox_export))
             TechnicalOutput(state.exportText)
             Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-                TextButton(onClick = { clipboard.setText(AnnotatedString(state.exportText)) }) { Text(stringResource(R.string.toolbox_copy)) }
+                TextButton(onClick = {
+                    copyScope.launch {
+                        clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("", state.exportText)))
+                    }
+                }) { Text(stringResource(R.string.toolbox_copy)) }
                 TextButton(onClick = {
                     context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
                         type = "application/json"

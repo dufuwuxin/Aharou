@@ -42,6 +42,26 @@ class ContextMemoryToolTest {
         assertTrue(own.toString().contains("private-summary"))
     }
 
+    @Test fun librarySearchUsesKeywordsAndCrossFieldTermsAfterSessionFiltering() = runBlocking {
+        fun entry(id: String, text: String = "body", keys: List<String> = emptyList()) = ContextEntry(
+            id, "arm64-$id", "summary", text, MemoryScope.PROJECT, ContextKind.REFERENCE,
+            ContextLoad.SEARCH, ContextOrigin.MEMORY, id, keywords = keys)
+        val keyword = entry("keyword", keys = listOf("needle"))
+        val body = entry("body", text = "needle ".repeat(30))
+        val otherSession = entry("private", keys = listOf("needle")).copy(
+            category = ContextCategory.TEMPORARY, sessionId = "s2")
+        every { library.list(any(), any()) } returns listOf(body, otherSession, keyword)
+        val result = tool.executeWithContext(mapOf("action" to JsonPrimitive("library_search"),
+            "query" to JsonPrimitive("arm64 needle")), ctx("s1"))
+        assertTrue(result is ToolResult.Success)
+        val text = ((result as ToolResult.Success).data as JsonPrimitive).content
+        assertTrue(text.indexOf("arm64-keyword") < text.indexOf("arm64-body"))
+        assertFalse(text.contains("arm64-private"))
+        val empty = tool.executeWithContext(mapOf("action" to JsonPrimitive("library_search"),
+            "query" to JsonPrimitive(" ")), ctx("s1")) as ToolResult.Success
+        assertEquals("", (empty.data as JsonPrimitive).content)
+    }
+
     @Test fun libraryReadExplicitlyReportsPendingAndPreservesBody() = runBlocking {
         val pending = ContextEntry("MEMORY:PROJECT:pending", "pending", "summary", "pending-body", MemoryScope.PROJECT,
             ContextKind.REFERENCE, ContextLoad.FULL, ContextOrigin.MEMORY, "source", pending = true, version = "v1")

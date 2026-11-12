@@ -76,7 +76,7 @@ class InlineHintCodeEditor(context: Context) : CodeEditor(context) {
 
     private fun drawHints(canvas: Canvas) {
         val editorLayout = layout ?: return
-        val content = text ?: return
+        val content = text
         if (content.lineCount <= 0) return
 
         val hintSize = rowHeight * HINT_TEXT_RATIO
@@ -101,8 +101,8 @@ class InlineHintCodeEditor(context: Context) : CodeEditor(context) {
                 // getCharLayoutOffset 的 [0] 是该行 row 的底部 y、[1] 是列位置的 x。
                 val offsets = editorLayout.getCharLayoutOffset(line, lineLength)
                 if (offsets.size < 2) return@forEach
-                val rowBottomY = offsets[0].toFloat()
-                val endX = offsets[1].toFloat()
+                val rowBottomY = offsets[0]
+                val endX = offsets[1]
 
                 val screenY = offsetY - scrollY + rowBottomY
                 if (screenY < 0f || screenY > height) return@forEach

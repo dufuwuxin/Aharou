@@ -880,7 +880,7 @@ private fun moveCursorHorizontally(editor: CodeEditor, forward: Boolean) {
  * 按钮只在有选区时露出——没选中就没有可投递的内容；点它把当前选中的文本交给 [onAdd]。
  */
 private fun installAddToInputAction(editor: CodeEditor, label: String, onAdd: (String) -> Unit) {
-    val scroller = editor.getComponent(EditorTextActionWindow::class.java)?.view as? ViewGroup
+    val scroller = editor.getComponent(EditorTextActionWindow::class.java).view
         ?: return
     val row = scroller.getChildAt(0) as? ViewGroup ?: return
     val buttons = row.getChildAt(0) as? ViewGroup ?: return

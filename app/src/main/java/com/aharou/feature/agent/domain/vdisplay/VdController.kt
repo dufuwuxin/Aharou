@@ -68,7 +68,7 @@ data class VdInfo(
  */
 @Singleton
 class VdController @Inject constructor(
-    @ApplicationContext private val context: Context,
+    @param:ApplicationContext private val context: Context,
     private val hostShell: HostShellManager,
 ) {
     companion object {

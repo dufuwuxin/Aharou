@@ -19,6 +19,8 @@ class ContextLibraryRepository @Inject constructor(
     private class Snapshot(
         val root: String?, val sessionId: String?, val memoryAllowed: Boolean,
         val injectionCategory: ContextCategory,
+        val userText: String = "", val roleName: String? = null,
+        val roleTags: List<String> = emptyList(),
     ) {
         var entries: List<ContextEntry>? = null
         val plans = mutableMapOf<Boolean, ContextPreview>()
@@ -29,7 +31,8 @@ class ContextLibraryRepository @Inject constructor(
         val previous = snapshot.get()
         snapshot.set(Snapshot(ctx.projectRoot.takeIf { it.isNotBlank() }, ctx.sessionId,
             ctx.agentDefinition?.let { InjectPart.MEMORY in it.inject } ?: true,
-            if (roleSession) ContextCategory.ROLE_INJECTED else ContextCategory.MAIN_INJECTED))
+            if (roleSession) ContextCategory.ROLE_INJECTED else ContextCategory.MAIN_INJECTED,
+            ctx.currentUserText, ctx.agentDefinition?.name, ctx.agentDefinition?.tags.orEmpty()))
         return try { block() } finally { if (previous == null) snapshot.remove() else snapshot.set(previous) }
     }
 
@@ -39,7 +42,8 @@ class ContextLibraryRepository @Inject constructor(
         m.version, pending = m.pending, enabled = m.expiresAt?.let { it > System.currentTimeMillis() } ?: true,
         category = m.contextCategory, folder = m.contextFolder, sessionId = m.contextSessionId,
         workspaceRoot = if (m.scope == MemoryScope.PROJECT) projectRoot else null, requestKey = m.contextRequest,
-    )
+        keywords = m.keywords, worldbook = m.worldbook, graphAliases = m.graphAliases,
+    ).let { it.copy(graphId = ContextGraphIdentity.scoped(ContextGraphIdentity.raw(m), it)) }
 
     internal fun sources(projectRoot: String?): List<ContextEntry> = buildList {
         builtins?.ensureSeeded(memories)
@@ -60,18 +64,22 @@ class ContextLibraryRepository @Inject constructor(
         val active = snapshot.get()
         return list(active?.root, active?.sessionId).filter { entry ->
             entry.requestKey == name && entry.enabled && !entry.pending && entry.loading != ContextLoad.OFF &&
-                entry.category == ContextCategory.RULE
+                entry.category == ContextCategory.RULE && active?.memoryAllowed != false &&
+                entry.worldbook.omission(active?.userText.orEmpty(),
+                    if (active?.injectionCategory == ContextCategory.ROLE_INJECTED) WorldbookAudience.ROLE else WorldbookAudience.MAIN,
+                    active?.roleName, active?.roleTags.orEmpty()) == null
         }.joinToString("\n\n") { ContextLibraryPlanner.safe(it.content) }
     }
 
     fun search(query: String, projectRoot: String?): List<ContextEntry> {
-        val terms = query.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
-        if (terms.isEmpty()) return emptyList()
-        return list(projectRoot).filter { e -> terms.all { term -> "${e.title}\n${e.description}\n${e.content}".contains(term, true) } }
+        if (query.isBlank()) return emptyList()
+        return ContextSearch.search(list(projectRoot), query)
     }
 
     fun save(entry: ContextEntry, projectRoot: String?): Boolean = synchronized(MemoryFileStorage.lock) {
-        val source = sources(projectRoot).firstOrNull { it.id == entry.id } ?: return@synchronized false
+        val entries = sources(projectRoot)
+        val source = entries.firstOrNull { it.id == entry.id } ?: return@synchronized false
+        val rules = ContextGraphIdentity.normalize(entry.worldbook, entries)
         if (!source.editable || source.scope != entry.scope || source.origin != entry.origin) return@synchronized false
         if (source.scope == MemoryScope.PROJECT && (entry.workspaceRoot != projectRoot || source.workspaceRoot != projectRoot)) return@synchronized false
         if (entry.category == ContextCategory.TEMPORARY && entry.sessionId.isNullOrBlank()) return@synchronized false
@@ -83,23 +91,25 @@ class ContextLibraryRepository @Inject constructor(
             return@synchronized MemoryFileStorage.renameChecked(original, original.copy(
                 name = entry.title, description = entry.description, content = entry.content,
                 contextKind = entry.kind, contextLoad = entry.loading, contextCategory = entry.category,
-                contextFolder = entry.folder, contextSessionId = entry.sessionId, contextRequest = source.requestKey
+                contextFolder = entry.folder, contextSessionId = entry.sessionId, contextRequest = source.requestKey,
+                worldbook = rules, graphAliases = (original.graphAliases + source.id + source.title).distinct()
             ), entry.version)
         }
         memories.writeMemory(source.title, entry.description, entry.content, source.scope, projectRoot,
             expectedVersion = entry.version, contextKind = entry.kind, contextLoad = entry.loading,
             contextCategory = entry.category, contextFolder = entry.folder, contextSessionId = entry.sessionId,
-            contextRequest = source.requestKey) == MemoryWriteResult.Success
+            contextRequest = source.requestKey, worldbook = rules.takeUnless { it == source.worldbook }) == MemoryWriteResult.Success
     }
 
     fun create(name: String, description: String, content: String, scope: MemoryScope, kind: ContextKind,
                loading: ContextLoad, projectRoot: String?, category: ContextCategory = ContextCategory.LONG_TERM,
-               folder: String = "", sessionId: String? = null): Boolean {
+               folder: String = "", sessionId: String? = null, worldbook: WorldbookRules = WorldbookRules()): Boolean {
         if (name.isBlank() || content.isBlank() || !ContextFolderPath.valid(folder) ||
             (category == ContextCategory.TEMPORARY && sessionId.isNullOrBlank())) return false
         return memories.writeMemory(name, description, content, scope, projectRoot,
             expectedVersion = MemorySource.VERSION_NEW, contextKind = kind, contextLoad = loading,
-            contextCategory = category, contextFolder = folder, contextSessionId = sessionId) == MemoryWriteResult.Success
+            contextCategory = category, contextFolder = folder, contextSessionId = sessionId,
+            worldbook = ContextGraphIdentity.normalize(worldbook, sources(projectRoot)).takeUnless { it == WorldbookRules() }) == MemoryWriteResult.Success
     }
 
     fun delete(entry: ContextEntry, projectRoot: String?): Boolean = synchronized(MemoryFileStorage.lock) {
@@ -131,21 +141,24 @@ class ContextLibraryRepository @Inject constructor(
         MemoryFileStorage.rewriteContextMetadata(updates, removeMarkers)
     }
 
-    fun preview(projectRoot: String?, query: String, sessionId: String? = null): ContextPreview {
+    fun preview(projectRoot: String?, query: String, sessionId: String? = null,
+                roleName: String? = null, memoryAllowed: Boolean = true, roleTags: List<String> = emptyList()): ContextPreview {
         val previous = snapshot.get()
-        snapshot.set(Snapshot(projectRoot?.takeIf(String::isNotBlank), sessionId, true, ContextCategory.MAIN_INJECTED))
+        snapshot.set(Snapshot(projectRoot?.takeIf(String::isNotBlank), sessionId, memoryAllowed,
+            if (roleName == null) ContextCategory.MAIN_INJECTED else ContextCategory.ROLE_INJECTED, query, roleName, roleTags))
         return try { plan(projectRoot, sessionId) } finally { if (previous == null) snapshot.remove() else snapshot.set(previous) }
     }
 
     private fun plan(root: String?, sessionId: String?, ordinaryMemoryEnabled: Boolean = true,
-                     memberName: String? = null): ContextPreview {
+                     memberName: String? = null, query: String = ""): ContextPreview {
         val normalizedRoot = root?.takeIf(String::isNotBlank)
         val active = snapshot.get()?.takeIf { it.root == normalizedRoot && it.sessionId == sessionId }
         val memoryAllowed = ordinaryMemoryEnabled && active?.memoryAllowed != false
         active?.plans?.get(memoryAllowed)?.let { return it }
         val audience = active?.injectionCategory ?: if (memberName == null) ContextCategory.MAIN_INJECTED else ContextCategory.ROLE_INJECTED
         return ContextLibraryPlanner.plan(list(normalizedRoot), sessionId,
-            injectionCategory = audience, memoryAllowed = memoryAllowed).also { active?.plans?.set(memoryAllowed, it) }
+            injectionCategory = audience, memoryAllowed = memoryAllowed,
+            userText = active?.userText ?: query, roleName = active?.roleName ?: memberName, roleTags = active?.roleTags.orEmpty()).also { active?.plans?.set(memoryAllowed, it) }
     }
 
     fun render(projectRoot: String?, sessionId: String?, origin: ContextOrigin, enabled: Boolean = true,
@@ -160,8 +173,9 @@ class ContextLibraryRepository @Inject constructor(
                 else entry.copy(content = expand(entry.content))
             }
             return ContextLibraryPlanner.plan(entries, sessionId, origin, audience,
-                ordinaryMemoryEnabled && active?.memoryAllowed != false).rendered
+                ordinaryMemoryEnabled && active?.memoryAllowed != false,
+                active?.userText ?: query, active?.roleName ?: memberName, active?.roleTags.orEmpty()).rendered
         }
-        return plan(projectRoot, sessionId, ordinaryMemoryEnabled, memberName).rendered
+        return plan(projectRoot, sessionId, ordinaryMemoryEnabled, memberName, query).rendered
     }
 }

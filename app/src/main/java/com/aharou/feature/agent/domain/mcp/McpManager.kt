@@ -60,7 +60,7 @@ class McpManager @Inject constructor(
     private val configRepository: McpConfigRepository,
     private val oauthClient: McpOAuthClient,
     private val toolRegistry: ToolRegistry,
-    @Named("Mcp") private val okHttpClient: OkHttpClient,
+    @param:Named("Mcp") private val okHttpClient: OkHttpClient,
     private val containerEngine: LinuxContainerEngine,
     private val remoteConnection: com.aharou.feature.agent.domain.container.RemoteSshConnection,
     private val workspaceRepository: WorkspaceRepository,
@@ -293,8 +293,9 @@ class McpManager @Inject constructor(
                         throw IllegalStateException(it)
                     }
                 }
+                val command = requireNotNull(cfg.command)
                 val serverCommand = buildString {
-                    append(cfg.command!!)
+                    append(command)
                     if (cfg.args.isNotEmpty()) append(" ").append(cfg.args.joinToString(" ") { shellQuote(it) })
                 }
                 StdioTransport(
@@ -308,7 +309,7 @@ class McpManager @Inject constructor(
                             remoteConnection.startProcess("$cd$env$serverCommand")
                         } else {
                             containerEngine.startStdioProcess(
-                                program = cfg.command!!,
+                                program = command,
                                 programArgs = cfg.args,
                                 projectPath = workspacePath,
                                 extraEnv = cfg.env,
@@ -316,7 +317,7 @@ class McpManager @Inject constructor(
                             )
                         }
                     },
-                    program = cfg.command!!,
+                    program = command,
                     programArgs = cfg.args,
                     // stdio 进程死亡 / 管道断开：自报死亡，由 onTransportClosed 摘除死连接并按退避重连。
                     onClosed = { onTransportClosed(workspacePath, cfg.name, created) }

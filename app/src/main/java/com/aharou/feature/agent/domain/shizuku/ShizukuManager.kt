@@ -52,7 +52,7 @@ data class ShizukuCommandResult(val output: String, val exitCode: Int)
  */
 @Singleton
 class ShizukuManager @Inject constructor(
-    @ApplicationContext private val context: Context
+    @param:ApplicationContext private val context: Context
 ) {
     private companion object {
         const val TAG = "ShizukuManager"

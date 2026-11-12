@@ -462,7 +462,7 @@ class AnthropicAdapter @Inject constructor(
     private fun supportsAdaptiveThinking(): Boolean {
         val m = Regex("claude-(?:opus|sonnet|haiku|fable|mythos)-(\\d+)(?:-(\\d+))?").find(model)
         val major = m?.groupValues?.get(1)?.toIntOrNull() ?: return false
-        val minor = m?.groupValues?.get(2)?.toIntOrNull()
+        val minor = m.groupValues.get(2).toIntOrNull()
         return major >= 5 || (major == 4 && (minor ?: 0) >= 6)
     }
 

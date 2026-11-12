@@ -32,7 +32,7 @@ class ConfigKnowledgeFields @Inject constructor(
     private fun Map<String, ConfigValue>.text(key: String, required: Boolean = true): String {
         val raw = get(key)
         if (raw != null && raw !is ConfigValue.Str) throw ConfigError.TypeMismatch("string")
-        val value = (raw as? ConfigValue.Str)?.value
+        val value = raw?.value
         if (required && value.isNullOrBlank()) throw ConfigError.InvalidValue("$key is required")
         return value.orEmpty()
     }

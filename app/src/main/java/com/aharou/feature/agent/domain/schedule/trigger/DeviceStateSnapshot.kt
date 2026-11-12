@@ -120,7 +120,7 @@ data class DeviceStateCheck(
  */
 @Singleton
 class DeviceStateMonitor @Inject constructor(
-    @ApplicationContext private val context: Context,
+    @param:ApplicationContext private val context: Context,
 ) {
 
     /** 读当前状态、与上次快照比对，并把当前状态存成新基线。首次运行 [DeviceStateCheck.previous] 为 null。 */

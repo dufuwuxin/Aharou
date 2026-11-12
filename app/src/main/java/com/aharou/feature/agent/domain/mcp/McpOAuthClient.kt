@@ -51,7 +51,7 @@ import kotlin.coroutines.resumeWithException
  */
 @Singleton
 class McpOAuthClient @Inject constructor(
-    @Named("Mcp") private val client: OkHttpClient,
+    @param:Named("Mcp") private val client: OkHttpClient,
     private val configRepository: McpConfigRepository
 ) {
     private companion object {
@@ -405,7 +405,7 @@ class McpOAuthClient @Inject constructor(
                     response.close()
                     return
                 }
-                cont.resume(response, null)
+                cont.resume(response) { _, cancelledResponse, _ -> cancelledResponse.close() }
             }
         })
     }

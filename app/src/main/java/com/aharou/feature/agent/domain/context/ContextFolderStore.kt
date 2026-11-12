@@ -13,7 +13,7 @@ import javax.inject.Singleton
 import org.json.JSONObject
 
 @Singleton
-class ContextFolderStore @Inject constructor(@param:ApplicationContext context: Context) {
+class ContextFolderStore @Inject constructor(@ApplicationContext context: Context) {
     private val file = AtomicFile(File(context.filesDir, "aharou-global/memory/.context-folders.json"))
     private val lock get() = MemoryFileStorage.lock
     init { MemoryFileStorage.folderJournal = ContextMetadataRecovery(file.baseFile, ::readRaw, ::writeRaw) }

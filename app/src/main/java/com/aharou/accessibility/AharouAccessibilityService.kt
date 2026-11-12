@@ -74,7 +74,7 @@ class AharouAccessibilityService : AccessibilityService() {
             type = AccessibilityEvent.eventTypeToString(event.eventType),
             packageName = event.packageName?.toString(),
             className = event.className?.toString(),
-            text = event.text?.joinToString(" ") { it?.toString() ?: "" }?.takeIf { it.isNotBlank() },
+            text = event.text.joinToString(" ") { it?.toString() ?: "" }.takeIf { it.isNotBlank() },
             timestamp = System.currentTimeMillis(),
         )
         eventRing.offer(rec)

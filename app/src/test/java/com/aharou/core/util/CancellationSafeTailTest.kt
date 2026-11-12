@@ -33,6 +33,7 @@ class CancellationSafeTailTest {
      * 而不是被排进调度器队列等别人推进。
      */
     @Test
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     fun cancelledPathRunsInlineWithoutScheduler() = runTest {
         val dispatcher = StandardTestDispatcher(testScheduler)
         var ranWhenReturned = false
@@ -49,6 +50,7 @@ class CancellationSafeTailTest {
     }
 
     @Test
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     fun cancelledPathPropagatesBlockFailureToCaller() = runTest {
         val dispatcher = StandardTestDispatcher(testScheduler)
         var threw = false

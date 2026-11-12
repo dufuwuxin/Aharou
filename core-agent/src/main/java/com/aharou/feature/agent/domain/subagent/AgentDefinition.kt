@@ -82,7 +82,8 @@ data class AgentDefinition(
     val inject: Set<InjectPart> = DEFAULT_INJECT,
     val keywordInjections: List<KeywordInjection> = emptyList(),
     val prompt: String,
-    val filePath: String? = null
+    val filePath: String? = null,
+    val tags: List<String> = emptyList()
 ) {
     /**
      * 按白名单/黑名单裁剪工具名集合。
@@ -112,6 +113,17 @@ data class AgentDefinition(
     }
 
     companion object {
+        const val MAX_ROLE_TAGS = 24
+        const val MAX_ROLE_TAG_LENGTH = 64
+
+        fun normalizeTags(tags: List<String>): List<String> = tags.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+
+        fun validTags(tags: List<String>): Boolean = normalizeTags(tags).let { normalized ->
+            normalized.size <= MAX_ROLE_TAGS && normalized.all {
+                it.length <= MAX_ROLE_TAG_LENGTH && it.none { c -> c == ',' || c.isISOControl() }
+            }
+        }
+
         /**
          * 从 Claude Code 生态导入的角色文件用 `Read` / `Write` / `Edit` / `Grep` / `Glob` 这套
          * 工具名，与本应用的 `readFile` / `writeFile` / … 对不上。白名单非空时只保留命中的工具，
@@ -177,13 +189,16 @@ data class AgentDefinitionForm(
     val skills: List<String> = emptyList(),
     val inject: Set<InjectPart> = AgentDefinition.DEFAULT_INJECT,
     val keywordInjections: List<KeywordInjection> = emptyList(),
-    val prompt: String = ""
+    val prompt: String = "",
+    val tags: List<String> = emptyList()
 )
 
 /** 保存子代理定义失败的原因。 */
 enum class AgentSaveError {
     /** 名称为空、过长或含不能做文件名的字符。 */
     INVALID_NAME,
+
+    INVALID_TAGS,
 
     /** 提示词正文为空：解析器会直接丢掉这种定义，存下来也用不了。 */
     EMPTY_PROMPT,

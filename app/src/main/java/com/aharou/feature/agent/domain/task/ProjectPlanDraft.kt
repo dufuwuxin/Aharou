@@ -60,7 +60,7 @@ object ProjectPlanDraft {
         val parents = java.util.ArrayDeque<Pair<Int, String>>()
         return pieces.mapIndexed { index, body ->
             val indent = body.takeWhile { it == ' ' || it == '\t' }.fold(0) { total, char -> total + if (char == '\t') 4 else 1 }
-            while (parents.isNotEmpty() && parents.peekLast().first >= indent) parents.removeLast()
+            while (parents.isNotEmpty() && checkNotNull(parents.peekLast()).first >= indent) parents.removeLast()
             val title = body.lineSequence().first().replaceFirst(marker, "").trim().take(120)
             val task = ProjectTask(workspace = project.workspace, projectId = project.id,
                 title = title.ifBlank { body.trim().take(120) }, requirement = body, background = shared,

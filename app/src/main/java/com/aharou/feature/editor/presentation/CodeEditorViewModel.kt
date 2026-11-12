@@ -51,7 +51,7 @@ sealed interface SaveResult {
 
 @HiltViewModel
 class CodeEditorViewModel @Inject constructor(
-    @ApplicationContext private val context: Context,
+    @param:ApplicationContext private val context: Context,
     private val fileAccess: FileAccessProvider,
     private val editorSettings: EditorSettingsRepository,
     private val editorLspManager: EditorLspManager,

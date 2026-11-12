@@ -162,7 +162,7 @@ class GeminiAdapter @Inject constructor(
             content = contentText,
             toolCalls = toolCalls,
             stopReason = if (aborted) "failed" else finishReason,
-            stopDetail = if (aborted) parseFailure?.message ?: "Gemini 响应解析失败" else null,
+            stopDetail = if (aborted) parseFailure.message ?: "Gemini 响应解析失败" else null,
             reasoning = thinkingText.ifEmpty { null },
             thinkingBlocksJson = partsSnapshot,
             inputTokens = inputTokens,

@@ -11,6 +11,7 @@ import com.aharou.core.config.ConfigRisk
 import com.aharou.core.config.ConfigSchema
 import com.aharou.core.config.ConfigValue
 import com.aharou.core.config.fields.ClosureField
+import com.aharou.feature.agent.domain.memory.CloudMemorySearch
 import com.aharou.feature.agent.domain.memory.MemoryAutoCompactSettings
 import com.aharou.feature.agent.domain.memory.MemorySyncScheduler
 import com.aharou.feature.agent.domain.memory.MemorySyncSettings
@@ -40,6 +41,30 @@ class ConfigMemorySyncFields @Inject constructor(
 ) {
 
     fun registerInto(registry: ConfigRegistry) {
+        registry.register(ClosureField(
+            path = "memory.cloud_search.enabled",
+            displayName = context.getString(R.string.memory_cloud_search_enabled),
+            description = context.getString(R.string.memory_cloud_search_privacy),
+            valueSchema = ConfigSchema.Bool,
+            reader = { ConfigValue.Bool(settings.cloudSearchEnabled) },
+            writer = { value -> settings.cloudSearchEnabled =
+                (value as? ConfigValue.Bool)?.value ?: throw ConfigError.TypeMismatch("boolean") },
+        ))
+        registry.register(ClosureField(
+            path = "memory.cloud_search.endpoint",
+            displayName = context.getString(R.string.memory_cloud_search_endpoint),
+            description = context.getString(R.string.memory_cloud_search_endpoint_hint),
+            valueSchema = ConfigSchema.Str(maxLength = 2048),
+            reader = { ConfigValue.Str(settings.cloudSearchEndpoint) },
+            writer = { value ->
+                val endpoint = (value as? ConfigValue.Str)?.value?.trim()
+                    ?: throw ConfigError.TypeMismatch("string")
+                if (endpoint.isNotEmpty() && CloudMemorySearch.endpointUrl(endpoint) == null) {
+                    throw ConfigError.InvalidValue(context.getString(R.string.memory_cloud_search_invalid_endpoint))
+                }
+                settings.cloudSearchEndpoint = endpoint
+            },
+        ))
         registry.register(ClosureField(
             path = "memory.review_proposals",
             displayName = context.getString(R.string.memory_review_proposals_name),

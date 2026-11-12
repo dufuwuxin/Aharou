@@ -99,6 +99,11 @@ class StatefulAgentWorkflowTest {
         cachedInputTokens = 40, images = listOf(image))
     private val eventInjector = mockk<com.aharou.feature.agent.domain.notification.AgentEventInjector>()
     private val approvals = mockk<PlanApprovalManager>()
+    private val generalSettings = mockk<com.aharou.feature.settings.data.repository.GeneralSettingsRepository>(relaxed = true).also {
+        coEvery { it.softCompactionThresholdPercent() } returns 60
+        coEvery { it.compactionThresholdPercent() } returns 100
+    }
+
 
     private val workflow = spyk(StatefulAgentWorkflow(
         toolRegistry = registry,
@@ -116,7 +121,7 @@ class StatefulAgentWorkflowTest {
         compactionModelSettingsRepository = compactionSettings,
         titleModelSettingsRepository = mockk(),
         defaultModelSettingsRepository = mockk(),
-        generalSettingsRepository = mockk(relaxed = true),
+        generalSettingsRepository = generalSettings,
         sessionUseCase = sessions,
         messagePersistenceUseCase = persistence,
         checkpointManager = mockk(),
@@ -193,6 +198,38 @@ class StatefulAgentWorkflowTest {
                 if (methodName == "buildModeReminder") assertNull(notice) else assertEquals("", notice)
             }
         }
+    }
+
+    @Test
+    fun maxStopsTheRealProviderCallWhenCompactionDoesNotReduceTheRequest() = runTest {
+        prepare(flow { emit(AIStreamChunk.Final(AIResponse("must not send"))) })
+        coEvery { generalSettings.softCompactionThresholdPercent() } returns 60
+        coEvery { generalSettings.compactionThresholdPercent() } returns 90
+        coEvery { metadata.resolve(any(), any(), any()) } returns ModelMetadata("model", contextTokens = 1000)
+        every { prompts.build(any(), any()) } returns "native context ".repeat(2000)
+        val events = mutableListOf<AgentEvent>()
+        workflow.executeEvents("request", context, emptyList()).collect { events += it }
+        assertTrue(events.any { it is AgentEvent.Failed })
+        verify(exactly = 0) { provider.completeStream(any(), any(), any(), any()) }
+        coVerify { compactor.compactIfNeeded(any(), any(), any(), any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun underMaxTheRealProviderReceivesTheSameNativeSystemPromptWithMiddlewareEnabled() = runTest {
+        prepare(flow { emit(AIStreamChunk.Final(AIResponse("done"))) })
+        coEvery { generalSettings.compactionThresholdPercent() } returns 90
+        val middlewareConfig = config.copy(requestMiddleware = "{\"enabled\":true}")
+        coEvery { providers.getProviderById("provider") } returns middlewareConfig
+        coEvery { workflow["createStandaloneProvider"](middlewareConfig, "session") } returns provider
+        every { prompts.build(any(), any()) } returns "native-system-prompt"
+        val sent = slot<String>()
+        every { provider.completeStream(capture(sent), any(), any(), any()) } returns flow {
+            emit(AIStreamChunk.Final(AIResponse("done")))
+        }
+        workflow.executeEvents("request", context, emptyList()).collect {
+            if (it is AgentEvent.AssistantText) it.persisted?.complete(Unit)
+        }
+        assertEquals("native-system-prompt", sent.captured)
     }
 
     @Test
@@ -600,7 +637,7 @@ class StatefulAgentWorkflowTest {
             rejectedResults = mapOf(toolCall.id to StatefulAgentWorkflow.ToolBatchResult(toolCall.id, toolCall.name, denied, true))
         )
         val result = workflow.reduce(state, action)
-        val next = result.first as StatefulAgentWorkflow.AgentSessionState
+        val next = result.first
         assertEquals(denied, next.rejectedToolResults.getValue(toolCall.id).result)
         verify(exactly = 0) { outputStore.process(any(), any(), any()) }
     }

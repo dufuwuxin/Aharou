@@ -13,7 +13,7 @@ import javax.inject.Singleton
  */
 @Singleton
 class ExperimentSettings @Inject constructor(
-    @param:ApplicationContext context: Context
+    @ApplicationContext context: Context
 ) {
     private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 

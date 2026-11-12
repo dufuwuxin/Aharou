@@ -45,6 +45,16 @@ class AppSkinContrastTest {
     }
 
     @Test
+    fun lightSkinKeepsSmallTextAndActionLabelsReadable() {
+        val skin = AppSkins.Default.tokens
+        listOf(skin.pageBackground, skin.card, skin.cardMuted).forEach { background ->
+            assertTrue("Secondary text must meet 4.5:1", contrast(skin.textSecondary, background) >= 4.5f)
+        }
+        assertTrue("Action labels must meet 4.5:1", contrast(skin.onPrimary, skin.primary) >= 4.5f)
+        assertTrue("Pressed action labels must meet 4.5:1", contrast(skin.onPrimary, skin.primaryPressed) >= 4.5f)
+    }
+
+    @Test
     fun onlyXiaochengIsAvailable() {
         assertTrue(AppSkins.all.map { it.id } == listOf("xiaocheng"))
         assertTrue(AppThemePreset.DEFAULT.id == "xiaocheng")

@@ -25,7 +25,7 @@ import javax.inject.Singleton
  */
 @Singleton
 class AgentCompletedNotifier @Inject constructor(
-    @ApplicationContext private val context: Context
+    @param:ApplicationContext private val context: Context
 ) {
 
     /** 发一条「任务完成」横幅通知；[body] 由调用方按当前语言与任务内容拼好。 */

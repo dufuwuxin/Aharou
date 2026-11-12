@@ -15,6 +15,7 @@ import com.aharou.feature.agent.domain.context.ContextEntry
 import com.aharou.feature.agent.domain.context.ContextKind
 import com.aharou.feature.agent.domain.context.ContextLibraryRepository
 import com.aharou.feature.agent.domain.context.ContextLoad
+import com.aharou.feature.agent.domain.context.WorldbookRules
 import com.aharou.feature.workspace.data.repository.WorkspaceRepository
 import java.security.MessageDigest
 import javax.inject.Inject
@@ -62,7 +63,7 @@ class ConfigContextLibraryFields @Inject constructor(
         if (entry.version != expectedVersion) throw ConfigError.InvalidValue("Context version changed; read again")
         val updated = transform(entry)
         if (!updated.sessionId.isNullOrBlank()) {
-            val session = runBlocking { sessions.getById(updated.sessionId!!) }
+            val session = runBlocking { sessions.getById(updated.sessionId) }
             if (session == null || session.workspacePath != root().orEmpty() || session.parentId != null) {
                 throw ConfigError.InvalidValue("Target session is unavailable in this workspace")
             }
@@ -98,6 +99,12 @@ class ConfigContextLibraryFields @Inject constructor(
                 },
             )
             return listOf(
+                text("worldbook", "世界书JSON：enabled、triggers、excludes、matchAll、caseSensitive、priority、roles（精确角色名）、audiences（MAIN/ROLE）、confidence（0..1）、importance（0..100）、relations（target/type）；可信度与重要性为用户标注", { it.worldbook.toJson() }, { e, v ->
+                    val rules = try { WorldbookRules.fromJson(v) } catch (_: IllegalArgumentException) {
+                        throw ConfigError.InvalidValue("Invalid worldbook JSON or metadata range")
+                    }
+                    e.copy(worldbook = rules)
+                }),
                 text("category", "RULE / TEMPORARY / LONG_TERM / ROLE_INJECTED / MAIN_INJECTED；旧INJECTED仅映射主代理，临时类必须有真实session_id", { it.category.name }, { e, v ->
                     val category = ContextCategory.from(v)
                         ?: throw ConfigError.InvalidValue("Unknown context category")

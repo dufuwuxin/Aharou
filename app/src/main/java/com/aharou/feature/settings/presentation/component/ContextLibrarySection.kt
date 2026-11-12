@@ -16,6 +16,9 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.produceState
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -70,12 +73,12 @@ internal fun ContextLibrarySection(viewModel: ContextLibraryViewModel = hiltView
             entry = target, initialCategory = category,
             initialFolder = folder ?: if (category.isInjection) stringResource(category.label()) else "", state = state,
             onBack = { creating = false; editor = null },
-            onSave = { name, description, content, entryScope, kind, entryLoad, entryCategory, entryFolder, sessionId ->
+            onSave = { name, description, content, entryScope, kind, entryLoad, entryCategory, entryFolder, sessionId, worldbook ->
                 val done = { creating = false; editor = null; category = entryCategory; folder = entryFolder }
                 if (target == null) viewModel.create(name, description, content, entryScope, kind, entryLoad,
-                    entryCategory, entryFolder, sessionId, editorRoot, done)
+                    entryCategory, entryFolder, sessionId, editorRoot, done, worldbook = worldbook)
                 else viewModel.save(target.copy(title = name, description = description, content = content, kind = kind, loading = entryLoad,
-                    category = entryCategory, folder = entryFolder, sessionId = sessionId), editorRoot, done)
+                    category = entryCategory, folder = entryFolder, sessionId = sessionId, worldbook = worldbook), editorRoot, done)
             },
             onDelete = target?.let { { viewModel.delete(it, editorRoot) { editor = null } } },
         )
@@ -129,9 +132,14 @@ internal fun ContextLibrarySection(viewModel: ContextLibraryViewModel = hiltView
         )
     }
     val currentFolder = folder
-    val visible = remember(state.entries, query, scope, loading, category, currentFolder) {
-        contextVisibleEntries(state.entries, query, category, currentFolder, scope, loading)
+    val searchRequest = remember(state.entries, query, scope, loading, category, currentFolder) { Any() }
+    val searchResult by produceState<Pair<Any, List<ContextEntry>>?>(initialValue = null, searchRequest) {
+        val entries = withContext(Dispatchers.Default) {
+            contextVisibleEntries(state.entries, query, category, currentFolder, scope, loading)
+        }
+        value = searchRequest to entries
     }
+    val visible = searchResult?.takeIf { it.first === searchRequest }?.second.orEmpty()
     val folders = remember(state.folders, state.entries, category, currentFolder, query) {
         val paths = state.folders[category].orEmpty() + state.entries.filter { it.category == category }.map { it.folder }
         if (query.isNotBlank()) emptyList() else contextChildFolders(paths, currentFolder.orEmpty())
@@ -139,9 +147,15 @@ internal fun ContextLibrarySection(viewModel: ContextLibraryViewModel = hiltView
     LazyColumn(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(Spacing.md),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(Spacing.lg)) {
         item { ContextOverview(state.entries) }
-        item { SegmentedTabs(tab, listOf(stringResource(R.string.context_tab_library), stringResource(R.string.context_tab_preview)), { tab = it }) }
+        item { SegmentedTabs(tab, listOf(stringResource(R.string.context_tab_library), stringResource(R.string.context_tab_preview), stringResource(R.string.context_graph_title)), { tab = it }) }
         if (state.error) item { ContextNotice(stringResource(R.string.context_operation_error), error = true) }
         if (tab == 1) item { ContextLibraryPreview(state, viewModel::preview, viewModel::clearPreview) }
+        else if (tab == 2) item {
+            ContextMemoryGraph(state.entries,
+                onSelect = { editorRoot = state.workspaceRoot; editor = it },
+                onEditRules = { tab = 0; folder = ""; query = "" },
+            )
+        }
         else {
             item { ContextChoiceRow(ContextCategory.entries.map { stringResource(it.label()) }, category.ordinal,
                 { category = ContextCategory.entries[it]; folder = null; query = "" }) }

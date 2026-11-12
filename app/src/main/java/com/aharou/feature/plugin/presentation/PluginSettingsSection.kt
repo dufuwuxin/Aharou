@@ -10,19 +10,22 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.Tab
+import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -37,7 +40,7 @@ import com.aharou.core.theme.Spacing
 import com.aharou.core.theme.semanticColors
 import com.aharou.feature.plugin.domain.model.InstalledPlugin
 import com.aharou.feature.plugin.domain.model.PluginStatus
-import com.aharou.feature.settings.presentation.component.SettingsDivider
+import com.aharou.feature.settings.presentation.ExtensionsViewModel
 import com.aharou.feature.settings.presentation.component.SettingsGroup
 import com.aharou.feature.settings.presentation.component.SettingsRow
 import compose.icons.FeatherIcons
@@ -51,37 +54,97 @@ import compose.icons.feathericons.Upload
 @Composable
 internal fun PluginSettingsSection(
     viewModel: PluginViewModel = hiltViewModel(),
+    marketViewModel: ExtensionsViewModel = hiltViewModel(),
+    operitViewModel: OperitMarketViewModel = hiltViewModel(),
 ) {
     val plugins by viewModel.plugins.collectAsStateWithLifecycle()
     val busyId by viewModel.busyId.collectAsStateWithLifecycle()
     val event by viewModel.event.collectAsStateWithLifecycle()
 
+    val marketBusyId by marketViewModel.busyId.collectAsStateWithLifecycle()
+    val marketEvent by marketViewModel.event.collectAsStateWithLifecycle()
+    val operitState by operitViewModel.state.collectAsStateWithLifecycle()
+    var selectedTab by rememberSaveable { mutableStateOf(0) }
+    var choosingImport by rememberSaveable { mutableStateOf(false) }
+    val legacyBusy = busyId != null || marketBusyId != null || choosingImport
+    val anyBusy = legacyBusy || operitState.busy
+
+    // 回调读取实时值而非上一帧的 enabled，文件选择返回也走同一个门禁。
+    fun runIfIdle(action: () -> Unit) {
+        if (!choosingImport && viewModel.busyId.value == null && marketViewModel.busyId.value == null && !operitViewModel.state.value.busy) action()
+    }
     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) viewModel.importAndInstall(uri)
+        choosingImport = false
+        if (uri != null) runIfIdle { viewModel.importAndInstall(uri) }
     }
     var pendingUninstall by remember { mutableStateOf<InstalledPlugin?>(null) }
+    val installedScroll = rememberScrollState()
+    val marketState = rememberSaveableStateHolder()
+
+    LaunchedEffect(marketEvent) {
+        if (marketEvent is PluginEvent.Installed) viewModel.refresh()
+    }
+    LaunchedEffect(event) {
+        if (event is PluginEvent.Installed || event == PluginEvent.Completed) marketViewModel.refresh()
+    }
 
     // 进入页面时刷新一次状态（端口探测反映最新运行态）
     LaunchedEffect(Unit) { viewModel.refresh() }
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        Column(
+    Column(modifier = Modifier.fillMaxSize()) {
+        PrimaryTabRow(selectedTabIndex = selectedTab) {
+            Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 },
+                text = { Text(stringResource(R.string.plugin_tab_installed)) })
+            Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 },
+                text = { Text(stringResource(R.string.plugin_tab_market)) })
+            Tab(selected = selectedTab == 2, onClick = { selectedTab = 2 },
+                text = { Text(stringResource(R.string.operit_tab)) })
+        }
+        if (anyBusy) {
+            Text(
+                stringResource(when {
+                    choosingImport -> R.string.plugin_market_choosing
+                    marketBusyId != null -> R.string.plugin_market_installing
+                    else -> R.string.plugin_busy
+                }),
+                modifier = Modifier.padding(Spacing.md),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+        event?.let { PluginEventText(it) }
+        PluginMarketNotice(marketEvent)
+        if (selectedTab == 2) {
+            marketState.SaveableStateProvider("operit") {
+                OperitMarketPanel(operitViewModel, legacyBusy, Modifier.weight(1f))
+            }
+        } else if (selectedTab == 1) {
+            marketState.SaveableStateProvider("market") {
+                PluginMarketPanel(
+                    viewModel = marketViewModel,
+                    anyBusy = anyBusy,
+                    onInstall = { entry, allowUnknown -> runIfIdle { marketViewModel.installMarketPlugin(entry, allowUnknown) } },
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        } else Column(
             modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
+                .weight(1f)
+                .verticalScroll(installedScroll)
                 .padding(horizontal = Spacing.lg)
                 .padding(top = Spacing.sm, bottom = Spacing.xl),
             verticalArrangement = Arrangement.spacedBy(Spacing.sm)
         ) {
-            event?.let { PluginEventText(it) }
-
             SettingsGroup {
                 SettingsRow(
                     icon = FeatherIcons.Upload,
                     title = stringResource(R.string.plugin_import),
                     subtitle = stringResource(R.string.plugin_import_hint),
-                    enabled = busyId == null,
-                    onClick = { importLauncher.launch(arrayOf("*/*")) }
+                    enabled = !anyBusy,
+                    onClick = { runIfIdle {
+                        choosingImport = true
+                        importLauncher.launch(arrayOf("*/*"))
+                    } }
                 )
             }
 
@@ -104,10 +167,10 @@ internal fun PluginSettingsSection(
                     PluginCard(
                         plugin = plugin,
                         busy = busyId == plugin.manifest.id,
-                        anyBusy = busyId != null,
-                        onLaunch = { viewModel.launch(plugin.manifest.id) },
-                        onStop = { viewModel.stop(plugin.manifest.id) },
-                        onUninstall = { pendingUninstall = plugin }
+                        anyBusy = anyBusy,
+                        onLaunch = { runIfIdle { viewModel.launch(plugin.manifest.id) } },
+                        onStop = { runIfIdle { viewModel.stop(plugin.manifest.id) } },
+                        onUninstall = { runIfIdle { pendingUninstall = plugin } }
                     )
                 }
             }
@@ -120,8 +183,8 @@ internal fun PluginSettingsSection(
             title = { Text(stringResource(R.string.plugin_uninstall_title)) },
             text = { Text(stringResource(R.string.plugin_uninstall_message, plugin.manifest.name)) },
             confirmButton = {
-                TextButton(onClick = {
-                    viewModel.uninstall(plugin.manifest.id)
+                TextButton(enabled = !anyBusy, onClick = {
+                    runIfIdle { viewModel.uninstall(plugin.manifest.id) }
                     pendingUninstall = null
                 }) { Text(stringResource(R.string.plugin_confirm)) }
             },
