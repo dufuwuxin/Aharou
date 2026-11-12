@@ -47,6 +47,9 @@ internal data class SessionContextMetrics(
     val progress: Float? get() = budget?.let { limit -> used?.let { (it.toFloat() / limit).coerceIn(0f, 1f) } }
 }
 
+internal fun diagnosticSessionId(current: String?, projectBody: Boolean, bound: String?): String? =
+    current?.takeIf { !projectBody || it == bound }
+
 internal fun sessionContextMetrics(usage: AgentEvent.ContextUsage?, lastInputTokens: Int, modelBudget: Int) =
     SessionContextMetrics(
         used = usage?.inputTokens?.takeIf { it >= 0 } ?: lastInputTokens.takeIf { it > 0 },

@@ -12,6 +12,7 @@ import com.aharou.feature.agent.domain.workflow.AgentEvent
 import com.aharou.feature.agent.domain.workflow.RequestContextComposition
 import com.aharou.feature.agent.presentation.component.SessionDiagnosticsSheet
 import com.aharou.feature.agent.presentation.component.sessionContextMetrics
+import com.aharou.feature.agent.presentation.component.diagnosticSessionId
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
@@ -29,6 +30,13 @@ import org.robolectric.annotation.SQLiteMode
 @ConscryptMode(ConscryptMode.Mode.OFF)
 class SessionDiagnosticsTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
+
+    @Test fun projectBindingMustMatchBeforeDiagnosticsReadAnySession() {
+        assertNull(diagnosticSessionId("old", true, null))
+        assertNull(diagnosticSessionId("old", true, "new"))
+        assertEquals("new", diagnosticSessionId("new", true, "new"))
+        assertEquals("ordinary", diagnosticSessionId("ordinary", false, null))
+    }
 
     @Test fun requestUsageKeepsItsOwnBudgetWhenSelectedModelChanges() {
         val usage = sessionContextMetrics(AgentEvent.ContextUsage(80, 100, true), 10000, 1000)

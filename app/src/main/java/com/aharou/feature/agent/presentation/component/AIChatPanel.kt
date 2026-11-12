@@ -185,6 +185,7 @@ fun AIChatPanel(
     }
     val currentSessionId by viewModel.currentSessionId.collectAsStateWithLifecycle()
     val modelSelectionSessionId = currentSessionId
+    val diagnosticsSessionId = diagnosticSessionId(currentSessionId, bodyOverride != null, composerSessionId)
     // 顶栏中轴展示的会话标题：取当前会话在会话列表里的标题，未命中（新会话未命名）则不显示。
     val allSessions by viewModel.sessions.collectAsStateWithLifecycle()
     // 软打断后 agentState 立即回到 Idle，但协程仍在后台跑当前这一步；长按强打断的入口要靠它保底。
@@ -291,7 +292,7 @@ fun AIChatPanel(
     var uploadingCount by remember { mutableStateOf(0) }
     var messageForMenu by remember { mutableStateOf<AgentUIMessage?>(null) }
     var crossCheckMessage by remember { mutableStateOf<AgentUIMessage?>(null) }
-    var showSessionDiagnostics by remember(currentSessionId) { mutableStateOf(false) }
+    var showSessionDiagnostics by remember(diagnosticsSessionId) { mutableStateOf(false) }
     val quoteReplyEnabled = rememberQuoteReplyEnabled()
     var editingMessage by remember { mutableStateOf<AgentUIMessage?>(null) }
     var queuedEditing by remember { mutableStateOf<QueuedRequest?>(null) }
@@ -371,7 +372,7 @@ fun AIChatPanel(
         sessionId = currentSessionId,
         turnKeys = turnKeys,
     )
-    val injectedContextText = rememberInjectedContextText(currentSessionId)
+    val injectedContextText = rememberInjectedContextText(diagnosticsSessionId)
     val lastUserMessageId = remember(chatItems) { chatItems.lastOrNull { it.message.role == MessageRole.USER }?.message?.id }
     // 每轮任务的总耗时（用户发送 → 本轮 AI 收工）与 token 合计，都只挂在轮末助手气泡下方
     val taskDurations = remember(messages, isBusy) {
@@ -1222,9 +1223,9 @@ fun AIChatPanel(
             Box(modifier = Modifier.weight(1f)) {
                 if (bodyOverride != null) {
                     Box(Modifier.fillMaxSize().padding(bottom = with(LocalDensity.current) { floatingLayerHeightPx.toDp() })) {
-                        ProjectChatMenuHost(sessionId = currentSessionId?.takeIf { sessionReady && currentSession?.parentId == null }, onTerminal = onNavigateToTerminal, onGit = onNavigateToGit, onBrowser = onNavigateToBrowser, onSandbox = onNavigateToSandbox, onShared = onNavigateToShared, onDiagnostics = { showSessionDiagnostics = true }, connectionState = connectionState?.takeIf { isRemote }, inputTokens = sessionInputTokens, outputTokens = sessionOutputTokens, contextStatus = {
-                            SessionContextStatus(sessionContextMetrics(contextUsages[currentSessionId], sessionLastInputTokens,
-                                activeModelMetadata?.let { com.aharou.feature.settings.domain.model.ModelContextPolicy.effectiveInputBudget(it) } ?: 0),
+                        ProjectChatMenuHost(sessionId = diagnosticsSessionId?.takeIf { sessionReady && currentSession?.parentId == null }, onTerminal = onNavigateToTerminal, onGit = onNavigateToGit, onBrowser = onNavigateToBrowser, onSandbox = onNavigateToSandbox, onShared = onNavigateToShared, onDiagnostics = { showSessionDiagnostics = true }, connectionState = connectionState?.takeIf { isRemote }, inputTokens = sessionInputTokens, outputTokens = sessionOutputTokens, contextStatus = {
+                            SessionContextStatus(sessionContextMetrics(contextUsages[diagnosticsSessionId], if (diagnosticsSessionId == null) 0 else sessionLastInputTokens,
+                                activeModelMetadata?.takeIf { diagnosticsSessionId != null }?.let { com.aharou.feature.settings.domain.model.ModelContextPolicy.effectiveInputBudget(it) } ?: 0),
                                 onClick = { showSessionDiagnostics = true })
                         }) { bodyOverride(composer::collapse) }
                     }
@@ -1786,13 +1787,13 @@ fun AIChatPanel(
             }
 
             crossCheckMessage?.let { message -> CrossCheckSheet(message, currentSessionId) { crossCheckMessage = null } }
-            key(currentSessionId) {
+            key(diagnosticsSessionId) {
                 val conversationMapScope = rememberCoroutineScope()
                 if (showSessionDiagnostics) {
                     val receipts by viewModel.currentSessionReceipts.collectAsStateWithLifecycle()
-                    SessionDiagnosticsSheet(currentSessionId, currentSession, messagesState, receipts,
-                        sessionContextMetrics(contextUsages[currentSessionId], sessionLastInputTokens,
-                            activeModelMetadata?.let { com.aharou.feature.settings.domain.model.ModelContextPolicy.effectiveInputBudget(it) } ?: 0),
+                    SessionDiagnosticsSheet(diagnosticsSessionId, currentSession?.takeIf { it.id == diagnosticsSessionId }, messagesState, receipts,
+                        sessionContextMetrics(contextUsages[diagnosticsSessionId], if (diagnosticsSessionId == null) 0 else sessionLastInputTokens,
+                            activeModelMetadata?.takeIf { diagnosticsSessionId != null }?.let { com.aharou.feature.settings.domain.model.ModelContextPolicy.effectiveInputBudget(it) } ?: 0),
                         injectedContextText, bodyOverride == null,
                     canLocate = { findChatMessageIndex(chatItems, it) >= 0 },
                     onJump = { id ->
