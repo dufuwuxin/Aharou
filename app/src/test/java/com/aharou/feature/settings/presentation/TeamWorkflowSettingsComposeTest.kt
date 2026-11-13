@@ -61,7 +61,7 @@ class TeamWorkflowSettingsComposeTest {
                 .mapNotNull { TeamWorkflowParser.parse(provider, it.absolutePath) }
             TeamWorkflowRepository.mergeAll(scan(AgentDefinitionScope.GLOBAL), scan(AgentDefinitionScope.PROJECT))
         }
-        compose.runOnUiThread { viewModel = TeamWorkflowSettingsViewModel(repository, teams) }
+        compose.runOnUiThread { viewModel = TeamWorkflowSettingsViewModel(repository, teams, kotlinx.coroutines.Dispatchers.Unconfined) }
     }
 
     @After fun cleanup() {
@@ -130,7 +130,7 @@ class TeamWorkflowSettingsComposeTest {
     }
 
     private fun awaitRepositoryIdle() {
-        // Dispatchers.IO is not tracked by Compose; use its default bounded wait, not sleeps or retries.
+        // The controlled file backend runs on the injected test dispatcher, not a real IO pool.
         compose.waitUntil { !viewModel.state.value.loading && !viewModel.state.value.saving }
         assertFalse(viewModel.state.value.loadFailed)
     }

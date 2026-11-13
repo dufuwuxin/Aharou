@@ -11,6 +11,7 @@ import com.aharou.feature.agent.domain.teamworkflow.toForm
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.ensureActive
@@ -38,10 +39,13 @@ data class TeamWorkflowSettingsState(
 )
 
 @HiltViewModel
-class TeamWorkflowSettingsViewModel @Inject constructor(
+class TeamWorkflowSettingsViewModel internal constructor(
     private val repository: TeamWorkflowRepository,
-    private val teams: AgentTeamRepository
+    private val teams: AgentTeamRepository,
+    private val ioDispatcher: CoroutineDispatcher
 ) : ViewModel() {
+    @Inject constructor(repository: TeamWorkflowRepository, teams: AgentTeamRepository) :
+        this(repository, teams, Dispatchers.IO)
     private val mutableState = MutableStateFlow(TeamWorkflowSettingsState())
     val state = mutableState.asStateFlow()
     private var refreshJob: Job? = null
@@ -87,7 +91,7 @@ class TeamWorkflowSettingsViewModel @Inject constructor(
         mutableState.value = state.value.copy(saving = true, loading = false, saveError = null)
         viewModelScope.launch {
             try {
-                val error = withContext(Dispatchers.IO) { repository.save(editor.form, editor.originalName) }
+                val error = withContext(ioDispatcher) { repository.save(editor.form, editor.originalName) }
                 mutableState.value = if (error == null) state.value.copy(editor = null)
                     else state.value.copy(saveError = error)
                 if (error == null) load()
@@ -117,7 +121,7 @@ class TeamWorkflowSettingsViewModel @Inject constructor(
         mutableState.value = state.value.copy(deleting = true, loading = false, deleteFailed = false)
         viewModelScope.launch {
             try {
-                val deleted = withContext(Dispatchers.IO) { repository.delete(entry.workflow.name, entry.scope) }
+                val deleted = withContext(ioDispatcher) { repository.delete(entry.workflow.name, entry.scope) }
                 mutableState.value = if (deleted) state.value.copy(pendingDelete = null)
                     else state.value.copy(deleteFailed = true)
                 if (deleted) load()
@@ -134,7 +138,7 @@ class TeamWorkflowSettingsViewModel @Inject constructor(
     private suspend fun load() {
         mutableState.value = state.value.copy(loading = true, loadFailed = false)
         try {
-            val (workflows, names) = withContext(Dispatchers.IO) {
+            val (workflows, names) = withContext(ioDispatcher) {
                 repository.listAll() to teams.listAll().map { it.team.name }
             }
             kotlin.coroutines.coroutineContext.ensureActive()

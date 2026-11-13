@@ -66,7 +66,7 @@ class TeamWorkflowSettingsViewModelTest {
         Dispatchers.resetMain()
     }
 
-    private fun vm() = TeamWorkflowSettingsViewModel(repository, teams).also(viewModels::add)
+    private fun vm() = TeamWorkflowSettingsViewModel(repository, teams, dispatcher).also(viewModels::add)
     private fun form(name: String = "release") = TeamWorkflowForm(name = name, description = "description", charter = "charter",
         teams = listOf(WorkflowTeamRefForm("build", lead = "lead"), WorkflowTeamRefForm("review", acceptsReject = false)))
 
