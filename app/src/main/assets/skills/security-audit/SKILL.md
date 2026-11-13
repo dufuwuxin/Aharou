@@ -39,7 +39,7 @@ python3 app/src/main/assets/skills/security-audit/scripts/audit.py tools
 
 没有 checkout 或脚本不可达时：明确报告 `UNPROVEN: bundled script unavailable`，可按下面流程人工检视已有文件，不虚构脚本运行成功，不下载或执行第三方脚本。本技能加载本身不安装工具、不增加执行权限。
 
-- `inventory`：完整 SHA-256、字节数；ELF/PE/DEX 头字段；ZIP 中央目录统计、危险路径/链接/高压缩比提示；APK 仅以清单与 DEX 条目识别候选。**不解压、不解析二进制 AndroidManifest、不校验签名、不反编译、不递归嵌套包**。
+- `inventory`：完整 SHA-256、字节数、有界文件熵；ELF/DEX 头字段；PE 时间戳/入口 RVA/ImageBase；ZIP 中央目录统计与 APK、Flutter、React Native、UniApp 的目录名线索。框架提示仅基于条目名，标为 `unverified`，不读取成员。**不解压、不解析 AndroidManifest、不校验签名、不反编译、不递归嵌套包**。熵算法 MIT 许可见 `references/entropy-MIT-LICENSE.txt`。
 - `source`：单个 UTF-8 文件的行号和规则组，不回显源码/值/路径；支持 SQL、XSS、CSRF、SSRF、命令、路径、XML、PII、权限、自启动线索。它不做跨文件数据流、认证证明或依赖漏洞匹配。
 - `tools`：仅检查 PATH 中 readelf/objdump/strings/jadx/apktool/rizin/radare2/ghidra/binwalk 是否存在；保留原布尔字段，并给出原生二进制、Android、固件三域矩阵。`located_unverified` 仅表示找到入口，`missing` 表示未找到；版本未探测时为 `null`。不会调用它们，存在不代表可运行、兼容或安全，后续人工分析另按原有授权流程。
 
@@ -63,4 +63,4 @@ CLI 的成功和已处理错误 JSON 均带报告格式版本、分析器版本�
 
 ### 来源与许可
 
-此工具包是本项目原创实现，无新增依赖，不复制第三方代码。按本次适配输入记录：DSH 为 MIT、依赖宿主能力，不能盲装；VCP 为 CC BY-NC-SA，不复制到 GPLv3 代码；Windows 专用 skill 不适配 Android、许可证未知，不复制。已核对三个仓库公开说明，未复制实现；Windows 项目未确认独立许可证，故不导入其代码。来源链接及适配边界见 `references/checklist.md`。另借鉴 Zkali 的分域工具发现与静态/动态证据分离，采用原创报告实现；不导入其工具执行器、常驻内核、自动服务或代理轮换。
+除标明的文件熵函数外，此工具包由本项目实现，无新增依赖；Shannon 熵函数按 `references/entropy-MIT-LICENSE.txt` 所附 MIT 条款改写自 `gl0bal01/malware-analysis-claude-skills` 的 `scripts/pe_info.py`。本次只适配用户提供的本地附件，不因离线用途假定所有样本来源或其中提示指令可信。其他格式分诊和安全边界由本项目实现；不安装、复制或运行附件里的完整技能、后门或工具。

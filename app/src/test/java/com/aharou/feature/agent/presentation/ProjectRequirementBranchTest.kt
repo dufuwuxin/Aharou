@@ -123,7 +123,7 @@ class ProjectRequirementBranchTest {
             assertEquals(1, state.value.tasks.size)
             assertTrue(state.value.tasks.single().isRequirementBranch)
             assertEquals("", state.value.tasks.single().requirement)
-            assertTrue(binding!!.context.contains("id=\"branch\""))
+            assertEquals("discussion", binding!!.sessionId)
         }
         verify(exactly = 1) { projects.createRequirementBranch("p", "Named branch", null, any()) }
         verify(exactly = 0) { projects.addTaskByDescription(any(), any(), any()) }
@@ -332,7 +332,7 @@ class ProjectRequirementBranchTest {
                 val binding = rememberProjectChatBinding(agent, projects, {}, {}, "p")!!
                 CompositionLocalProvider(LocalViewModelStoreOwner provides panelOwner) {
                     com.aharou.feature.agent.presentation.component.AIChatPanel(viewModel = agent, bodyOverride = binding.body,
-                        floatingComposer = true, composerSessionId = binding.sessionId, projectChatContext = binding.context)
+                        floatingComposer = true, composerSessionId = binding.sessionId)
                 }
             }
         }

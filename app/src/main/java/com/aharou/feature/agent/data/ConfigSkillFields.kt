@@ -85,11 +85,10 @@ class ConfigSkillFields @Inject constructor(
                     path = "$basePath.$forId.disabled",
                     displayName = "停用（$forId）",
                     description =
-                        "是否停用。读取的是全局与项目禁用名单的并集；写入只改全局名单，" +
-                            "项目级名单不受影响。",
+                        "全局作用域是否停用。读写同一全局名单；项目级名单独立，最终执行仍取两者并集。",
                     valueSchema = ConfigSchema.Bool,
                     revertable = true,
-                    reader = { ConfigValue.Bool(skillRepository.isSkillDisabled(forId)) },
+                    reader = { ConfigValue.Bool(forId.lowercase() in skillConfig.disabledNames(SkillScope.GLOBAL)) },
                     writer = { v ->
                         val b = (v as? ConfigValue.Bool)?.value
                             ?: throw ConfigError.TypeMismatch("boolean")

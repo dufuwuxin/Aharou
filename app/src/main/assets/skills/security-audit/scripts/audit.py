@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import re
 import shutil
@@ -17,7 +18,7 @@ from pathlib import Path, PurePosixPath
 from typing import BinaryIO, Iterator
 
 REPORT_SCHEMA = 1
-ANALYZER_VERSION = "1.0.0"
+ANALYZER_VERSION = "1.1.0"
 MAX_SAMPLE = 128 * 1024 * 1024
 MAX_SOURCE = 4 * 1024 * 1024
 MAX_DIRECTORY = 2 * 1024 * 1024
@@ -110,6 +111,22 @@ def digest(stream: BinaryIO, maximum: int) -> str:
     return result.hexdigest()
 
 
+def shannon_entropy(stream: BinaryIO) -> float:
+    # Adapted from gl0bal01's MIT pe_info.py; see ../references/entropy-MIT-LICENSE.txt.
+    frequency = [0] * 256
+    total = 0
+    while block := stream.read(65536):
+        total += len(block)
+        if total > MAX_SAMPLE:
+            raise AuditError("sample_size_limit")
+        for value in block:
+            frequency[value] += 1
+    stream.seek(0)
+    if not total:
+        return 0.0
+    return -sum((count / total) * math.log2(count / total)
+                for count in frequency if count)
+
 def zip_metadata(stream: BinaryIO, size: int) -> dict:
     # Inspect EOCD before ZipFile allocates objects for every central entry.
     stream.seek(max(0, size - 65557))
@@ -150,6 +167,9 @@ def zip_metadata(stream: BinaryIO, size: int) -> dict:
         compressed = sum(entry.compress_size for entry in entries)
         unsafe = links = encrypted = high_ratio = dex_count = 0
         manifest = False
+        flutter_libraries: set[str] = set()
+        app_libraries: set[str] = set()
+        framework_hints: set[str] = set()
         for entry in entries:
             name = entry.filename.replace("\\", "/")
             parts = PurePosixPath(name).parts
@@ -159,12 +179,25 @@ def zip_metadata(stream: BinaryIO, size: int) -> dict:
             high_ratio += int(entry.file_size > max(1, entry.compress_size) * 100)
             manifest |= name == "AndroidManifest.xml"
             dex_count += int(bool(re.fullmatch(r"classes(?:\d+)?\.dex", name)))
+            if entry.is_dir() or ".." in parts or entry.filename != name or stat.S_ISLNK(entry.external_attr >> 16):
+                continue
+            native = re.fullmatch(r"lib/([^/]+)/(?P<library>libflutter|libapp)\.so", name)
+            if native:
+                (flutter_libraries if native["library"] == "libflutter" else app_libraries).add(native[1])
+            if name == "assets/index.android.bundle":
+                framework_hints.add("react_native")
+            if re.fullmatch(r"assets/apps/__UNI__[^/]+/www/app-service\.js", name):
+                framework_hints.add("uniapp")
+        if flutter_libraries & app_libraries:
+            framework_hints.add("flutter")
         return {"entry_count": len(entries), "declared_expanded_bytes": expanded,
                 "declared_compressed_bytes": compressed, "unsafe_path_count": unsafe,
                 "symlink_count": links, "encrypted_count": encrypted,
                 "high_ratio_count": high_ratio, "expansion_limit_exceeded": expanded > MAX_EXPANDED,
                 "apk_candidate": manifest and dex_count > 0, "manifest_present": manifest,
                 "dex_entry_count": dex_count, "contents_read": False,
+                "framework_hints": sorted(framework_hints),
+                "framework_evidence": "entry_names_only_unverified",
                 "nested_archives_inspected": False, "signature_verified": False}
 
 
@@ -188,8 +221,23 @@ def binary_metadata(stream: BinaryIO, size: int) -> dict:
         coff = stream.read(24)
         if coff[:4] != b"PE\0\0":
             raise AuditError("invalid_pe_header")
-        machine, sections = struct.unpack_from("<HH", coff, 4)
-        return {"format": "PE", "machine": machine, "sections": sections, "header_only": True}
+        machine, sections, timestamp = struct.unpack_from("<HHI", coff, 4)
+        optional_size = struct.unpack_from("<H", coff, 20)[0]
+        bits = entry_rva = image_base = None
+        if optional_size:
+            if optional_size < 32 or offset + 24 + optional_size > size:
+                raise AuditError("invalid_pe_header")
+            optional = stream.read(32)
+            magic = struct.unpack_from("<H", optional)[0]
+            if magic not in (0x10B, 0x20B):
+                raise AuditError("unsupported_pe_optional_header")
+            bits = 32 if magic == 0x10B else 64
+            entry_rva = struct.unpack_from("<I", optional, 16)[0]
+            image_base = struct.unpack_from("<I" if bits == 32 else "<Q", optional,
+                                            28 if bits == 32 else 24)[0]
+        return {"format": "PE", "machine": machine, "sections": sections,
+                "timestamp_raw": timestamp, "bits": bits, "entry_point_rva": entry_rva,
+                "image_base": image_base, "header_only": True}
     if header.startswith(b"dex\n"):
         if len(header) < 112 or not re.fullmatch(rb"dex\n\d{3}\x00", header[:8]):
             raise AuditError("invalid_dex_header")
@@ -206,9 +254,10 @@ def binary_metadata(stream: BinaryIO, size: int) -> dict:
 def inventory(root: str, sample: str) -> dict:
     with sample_file(root, sample, MAX_SAMPLE) as (stream, info):
         sha256 = digest(stream, MAX_SAMPLE)
+        entropy = shannon_entropy(stream)
         metadata = binary_metadata(stream, info.st_size)
         result = {"mode": "inventory", "sha256": sha256, "size_bytes": info.st_size,
-                  "metadata": metadata, "assessment": "metadata_only_not_a_safety_verdict"}
+                  "entropy_bits_per_byte": entropy, "metadata": metadata, "assessment": "metadata_only_not_a_safety_verdict"}
     return result
 
 

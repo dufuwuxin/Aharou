@@ -77,13 +77,17 @@ object AgentDefinitionParser {
         return AgentMode.entries.firstOrNull { it.name == token }
     }
 
-    /** 缺省或全部取值非法时回退默认注入项，避免定义写错就丢掉全部上下文。 */
+    /** 只有省略字段时使用默认记忆视图；显式空值、none或旧入口标记均不启用隐式默认项。 */
     internal fun parseInject(raw: Any?): Set<InjectPart> {
+        if (raw == null) return AgentDefinition.DEFAULT_INJECT
         val tokens = stringList(raw)
-        if (tokens.isEmpty()) return AgentDefinition.DEFAULT_INJECT
-        if (tokens.size == 1 && tokens.first().equals("none", ignoreCase = true)) return emptySet()
-        val parsed = tokens.mapNotNull { InjectPart.fromToken(it) }.toSet()
-        return parsed.ifEmpty { AgentDefinition.DEFAULT_INJECT }
+        if (tokens.isEmpty() || tokens.any { it.equals("none", ignoreCase = true) }) return emptySet()
+        val parsed = tokens.mapNotNull { InjectPart.fromToken(it) }.toMutableSet()
+        if (tokens.any { token ->
+                token.trim().lowercase().replace("-", "").replace("_", "") in
+                    setOf("base", "mainrules", "projectrules", "projectrule")
+            }) parsed += InjectPart.MEMORY
+        return parsed
     }
 
     /** keywordInjection: [{keywords: [a,b], inject: "..."}] 列表。非法子项整体跳过。 */

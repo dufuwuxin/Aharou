@@ -8,7 +8,6 @@ import com.aharou.core.soul.SoulBodyLimitCheck
 import com.aharou.core.soul.SoulFile
 import com.aharou.core.soul.SoulMetadata
 import com.aharou.core.soul.SoulStore
-import com.aharou.core.soul.SystemPromptBuilder
 import kotlinx.coroutines.flow.map
 
 /**
@@ -22,17 +21,18 @@ object ConfigBuiltins {
     fun registerInto(registry: ConfigRegistry, context: Context) {
         val appContext = context.applicationContext
         val memoryStore = com.aharou.core.memory.AharouMemoryStore(appContext)
+        com.aharou.core.memory.NativeProfileMemory.migrate(memoryStore.dir, memoryStore.isMemoryEnabled())
 
         registry.register(
             ClosureField(
                 path = "soul.body",
                 displayName = "人格正文",
-                description = "SOUL.md 正文——决定说话方式与性格。中文 ≤1600 字 / 英文 ≤1000 词；自动拒绝 prompt 注入句式。",
+                description = "记忆库「人格正文」条目的兼容编辑入口；注入方式、停用和删除在记忆库管理。",
                 valueSchema = ConfigSchema.Str(maxLength = 40000),
                 access = ConfigAccess.READWRITE,
                 risk = ConfigRisk.SENSITIVE,
                 revertable = true,
-                reader = { ConfigValue.Str(SoulStore.load(appContext)?.body.orEmpty()) },
+                reader = { ConfigValue.Str(com.aharou.core.memory.NativeProfileMemory.read(memoryStore.dir, com.aharou.core.memory.NativeProfileMemory.BODY)) },
                 writer = { v ->
                     val body = (v as? ConfigValue.Str)?.value
                         ?: throw ConfigError.TypeMismatch("string")
@@ -47,11 +47,8 @@ object ConfigBuiltins {
                         }
                         throw ConfigError.InvalidValue("人格正文$msg")
                     }
-                    if (SystemPromptBuilder.containsInjectionPattern(body)) {
-                        throw ConfigError.InvalidValue("正文包含 prompt 注入句式，已拒绝")
-                    }
-                    val current = SoulStore.load(appContext) ?: SoulFile(SoulMetadata.DEFAULT, "")
-                    SoulStore.save(appContext, current.copy(body = body))
+                    com.aharou.core.memory.NativeProfileMemory.write(memoryStore.dir,
+                        com.aharou.core.memory.NativeProfileMemory.BODY, body)
                 },
             ),
         )
@@ -77,15 +74,15 @@ object ConfigBuiltins {
             ClosureField(
                 path = "soul.style",
                 displayName = "风格",
-                description = "回复风格（一句话）——如「病娇」「简洁、不用 markdown、不要表情包」；会作为硬性风格约束注入系统提示，优先级高于默认的语气设定。",
+                description = "记忆库「回复风格」条目的兼容编辑入口；不从旧人格文件另行注入。",
                 valueSchema = ConfigSchema.Str(maxLength = 400),
                 revertable = true,
-                reader = { ConfigValue.Str(SoulStore.load(appContext)?.metadata?.style.orEmpty()) },
+                reader = { ConfigValue.Str(com.aharou.core.memory.NativeProfileMemory.read(memoryStore.dir, com.aharou.core.memory.NativeProfileMemory.STYLE)) },
                 writer = { v ->
                     val style = (v as? ConfigValue.Str)?.value
                         ?: throw ConfigError.TypeMismatch("string")
-                    val current = SoulStore.load(appContext) ?: SoulFile(SoulMetadata.DEFAULT, "")
-                    SoulStore.save(appContext, current.copy(metadata = current.metadata.copy(style = style.trim())))
+                    com.aharou.core.memory.NativeProfileMemory.write(memoryStore.dir,
+                        com.aharou.core.memory.NativeProfileMemory.STYLE, style.trim())
                 },
             ),
         )
@@ -114,12 +111,13 @@ object ConfigBuiltins {
                 description = "回复语言：auto / zh / en。",
                 valueSchema = ConfigSchema.StrEnum(listOf("auto", "zh", "en")),
                 revertable = true,
-                reader = { ConfigValue.Str(SoulStore.load(appContext)?.metadata?.lang ?: "auto") },
+                reader = { ConfigValue.Str(com.aharou.core.memory.NativeProfileMemory.read(memoryStore.dir,
+                    com.aharou.core.memory.NativeProfileMemory.LANGUAGE).ifBlank { "auto" }) },
                 writer = { v ->
                     val lang = (v as? ConfigValue.Str)?.value
                         ?: throw ConfigError.TypeMismatch("string")
-                    val current = SoulStore.load(appContext) ?: SoulFile(SoulMetadata.DEFAULT, "")
-                    SoulStore.save(appContext, current.copy(metadata = current.metadata.copy(lang = lang)))
+                    com.aharou.core.memory.NativeProfileMemory.write(memoryStore.dir,
+                        com.aharou.core.memory.NativeProfileMemory.LANGUAGE, lang)
                 },
             ),
         )
@@ -166,7 +164,7 @@ object ConfigBuiltins {
             ClosureField(
                 path = "memory.enabled",
                 displayName = "启用记忆",
-                description = "记忆总开关。关闭后提示词不再注入核心档案与每日日志（记忆文件仍保留，可随时再打开）。默认开启。",
+                description = "普通记忆注入与自动整理开关，关闭后仍可读取文件；主代理和成员指令条目由记忆库各条目的使用方式独立控制。",
                 valueSchema = ConfigSchema.Bool,
                 access = ConfigAccess.READWRITE,
                 revertable = true,

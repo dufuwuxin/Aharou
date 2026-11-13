@@ -43,7 +43,7 @@ class AgentDefinitionParserTest {
             mode: plan
             tools: [readFile, search]
             disallowedTools: [Bash]
-            inject: [base, projectRules]
+            inject: [skills, memory]
             ---
             你是调研专家。
             """.trimIndent()
@@ -59,7 +59,7 @@ class AgentDefinitionParserTest {
         assertEquals(AgentMode.PLAN, def.mode)
         assertEquals(listOf("readFile", "search"), def.allowedTools)
         assertEquals(listOf("Bash"), def.disallowedTools)
-        assertEquals(setOf(InjectPart.BASE, InjectPart.PROJECT_RULES), def.inject)
+        assertEquals(setOf(InjectPart.SKILLS, InjectPart.MEMORY), def.inject)
         assertEquals("你是调研专家。", def.prompt)
     }
 
@@ -90,12 +90,21 @@ class AgentDefinitionParserTest {
         assertTrue(def.inject.isEmpty())
     }
 
-    /** 全部取值非法时回退默认，避免写错一个词就丢掉全部上下文。 */
+    /** 未知token不注入；旧静态规则token迁移到原生记忆受众而不丢失成员工作约定。 */
     @Test
-    fun parse_invalidInjectFallsBackToDefault() {
-        val def = parseFile(write("a.md", "---\nname: a\ninject: [bogus]\n---\n正文"))!!
+    fun parse_legacyStaticMarkersMigrateToNativeMemoryOnly() {
+        for (value in listOf("base,projectRules", "mainRules")) {
+            val def = parseFile(write("a.md", "---\nname: a\ninject: [$value]\n---\n正文"))!!
+            assertEquals(setOf(InjectPart.MEMORY), def.inject)
+        }
+        val unknown = parseFile(write("unknown.md", "---\nname: unknown\ninject: [bogus]\n---\n正文"))!!
+        assertTrue(unknown.inject.isEmpty())
+    }
 
-        assertEquals(AgentDefinition.DEFAULT_INJECT, def.inject)
+    @Test
+    fun parse_explicitEmptyInjectDoesNotEnableDefaults() {
+        val def = parseFile(write("a.md", "---\nname: a\ninject: []\n---\n正文"))!!
+        assertTrue(def.inject.isEmpty())
     }
 
     @Test
@@ -163,7 +172,7 @@ class AgentDefinitionParserTest {
             mode = AgentMode.PLAN,
             allowedTools = listOf("readFile", "search"),
             disallowedTools = listOf("Bash"),
-            inject = setOf(InjectPart.BASE, InjectPart.PROJECT_RULES),
+            inject = setOf(InjectPart.SKILLS, InjectPart.MEMORY),
             prompt = "你是调研专家。\n\n结论要带 文件:行号 引用。"
         )
 
@@ -177,7 +186,7 @@ class AgentDefinitionParserTest {
         assertEquals(AgentMode.PLAN, def.mode)
         assertEquals(listOf("readFile", "search"), def.allowedTools)
         assertEquals(listOf("Bash"), def.disallowedTools)
-        assertEquals(setOf(InjectPart.BASE, InjectPart.PROJECT_RULES), def.inject)
+        assertEquals(setOf(InjectPart.SKILLS, InjectPart.MEMORY), def.inject)
         assertEquals("你是调研专家。\n\n结论要带 文件:行号 引用。", def.prompt)
     }
 

@@ -5,37 +5,18 @@ import com.aharou.feature.agent.domain.model.AgentMode
 /** 子代理定义的来源作用域：全局（跨项目共享）或项目级（仅当前工作区生效，可 git 追踪）。 */
 enum class AgentDefinitionScope { GLOBAL, PROJECT }
 
-/**
- * 子代理系统提示词的可注入片段。省略 `inject` 时使用 [AgentDefinition.DEFAULT_INJECT]。
- *
- * BASE 与 MAIN_RULES 互斥语义上并不强制，同时写则两者都注入（MAIN_RULES 在前）。
- */
+/** 成员可继承的记忆视图选项；所有正文仍由原生记忆条目承载。 */
 enum class InjectPart(val token: String) {
-    /** 子代理专用精简基线（`agent/subagent-base.md`）：工具用法、路径约定、安全边界。 */
-    BASE("base"),
-
-    /** 主代理的完整静态规则基线（`00`~`70` 全部片段），需要子代理与主代理行为完全一致时使用。 */
-    MAIN_RULES("mainRules"),
-
-    /** 可用技能清单（子代理可 loadSkill）。 */
     SKILLS("skills"),
-
-    /** 全局 + 项目记忆的摘要清单。 */
-    MEMORY("memory"),
-
-    /** 项目规则（AGENTS.md / CLAUDE.md）。 */
-    PROJECT_RULES("projectRules");
+    MEMORY("memory");
 
     companion object {
         /** frontmatter 里的宽松写法映射：忽略大小写、连字符与下划线差异。 */
         fun fromToken(token: String): InjectPart? {
             val normalized = token.trim().lowercase().replace("-", "").replace("_", "")
             return when (normalized) {
-                "base" -> BASE
-                "mainrules" -> MAIN_RULES
                 "skills", "skill" -> SKILLS
                 "memory", "memories" -> MEMORY
-                "projectrules", "projectrule" -> PROJECT_RULES
                 else -> null
             }
         }
@@ -144,13 +125,8 @@ data class AgentDefinition(
         private fun canonicalToolName(name: String): String =
             TOOL_ALIASES[name.lowercase()] ?: name
 
-        /** 省略 `inject` 时的默认注入项：精简基线 + 技能 + 记忆 + 项目规则。 */
-        val DEFAULT_INJECT: Set<InjectPart> = setOf(
-            InjectPart.BASE,
-            InjectPart.SKILLS,
-            InjectPart.MEMORY,
-            InjectPart.PROJECT_RULES
-        )
+        /** 省略 `inject` 时在记忆请求模板里展开技能发现和普通记忆。 */
+        val DEFAULT_INJECT: Set<InjectPart> = setOf(InjectPart.SKILLS, InjectPart.MEMORY)
 
         /**
          * 子代理递归派发的最大深度：主代理（0）→ 子代理（1）→ 孙代理（2）为上限，

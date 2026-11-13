@@ -9,6 +9,11 @@ import com.aharou.feature.agent.data.remote.gemini.GeminiApi
 import com.aharou.feature.agent.data.remote.openai.OpenAIApi
 import com.aharou.feature.agent.domain.model.AgentMessage
 import android.os.SystemClock
+import com.aharou.feature.agent.domain.privacy.maskIfNeeded
+import com.aharou.feature.agent.domain.privacy.outboundMaskerOrNull
+import com.aharou.feature.agent.domain.privacy.restoredFromOutbound
+import com.aharou.feature.agent.domain.context.ContextCategory
+import com.aharou.feature.agent.domain.context.ContextLibraryRepository
 import com.aharou.feature.agent.domain.provider.AIProvider
 import com.aharou.feature.agent.domain.provider.AIResponse
 import com.aharou.feature.agent.domain.provider.AnthropicAdapter
@@ -16,6 +21,8 @@ import com.aharou.feature.agent.domain.provider.GeminiAdapter
 import com.aharou.feature.agent.domain.provider.OpenAIAdapter
 import com.aharou.feature.agent.domain.provider.fixedTemperature
 import com.aharou.feature.agent.domain.session.SessionUseCase
+import com.aharou.feature.agent.domain.subagent.AgentDefinitionRepository
+import com.aharou.feature.agent.domain.subagent.InjectPart
 import com.aharou.feature.settings.data.remote.ModelMetadataService
 import com.aharou.feature.settings.data.repository.DefaultModelSettingsRepository
 import com.aharou.feature.settings.data.repository.GeneralSettingsRepository
@@ -24,6 +31,7 @@ import com.aharou.feature.settings.domain.model.AIProviderConfig
 import com.aharou.feature.settings.domain.model.ProviderType
 import com.aharou.feature.settings.domain.repository.AIProviderRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.serialization.json.JsonElement
@@ -107,7 +115,9 @@ class MobileOperator @Inject constructor(
     private val generalSettingsRepository: GeneralSettingsRepository,
     private val defaultModelSettingsRepository: DefaultModelSettingsRepository,
     private val providerKeyRotator: ProviderKeyRotator,
+    private val contextLibrary: ContextLibraryRepository,
     private val sessionUseCase: SessionUseCase,
+    private val agentDefinitionRepository: AgentDefinitionRepository,
     private val llmCallRecordDao: LlmCallRecordDao,
 ) {
 
@@ -128,6 +138,31 @@ class MobileOperator @Inject constructor(
         sessionId: String?,
     ): OperatorOutcome {
         val trace = traceStore.start(goal = goal, app = app.orEmpty(), sessionId = sessionId)
+        val session = if (sessionId == null) null else try {
+            sessionUseCase.getSessionById(sessionId)
+                ?: return finish(trace, OperatorOutcome.Failed(0, trace.id, "Session unavailable"))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            return finish(trace, OperatorOutcome.Failed(0, trace.id, "Session unavailable"))
+        }
+        val isMember = session?.parentId != null
+        val role = session?.takeIf { isMember }?.subagentType
+            ?.let { agentDefinitionRepository.findIncludingDisabled(it) }
+        val audience = if (isMember) ContextCategory.ROLE_INJECTED else ContextCategory.MAIN_INJECTED
+        val memoryAllowed = !isMember || role?.let { InjectPart.MEMORY in it.inject } == true
+        val systemPrompt = contextLibrary.resolvePromptForContext(SYSTEM_PROMPT_KEY,
+            session?.workspacePath, sessionId, goal, audience, role?.name, role?.tags.orEmpty(), memoryAllowed).trim()
+        if (systemPrompt.isEmpty()) {
+            return finish(trace, OperatorOutcome.Failed(0, trace.id, "手机操作系统提示已停用或不存在"))
+        }
+        val inputTemplate = contextLibrary.resolvePromptForContext(INPUT_TEMPLATE_KEY,
+            session?.workspacePath, sessionId, goal, audience, role?.name, role?.tags.orEmpty(), memoryAllowed).trim()
+        val retryRequest = contextLibrary.resolvePromptForContext(RETRY_REQUEST_KEY,
+            session?.workspacePath, sessionId, goal, audience, role?.name, role?.tags.orEmpty(), memoryAllowed).trim()
+        if (inputTemplate.isEmpty()) {
+            return finish(trace, OperatorOutcome.Failed(0, trace.id, "手机操作用户消息模板已停用或不存在"))
+        }
         val provider = runCatching { createProvider(sessionId, modelOverride) }.getOrNull()
             ?: return finish(trace, OperatorOutcome.Failed(0, trace.id, "没有可用于手机操作的模型：请先在设置里配置并选中一个支持图片输入的模型"))
 
@@ -152,8 +187,11 @@ class MobileOperator @Inject constructor(
             stepNo++
             val obs = observation ?: observe(hand)
 
-            val decision = runCatching { decide(provider, goal, progress, obs, sessionId) }
-                .getOrElse { return finish(trace, OperatorOutcome.Failed(stepNo, trace.id, "模型调用失败：${it.message ?: it.javaClass.simpleName}")) }
+            val decision = runCatching { decide(provider, systemPrompt, inputTemplate, retryRequest, goal, progress, obs, sessionId) }
+                .getOrElse {
+                    if (it is CancellationException) throw it
+                    return finish(trace, OperatorOutcome.Failed(stepNo, trace.id, "模型调用失败：${it.message ?: it.javaClass.simpleName}"))
+                }
             val step = decision.step
             if (step == null) {
                 trace.step(stepNo, obs.caption, obs.image, thought = null, action = null,
@@ -275,29 +313,32 @@ class MobileOperator @Inject constructor(
     /** 让模型给出下一步；回复不成形时最多重问 [PARSE_RETRIES] 次。 */
     private suspend fun decide(
         provider: AIProvider,
+        systemPrompt: String,
+        inputTemplate: String,
+        retryRequest: String,
         goal: String,
         progress: List<String>,
         obs: HandObservation,
         sessionId: String?,
     ): Decision {
-        val progressText = progress.mapIndexed { i, s -> "Step ${i + 1}: $s; " }.joinToString("")
-        var content = MobilePrompt.userText(goal, progressText, screenSize(obs))
-        obs.nodesText?.takeIf { it.isNotBlank() }?.let { content += "\n\n" + MobilePrompt.nodesText(it) }
+        val progressText = progress.joinToString("\n")
+        val content = MobilePrompt.userText(inputTemplate, goal, progressText, screenSize(obs), obs.nodesText)
         var messages: List<AgentMessage> = listOf(AgentMessage.UserMessage(content = content, images = listOfNotNull(obs.image)))
         val started = System.currentTimeMillis()
         var raw = ""
         repeat(PARSE_RETRIES) { attempt ->
-            val response = complete(provider, messages, sessionId)
+            val response = complete(provider, systemPrompt, messages, sessionId)
             raw = response.content
             MobileStepParser.parse(raw)?.let { step ->
                 return Decision(step, raw, System.currentTimeMillis() - started)
             }
             FileLogger.w(TAG, "手机操作一步解析失败（第 ${attempt + 1} 次）：${raw.take(300)}")
             if (attempt + 1 < PARSE_RETRIES) {
+                if (retryRequest.isEmpty()) return Decision(null, raw, System.currentTimeMillis() - started)
                 messages = listOf(
                     AgentMessage.UserMessage(content = content, images = listOfNotNull(obs.image)),
                     AgentMessage.AssistantMessage(content = raw),
-                    AgentMessage.UserMessage(content = "这不是要求的格式。请用 Thought、Action 和一个调用 ${MobilePrompt.TOOL_NAME} 的 <tool_call> 块重新回复。"),
+                    AgentMessage.UserMessage(content = retryRequest),
                 )
             }
         }
@@ -305,13 +346,16 @@ class MobileOperator @Inject constructor(
     }
 
     /** 发一次补全并落一条调用统计（失败照抛，由循环按「产不出动作」处理）。 */
-    private suspend fun complete(provider: AIProvider, messages: List<AgentMessage>, sessionId: String?): AIResponse {
+    private suspend fun complete(provider: AIProvider, systemPrompt: String, messages: List<AgentMessage>, sessionId: String?): AIResponse {
         val startedElapsed = SystemClock.elapsedRealtime()
         val startedWall = System.currentTimeMillis()
         var response: AIResponse? = null
         var error: String? = null
         try {
-            val result = provider.complete(systemPrompt = MobilePrompt.SYSTEM_PROMPT, messages = messages, tools = emptyList())
+            val masker = outboundMaskerOrNull(generalSettingsRepository.privacyMaskingEnabled())
+            val raw = provider.complete(systemPrompt = systemPrompt.maskIfNeeded(masker),
+                messages = messages.maskIfNeeded(masker), tools = emptyList())
+            val result = if (masker == null) raw else raw.restoredFromOutbound(masker)
             response = result
             return result
         } catch (e: Exception) {
@@ -350,8 +394,8 @@ class MobileOperator @Inject constructor(
     }
 
     /** 给模型看的屏幕像素尺寸（归一化坐标换算用）；尺寸未知返回 null。 */
-    private fun screenSize(obs: HandObservation): String? =
-        if (obs.width > 0 && obs.height > 0) "${obs.width}×${obs.height}" else null
+    private fun screenSize(obs: HandObservation): String =
+        if (obs.width > 0 && obs.height > 0) "${obs.width}×${obs.height}" else "未知"
 
     /** 动作后等静默的总超时：启动 App 落屏慢一些，其余统一 [SETTLE_TIMEOUT_MS]。 */
     private fun settleTimeoutMs(args: Map<String, JsonElement>): Long {
@@ -491,6 +535,9 @@ class MobileOperator @Inject constructor(
 
     companion object {
         private const val TAG = "MobileOperator"
+        private const val SYSTEM_PROMPT_KEY = "agent/mobile-operator-system.md"
+        private const val INPUT_TEMPLATE_KEY = "agent/mobile-operator-input.md"
+        private const val RETRY_REQUEST_KEY = "agent/mobile-operator-format-retry.md"
 
         /** 连续这么多步没有产生有效动作（动作不认识 / 同一动作反复做）即中止。 */
         const val MAX_IDLE_STEPS = 6

@@ -43,6 +43,7 @@ data class ContextEntry(
     val worldbook: WorldbookRules = WorldbookRules(),
     val graphId: String = "",
     val graphAliases: List<String> = emptyList(),
+    val dynamic: Boolean = false,
 )
 
 data class ContextPreview(

@@ -31,7 +31,16 @@ class BuiltinContextEntriesTest {
 
     private val asset: File get() = listOf(File("src/main/assets/context-library/builtin.json"),
         File("app/src/main/assets/context-library/builtin.json")).first { it.isFile }
-    private val executionIds = setOf("main-execution-contract", "member-execution-contract", "execution-source-map")
+    private val executionIds = setOf("main-execution-contract", "member-execution-contract", "execution-source-map",
+        "archive-execution-supplement", "crosscheck-system-request", "steward-judge-system-request",
+        "steward-judge-input-request", "mobile-operator-system-request",
+        "mobile-operator-format-retry-request", "mobile-operator-input-request",
+        "project-task-context-rules-request", "project-task-context-slot")
+    private val auxiliaryPromptIds = listOf("crosscheck-system-request", "steward-judge-system-request",
+        "steward-judge-input-request", "mobile-operator-system-request",
+        "mobile-operator-format-retry-request", "mobile-operator-input-request")
+    private val changedSeedOrder = listOf("archive-execution-supplement") + auxiliaryPromptIds + listOf(
+        "project-task-context-rules-request", "project-task-context-slot")
     private val legacyRecordedIds = setOf("main-foundation", "member-foundation", "title-request",
         "main-tool-directory", "member-tool-directory")
     private fun seeds() = BuiltinContextEntries(File(temp.root, ".context-defaults-v1")) { asset.readText() }
@@ -49,18 +58,35 @@ class BuiltinContextEntriesTest {
         val defaults = seeds().defaults()
         assertTrue(defaults.isNotEmpty())
         assertTrue(defaults.filter { it.loading == ContextLoad.FULL }.all {
-            it.category.isInjection && it.content.length <= ContextLibraryPlanner.FULL_ENTRY_CHARS
+            (it.category.isInjection || it.id == "project-task-context-slot") &&
+                it.content.length <= ContextLibraryPlanner.FULL_ENTRY_CHARS
         })
-        assertEquals(25, defaults.count { it.requestKey != null })
+        assertEquals(32, defaults.count { it.requestKey != null })
+        assertEquals(auxiliaryPromptIds, defaults.filter { it.id in auxiliaryPromptIds }.map { it.id })
+        assertEquals(changedSeedOrder, defaults.filter { it.id in changedSeedOrder }.map { it.id })
+        defaults.filter { it.id in changedSeedOrder }.forEach { assertEquals(-1, it.worldbook.priority) }
+        defaults.filter { it.id !in changedSeedOrder }.forEach { assertEquals(0, it.worldbook.priority) }
         assertTrue(defaults.filter { it.requestKey != null }.all { it.folder == "辅助请求" && it.loading == ContextLoad.SEARCH })
         assertFalse(defaults.any { it.folder == "内置默认" || it.folder.startsWith("requests/") })
         for (category in listOf(ContextCategory.MAIN_INJECTED, ContextCategory.ROLE_INJECTED)) {
             val entries = defaults.filter { it.category == category }.map {
                 ContextEntry(it.id, it.title, it.description, it.content, MemoryScope.GLOBAL,
-                    ContextKind.INSTRUCTION, it.loading, ContextOrigin.MEMORY, it.id, category = it.category)
+                    ContextKind.INSTRUCTION, it.loading, ContextOrigin.MEMORY, it.id, category = it.category,
+                    worldbook = it.worldbook)
             }
             assertEquals(entries.size, ContextLibraryPlanner.plan(entries, injectionCategory = category).full.size)
         }
+        val mainAndRules = defaults.filter {
+            it.category == ContextCategory.MAIN_INJECTED || it.category == ContextCategory.RULE
+        }.map {
+            ContextEntry(it.id, it.title, it.description, it.content, MemoryScope.GLOBAL,
+                ContextKind.INSTRUCTION, it.loading, ContextOrigin.MEMORY, it.id,
+                category = it.category, worldbook = it.worldbook)
+        }
+        val mainOrder = ContextLibraryPlanner.plan(mainAndRules, injectionCategory = ContextCategory.MAIN_INJECTED)
+            .full.map { it.id }
+        assertEquals("project-task-context-slot", mainOrder.last())
+        assertTrue(mainOrder.dropLast(1).all { id -> defaults.single { it.id == id }.worldbook.priority == 0 })
     }
 
     @Test fun seedListEditOffRenameAndDeleteSurviveRepositoryRecreation() {
@@ -156,7 +182,7 @@ class BuiltinContextEntriesTest {
             contextCategory = injection.category, contextLoad = ContextLoad.OFF, contextFolder = "内置默认"))
         val entries = ContextLibraryRepository(memory, seeds()).list(null)
         assertFalse(entries.any { it.title == request.title || it.title == injection.title || it.title == removed.title })
-        assertEquals(7, entries.size)
+        assertEquals(executionIds.size + 4, entries.size)
         assertEquals(request.requestKey, entries.single { it.title == "改名请求" }.requestKey)
         assertEquals("辅助请求", entries.single { it.title == "改名请求" }.folder)
         assertEquals(ContextLoad.OFF, entries.single { it.title == "改名注入" }.loading)
@@ -176,10 +202,10 @@ class BuiltinContextEntriesTest {
         val first = ContextLibraryRepository(memory, seeds()).list(null)
         val addedTitles = seeds().defaults().filter { it.id in executionIds }.map { it.title }.toSet()
         assertEquals(setOf("仅存规则", "主代理工具目录", "成员工具目录") + addedTitles, first.map { it.title }.toSet())
-        assertEquals(4, first.count { it.category.isInjection })
+        assertEquals(5, first.count { it.category.isInjection })
         val second = ContextLibraryRepository(memory, seeds()).list(null)
         assertEquals(first.map { it.title }, second.map { it.title })
-        assertEquals(4, second.count { it.category.isInjection })
+        assertEquals(5, second.count { it.category.isInjection })
         assertEquals(legacyRecordedIds + executionIds,
             File(temp.root, ".context-defaults-v1").readLines().drop(1).toSet())
     }
@@ -237,7 +263,7 @@ class BuiltinContextEntriesTest {
         val other = library.list(null).single { it.title == "成员工具目录" }
         assertTrue(library.delete(other, null))
         val next = ContextLibraryRepository(memory, seeds()).list(null)
-        assertEquals(4, next.size)
+        assertEquals(addedTitles.size + 1, next.size)
         assertEquals(addedTitles + entry.title, next.map { it.title }.toSet())
         assertEquals("用户目录", next.single { it.id == entry.id }.content)
         assertEquals(ContextLoad.OFF, next.single { it.id == entry.id }.loading)
@@ -265,13 +291,19 @@ class BuiltinContextEntriesTest {
             assertEquals(expected.category, actual.category)
             assertEquals(expected.loading, actual.loading)
             assertEquals(expected.folder, actual.folder)
-            assertNull(actual.requestKey)
+            assertEquals(expected.requestKey, actual.requestKey)
         }
+        val oldIds = defaults.filter { it.id !in changedSeedOrder }.map { it.id }
+        assertEquals(oldIds, defaults.take(oldIds.size).map { it.id })
         assertEquals(ContextCategory.MAIN_INJECTED, additions.single { it.id == "main-execution-contract" }.category)
         assertEquals(ContextCategory.ROLE_INJECTED, additions.single { it.id == "member-execution-contract" }.category)
-        assertTrue(additions.filter { it.id != "execution-source-map" }.all { it.loading == ContextLoad.FULL })
-        assertEquals(ContextCategory.RULE, additions.single { it.id == "execution-source-map" }.category)
-        assertEquals(ContextLoad.SEARCH, additions.single { it.id == "execution-source-map" }.loading)
+        assertTrue(additions.filter { it.id in setOf("main-execution-contract", "member-execution-contract") }.all { it.loading == ContextLoad.FULL })
+        assertTrue(additions.filter { it.id in setOf("execution-source-map", "archive-execution-supplement",
+            "project-task-context-rules-request") + auxiliaryPromptIds }.all {
+            it.category == ContextCategory.RULE && it.loading == ContextLoad.SEARCH
+        })
+        assertEquals(ContextCategory.MAIN_INJECTED, additions.single { it.id == "project-task-context-slot" }.category)
+        assertEquals(ContextLoad.FULL, additions.single { it.id == "project-task-context-slot" }.loading)
         assertEquals("version=1-legacy", receipt.readLines().first())
         assertEquals(legacyRecordedIds + executionIds, receipt.readLines().drop(1).toSet())
         val recorded = receipt.readText()
@@ -285,6 +317,10 @@ class BuiltinContextEntriesTest {
         val main = defaults.single { it.id == "main-execution-contract" }
         val member = defaults.single { it.id == "member-execution-contract" }
         val sourceMap = defaults.single { it.id == "execution-source-map" }
+        val archiveSource = defaults.single { it.id == "archive-execution-supplement" }
+        val mobilePrompt = defaults.single { it.id == "mobile-operator-system-request" }
+        val projectPromptTitles = defaults.filter { it.id in setOf("project-task-context-rules-request",
+            "project-task-context-slot") }.map { it.title }.toSet()
         val plain = ContextLibraryRepository(memory)
         assertTrue(plain.create(main.title, "自定义说明", "用户已有契约", MemoryScope.GLOBAL,
             ContextKind.INSTRUCTION, ContextLoad.OFF, null, category = main.category))
@@ -293,20 +329,50 @@ class BuiltinContextEntriesTest {
         val receipt = legacyReceipt()
         val library = ContextLibraryRepository(memory, seeds())
         val first = library.list(null)
-        assertEquals(setOf(main.title, member.title, sourceMap.title), first.map { it.title }.toSet())
+        val auxiliaryTitles = defaults.filter { it.id in auxiliaryPromptIds }.map { it.title }.toSet()
+        assertEquals(setOf(main.title, member.title, sourceMap.title, archiveSource.title) + projectPromptTitles + auxiliaryTitles,
+            first.map { it.title }.toSet())
         assertEquals(bytes, File(existing.sourceLabel).readText())
         assertEquals(existing, first.single { it.title == main.title })
         assertTrue(library.save(first.single { it.title == member.title }.copy(
             title = "用户改名契约", content = "用户改写正文", loading = ContextLoad.OFF), null))
         assertTrue(library.delete(first.single { it.title == sourceMap.title }, null))
+        assertTrue(library.delete(first.single { it.title == mobilePrompt.title }, null))
         val recorded = receipt.readText()
         val next = ContextLibraryRepository(memory, seeds()).list(null)
-        assertEquals(setOf(main.title, "用户改名契约"), next.map { it.title }.toSet())
+        assertEquals(setOf(main.title, "用户改名契约", archiveSource.title) + projectPromptTitles + auxiliaryTitles - mobilePrompt.title,
+            next.map { it.title }.toSet())
         assertEquals("用户已有契约", next.single { it.title == main.title }.content)
         assertEquals("用户改写正文", next.single { it.title == "用户改名契约" }.content)
-        assertTrue(next.all { it.loading == ContextLoad.OFF })
+        assertEquals(ContextLoad.OFF, next.single { it.title == main.title }.loading)
+        assertEquals(ContextLoad.OFF, next.single { it.title == "用户改名契约" }.loading)
+        assertEquals(ContextLoad.SEARCH, next.single { it.title == archiveSource.title }.loading)
         assertEquals(legacyRecordedIds + executionIds, receipt.readLines().drop(1).toSet())
         assertEquals(recorded, receipt.readText())
+    }
+
+    @Test fun legacyReceiptInstallsSearchOnlyAttachmentIndexWithoutRewritingPriorDefaults() {
+        val memory = memories()
+        val original = seeds().defaults().single { it.id == "main-foundation" }
+        val plain = ContextLibraryRepository(memory)
+        assertTrue(plain.create(original.title, "用户自定义摘要", "旧正文保持", MemoryScope.GLOBAL,
+            ContextKind.INSTRUCTION, ContextLoad.OFF, null, category = original.category))
+        val existing = plain.list(null).single()
+        val bytes = File(existing.sourceLabel).readText()
+        val receipt = legacyReceipt()
+        val library = ContextLibraryRepository(memory, seeds())
+        val first = library.list(null)
+        val archiveIndex = first.single { it.title == "附件工程机制补充" }
+        assertEquals(ContextCategory.RULE, archiveIndex.category)
+        assertEquals(ContextLoad.SEARCH, archiveIndex.loading)
+        assertTrue(library.search("附件工程机制补充", null).any { it.title == archiveIndex.title })
+        assertEquals(bytes, File(existing.sourceLabel).readText())
+        assertEquals("旧正文保持", first.single { it.title == original.title }.content)
+        assertEquals(ContextLoad.OFF, first.single { it.title == original.title }.loading)
+        assertTrue(receipt.readLines().drop(1).contains("archive-execution-supplement"))
+        val receiptBytes = receipt.readText()
+        assertEquals(first, ContextLibraryRepository(memory, seeds()).list(null))
+        assertEquals(receiptBytes, receipt.readText())
     }
 
     @Test fun realManifestExecutionContractsReachOnlyTheirAudienceAndRespectOff() {
@@ -335,6 +401,47 @@ class BuiltinContextEntriesTest {
         val afterOff = library.withPromptSnapshot(context) { library.render(temp.root.path, "main", ContextOrigin.MEMORY) }
         assertFalse(afterOff.contains(main.content))
         assertTrue(library.search("执行机制来源与适配", null).any { it.title == sourceMap.title })
+        assertTrue(library.search("附件工程机制补充", null).any { it.title == "附件工程机制补充" })
+    }
+
+    @Test fun auxiliaryModelPromptsResolveOnlyFromSearchOnlyNativeMemory() {
+        val library = ContextLibraryRepository(memories(), seeds())
+        val defaults = seeds().defaults().filter { it.id in executionIds }
+            .filter { it.requestKey?.startsWith("agent/crosscheck-") == true ||
+                it.requestKey?.startsWith("agent/steward-judge-") == true ||
+                it.requestKey?.startsWith("agent/mobile-operator-") == true }
+        assertEquals(6, defaults.size)
+        val system = library.render(temp.root.path, "main", ContextOrigin.MEMORY)
+        defaults.forEach { entry ->
+            assertEquals(ContextCategory.RULE, entry.category)
+            assertEquals(ContextLoad.SEARCH, entry.loading)
+            val resolved = library.resolvePrompt(entry.requestKey!!)
+            assertEquals(ContextLibraryPlanner.safe(entry.content), resolved)
+            assertFalse(system.contains(entry.content))
+            val stored = library.list(null).single { it.title == entry.title }
+            assertTrue(library.save(stored.copy(loading = ContextLoad.OFF), null))
+            assertEquals("", library.resolvePrompt(entry.requestKey))
+        }
+    }
+
+    @Test fun explicitPromptLookupHonorsAudienceWorldbookAndMemoryOff() {
+        val library = ContextLibraryRepository(memories(), seeds())
+        val request = seeds().defaults().single { it.id == "mobile-operator-system-request" }
+        val entry = library.list(null).single { it.title == request.title }
+        assertTrue(library.save(entry.copy(worldbook = WorldbookRules(triggers = listOf("mobile"),
+            roles = listOf("mobile-member"), audiences = listOf(WorldbookAudience.ROLE))), null))
+        val key = request.requestKey!!
+        assertEquals("", library.resolvePromptForContext(key, null, "s", "mobile", ContextCategory.MAIN_INJECTED))
+        assertEquals("", library.resolvePromptForContext(key, null, "s", "mobile", ContextCategory.ROLE_INJECTED,
+            "other-member"))
+        assertEquals("", library.resolvePromptForContext(key, null, "s", "other", ContextCategory.ROLE_INJECTED,
+            "mobile-member"))
+        assertEquals("", library.resolvePromptForContext(key, null, "s", "mobile", ContextCategory.ROLE_INJECTED,
+            "mobile-member", memoryAllowed = false))
+        assertEquals(ContextLibraryPlanner.safe(entry.content), library.resolvePromptForContext(key, null, "s",
+            "mobile", ContextCategory.ROLE_INJECTED, "mobile-member"))
+        assertEquals("", library.resolvePromptForContext(key, null, "s", "unrelated", ContextCategory.ROLE_INJECTED,
+            "mobile-member"))
     }
 
     @Test fun finalSystemPromptExpandsNativeEntriesAndKeepsExecutionAudience() {
@@ -350,9 +457,11 @@ class BuiltinContextEntriesTest {
         every { profiles.forWorkspace(any()) } returns profile
         every { profile.mode } returns com.aharou.feature.settings.data.repository.ExecutionMode.LOCAL_PROOT
         val store = mockk<com.aharou.feature.agent.domain.prompt.InjectedContextStore>(relaxed = true)
+        val taskContext = mockk<com.aharou.feature.agent.domain.prompt.ProjectTaskContext>()
+        every { taskContext.build(any(), any()) } returns null
         val provider = com.aharou.feature.agent.domain.prompt.SystemPromptProvider(
             mockk(), skills, mockk(), mockk(), mockk(), teams, rules, mockk(), mockk(),
-            profiles, mockk(), mockk(), store, library)
+            profiles, mockk(), taskContext, store, library)
         val context = com.aharou.feature.agent.domain.model.AgentContext(null, null, temp.root.path, null)
         val text = provider.build(context)
         assertTrue(text.contains(main.content))

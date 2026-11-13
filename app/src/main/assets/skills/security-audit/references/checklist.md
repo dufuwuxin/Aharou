@@ -82,7 +82,9 @@
 
 ## 格式与资源边界
 
-- ELF/PE/DEX 是头字段识别，不验证加载器语义、节/段表、签名或 DEX 校验和。
+- ELF/DEX 是头字段识别；PE 额外记录 COFF timestamp、optional-header 类型、entry-point RVA 与 ImageBase，不读取 section/import/debug 数据，也不验证加载器语义或签名。
+- 熵按文件字节计算 Shannon entropy，数值只用来排序复核优先级；高熵也可能是压缩、媒体或随机数据，低熵不排除混淆。不能据阈值断言壳/加密；哈希扫描与熵读取对同一文件分别顺序读取，单文件上限仍为 128 MiB。计算实现改写自 `gl0bal01/malware-analysis-claude-skills` 的 `scripts/pe_info.py`（归档内 SHA-256 `0d145b591e9c56e7646e5bf44ebda5ec5b7cf9b1e8f22c93ad16ea243c2c90ea`）；随包保留 `entropy-MIT-LICENSE.txt`。没有复制 PE 解析器、恶意代码结论或样本。
+- APK/ZIP 的 Flutter/React Native/UniApp 提示只按匹配条目名；目录名可伪造且不表示代码已经读取，恒标 `entry_names_only_unverified`，不是框架鉴定或漏洞结论。
 - ZIP 先限制 EOCD/中央目录字节及实际条目数，再读目录；不调用成员读取/解压接口。只统计条目元数据，大小和压缩比来自可伪造的目录声明。
 - ZIP64、多卷、结构不一致、超限归档报未评估；压缩比/展开量阈值只是线索，不是 ZIP bomb 的充分判据。没有成员 CRC、加密内容、嵌套包分析。
 - APK 候选由 AndroidManifest.xml + classes*.dex 条目推定；清单内容、证书、签名方案、网络安全配置、资源和 native 库须另行人工检查。
@@ -90,10 +92,13 @@
 - 输入必须是明确授权样本。已知凭据名/目录被拒绝不是通用敏感文件识别器；不要把整个用户主目录设为待扫范围。目录组件并发替换不属于此 CLI 的对抗性保证。
 - 本地初始化部署附属资源到 `~/.aharou/builtin-skills/security-audit/`：脚本为 `scripts/audit.py`，本清单为 `references/checklist.md`。不要与用户自定义技能目录混用。实际文件未出现或 SSH 端未同步时明确报告，部署代码存在不等于设备已升级。
 
-## 上游适配登记（公开说明与许可已核对，不复制实现）
+## 工具与方法来源登记（注明许可、改写与未移植范围）
 
 | 来源 | 输入中的许可/平台事实 | 采用方式 | 未验证 |
 | --- | --- | --- | --- |
+| [MoJin 2.0.0 Windows](用户提供的 `mojin-2.0.0-Windows-x64.zip`, SHA-256 `d2d7b35a4946519e38ef56f0909e56199ddfb0302995b06244d13cef5611c07b`) | Windows 工作台；README 说明模型通过可配置 OpenAI-compatible endpoint；无 Android 运行时 | 只适配 APK 目录名格式提示和静态 triage 次序；未复制提示词、工具配置或攻击技能 | 不因“数据本地保存”推断推理完全离线；Windows 二进制/MCP/插件未移植或运行。主提示中压制拒绝/安全限制内容不合入 |
+| [reverse-skills collection](用户提供的 `逆向大神技能合集.zip`, SHA-256 `0adadcb539b2ab1e9248b7246493d95f9a3cc25ef858786a75d99f2b300b8436`) / `malware-analysis-claude-skills/pe_info.py` (SHA-256 `0d145b591e9c56e7646e5bf44ebda5ec5b7cf9b1e8f22c93ad16ea243c2c90ea`) | 嵌套仓库 LICENSE 为 MIT | 只将 Shannon 熵函数改写为有界流式算法，见相邻 `entropy-MIT-LICENSE.txt`；PE 头字段与 APK 目录线索按格式字段另行实现 | 上游 PE 报告、其余 PE 解析器、技能合集与全部工具未移植 |
+
 | [DSH plugin hub](https://github.com/dshplugin/dsh-plugin-hub) | 已核对公开 LICENSE 为 MIT；依赖 DSH 宿主 | 仅借鉴能力分类，使用现有 Aharou 工具；不盲装依赖、不运行第三方脚本 | 未复制源码；Aharou 未实现 DSH 宿主 API，不声称插件二进制兼容 |
 | [VCPToolBox](https://github.com/lioensky/VCPToolBox) | 已核对公开 LICENSE 为 CC BY-NC-SA 4.0 | 只复述需求与兼容性边界，原创实现；不复制到 GPLv3 工程，不把来源许可改称 GPL | 精确提交未固定；未做 VCP 协议兼容或算法性能复现 |
 | [Zkali](https://github.com/HaizhuAI/Zkali/tree/a23e4d497c10e51745b1b18591196e055e77a41d) | 已核对该提交 LICENSE 为 Apache-2.0；逆向角色要求静态/动态证据与测试向量，toolbox 按域发现工具、以参数数组启动进程 | 原创补齐分域工具矩阵、报告身份与规则指纹；人工逆向采用证据闭环，不复制源码、插件或提示词 | 未验证其工具在 Android/SSH 上可运行；二进制名白名单不等于参数和目标授权，不导入 run、代理轮换、自动服务或重复常驻内核 |

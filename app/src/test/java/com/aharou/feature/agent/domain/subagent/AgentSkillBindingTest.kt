@@ -24,7 +24,7 @@ class AgentSkillBindingTest {
         allowedTools = listOf("readFile"),
         disallowedTools = listOf("Bash"),
         skills = listOf("existing"),
-        inject = setOf(InjectPart.BASE, InjectPart.SKILLS),
+        inject = setOf(InjectPart.SKILLS),
         keywordInjections = listOf(KeywordInjection(listOf("review"), "check \"carefully\"\nkeep all details")),
         prompt = "member instructions",
         filePath = "/global/original.md"

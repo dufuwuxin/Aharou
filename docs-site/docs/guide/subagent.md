@@ -164,7 +164,7 @@ reasoningEffort: high
 mode: plan
 tools: [readFile, list, search, websearch, webfetch]
 disallowedTools: [Bash, terminal]
-inject: [base, projectRules]
+inject: [skills, memory]
 ---
 你是资深代码调研专家。请先使用 search 定位入口，再用 readFile 深入核实。
 输出结论时请务必标注准确的 `文件路径:行号` 引用；未核实推断需如实注明。
@@ -182,21 +182,16 @@ inject: [base, projectRules]
 | `mode` | 否 | 默认运行模式：`build` / `plan` / `auto`，省略时继承父会话当前模式 |
 | `tools` | 否 | 工具白名单。**省略时代表开放全部可用工具** |
 | `disallowedTools` | 否 | 工具黑名单，优先级高于白名单，支持 `mcp__*` 前缀通配 |
-| `inject` | 否 | 注入的系统规则片段，详见下表 |
+| `inject` | 否 | 控制记忆条目中是否展开技能摘要和普通记忆；系统规则正文统一来自记忆库 |
 
-### inject 规则片段
+### 记忆视图选项
 
 | 取值 | 含义 |
 | --- | --- |
-| `base` | 子代理专用轻量基线：包含工具使用规范与路径约定，轻量且省 token |
-| `mainRules` | 完整通用规则：与主会话保持完全一致的行为准则与规则基线 |
-| `skills` | 技能支持：注入可用技能清单，允许子代理加载并执行项目技能 |
-| `memory` | 记忆支持：注入全局与项目长期记忆摘要，见 [记忆与项目规则](/guide/memory) |
-| `projectRules` | 项目规则：注入工作区内的 `AGENTS.md` 或 `CLAUDE.md` 约束，见 [记忆与项目规则](/guide/memory) |
+| `skills` | 在成员记忆条目的技能索引处展开当前角色可见的技能摘要；技能正文仍用 `loadSkill` 按需读取 |
+| `memory` | 允许当前成员的记忆请求模板展开全局与项目普通记忆摘要；成员受众记忆由原生记忆类别决定 |
 
-`base` 与 `mainRules` 是同一套规则的简版与完整版，**正常只选一个**。两个同时开不会报错，但会把相互重叠的规则文本注入两遍，白白占用上下文。
-
-若省略 `inject` 字段，默认等同于 `[base, skills, memory, projectRules]`。如果填写 `inject: [none]`，则仅使用你在 Markdown 正文中编写的提示词。
+所有主提示、成员约定、模式及项目任务背景只通过记忆库条目注入。成员 YAML 正文用于存储定义，不再作为系统提示自动拼接；项目 `AGENTS.md`/`CLAUDE.md` 与技能正文仍可由普通文件/技能读取入口按需读取，不会因内容可读而自动注入。旧 `base`、`mainRules`、`projectRules` token 不再启用任何静态注入入口；若旧定义曾使用这类标记，解析时仅迁移为 `memory` 记忆受众，保留正常成员记忆，其余未知 token 不增加注入。字段省略时默认等同于 `[skills, memory]`；`inject: [none]` 或显式空列表会关闭成员可选的技能/普通记忆展开，但不会改变内置成员受众记忆或主代理记忆。
 
 ## 团队预设
 

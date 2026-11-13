@@ -705,7 +705,7 @@ fun AppNavigation(
                                     com.aharou.feature.agent.presentation.component.ToolCallPreviewHolder.current = msg; navController.navigate("toolDetail") })
                             AIChatPanel(
                                 bodyOverride = projectChat?.body, floatingComposer = projectChat != null,
-                                composerSessionId = projectChat?.sessionId, projectChatContext = projectChat?.context.orEmpty(),
+                                composerSessionId = projectChat?.sessionId,
                                 viewModel = agentViewModel,
                                 settingsViewModel = settingsViewModel,
                                 workspaceViewModel = workspaceViewModel,

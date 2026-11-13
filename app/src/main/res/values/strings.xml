@@ -1652,14 +1652,14 @@
     <string name="subagents_delete_confirm_message">将删除「%1$s」的定义文件，此操作不可恢复。确定删除？</string>
     <string name="subagent_model">模型</string>
     <string name="subagent_tools">工具集</string>
-    <string name="subagent_inject">注入的提示词</string>
+    <string name="subagent_inject">记忆视图</string>
     <string name="subagent_prompt">agent 提示词</string>
     <string name="subagent_source_file">定义文件</string>
     <string name="subagent_inherit_parent">继承父会话</string>
     <string name="subagent_all_tools">继承全量工具（不含 task）</string>
     <string name="subagent_tools_allow">仅允许：%1$s</string>
     <string name="subagent_tools_deny">禁用：%1$s</string>
-    <string name="subagent_inject_none">不注入任何额外提示词</string>
+    <string name="subagent_inject_none">不展开技能和普通记忆</string>
     <string name="subagent_add">创建角色卡</string>
     <string name="subagent_edit">编辑成员</string>
     <string name="subagent_enable">启用该成员</string>
@@ -1696,16 +1696,10 @@
     <string name="subagent_editor_error_empty_prompt">提示词正文不能为空</string>
     <string name="subagent_editor_error_name_conflict">该作用域下已存在同名成员</string>
     <string name="subagent_editor_error_io">写入定义文件失败，请稍后重试</string>
-    <string name="subagent_inject_base">成员基线</string>
-    <string name="subagent_inject_base_hint">工具用法与路径约定，轻量、节省 Token</string>
-    <string name="subagent_inject_main_rules">完整通用规则</string>
-    <string name="subagent_inject_main_rules_hint">与「成员基线」二选一即可；两个都开会重复注入规则、多占上下文</string>
-    <string name="subagent_inject_skills">技能清单</string>
-    <string name="subagent_inject_skills_hint">允许它加载并执行项目技能</string>
+    <string name="subagent_inject_skills">技能发现摘要</string>
+    <string name="subagent_inject_skills_hint">仅在记忆模板中列出当前成员可读取的摘要；正文仍需显式 loadSkill</string>
     <string name="subagent_inject_memory">记忆摘要</string>
-    <string name="subagent_inject_memory_hint">注入全局与项目长期记忆</string>
-    <string name="subagent_inject_project_rules">项目规则</string>
-    <string name="subagent_inject_project_rules_hint">注入 AGENTS.md 或 CLAUDE.md</string>
+    <string name="subagent_inject_memory_hint">允许此成员受众的记忆条目按使用方式注入或检索</string>
 
     <!-- MCP stdio Fields -->
     <string name="mcp_command">启动命令</string>

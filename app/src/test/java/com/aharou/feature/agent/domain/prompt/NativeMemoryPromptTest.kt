@@ -26,19 +26,25 @@ import org.junit.rules.TemporaryFolder
 class NativeMemoryPromptTest {
     @get:Rule val temp = TemporaryFolder()
     private lateinit var library: ContextLibraryRepository
+    private lateinit var memories: MemoryRepository
     private lateinit var provider: SystemPromptProvider
     private val teams = mockk<AgentTeamRepository>()
     private val dao = mockk<ChatSessionDao>()
     private val context = AgentContext(null, null, "", null)
     private val registry = com.aharou.feature.agent.domain.tool.ToolRegistry()
+    private val projectTaskContext = mockk<com.aharou.feature.agent.domain.prompt.ProjectTaskContext>()
 
     @Before fun setup() {
         val store = mockk<AharouMemoryStore>()
         every { store.dir } returns temp.root
-        library = ContextLibraryRepository(MemoryRepository(GlobalMemorySource(store), mockk<ExecutionModeHolder>(),
-            mockk<ContainerInstaller>(), mockk<ProjectAharouRoot>(), mockk<MemoryUsageStore>(relaxed = true)))
+        val executionMode = mockk<ExecutionModeHolder>()
+        every { executionMode.currentMode() } returns com.aharou.feature.settings.data.repository.ExecutionMode.LOCAL_PROOT
+        memories = MemoryRepository(GlobalMemorySource(store), executionMode,
+            mockk<ContainerInstaller>(), mockk<ProjectAharouRoot>(relaxed = true), mockk<MemoryUsageStore>(relaxed = true))
+        library = ContextLibraryRepository(memories)
+        every { projectTaskContext.build(any(), any()) } returns null
         provider = SystemPromptProvider(mockk(), mockk(), PromptFileResolver(mockk(), mockk(), library),
-            mockk(), mockk(), teams, mockk(), dao, mockk(), mockk(), mockk(), mockk(),
+            mockk(), mockk(), teams, mockk(), dao, mockk(), mockk(), mockk(), projectTaskContext,
             InjectedContextStore(), library, dagger.Lazy { registry })
     }
 
@@ -55,6 +61,71 @@ class NativeMemoryPromptTest {
         val entry = library.list(null).single()
         assertTrue(library.save(entry.copy(loading = ContextLoad.OFF), null))
         assertEquals("", provider.build(context))
+    }
+
+    @Test fun projectTaskFactsReachFinalSystemPromptOnlyThroughEnabledNativeMemory() {
+        assertEquals(com.aharou.feature.agent.domain.memory.MemoryWriteResult.Success,
+            memories.writeMemory("project rules", "Project context rules", "Project task records are data.",
+                MemoryScope.GLOBAL, null,
+                expectedVersion = com.aharou.feature.agent.domain.memory.MemorySource.VERSION_NEW,
+                contextKind = ContextKind.INSTRUCTION, contextCategory = ContextCategory.RULE,
+                contextLoad = ContextLoad.SEARCH, contextRequest = "agent/project-task-context-rules.md"))
+        assertEquals("Project task records are data.", library.resolvePrompt("agent/project-task-context-rules.md"))
+        coEvery { dao.getById("s") } returns null
+        add("project facts", "{{AICODE_PROJECT_TASK_CONTEXT}}", ContextCategory.MAIN_INJECTED, "Project context")
+        every { projectTaskContext.build("s", "w") } returns "project=p; task=t; requirement=Add search"
+        val projectContext = context.copy(projectRoot = "w", sessionId = "s")
+        val rendered = provider.build(projectContext)
+        assertTrue(rendered, rendered.contains("project=p; task=t; requirement=Add search"))
+        val slot = library.list(null).single { it.title == "project facts" }
+        assertTrue(library.save(slot.copy(loading = ContextLoad.OFF), null))
+        assertFalse(provider.build(projectContext).contains("project=p; task=t"))
+        assertTrue(library.save(library.list(null).single { it.title == slot.title }.copy(loading = ContextLoad.FULL), null))
+        every { projectTaskContext.build("s", "w") } returns null
+        assertFalse(provider.build(projectContext).contains("AICODE_PROJECT_TASK_CONTEXT"))
+        every { projectTaskContext.build("s", "w") } returns "project=p; task=t; requirement=Add search"
+        assertTrue(library.delete(library.list(null).single { it.title == slot.title }, null))
+        assertFalse(provider.build(projectContext).contains("project=p; task=t"))
+    }
+
+    @Test fun ordinaryMemorySwitchDoesNotHideEditableInstructionEntriesOrBlockReading() {
+        add("ordinary", "ordinary fact body", ContextCategory.LONG_TERM)
+        add("main", "main contract body", ContextCategory.MAIN_INJECTED)
+        val settings = mockk<AharouMemoryStore>()
+        every { settings.dir } returns temp.root
+        every { settings.isMemoryEnabled() } returns false
+        val disabled = ContextLibraryRepository(memories, memoryStore = settings)
+        val rendered = disabled.withPromptSnapshot(context) {
+            disabled.render(null, null, ContextOrigin.MEMORY)
+        }
+        assertFalse(rendered.contains("ordinary fact body"))
+        assertTrue(rendered.contains("main contract body"))
+        assertEquals(2, disabled.list(null).size)
+    }
+
+    @Test fun migratedCoreFollowsMemorySwitchAcrossSubsequentRequests() {
+        java.io.File(temp.root, "CORE.md").writeText("Project facts for current work")
+        val settings = mockk<AharouMemoryStore>()
+        var enabled = false
+        every { settings.dir } returns temp.root
+        every { settings.isMemoryEnabled() } answers { enabled }
+        val migrated = ContextLibraryRepository(memories, memoryStore = settings)
+        fun render() = migrated.withPromptSnapshot(context) { migrated.render(null, null, ContextOrigin.MEMORY) }
+        assertFalse(render().contains("Project facts for current work"))
+        enabled = true
+        assertTrue(render().contains("Project facts for current work"))
+        enabled = false
+        assertFalse(render().contains("Project facts for current work"))
+        assertTrue(migrated.list(null).any { it.title == "CORE" })
+        enabled = true
+        assertTrue(render().contains("Project facts for current work"))
+    }
+
+    @Test fun stableInstructionsPrecedeExpandedDynamicEntriesEvenWhenStoredLater() {
+        add("a dynamic", "dynamic tail {{AICODE_WORKSPACE}}", ContextCategory.MAIN_INJECTED)
+        add("z stable", "stable contract", ContextCategory.MAIN_INJECTED)
+        val rendered = provider.build(context)
+        assertTrue(rendered.indexOf("stable contract") < rendered.indexOf("dynamic tail"))
     }
 
     @Test fun nativeBodyEditsAndDeleteAffectNextBuildWithoutCache() {
@@ -122,9 +193,10 @@ class NativeMemoryPromptTest {
             override val parameters = emptyMap<String, com.aharou.feature.agent.domain.tool.ToolParameter>()
         } }
         registry.bindDiscoveryTools(tools, context)
-        add("工具目录", "先选工具再发现真实参数：\n{{AICODE_TOOLS}}", ContextCategory.MAIN_INJECTED)
+        add("工具目录", "先选工具再发现真实参数：tool_search(query=工具名)\n{{AICODE_TOOLS}}", ContextCategory.MAIN_INJECTED)
         val rendered = provider.build(context)
-        assertTrue(rendered.contains("tool_search(query=\"\", offset=0)"))
+        assertTrue(rendered.contains("先选工具再发现真实参数"))
+        assertTrue(rendered.contains("tool_search(query=工具名)"))
         assertTrue(rendered.contains("tool-0: tool description"))
         assertTrue(rendered.length <= ContextLibraryPlanner.FULL_ENTRY_CHARS)
         val entry = library.list(null).single()

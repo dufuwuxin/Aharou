@@ -22,7 +22,10 @@ object ContextLibraryPlanner {
         var fullChars = 0
         var indexChars = 0
         val audience = if (injectionCategory == ContextCategory.ROLE_INJECTED) WorldbookAudience.ROLE else WorldbookAudience.MAIN
-        for (entry in entries.distinctBy { it.id }.sortedByDescending { it.worldbook.priority }) {
+        for (entry in entries.distinctBy { it.id }.sortedWith(
+            compareBy<ContextEntry> { it.dynamic || it.content.contains("{{AICODE_") || it.category == ContextCategory.TEMPORARY }
+                .thenByDescending { it.worldbook.priority }
+        )) {
             // Filter before charging budgets: another audience must not crowd out this one.
             if (entry.category.isInjection && entry.category != injectionCategory) {
                 omitted += entry to "different injection audience"

@@ -265,7 +265,8 @@ class AharouMemoryStore @Inject constructor(
     }
 
     /** 读核心档案（CORE.md）。 */
-    fun readCore(): String? = File(dir, "CORE.md").takeIf { it.exists() }?.readText()
+    fun readCore(): String? = File(dir, "CORE.md").takeIf { it.isFile }
+        ?.let { NativeProfileMemory.read(dir, "CORE") }
 
     /** 读全局记忆（GLOBAL.md）。 */
     fun readGlobal(): String? = File(dir, "GLOBAL.md").takeIf { it.exists() }?.readText()
@@ -363,12 +364,7 @@ class AharouMemoryStore @Inject constructor(
         synchronized(FILE_LOCK) {
             runCatching {
                 dir.mkdirs()
-                val target = File(dir, "CORE.md")
-                val existing = com.aharou.feature.agent.domain.memory.MemoryParser.parse(target, com.aharou.feature.agent.domain.memory.MemoryScope.GLOBAL)
-                val output = if (existing != null && target.readText().trimStart().startsWith("---")) {
-                    com.aharou.feature.agent.domain.memory.MemoryParser.format(existing.copy(content = text))
-                } else text
-                target.writeTextSafely(output, TAG)
+                NativeProfileMemory.write(dir, "CORE", text, isMemoryEnabled())
             }.onFailure { FileLogger.w(TAG, "writeCore failed: ${it.message}") }
         }
     }

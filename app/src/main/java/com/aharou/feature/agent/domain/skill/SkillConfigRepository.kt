@@ -42,21 +42,45 @@ class SkillConfigRepository @Inject constructor(
     private fun projectFile(): File = File(projectAicodeRoot.current(), CONFIG_FILE)
 
     /** 当前生效的禁用技能名集合（全局 + 项目并集，归一化为小写）。 */
-    fun disabledNames(): Set<String> {
-        val global = readGlobalDisabled()
-        val project = readDisabled(projectFile())
-        return (global + project).map { it.lowercase() }.toSet()
-    }
+    fun disabledNames(): Set<String> =
+        disabledNames(SkillScope.GLOBAL) + disabledNames(SkillScope.PROJECT)
+
+    fun disabledNames(scope: SkillScope): Set<String> =
+        (if (scope == SkillScope.GLOBAL) readGlobalDisabled() else readDisabled(projectFile()))
+            .map { it.lowercase() }.toSet()
 
     /** 在指定作用域的配置中启用/禁用某个技能。 */
+    @Synchronized
     fun setDisabled(name: String, disabled: Boolean, scope: SkillScope) {
-        val names = (if (scope == SkillScope.GLOBAL) readGlobalDisabled() else readDisabled(projectFile()))
-            .toMutableSet()
-        if (disabled) names.add(name) else names.remove(name)
+        val names = disabledNames(scope).toMutableSet()
+        if (disabled) names.add(name.lowercase()) else names.remove(name.lowercase())
         if (scope == SkillScope.GLOBAL) {
             fileAccess.writeFile(GLOBAL_CONFIG_PATH, serializeDisabled(names))
         } else {
-            writeDisabled(projectFile(), names)
+            val file = projectFile()
+            writeDisabled(file, names)
+            check(file.isFile && readDisabled(file) == names) { "Project skill settings write failed" }
+        }
+    }
+
+    /** The UI displays the effective union, so enabling clears both contributing records. */
+    @Synchronized
+    fun setEffectiveDisabled(name: String, disabled: Boolean, scope: SkillScope) {
+        if (disabled) {
+            setDisabled(name, true, scope)
+            return
+        }
+        val global = readGlobalDisabled()
+        val project = readDisabled(projectFile())
+        try {
+            setDisabled(name, false, SkillScope.GLOBAL)
+            setDisabled(name, false, SkillScope.PROJECT)
+        } catch (failure: Exception) {
+            try { fileAccess.writeFile(GLOBAL_CONFIG_PATH, serializeDisabled(global)) }
+            catch (restore: Exception) { failure.addSuppressed(restore) }
+            try { writeDisabled(projectFile(), project) }
+            catch (restore: Exception) { failure.addSuppressed(restore) }
+            throw failure
         }
     }
 

@@ -1,6 +1,8 @@
 package com.aharou.feature.agent.domain.mobileagent
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Assert.assertNull
 import org.junit.Test
 
@@ -11,6 +13,17 @@ import org.junit.Test
  * 夹边界会变成默默点偏，用户看到的是「AI 点错地方」，排查时却发现不了。
  */
 class MobileCoordinatesTest {
+
+    @Test
+    fun mobileUserMessageUsesOnlyTheLoadedMemoryTemplateAndCurrentData() {
+        val rendered = MobilePrompt.userText(
+            "goal={{GOAL}}; screen={{SCREEN}}; progress={{PROGRESS}}; nodes={{NODES}}",
+            "open {{SCREEN}}", "tap button", "1080×1920", "button @ 540,960")
+        assertTrue(rendered.contains("goal=open {{SCREEN}}; screen=1080×1920 像素; progress=tap button;"))
+        assertTrue(rendered.contains("屏幕节点数据（像素坐标）："))
+        assertTrue(rendered.contains("button @ 540,960"))
+        assertTrue(rendered.contains("open {{SCREEN}}"))
+    }
 
     @Test
     fun zero_maps_to_origin() {

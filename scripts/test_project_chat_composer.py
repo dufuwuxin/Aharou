@@ -1,4 +1,5 @@
 """Source-contract regression only; this does not exercise Compose clicks or IME."""
+import json
 import unittest
 from pathlib import Path
 
@@ -54,10 +55,18 @@ class ProjectChatComposerContract(unittest.TestCase):
 
     def test_status_questions_do_not_force_requirement_writes(self):
         screen = source("ProjectChatScreen.kt")
-        self.assertIn("Only new or changed requirements", screen)
-        self.assertIn("use read-only queries for them", screen)
-        self.assertIn("Saving is not evidence of execution or acceptance", screen)
-        self.assertIn("PLAN only saves", screen)
+        entries = json.loads((ROOT / "app/src/main/assets/context-library/builtin.json").read_text())["entries"]
+        rules = [entry for entry in entries if entry.get("requestKey") == "agent/project-task-context-rules.md"]
+        self.assertEqual(1, len(rules))
+        self.assertEqual("RULE", rules[0]["category"])
+        self.assertEqual("SEARCH", rules[0]["loading"])
+        for contract in ("只在明确新需求时用project_tasks plan", "修改已有任务时用supplement",
+                         "查询进度时用outline", "PLAN只保存计划", "不表示执行或验收"):
+            self.assertIn(contract, rules[0]["content"])
+        provider = (JAVA / "feature/agent/domain/prompt/SystemPromptProvider.kt").read_text()
+        self.assertIn('promptFileResolver.resolve("agent/project-task-context-rules.md")', provider)
+        self.assertNotIn("projectChatContext", screen)
+        self.assertNotIn("projectChatContext", source("AIChatPanel.kt"))
         self.assertNotIn("apply the appropriate action before reporting changes", screen)
 
     def test_collapsing_is_gesture_or_real_ime_dismissal(self):
@@ -135,7 +144,9 @@ class ProjectChatComposerContract(unittest.TestCase):
         toggle = workbench.split("val toggle:", 1)[1].split("val process:", 1)[0]
         self.assertIn("if (id == rootId) onSelectRequirementBranch(null)", toggle)
         self.assertIn("onSelectRequirementBranch(null); rootReader = true", workbench)
-        self.assertIn("Ask and answer questions normally without planning unless the user asks to add requirements", screen)
+        self.assertNotIn("[Selected requirement branch:", screen)
+        self.assertIn('"PROJECT_TASK_CONTEXT" -> projectTaskContext.build(ctx.sessionId, ctx.projectRoot)',
+                      (JAVA / "feature/agent/domain/prompt/SystemPromptProvider.kt").read_text())
 
     def test_branch_sessions_are_linked_only_to_the_same_branch(self):
         vm = (JAVA / "feature/agent/presentation/ProjectTaskViewModel.kt").read_text()

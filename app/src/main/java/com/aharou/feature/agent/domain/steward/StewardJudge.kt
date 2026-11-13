@@ -1,6 +1,11 @@
 package com.aharou.feature.agent.domain.steward
 
 import com.aharou.core.util.FileLogger
+import com.aharou.feature.agent.domain.context.ContextCategory
+import com.aharou.feature.agent.domain.context.ContextLibraryRepository
+import com.aharou.feature.agent.domain.session.SessionUseCase
+import com.aharou.feature.agent.domain.subagent.AgentDefinitionRepository
+import com.aharou.feature.agent.domain.subagent.InjectPart
 import com.aharou.feature.agent.domain.workflow.AgentWorkflow
 import dagger.Binds
 import dagger.Module
@@ -36,6 +41,9 @@ interface StewardJudgePort {
 @Singleton
 class StewardJudge @Inject constructor(
     private val agentWorkflow: AgentWorkflow,
+    private val contextLibrary: ContextLibraryRepository,
+    private val sessionUseCase: SessionUseCase,
+    private val agentDefinitionRepository: AgentDefinitionRepository,
 ) : StewardJudgePort {
 
     override suspend fun judge(
@@ -45,11 +53,24 @@ class StewardJudge @Inject constructor(
     ): StewardJudgement? {
         if (originalInstruction.isBlank()) return null
         return try {
-            val prompt = JUDGE_PROMPT
+            val session = if (sessionId == null) null else sessionUseCase.getSessionById(sessionId) ?: return null
+            val isMember = session?.parentId != null
+            val role = session?.takeIf { isMember }?.subagentType
+                ?.let { agentDefinitionRepository.findIncludingDisabled(it) }
+            val audience = if (isMember) ContextCategory.ROLE_INJECTED else ContextCategory.MAIN_INJECTED
+            val memoryAllowed = !isMember || role?.let { InjectPart.MEMORY in it.inject } == true
+            val systemPrompt = contextLibrary.resolvePromptForContext(SYSTEM_PROMPT_KEY,
+                session?.workspacePath, sessionId, originalInstruction, audience, role?.name,
+                role?.tags.orEmpty(), memoryAllowed).trim()
+            val inputTemplate = contextLibrary.resolvePromptForContext(INPUT_PROMPT_KEY,
+                session?.workspacePath, sessionId, originalInstruction, audience, role?.name,
+                role?.tags.orEmpty(), memoryAllowed).trim()
+            if (systemPrompt.isEmpty() || inputTemplate.isEmpty()) return null
+            val prompt = inputTemplate
                 .replace(PLACEHOLDER_INSTRUCTION, originalInstruction)
                 .replace(PLACEHOLDER_REPORT, lastReport.ifBlank { NO_REPORT_PLACEHOLDER })
             val raw = withTimeoutOrNull(JUDGE_TIMEOUT_MS) {
-                agentWorkflow.completeOnce(systemPrompt = SYSTEM_PROMPT, userText = prompt, sessionId = sessionId)
+                agentWorkflow.completeOnce(systemPrompt = systemPrompt, userText = prompt, sessionId = sessionId)
             }
             if (raw == null) {
                 FileLogger.w(TAG, "主管判定超时或无输出，跳过本轮续发")
@@ -95,26 +116,12 @@ class StewardJudge @Inject constructor(
         /** 判定是旁路调用，超时就当没判出来，绝不拖住会话主链路。 */
         const val JUDGE_TIMEOUT_MS = 60_000L
 
-        private const val SYSTEM_PROMPT = "You are a task supervisor. Follow the instruction and return only the requested JSON object."
+        private const val SYSTEM_PROMPT_KEY = "agent/steward-judge-system.md"
+        private const val INPUT_PROMPT_KEY = "agent/steward-judge-input.md"
         private const val NO_REPORT_PLACEHOLDER = "(the AI produced no text reply this turn)"
         private const val PLACEHOLDER_INSTRUCTION = "{instruction}"
         private const val PLACEHOLDER_REPORT = "{report}"
 
-        /** 判定提示词：照搬参考实现（RikkaHub Steward Mode）的原文，内联在此以免多一个资产文件。 */
-        const val JUDGE_PROMPT = """You are a task supervisor. The user gave an instruction and the AI has given an execution report. Determine whether the user's instruction has been fully completed.
-
-User original instruction:
-{instruction}
-
-AI last execution report:
-{report}
-
-Return only a JSON object, with no additional content:
-{
-  "completed": true or false,
-  "reason": "one-sentence justification",
-  "next_instruction": "the next instruction when not completed; leave as an empty string when completed"
-}"""
     }
 }
 

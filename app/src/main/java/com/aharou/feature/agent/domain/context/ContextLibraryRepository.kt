@@ -15,6 +15,7 @@ import javax.inject.Singleton
 class ContextLibraryRepository @Inject constructor(
     private val memories: MemoryRepository,
     private val builtins: BuiltinContextEntries? = null,
+    private val memoryStore: com.aharou.core.memory.AharouMemoryStore? = null,
 ) {
     private class Snapshot(
         val root: String?, val sessionId: String?, val memoryAllowed: Boolean,
@@ -30,7 +31,7 @@ class ContextLibraryRepository @Inject constructor(
     fun withPromptSnapshot(ctx: AgentContext, roleSession: Boolean = ctx.agentDefinition != null, block: () -> String): String {
         val previous = snapshot.get()
         snapshot.set(Snapshot(ctx.projectRoot.takeIf { it.isNotBlank() }, ctx.sessionId,
-            ctx.agentDefinition?.let { InjectPart.MEMORY in it.inject } ?: true,
+            (ctx.agentDefinition?.let { InjectPart.MEMORY in it.inject } ?: true) && memoryStore?.isMemoryEnabled() != false,
             if (roleSession) ContextCategory.ROLE_INJECTED else ContextCategory.MAIN_INJECTED,
             ctx.currentUserText, ctx.agentDefinition?.name, ctx.agentDefinition?.tags.orEmpty()))
         return try { block() } finally { if (previous == null) snapshot.remove() else snapshot.set(previous) }
@@ -46,11 +47,14 @@ class ContextLibraryRepository @Inject constructor(
     ).let { it.copy(graphId = ContextGraphIdentity.scoped(ContextGraphIdentity.raw(m), it)) }
 
     internal fun sources(projectRoot: String?): List<ContextEntry> = buildList {
+        memoryStore?.let { com.aharou.core.memory.NativeProfileMemory.migrate(it.dir, it.isMemoryEnabled()) }
         builtins?.ensureSeeded(memories)
         addAll(memories.listMemoriesInScope(MemoryScope.GLOBAL, projectRoot))
         if (!projectRoot.isNullOrBlank()) addAll(memories.listMemoriesInScope(MemoryScope.PROJECT, projectRoot))
     }.let(MemoryFileStorage::migrateContextLayout).filterNot { memory ->
-        !memory.hasContextMetadata && listOf("SOUL", "CORE", "GLOBAL").any { it.equals(memory.name, true) }
+        !memory.hasContextMetadata && listOf("SOUL", "CORE", "GLOBAL").any {
+            it.equals(memory.file?.nameWithoutExtension ?: memory.name, true)
+        }
     }.map { memoryEntry(it, projectRoot) }
 
     fun list(projectRoot: String?, sessionId: String? = null): List<ContextEntry> {
@@ -62,14 +66,23 @@ class ContextLibraryRepository @Inject constructor(
     /** Named requests are explicit retrieval, not a second prompt storage channel. OFF always wins. */
     fun resolvePrompt(name: String): String {
         val active = snapshot.get()
-        return list(active?.root, active?.sessionId).filter { entry ->
-            entry.requestKey == name && entry.enabled && !entry.pending && entry.loading != ContextLoad.OFF &&
-                entry.category == ContextCategory.RULE && active?.memoryAllowed != false &&
-                entry.worldbook.omission(active?.userText.orEmpty(),
-                    if (active?.injectionCategory == ContextCategory.ROLE_INJECTED) WorldbookAudience.ROLE else WorldbookAudience.MAIN,
-                    active?.roleName, active?.roleTags.orEmpty()) == null
-        }.joinToString("\n\n") { ContextLibraryPlanner.safe(it.content) }
+        return resolvePromptForContext(name, active?.root, active?.sessionId,
+            active?.userText.orEmpty(), active?.injectionCategory ?: ContextCategory.MAIN_INJECTED,
+            active?.roleName, active?.roleTags.orEmpty(), active?.memoryAllowed != false)
     }
+
+    fun resolvePromptForContext(name: String, projectRoot: String?, sessionId: String?, userText: String,
+                                audience: ContextCategory = ContextCategory.MAIN_INJECTED,
+                                roleName: String? = null, roleTags: List<String> = emptyList(),
+                                memoryAllowed: Boolean = true): String =
+        sources(projectRoot).filter { entry ->
+            memoryAllowed && entry.requestKey == name && entry.enabled && !entry.pending && entry.loading != ContextLoad.OFF &&
+                (entry.scope != MemoryScope.PROJECT || !projectRoot.isNullOrBlank()) &&
+                entry.category == ContextCategory.RULE &&
+                entry.worldbook.omission(userText,
+                    if (audience == ContextCategory.ROLE_INJECTED) WorldbookAudience.ROLE else WorldbookAudience.MAIN,
+                    roleName, roleTags) == null
+        }.joinToString("\n\n") { ContextLibraryPlanner.safe(it.content) }
 
     fun search(query: String, projectRoot: String?): List<ContextEntry> {
         if (query.isBlank()) return emptyList()
@@ -153,7 +166,7 @@ class ContextLibraryRepository @Inject constructor(
                      memberName: String? = null, query: String = ""): ContextPreview {
         val normalizedRoot = root?.takeIf(String::isNotBlank)
         val active = snapshot.get()?.takeIf { it.root == normalizedRoot && it.sessionId == sessionId }
-        val memoryAllowed = ordinaryMemoryEnabled && active?.memoryAllowed != false
+        val memoryAllowed = ordinaryMemoryEnabled && active?.memoryAllowed != false && memoryStore?.isMemoryEnabled() != false
         active?.plans?.get(memoryAllowed)?.let { return it }
         val audience = active?.injectionCategory ?: if (memberName == null) ContextCategory.MAIN_INJECTED else ContextCategory.ROLE_INJECTED
         return ContextLibraryPlanner.plan(list(normalizedRoot), sessionId,
@@ -168,12 +181,16 @@ class ContextLibraryRepository @Inject constructor(
         if (expand != null) {
             val active = snapshot.get()
             val audience = active?.injectionCategory ?: if (memberName == null) ContextCategory.MAIN_INJECTED else ContextCategory.ROLE_INJECTED
-            val entries = list(projectRoot).map { entry ->
+            val entries = list(projectRoot).mapNotNull { entry ->
                 if (entry.category.isInjection && entry.category != audience || !entry.enabled || entry.loading != ContextLoad.FULL) entry
-                else entry.copy(content = expand(entry.content))
+                else {
+                    val content = expand(entry.content)
+                    if (entry.content.contains("{{AICODE_") && content.isBlank()) null
+                    else entry.copy(content = content, dynamic = entry.content.contains("{{AICODE_"))
+                }
             }
             return ContextLibraryPlanner.plan(entries, sessionId, origin, audience,
-                ordinaryMemoryEnabled && active?.memoryAllowed != false,
+                ordinaryMemoryEnabled && active?.memoryAllowed != false && memoryStore?.isMemoryEnabled() != false,
                 active?.userText ?: query, active?.roleName ?: memberName, active?.roleTags.orEmpty()).rendered
         }
         return plan(projectRoot, sessionId, ordinaryMemoryEnabled, memberName, query).rendered

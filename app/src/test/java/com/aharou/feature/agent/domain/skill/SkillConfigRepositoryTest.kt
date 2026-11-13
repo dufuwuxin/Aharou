@@ -81,6 +81,42 @@ class SkillConfigRepositoryTest {
     }
 
     @Test
+    fun scopedReadMatchesScopedWritesAndEnablingIsCaseInsensitive() {
+        File(activeGlobalRoot, "skills.json").writeText("""{"disabled":["MixedCase"]}""")
+        File(projectRoot, "skills.json").writeText("""{"disabled":["ProjectOnly"]}""")
+        assertEquals(setOf("mixedcase"), repository.disabledNames(SkillScope.GLOBAL))
+        assertEquals(setOf("projectonly"), repository.disabledNames(SkillScope.PROJECT))
+        repository.setDisabled("MIXEDCASE", false, SkillScope.GLOBAL)
+        assertEquals(emptySet<String>(), repository.disabledNames(SkillScope.GLOBAL))
+        assertEquals(setOf("projectonly"), repository.disabledNames())
+    }
+
+    @Test
+    fun effectiveEnableClearsBothScopesButKeepsUnrelatedSkills() {
+        File(activeGlobalRoot, "skills.json").writeText("""{"disabled":["Shared","Other"]}""")
+        File(projectRoot, "skills.json").writeText("""{"disabled":["SHARED","Project"]}""")
+        repository.setEffectiveDisabled("shared", false, SkillScope.GLOBAL)
+        assertEquals(setOf("other", "project"), repository.disabledNames())
+        assertEquals(setOf("other"), repository.disabledNames(SkillScope.GLOBAL))
+        assertEquals(setOf("project"), repository.disabledNames(SkillScope.PROJECT))
+    }
+
+    @Test
+    fun failedProjectEnableReportsFailureAndRestoresGlobalRecord() {
+        File(activeGlobalRoot, "skills.json").writeText("""{"disabled":["Shared"]}""")
+        val blockedConfig = File(projectRoot, "skills.json")
+        assertTrue(blockedConfig.mkdir())
+        File(blockedConfig, "preserve-user-data").writeText("must not be removed")
+        try {
+            repository.setEffectiveDisabled("shared", false, SkillScope.GLOBAL)
+            org.junit.Assert.fail("project write failure must be reported")
+        } catch (expected: IllegalStateException) {
+            assertEquals(setOf("shared"), repository.disabledNames(SkillScope.GLOBAL))
+            assertTrue(File(blockedConfig, "preserve-user-data").isFile)
+        }
+    }
+
+    @Test
     fun setDisabled_project_keepsLocalProjectRoot_withoutBackendAccess() {
         repository.setDisabled("project", true, SkillScope.PROJECT)
         assertEquals(setOf("project"), SkillConfigRepository.readDisabled(File(projectRoot, "skills.json")))

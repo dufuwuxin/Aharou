@@ -35,10 +35,14 @@ class BuiltinContextEntries internal constructor(
     internal data class Default(
         val id: String, val title: String, val description: String, val content: String,
         val category: ContextCategory, val loading: ContextLoad, val folder: String,
-        val requestKey: String? = null,
+        val requestKey: String? = null, val worldbook: WorldbookRules = WorldbookRules(),
     )
 
-    internal fun defaults(): List<Default> {
+    private val parsedDefaults by lazy { parseDefaults() }
+
+    internal fun defaults(): List<Default> = parsedDefaults
+
+    private fun parseDefaults(): List<Default> {
         val root = Json.parseToJsonElement(loadAsset()).jsonObject
         require(root.getValue("version").jsonPrimitive.content == "1")
         val entries = root.getValue("entries").jsonArray.map { raw ->
@@ -46,7 +50,8 @@ class BuiltinContextEntries internal constructor(
             fun value(key: String) = entry.getValue(key).jsonPrimitive.content
             Default(value("id"), value("title"), value("description"), value("content"),
                 ContextCategory.valueOf(value("category")), ContextLoad.valueOf(value("loading")), value("folder"),
-                entry["requestKey"]?.jsonPrimitive?.content)
+                entry["requestKey"]?.jsonPrimitive?.content,
+                entry["worldbook"]?.jsonObject?.let { WorldbookRules.fromJson(it.toString()) } ?: WorldbookRules())
         }
         require(entries.map { it.id }.distinct().size == entries.size)
         require(entries.map { it.title }.distinct().size == entries.size)
@@ -61,7 +66,11 @@ class BuiltinContextEntries internal constructor(
         var legacyAdoption = false
         // Only new IDs may join a legacy library; old defaults remain user-owned even when absent.
         val legacyAdditionIds = setOf("main-tool-directory", "member-tool-directory",
-            "main-execution-contract", "member-execution-contract", "execution-source-map")
+            "main-execution-contract", "member-execution-contract", "execution-source-map",
+            "archive-execution-supplement", "crosscheck-system-request", "steward-judge-system-request",
+            "steward-judge-input-request", "mobile-operator-system-request",
+            "mobile-operator-format-retry-request", "mobile-operator-input-request",
+            "project-task-context-rules-request", "project-task-context-slot")
         val done = if (ledger.exists()) {
             val lines = try { ledger.readLines() } catch (e: Exception) {
                 FileLogger.w("BuiltinContextEntries", "读取默认收据失败", e)
@@ -94,7 +103,8 @@ class BuiltinContextEntries internal constructor(
             val result = memories.writeMemory(entry.title, entry.description, entry.content,
                 MemoryScope.GLOBAL, null, expectedVersion = MemorySource.VERSION_NEW,
                 contextKind = ContextKind.INSTRUCTION, contextLoad = entry.loading,
-                contextCategory = entry.category, contextFolder = entry.folder, contextRequest = entry.requestKey)
+                contextCategory = entry.category, contextFolder = entry.folder, contextRequest = entry.requestKey,
+                worldbook = entry.worldbook)
             // An existing user-owned name wins, even if its body or metadata differs from our default.
             check(result == MemoryWriteResult.Success || result is MemoryWriteResult.VersionConflict) {
                 "Native context default write failed: ${entry.id}: $result"

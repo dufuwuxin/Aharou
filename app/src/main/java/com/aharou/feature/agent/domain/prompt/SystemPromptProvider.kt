@@ -78,7 +78,6 @@ class SystemPromptProvider @Inject constructor(
                     ctx.agentDefinition?.let { InjectPart.SKILLS in it.inject } ?: true)
                     .joinToString("\n") { "- ${it.name}: ${it.description} [loadSkill: ${it.name}]" }
                 "TOOLS" -> buildString {
-                    append("完整目录：tool_search(query=\"\", offset=0)，只列名称与描述；选中后以工具名查询展开参数。\n")
                     for (tool in toolRegistry?.get()?.getDeferredTools(ctx).orEmpty()) {
                         val line = "- ${tool.name}: ${tool.description.lineSequence().joinToString(" ").take(60)}\n"
                         if (length + line.length > 600) break
@@ -92,6 +91,12 @@ class SystemPromptProvider @Inject constructor(
                     "- ${it.name}: ${it.description} [loadRule: ${it.name}]"
                 }
                 "PROJECT_RULES" -> projectRuleIndex(ctx.projectRoot)
+                "PROJECT_TASK_CONTEXT" -> projectTaskContext.build(ctx.sessionId, ctx.projectRoot)
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let { facts ->
+                        promptFileResolver.resolve("agent/project-task-context-rules.md")
+                            .takeIf { it.isNotBlank() }?.let { "$it\n\n$facts" }
+                    }.orEmpty()
                 "WORKSPACE" -> ctx.projectRoot
                 "WORKSPACE_NAME" -> ctx.workspaceName.orEmpty()
                 "WORKSPACE_TYPES" -> if (ctx.projectRoot.isBlank()) "" else WorkspaceTypeDetector.detect(File(ctx.projectRoot)).joinToString(", ")

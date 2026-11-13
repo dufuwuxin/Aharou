@@ -695,17 +695,11 @@ private fun AgentSaveError.messageRes(): Int = when (this) {
 }
 
 private fun InjectPart.labelRes(): Int = when (this) {
-    InjectPart.BASE -> R.string.subagent_inject_base
-    InjectPart.MAIN_RULES -> R.string.subagent_inject_main_rules
     InjectPart.SKILLS -> R.string.subagent_inject_skills
     InjectPart.MEMORY -> R.string.subagent_inject_memory
-    InjectPart.PROJECT_RULES -> R.string.subagent_inject_project_rules
 }
 
 private fun InjectPart.hintRes(): Int = when (this) {
-    InjectPart.BASE -> R.string.subagent_inject_base_hint
-    InjectPart.MAIN_RULES -> R.string.subagent_inject_main_rules_hint
     InjectPart.SKILLS -> R.string.subagent_inject_skills_hint
     InjectPart.MEMORY -> R.string.subagent_inject_memory_hint
-    InjectPart.PROJECT_RULES -> R.string.subagent_inject_project_rules_hint
 }

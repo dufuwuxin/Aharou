@@ -18,10 +18,11 @@ import com.aharou.feature.settings.presentation.SettingsViewModel
 import com.aharou.feature.workspace.presentation.WorkspaceViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ensureActive
-import kotlinx.serialization.json.JsonPrimitive
 
-internal data class ProjectChatBinding(val sessionId: String?, val context: String,
-    val body: @Composable (() -> Unit) -> Unit)
+internal data class ProjectChatBinding(
+    val sessionId: String?,
+    val body: @Composable (() -> Unit) -> Unit
+)
 
 /** Ordinary unbound chats retain their original list; membership never creates a project. */
 @Composable
@@ -64,21 +65,7 @@ internal fun rememberProjectChatBinding(agent: AIAgentViewModel, projects: Proje
     val ready = sessionId != null && currentSession == sessionId && messages.loaded &&
         messages.sessionId == sessionId && selectedSession?.id == sessionId && selectedSession?.parentId == null &&
         selectedWorkspace == workspace && state.workspace == workspace
-    val context = project?.let {
-        "\n\n[Project conversation: project_id=${JsonPrimitive(it.id)}, workspace=${JsonPrimitive(workspace)}. " +
-            "Use project_tasks action=outline to inspect task IDs. Only new or changed requirements call action=plan " +
-            "with requirement=user request to add tasks, or action=supplement with task_id and requirement to revise an existing branch. " +
-            "Questions, progress checks and reports of an already recorded issue do not change requirements; use read-only queries for them. " +
-            "Successful requirement writes request background continuation outside PLAN; PLAN only saves. " +
-            "Saving is not evidence of execution or acceptance. " +
-            "Continue the project workflow without creating a separate project.]"
-    }.orEmpty() + selectedBranch?.let {
-        "\n[Selected requirement branch: id=${JsonPrimitive(it.id)}, title=${JsonPrimitive(it.title)}. " +
-            "This session is the branch discussion; project_tasks plan deterministically creates tasks only under this branch. " +
-            "Ask and answer questions normally without planning unless the user asks to add requirements. " +
-            "Existing branch requirements: ${JsonPrimitive(it.requirement)}]"
-    }.orEmpty()
-    return ProjectChatBinding(sessionId.takeIf { ready }, context) { collapse ->
+    return ProjectChatBinding(sessionId.takeIf { ready }) { collapse ->
         if (project != null) ProjectTaskWorkbench(id, projects, onBack, onContentDrag = collapse,
             requirementBranchId = requirementBranchId, onSelectRequirementBranch = chooseBranch,
             branchSessionId = sessionId.takeIf { requirementBranchId != null },
@@ -103,7 +90,7 @@ fun ProjectChatScreen(projectId: String, agentViewModel: AIAgentViewModel, proje
     onNavigateToSandbox: () -> Unit, onNavigateToShared: () -> Unit, onNavigateToObserve: () -> Unit) {
     val binding = rememberProjectChatBinding(agentViewModel, projectViewModel, onBack, onToolDetail, projectId)!!
     AIChatPanel(viewModel = agentViewModel, settingsViewModel = settingsViewModel, workspaceViewModel = workspaceViewModel,
-        bodyOverride = binding.body, floatingComposer = true, composerSessionId = binding.sessionId, projectChatContext = binding.context,
+        bodyOverride = binding.body, floatingComposer = true, composerSessionId = binding.sessionId,
         onBackToSessions = onBack,
         onNavigateToTerminal = onNavigateToTerminal, onNavigateToGit = onNavigateToGit, onNavigateToBrowser = onNavigateToBrowser,
         onNavigateToSandbox = onNavigateToSandbox, onNavigateToShared = onNavigateToShared, onNavigateToObserve = onNavigateToObserve)

@@ -76,6 +76,99 @@ class SecurityAuditTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(result["metadata"]["sections"], 3)
 
+    def test_inventory_entropy_known_vectors(self):
+        for data, expected in ((b"", 0.0), (b"A" * 65537, 0.0),
+                               (b"AB" * 32769, 1.0), (bytes(range(256)) * 257, 8.0)):
+            with self.subTest(size=len(data)):
+                path = self.sample(data)
+                code, result = self.cli("inventory", path)
+                self.assertEqual(code, 0)
+                self.assertAlmostEqual(result["entropy_bits_per_byte"], expected, places=6)
+                self.assertEqual(result["sha256"], hashlib.sha256(data).hexdigest())
+                self.assertEqual(path.read_bytes(), data)
+
+    def test_pe_optional_header_baseline(self):
+        for magic, machine, image_base in ((0x10B, 0x14C, 0x400000),
+                                           (0x20B, 0x8664, 0x140000000)):
+            header = bytearray(120)
+            header[:2] = b"MZ"
+            struct.pack_into("<I", header, 60, 64)
+            header[64:68] = b"PE\0\0"
+            struct.pack_into("<HHI", header, 68, machine, 1, 123456789)
+            struct.pack_into("<H", header, 84, 32)
+            struct.pack_into("<H", header, 88, magic)
+            struct.pack_into("<I", header, 104, 0x1234)
+            struct.pack_into("<I" if magic == 0x10B else "<Q", header,
+                             116 if magic == 0x10B else 112, image_base)
+            code, result = self.cli("inventory", self.sample(header))
+            self.assertEqual(code, 0)
+            metadata = result["metadata"]
+            self.assertEqual(metadata["timestamp_raw"], 123456789)
+            self.assertEqual(metadata["entry_point_rva"], 0x1234)
+            self.assertEqual(metadata["image_base"], image_base)
+            self.assertEqual(metadata["bits"], 32 if magic == 0x10B else 64)
+            self.assertTrue(metadata["header_only"])
+
+    def test_pe_optional_header_bounds_and_unknown_magic(self):
+        for optional_size, magic, error in ((33, 0x10B, "invalid_pe_header"),
+                                            (2, 0x10B, "invalid_pe_header"),
+                                            (32, 0x999, "unsupported_pe_optional_header")):
+            header = bytearray(120)
+            header[:2] = b"MZ"
+            struct.pack_into("<I", header, 60, 64)
+            header[64:68] = b"PE\0\0"
+            struct.pack_into("<H", header, 84, optional_size)
+            struct.pack_into("<H", header, 88, magic)
+            code, result = self.cli("inventory", self.sample(header))
+            self.assertEqual(code, 2)
+            self.assertEqual(result["error"], error)
+
+    def test_apk_framework_hints_are_directory_only(self):
+        path = self.archive({"AndroidManifest.xml": b"opaque", "classes.dex": b"opaque",
+                             "lib/arm64-v8a/libflutter.so": b"not a library",
+                             "lib/arm64-v8a/libapp.so": b"not a library",
+                             "assets/apps/__UNI__TEST/www/app-service.js": b"not javascript",
+                             "assets/index.android.bundle": b"not javascript"})
+        with patch.object(zipfile.ZipFile, "open", side_effect=AssertionError("member read")), \
+                patch.object(subprocess, "Popen", side_effect=AssertionError("execution")), \
+                patch.object(socket, "socket", side_effect=AssertionError("network")):
+            code, result = self.cli("inventory", path)
+        self.assertEqual(code, 0)
+        self.assertEqual(result["metadata"]["framework_hints"], ["flutter", "react_native", "uniapp"])
+        self.assertEqual(result["metadata"]["framework_evidence"], "entry_names_only_unverified")
+        self.assertFalse(result["metadata"]["contents_read"])
+        self.assertNotIn("__UNI__TEST", json.dumps(result))
+
+    def test_framework_hints_do_not_infer_from_unrelated_or_directory_names(self):
+        for entries in ({"lib/arm64-v8a/libapp.so": b"x", "lib/x86/libflutter.so": b"x"},
+                        {"docs/libflutter.so": b"x", "docs/app-service.js": b"x"},
+                        {"assets/index.android.bundle/": b"", "assets/apps/__UNI__X/www/app-service.js/": b""}):
+            code, result = self.cli("inventory", self.archive(entries))
+            self.assertEqual(code, 0)
+            self.assertEqual(result["metadata"]["framework_hints"], [])
+
+    def test_framework_hints_ignore_unsafe_zip_path_aliases(self):
+        aliases = (
+            (("../lib/arm64-v8a/libflutter.so", "../lib/arm64-v8a/libapp.so"), 2),
+            (("/lib/arm64-v8a/libflutter.so", "/lib/arm64-v8a/libapp.so"), 2),
+            ((r"lib\arm64-v8a\libflutter.so", r"lib\arm64-v8a\libapp.so"), 0),
+            (("../../assets/apps/__UNI__X/www/app-service.js",), 1),
+        )
+        for names, unsafe_count in aliases:
+            with self.subTest(names=names):
+                entries = {name: b"name-only hint must not read member bytes" for name in names}
+                path = self.archive(entries)
+                with (
+                    patch.object(zipfile.ZipFile, "open", side_effect=AssertionError("member read")),
+                    patch.object(zipfile.ZipFile, "read", side_effect=AssertionError("member read")),
+                    patch.object(zipfile.ZipFile, "extract", side_effect=AssertionError("extraction")),
+                    patch.object(zipfile.ZipFile, "extractall", side_effect=AssertionError("extraction")),
+                ):
+                    code, result = self.cli("inventory", path)
+                self.assertEqual(code, 0)
+                self.assertEqual(result["metadata"]["framework_hints"], [])
+                self.assertEqual(result["metadata"]["unsafe_path_count"], unsafe_count)
+
     def test_dex_header(self):
         header = bytearray(112)
         header[:8] = b"dex\n039\0"

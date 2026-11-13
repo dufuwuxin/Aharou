@@ -122,7 +122,7 @@ class SkillRepository @Inject constructor(
     /** 在指定作用域启用/禁用某个技能。内置技能不可停用，直接忽略。 */
     fun setSkillDisabled(name: String, disabled: Boolean, scope: SkillScope) {
         if (scope == SkillScope.BUILTIN) return
-        skillConfigRepository.setDisabled(name, disabled, scope)
+        skillConfigRepository.setEffectiveDisabled(name, disabled, scope)
     }
 
     /**

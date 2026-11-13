@@ -8,12 +8,16 @@ import com.aharou.feature.agent.domain.model.AgentMessage
 import com.aharou.feature.agent.domain.privacy.maskIfNeeded
 import com.aharou.feature.agent.domain.privacy.outboundMaskerOrNull
 import com.aharou.feature.agent.domain.privacy.restoreIfNeeded
+import com.aharou.feature.agent.domain.context.ContextCategory
+import com.aharou.feature.agent.domain.context.ContextLibraryRepository
 import com.aharou.feature.agent.domain.provider.AIProvider
 import com.aharou.feature.agent.domain.provider.AnthropicAdapter
 import com.aharou.feature.agent.domain.provider.GeminiAdapter
 import com.aharou.feature.agent.domain.provider.OpenAIAdapter
 import com.aharou.feature.agent.domain.provider.fixedTemperature
 import com.aharou.feature.agent.domain.session.SessionUseCase
+import com.aharou.feature.agent.domain.subagent.AgentDefinitionRepository
+import com.aharou.feature.agent.domain.subagent.InjectPart
 import com.aharou.feature.settings.data.remote.ModelMetadataService
 import com.aharou.feature.settings.data.repository.DefaultModelSettingsRepository
 import com.aharou.feature.settings.data.repository.GeneralSettingsRepository
@@ -44,6 +48,8 @@ class CrossCheckCoordinator @Inject constructor(
     private val sessionUseCase: SessionUseCase,
     private val providerKeyRotator: ProviderKeyRotator,
     private val modelMetadataService: ModelMetadataService,
+    private val contextLibrary: ContextLibraryRepository,
+    private val agentDefinitionRepository: AgentDefinitionRepository,
     private val openAIApi: OpenAIApi,
     private val anthropicApi: AnthropicApi,
     private val geminiApi: GeminiApi
@@ -52,6 +58,21 @@ class CrossCheckCoordinator @Inject constructor(
     suspend fun review(sessionId: String?, content: String): CrossCheckOutcome {
         val body = content.trim()
         if (body.isEmpty()) return CrossCheckOutcome.Failed("empty message")
+        val session = if (sessionId == null) null else try {
+            sessionUseCase.getSessionById(sessionId)
+                ?: return CrossCheckOutcome.Failed("session unavailable")
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            return CrossCheckOutcome.Failed("session unavailable")
+        }
+        val isMember = session?.parentId != null
+        val role = session?.takeIf { isMember }?.subagentType?.let { agentDefinitionRepository.findIncludingDisabled(it) }
+        val audience = if (isMember) ContextCategory.ROLE_INJECTED else ContextCategory.MAIN_INJECTED
+        val systemPrompt = contextLibrary.resolvePromptForContext(SYSTEM_PROMPT_KEY,
+            session?.workspacePath, sessionId, body, audience, role?.name,
+            role?.tags.orEmpty(), !isMember || role?.let { InjectPart.MEMORY in it.inject } == true).trim()
+        if (systemPrompt.isEmpty()) return CrossCheckOutcome.Failed("cross-check memory prompt unavailable")
         val reviewer = pickReviewer(sessionId) ?: return CrossCheckOutcome.NoOtherModel
         val masker = outboundMaskerOrNull(generalSettingsRepository.privacyMaskingEnabled())
         val label = "${reviewer.config.name} / ${reviewer.model}"
@@ -59,7 +80,7 @@ class CrossCheckCoordinator @Inject constructor(
             val provider = buildProvider(reviewer.config, reviewer.model, sessionId)
             val answer = withTimeoutOrNull(REVIEW_TIMEOUT_MS) {
                 provider.complete(
-                    systemPrompt = SYSTEM_PROMPT,
+                    systemPrompt = systemPrompt.maskIfNeeded(masker),
                     messages = listOf(
                         AgentMessage.UserMessage(
                             content = body.take(MAX_CONTENT_CHARS).maskIfNeeded(masker)
@@ -148,15 +169,6 @@ class CrossCheckCoordinator @Inject constructor(
 
         // 单条消息可能很长，截断到与后台一次性调用同量级，避免把整段长文再发一遍。
         private const val MAX_CONTENT_CHARS = 12_000
-
-        private val SYSTEM_PROMPT = """
-            你是一位独立的审稿人。用户会给你一段由另一个 AI 模型（或用户本人）写出的正文，请你复核它。
-            要求：
-            1. 不要改写、不要润色、不要输出替代的全文。
-            2. 只指出三类问题：事实或逻辑上的错误、明显缺失的关键内容、表述不严谨或你无法确定的地方。
-            3. 按严重程度从高到低分点列出；每点先引用出问题的原句或片段，再说明原因。
-            4. 确实没有发现问题时就明确说没有发现明显问题，不要为了凑数编造问题。
-            5. 用与原文相同的语言回答。
-        """.trimIndent()
+        private const val SYSTEM_PROMPT_KEY = "agent/crosscheck-system.md"
     }
 }

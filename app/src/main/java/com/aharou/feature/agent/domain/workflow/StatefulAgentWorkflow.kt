@@ -1320,11 +1320,12 @@ class StatefulAgentWorkflow @Inject constructor(
         val provider = getEffectiveProvider(sessionId)
         val masker = outboundMaskerOrNull(generalSettingsRepository.privacyMaskingEnabled())
         provider.complete(
-            systemPrompt = systemPrompt,
+            systemPrompt = systemPrompt.maskIfNeeded(masker),
             messages = listOf(AgentMessage.UserMessage(content = userText.maskIfNeeded(masker))),
             tools = emptyList()
         ).content.restoreIfNeeded(masker).trim().ifBlank { null }
     }.onFailure { e ->
+        if (e is CancellationException) throw e
         FileLogger.w(TAG, "一次性调用失败", e)
     }.getOrNull()
 
