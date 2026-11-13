@@ -139,6 +139,53 @@ class RetryPolicyTest {
         }
     }
 
+    @Test(timeout = 5000)
+    fun network_loss_unblocks_body_after_first_content_even_without_idle_timeout() = kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) {
+        val network = com.aharou.core.net.NetworkStatus
+        network.update(true)
+        val released = java.util.concurrent.CountDownLatch(1)
+        val entered = java.util.concurrent.CountDownLatch(1)
+        val switcher = Thread {
+            entered.await()
+            network.update(false)
+        }.apply { isDaemon = true; start() }
+        try {
+            withFirstContentTimeout(0) { guard ->
+                guard.attach { released.countDown() }
+                guard.receivedContent()
+                entered.countDown()
+                assertTrue("Network loss must close the stalled body", released.await(2, java.util.concurrent.TimeUnit.SECONDS))
+            }
+            org.junit.Assert.fail("Network interruption must not become successful EOF")
+        } catch (e: IOException) {
+            assertTrue(e.message.orEmpty().contains("Network changed"))
+            assertEquals(0L, released.count)
+        } finally {
+            network.update(true)
+            switcher.join(1000)
+        }
+    }
+
+    @Test fun switchingBetweenOnlineNetworksDoesNotReplayAnAlreadyVisibleStream() = runTest {
+        var attempts = 0
+        try {
+            streamWithStaircaseRetry(maxRetries = 2, attemptOnce = { onContent ->
+                attempts++
+                withFirstContentTimeout(0) { guard ->
+                    val closed = kotlinx.coroutines.CompletableDeferred<Unit>()
+                    guard.attach { closed.complete(Unit) }
+                    onContent()
+                    guard.receivedContent()
+                    com.aharou.core.net.NetworkStatus.update(true, networkChanged = true)
+                    closed.await()
+                }
+            })
+            org.junit.Assert.fail("Expected interrupted response")
+        } catch (_: IOException) {
+            assertEquals(1, attempts)
+        }
+    }
+
     @Test
     fun zero_timeout_does_not_limit_wait() = runTest {
         withFirstContentTimeout(0) { delay(1000) }

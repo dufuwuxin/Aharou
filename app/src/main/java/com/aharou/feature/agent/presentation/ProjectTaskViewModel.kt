@@ -408,8 +408,15 @@ class ProjectTaskViewModel @Inject constructor(
     }
 
     fun startProject(projectId: String) {
-        if (mutable.value.loading || mutable.value.busy) return
-        startProjectIn(projectId, mutable.value.workspace)
+        val state = mutable.value
+        if (state.loading || state.busy) return
+        val project = state.projects.singleOrNull { it.id == projectId && it.workspace == state.workspace }
+        if (project != null && state.tasks.none { it.projectId == projectId && !it.isRequirementBranch }) {
+            val requirement = project.requirements.ifBlank { project.purpose }
+            if (requirement.isNotBlank()) addTaskByDescription(projectId, requirement)
+            return
+        }
+        startProjectIn(projectId, state.workspace)
     }
 
     private fun startProjectIn(projectId: String, workspace: String, continueAfterRun: Boolean = false) {

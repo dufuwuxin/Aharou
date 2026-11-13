@@ -334,13 +334,16 @@ class ProjectRequirementBranchTest {
                 val binding = rememberProjectChatBinding(agent, projects, {}, {}, "p")!!
                 CompositionLocalProvider(LocalViewModelStoreOwner provides panelOwner) {
                     com.aharou.feature.agent.presentation.component.AIChatPanel(viewModel = agent, bodyOverride = binding.body,
-                        floatingComposer = true, composerSessionId = binding.sessionId)
+                        floatingComposer = true, composerSessionId = binding.sessionId, projectConversation = binding.rootConversation)
                 }
             }
         }
         compose.waitForIdle()
+        compose.onNodeWithTag("project_main_conversation").assertDoesNotExist()
         compose.onNodeWithTag("project_context_status").assertExists().performClick()
         compose.onNodeWithTag("session_diagnostics").assertExists()
+        compose.onNodeWithTag("diagnostics_tab_PLANNING").performClick()
+        compose.onNodeWithTag("diagnostics_tab_CONTEXT").performClick()
         compose.onNodeWithText(compose.activity.getString(R.string.session_context_no_snapshot)).assertExists()
         compose.onNodeWithTag("diagnostics_tab_ACTIVITY").performClick()
         compose.onNodeWithText(compose.activity.getString(R.string.activity_sheet_empty)).assertExists()

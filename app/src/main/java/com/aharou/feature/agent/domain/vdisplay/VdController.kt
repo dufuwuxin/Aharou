@@ -10,6 +10,13 @@ import com.aharou.feature.agent.domain.shell.HostShellMode
 import com.aharou.feature.agent.domain.shell.ShellCommandResult
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -132,6 +139,7 @@ class VdController @Inject constructor(
         const val KEYCODE_PASTE = 279
     }
 
+    private val lifecycle = Mutex()
     private val suffix = instanceSuffix(context.packageName)
     val displayName = "aharou-vd$suffix"
     private val jarRemote = "/data/local/tmp/aharou-vd$suffix.jar"
@@ -215,7 +223,15 @@ class VdController @Inject constructor(
         width: Int = DEFAULT_WIDTH,
         height: Int = DEFAULT_HEIGHT,
         dpi: Int = DEFAULT_DPI,
-    ): VdInfo {
+    ): VdInfo = lifecycle.withLock {
+        try { startLocked(width, height, dpi) }
+        catch (failure: Throwable) {
+            withContext(NonCancellable) { runCatching { stopLocked() } }
+            throw failure
+        }
+    }
+
+    private suspend fun startLocked(width: Int, height: Int, dpi: Int): VdInfo {
         refresh()?.let { running ->
             if (ctlAvailable == null) probeChannel()
             if (ctlAvailable == true) {
@@ -223,7 +239,7 @@ class VdController @Inject constructor(
                 if (ping is CtlResult.Ok && "protocol=2" in ping.body) return running
             }
             FileLogger.i(TAG, "影子屏 runner 需要升级或非本实例启动，重建")
-            stop()
+            stopLocked()
         }
         ensureDeployed()
         // 自己起就把随机名定下来；之后截图按这个路径等 runner 出图。
@@ -272,7 +288,11 @@ class VdController @Inject constructor(
         runCatching {
             exec("wm size -d ${info.displayId} ${width}x$height", 15_000L)
             exec("wm density -d ${info.displayId} $dpi", 15_000L)
-        }.onFailure { FileLogger.i(TAG, "设置影子屏尺寸失败：${it.message}") }
+        }.onFailure {
+            if (it is CancellationException) throw it
+            FileLogger.i(TAG, "设置影子屏尺寸失败：${it.message}")
+        }
+        currentCoroutineContext().ensureActive()
         _state.value = info
         return info
     }
@@ -284,7 +304,9 @@ class VdController @Inject constructor(
      * 持着窗口管理的全局锁去截过渡画面；一旦 surfaceflinger 正好卡在拆屏，整机就冻住
      * （2026-10-30 真机看门狗记录）。任务都结束了，搬家那条路就不会走。
      */
-    suspend fun stop() {
+    suspend fun stop() = withContext(NonCancellable) { lifecycle.withLock { stopLocked() } }
+
+    private suspend fun stopLocked() {
         (_state.value ?: runCatching { refresh() }.getOrNull())?.displayId?.let { removeTasksOn(it) }
         exec("touch $stopFile && echo OK", 15_000L)
         // runner 拆屏后还要排空一会儿帧缓冲再退出，等它走完。

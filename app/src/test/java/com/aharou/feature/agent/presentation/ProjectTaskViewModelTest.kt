@@ -158,6 +158,22 @@ class ProjectTaskViewModelTest {
         org.junit.Assert.assertTrue(viewModel.canDeleteProject(project))
     }
 
+    @Test fun explicitStartPlansSavedPurposeAndRunsWithoutSendingAnotherMessage() = runTest(dispatcher) {
+        val project = ProjectPlan("p", "/first", "p", "", purpose = "Build the requested feature")
+        val stores = repository.snapshots as MutableStateFlow<Map<String, ProjectTaskSnapshot>>
+        stores.value = mapOf("/first" to ProjectTaskSnapshot(projects = listOf(project)))
+        coEvery { repository.addTaskByDescription("p", project.purpose, "/first", null) } coAnswers {
+            stores.value = mapOf("/first" to ProjectTaskSnapshot(projects = listOf(project), tasks = listOf(projectTask.copy(projectId = "p"))))
+            ProjectPlanOutcome(project, false)
+        }
+        coEvery { workflow.run("p", "/first") } returns Unit
+        viewModel.workspace("/first"); runCurrent()
+        viewModel.startProject("p"); viewModel.startProject("p"); runCurrent()
+        coVerify(exactly = 1) { repository.addTaskByDescription("p", project.purpose, "/first", null) }
+        coVerify(exactly = 1) { workflow.run("p", "/first") }
+        coVerify(exactly = 0) { repository.appendRequirements(any(), any(), any()) }
+    }
+
     @Test fun oneProjectStartIsIdempotentAndDoesNotFollowWorkspaceSwitch() = runTest(dispatcher) {
         val finish = kotlinx.coroutines.CompletableDeferred<Unit>()
         coEvery { workflow.run("p", "/first") } coAnswers { finish.await() }
@@ -362,12 +378,16 @@ class ProjectTaskViewModelTest {
 
     @Test fun runningOrPlanningLegacyProjectRejectsExplicitContinuation() = runTest(dispatcher) {
         val original = ProjectPlan("legacy", "/legacy", "legacy", "requirements")
-        every { repository.snapshots } returns MutableStateFlow(mapOf("/legacy" to ProjectTaskSnapshot(projects = listOf(original))))
+        val runningSnapshot = ProjectTaskSnapshot(projects = listOf(original),
+            tasks = listOf(projectTask.copy(projectId = "legacy", workspace = "/legacy")))
+        every { repository.snapshots } returns MutableStateFlow(mapOf("/legacy" to runningSnapshot))
+        coEvery { repository.load("/legacy") } returns runningSnapshot
         coEvery { workflow.run("legacy", "/legacy") } coAnswers { kotlinx.coroutines.awaitCancellation() }
         coEvery { repository.appendRequirements("legacy", any(), "/legacy") } coAnswers { kotlinx.coroutines.awaitCancellation() }
         viewModel = ProjectTaskViewModel(repository, sessions, runner, workflow, flows, javax.inject.Provider { workspaces })
         viewModel.workspace("/legacy"); runCurrent()
         viewModel.startProject("legacy"); runCurrent()
+        org.junit.Assert.assertTrue("legacy" in viewModel.state.value.activeProjectIds)
         viewModel.continueInOwnedWorkspace("legacy") { error("must not navigate") }; runCurrent()
         coVerify(exactly = 0) { repository.continueInOwnedWorkspace(any(), any(), any()) }
         viewModel.stopProject("legacy"); runCurrent()

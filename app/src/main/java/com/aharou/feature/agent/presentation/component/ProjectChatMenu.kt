@@ -10,6 +10,8 @@ import com.aharou.R
 import com.aharou.feature.agent.domain.container.ConnectionState
 import com.aharou.feature.agent.presentation.StewardPanelViewModel
 
+internal val LocalProjectDiagnostics = staticCompositionLocalOf<(() -> Unit)?> { null }
+
 internal val LocalProjectChatMenu = staticCompositionLocalOf<@Composable (() -> Unit) -> Unit> { {} }
 
 @Composable
@@ -19,6 +21,7 @@ internal fun ProjectChatMenuHost(
     onSandbox: () -> Unit, onShared: () -> Unit, onDiagnostics: () -> Unit,
     connectionState: ConnectionState?, inputTokens: Int, outputTokens: Int,
     contextStatus: @Composable () -> Unit = {},
+    unifiedDiagnostics: Boolean = false,
     content: @Composable () -> Unit
 ) {
     var stewardOpen by remember(sessionId) { mutableStateOf(false) }
@@ -45,7 +48,7 @@ internal fun ProjectChatMenuHost(
         }
         ScheduledTaskPill(sessionId = sessionId)
     }
-    CompositionLocalProvider(LocalProjectChatMenu provides menu) {
+    CompositionLocalProvider(LocalProjectChatMenu provides menu, LocalProjectDiagnostics provides onDiagnostics.takeIf { unifiedDiagnostics }) {
         androidx.compose.foundation.layout.Column { contextStatus(); content() }
     }
     key(sessionId) {

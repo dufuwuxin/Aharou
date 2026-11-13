@@ -50,7 +50,7 @@ class NetworkConnectivityObserver @Inject constructor(
                     val changed = network != lastNetwork
                     lastNetwork = network
                     _isOnline.value = true
-                    NetworkStatus.update(true)
+                    NetworkStatus.update(true, networkChanged = changed)
                     if (changed) {
                         FileLogger.i(TAG, "默认网络可用，触发重连")
                         _recovered.tryEmit(Unit)

@@ -344,7 +344,7 @@ private fun AccountLoginDialog(login: AccountLogin, manager: AccountProviderMana
         context.startActivity(android.content.Intent(context, AccountLoginActivity::class.java).apply {
             putExtra(AccountLoginActivity.URL, login.url)
             putExtra(AccountLoginActivity.CALLBACK_PREFIX, login.callbackPrefix)
-            putExtra(AccountLoginActivity.RECEIVER, receiver)
+            putExtra(AccountLoginActivity.RECEIVER, receiver.forAccountLoginIpc())
         })
         onDispose { disposed = true; remote?.send(0, android.os.Bundle.EMPTY) }
     }

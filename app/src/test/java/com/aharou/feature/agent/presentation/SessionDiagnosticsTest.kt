@@ -31,6 +31,30 @@ import org.robolectric.annotation.SQLiteMode
 class SessionDiagnosticsTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
 
+    @Test fun projectPlanningIsInsideDiagnosticsWithoutASecondReaderWindow() {
+        compose.setContent {
+            MaterialTheme {
+                SessionDiagnosticsSheet("main", null, ChatMessagesState("main", emptyList(), true),
+                    emptyList(), sessionContextMetrics(null, 0, 0), null, false, { false }, { false }, {},
+                    projectConversation = { androidx.compose.material3.Text("planning history fixture") })
+            }
+        }
+        compose.onNodeWithTag("diagnostics_tab_PLANNING").performClick()
+        compose.onNodeWithText("planning history fixture").assertExists()
+        compose.onNodeWithTag("diagnostics_tab_CONTEXT").performClick()
+        compose.onNodeWithText("planning history fixture").assertDoesNotExist()
+    }
+
+    @Test fun ordinaryChatHasNoProjectPlanningTab() {
+        compose.setContent {
+            MaterialTheme {
+                SessionDiagnosticsSheet("chat", null, ChatMessagesState("chat", emptyList(), true),
+                    emptyList(), sessionContextMetrics(null, 0, 0), null, true, { false }, { false }, {})
+            }
+        }
+        compose.onNodeWithTag("diagnostics_tab_PLANNING").assertDoesNotExist()
+    }
+
     @Test fun projectBindingMustMatchBeforeDiagnosticsReadAnySession() {
         assertNull(diagnosticSessionId("old", true, null))
         assertNull(diagnosticSessionId("old", true, "new"))

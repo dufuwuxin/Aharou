@@ -21,6 +21,7 @@ import kotlinx.coroutines.ensureActive
 
 internal data class ProjectChatBinding(
     val sessionId: String?,
+    val rootConversation: @Composable () -> Unit,
     val body: @Composable (() -> Unit) -> Unit
 )
 
@@ -65,15 +66,16 @@ internal fun rememberProjectChatBinding(agent: AIAgentViewModel, projects: Proje
     val ready = sessionId != null && currentSession == sessionId && messages.loaded &&
         messages.sessionId == sessionId && selectedSession?.id == sessionId && selectedSession?.parentId == null &&
         selectedWorkspace == workspace && state.workspace == workspace
-    return ProjectChatBinding(sessionId.takeIf { ready }) { collapse ->
+    val rootConversation: @Composable () -> Unit = {
+        val records = rootSessions.filter { it.id in project?.flowSessionIds.orEmpty() && it.parentId == null && it.workspacePath == workspace }
+            .sortedByDescending { it.updatedAt }.map { it.id }
+        key(id, workspace) { ProjectRootConversation(records, agent, onToolDetail) }
+    }
+    return ProjectChatBinding(sessionId.takeIf { ready }, rootConversation) { collapse ->
         if (project != null) ProjectTaskWorkbench(id, projects, onBack, onContentDrag = collapse,
             requirementBranchId = requirementBranchId, onSelectRequirementBranch = chooseBranch,
             branchSessionId = sessionId.takeIf { requirementBranchId != null },
-            rootConversation = {
-                val records = rootSessions.filter { it.id in project.flowSessionIds && it.parentId == null && it.workspacePath == workspace }
-                    .sortedByDescending { it.updatedAt }.map { it.id }
-                key(id, workspace) { ProjectRootConversation(records, agent, onToolDetail) }
-            }, conversation = { _, record -> key(record) { ProjectTaskConversation(record, agent, onToolDetail) } })
+            rootConversation = rootConversation, conversation = { _, record -> key(record) { ProjectTaskConversation(record, agent, onToolDetail) } })
         else Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             if (failed) Text(stringResource(R.string.project_chat_binding_failed), color = MaterialTheme.colorScheme.error)
             else CircularProgressIndicator()
@@ -90,7 +92,7 @@ fun ProjectChatScreen(projectId: String, agentViewModel: AIAgentViewModel, proje
     onNavigateToSandbox: () -> Unit, onNavigateToShared: () -> Unit, onNavigateToObserve: () -> Unit) {
     val binding = rememberProjectChatBinding(agentViewModel, projectViewModel, onBack, onToolDetail, projectId)!!
     AIChatPanel(viewModel = agentViewModel, settingsViewModel = settingsViewModel, workspaceViewModel = workspaceViewModel,
-        bodyOverride = binding.body, floatingComposer = true, composerSessionId = binding.sessionId,
+        bodyOverride = binding.body, floatingComposer = true, composerSessionId = binding.sessionId, projectConversation = binding.rootConversation,
         onBackToSessions = onBack,
         onNavigateToTerminal = onNavigateToTerminal, onNavigateToGit = onNavigateToGit, onNavigateToBrowser = onNavigateToBrowser,
         onNavigateToSandbox = onNavigateToSandbox, onNavigateToShared = onNavigateToShared, onNavigateToObserve = onNavigateToObserve)

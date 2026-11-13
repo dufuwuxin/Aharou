@@ -78,6 +78,7 @@ fun SessionListScreen(
     onDelete: (ChatSession) -> Unit,
     onNewSession: () -> Unit,
     showNewSession: Boolean = true,
+    activeSessionIds: Set<String> = emptySet(),
 ) {
     // 长按触发删除二次确认。
     var pendingDelete by remember { mutableStateOf<ChatSession?>(null) }
@@ -146,7 +147,7 @@ fun SessionListScreen(
                         ChatSessionRow(
                             session = session,
                             selected = session.id == currentSessionId,
-                            isExecuting = agentStates[session.id] is AgentUIState.Loading || agentStates[session.id] is AgentUIState.Streaming,
+                            isExecuting = session.id in activeSessionIds,
                             awaitingPermission = session.id in awaitingPermissionSessionIds,
                             pinned = session.isPinned,
                             onClick = { onSelect(session) },

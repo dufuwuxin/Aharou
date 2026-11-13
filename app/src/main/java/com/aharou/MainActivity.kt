@@ -527,7 +527,7 @@ fun AppNavigation(
     val sessionsByWorkspace by agentViewModel.sessionsByWorkspace.collectAsStateWithLifecycle()
     LaunchedEffect(sessionsByWorkspace.keys) { projectTaskViewModel.indexSessions(sessionsByWorkspace.keys.toList()) }
     val currentSessionId by agentViewModel.currentSessionId.collectAsStateWithLifecycle()
-    val agentStates by agentViewModel.agentStates.collectAsStateWithLifecycle()
+    val agentStates by agentViewModel.agentStates.collectAsStateWithLifecycle(); val activeAgentSessions by agentViewModel.activeAgentSessions.collectAsStateWithLifecycle()
     val awaitingPermissionSessionIds by agentViewModel.awaitingPermissionSessionIds.collectAsStateWithLifecycle()
     val context = androidx.compose.ui.platform.LocalContext.current
 
@@ -704,7 +704,7 @@ fun AppNavigation(
                                 onBack = { navController.popBackStack() }, onToolDetail = { msg ->
                                     com.aharou.feature.agent.presentation.component.ToolCallPreviewHolder.current = msg; navController.navigate("toolDetail") })
                             AIChatPanel(
-                                bodyOverride = projectChat?.body, floatingComposer = projectChat != null,
+                                bodyOverride = projectChat?.body, floatingComposer = projectChat != null, projectConversation = projectChat?.rootConversation,
                                 composerSessionId = projectChat?.sessionId,
                                 viewModel = agentViewModel,
                                 settingsViewModel = settingsViewModel,
@@ -759,7 +759,7 @@ fun AppNavigation(
                     }
                 } else SessionListScreen(
                     sessions = sessionsByWorkspace[currentWsPath].orEmpty().filterNot { it.id in projectTaskState.projectSessionIds },
-                    currentSessionId = currentSessionId, agentStates = agentStates,
+                    currentSessionId = currentSessionId, agentStates = agentStates, activeSessionIds = activeAgentSessions,
                     awaitingPermissionSessionIds = awaitingPermissionSessionIds,
                     workspaceName = currentWsPath.substringAfterLast('/'),
                     onSelect = { session -> agentViewModel.selectSession(session.id); navController.navigate("chat") { launchSingleTop = true } },

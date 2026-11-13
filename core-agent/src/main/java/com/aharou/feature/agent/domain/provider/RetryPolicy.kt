@@ -11,6 +11,7 @@ import kotlinx.coroutines.InternalCoroutinesApi
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import retrofit2.HttpException
@@ -94,6 +95,8 @@ suspend fun withFirstContentTimeout(
 ) {
     val guard = FirstContentGuard()
     val timedOut = java.util.concurrent.atomic.AtomicBoolean(false)
+    val networkGeneration = NetworkStatus.generation.value
+    val networkChanged = java.util.concurrent.atomic.AtomicBoolean(false)
     try {
         coroutineScope {
             val attemptJob = coroutineContext[Job]!!
@@ -111,9 +114,16 @@ suspend fun withFirstContentTimeout(
             }
             guard.timer = timer
             timer.start()
+            val networkWatch = launch(start = CoroutineStart.UNDISPATCHED) {
+                NetworkStatus.generation.first { it != networkGeneration }
+                networkChanged.set(true)
+                guard.closeBody()
+            }
             try {
                 block(guard)
+                if (networkChanged.get()) throw IOException("Network changed during response")
             } finally {
+                networkWatch.cancel()
                 timer.cancel()
                 handle.dispose()
             }
@@ -121,6 +131,7 @@ suspend fun withFirstContentTimeout(
     } catch (e: Throwable) {
         coroutineContext.ensureActive()
         if (timedOut.get()) throw SocketTimeoutException("First content timeout after ${timeoutMs}ms")
+        if (networkChanged.get()) throw IOException("Network changed during response", e)
         throw e
     }
 }

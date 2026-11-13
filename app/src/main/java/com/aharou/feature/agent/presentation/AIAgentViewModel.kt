@@ -2259,7 +2259,7 @@ class AIAgentViewModel @Inject constructor(
                 setRetryState(sessionId, null)
                 setKeySwitchState(sessionId, null)
                 val currentState = _agentStates.value[sessionId]
-                if (currentState !is AgentUIState.Error && currentState !is AgentUIState.Loading && currentState !is AgentUIState.Streaming) {
+                if (currentState !is AgentUIState.Error) {
                     setAgentState(sessionId, AgentUIState.Idle)
                 }
             }

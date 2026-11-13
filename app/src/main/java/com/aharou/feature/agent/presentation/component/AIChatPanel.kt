@@ -125,7 +125,7 @@ import kotlinx.coroutines.withContext
 @Composable
 fun AIChatPanel(
     viewModel: AIAgentViewModel,
-    bodyOverride: (@Composable (() -> Unit) -> Unit)? = null,
+    bodyOverride: (@Composable (() -> Unit) -> Unit)? = null, projectConversation: (@Composable () -> Unit)? = null,
     floatingComposer: Boolean = false,
     composerSessionId: String? = null,
     onNavigateToTerminal: () -> Unit = {},
@@ -1222,7 +1222,7 @@ fun AIChatPanel(
             Box(modifier = Modifier.weight(1f)) {
                 if (bodyOverride != null) {
                     Box(Modifier.fillMaxSize().padding(bottom = with(LocalDensity.current) { floatingLayerHeightPx.toDp() })) {
-                        ProjectChatMenuHost(sessionId = diagnosticsSessionId?.takeIf { sessionReady && currentSession?.parentId == null }, onTerminal = onNavigateToTerminal, onGit = onNavigateToGit, onBrowser = onNavigateToBrowser, onSandbox = onNavigateToSandbox, onShared = onNavigateToShared, onDiagnostics = { showSessionDiagnostics = true }, connectionState = connectionState?.takeIf { isRemote }, inputTokens = sessionInputTokens, outputTokens = sessionOutputTokens, contextStatus = {
+                        ProjectChatMenuHost(sessionId = diagnosticsSessionId?.takeIf { sessionReady && currentSession?.parentId == null }, onTerminal = onNavigateToTerminal, onGit = onNavigateToGit, onBrowser = onNavigateToBrowser, onSandbox = onNavigateToSandbox, onShared = onNavigateToShared, onDiagnostics = { showSessionDiagnostics = true }, unifiedDiagnostics = projectConversation != null, connectionState = connectionState?.takeIf { isRemote }, inputTokens = sessionInputTokens, outputTokens = sessionOutputTokens, contextStatus = {
                             SessionContextStatus(sessionContextMetrics(contextUsages[diagnosticsSessionId], if (diagnosticsSessionId == null) 0 else sessionLastInputTokens,
                                 activeModelMetadata?.takeIf { diagnosticsSessionId != null }?.let { com.aharou.feature.settings.domain.model.ModelContextPolicy.effectiveInputBudget(it) } ?: 0),
                                 onClick = { showSessionDiagnostics = true })
@@ -1793,7 +1793,7 @@ fun AIChatPanel(
                     SessionDiagnosticsSheet(diagnosticsSessionId, currentSession?.takeIf { it.id == diagnosticsSessionId }, messagesState, receipts,
                         sessionContextMetrics(contextUsages[diagnosticsSessionId], if (diagnosticsSessionId == null) 0 else sessionLastInputTokens,
                             activeModelMetadata?.takeIf { diagnosticsSessionId != null }?.let { com.aharou.feature.settings.domain.model.ModelContextPolicy.effectiveInputBudget(it) } ?: 0),
-                        injectedContextText, bodyOverride == null,
+                        injectedContextText, bodyOverride == null, projectConversation = projectConversation,
                     canLocate = { findChatMessageIndex(chatItems, it) >= 0 },
                     onJump = { id ->
                         val index = findChatMessageIndex(chatItems, id)

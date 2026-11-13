@@ -60,7 +60,7 @@ class AccountLoginActivity : Activity() {
                     closingFromOwner = true
                     finish()
                 }
-            })
+            }.forAccountLoginIpc())
         })
     }
 

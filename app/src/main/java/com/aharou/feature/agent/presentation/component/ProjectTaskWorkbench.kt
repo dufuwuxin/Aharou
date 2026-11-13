@@ -85,6 +85,7 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
             onReadFull = { session -> readerSession = session; readerId = task.id }, initialSession = if (task.id == requirementBranchId) branchSessionId else selectedRecords[task.id],
             onRecordSelected = { session -> selectedRecords = selectedRecords + (task.id to session) })
     }
+    val diagnostics = LocalProjectDiagnostics.current
     val sessionMenu = LocalProjectChatMenu.current
     val header: @Composable (@Composable (() -> Unit) -> Unit) -> Unit = { mapMenu ->
         Column(verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
@@ -113,7 +114,8 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
                         R.string.project_branch_plan_start else R.string.project_flow_start)) },
                         leadingIcon = { Icon(FeatherIcons.Play, null) },
                         enabled = !state.loading && !state.busy && !planning &&
-                            (selectedBranch != null && !branchHasChildren || executableTasks.any { !ProjectWorkflowPlan.delivered(it) }),
+                            (selectedBranch != null && !branchHasChildren || executableTasks.any { !ProjectWorkflowPlan.delivered(it) } ||
+                                executableTasks.isEmpty() && (!project?.requirements.isNullOrBlank() || !project?.purpose.isNullOrBlank())),
                         modifier = Modifier.testTag("project_flow_start"),
                         onClick = {
                             menuOpen = false
@@ -134,7 +136,7 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
                 }
             }
         }
-        TextButton(onClick = { onSelectRequirementBranch(null); rootReader = true }, modifier = Modifier.fillMaxWidth().testTag("project_main_conversation")) {
+        if (diagnostics == null) TextButton(onClick = { onSelectRequirementBranch(null); rootReader = true }, modifier = Modifier.fillMaxWidth().testTag("project_main_conversation")) {
             Text(stringResource(R.string.project_main_conversation))
         }
         tasks.firstOrNull { it.id == requirementBranchId && it.isRequirementBranch }?.let { selected ->
@@ -183,7 +185,7 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
                 onOpenProcess = { id -> expandedId = id; viewModel.select(id)
                     if (tasks.any { it.id == id && it.isRequirementBranch }) onSelectRequirementBranch(id) }, onDismissProcess = { expandedId = null },
                 onSupplement = {}, onAddChild = { task -> addingParentId = task?.id; adding = true }, onContentDrag = onContentDrag,
-                onOpenRoot = { toggle(rootId) }, rootConversation = rootConversation,
+                onOpenRoot = { if (diagnostics != null) { onSelectRequirementBranch(null); diagnostics() } else toggle(rootId) }, rootConversation = rootConversation,
                 modifier = Modifier.fillMaxSize().testTag("project_map_body"), header = header, process = process)
                 }
                 tasks.firstOrNull { it.id == requirementBranchId && it.isRequirementBranch }?.let { branch ->
@@ -207,7 +209,7 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
                 item(key = "project-root") {
                     Surface(shape = RoundedCornerShape(Radius.mdLarge), color = MaterialTheme.colorScheme.primaryContainer,
                         modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
-                            .clickable { toggle(rootId) }
+                            .clickable { if (diagnostics != null) { onSelectRequirementBranch(null); diagnostics() } else toggle(rootId) }
                             .testTag("task_node_root")) {
                         Column(Modifier.padding(Spacing.sm)) {
                             Text(stringResource(R.string.project_main_conversation), maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall)

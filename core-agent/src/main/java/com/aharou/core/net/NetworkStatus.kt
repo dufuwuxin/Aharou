@@ -11,7 +11,13 @@ object NetworkStatus {
     var isOnline: Boolean = true
         private set
 
-    fun update(online: Boolean) {
+    private val changes = kotlinx.coroutines.flow.MutableStateFlow(0L)
+    val generation: kotlinx.coroutines.flow.StateFlow<Long> = changes
+
+    @Synchronized
+    fun update(online: Boolean, networkChanged: Boolean = false) {
+        val changed = isOnline != online || networkChanged
         isOnline = online
+        if (changed) changes.value += 1
     }
 }

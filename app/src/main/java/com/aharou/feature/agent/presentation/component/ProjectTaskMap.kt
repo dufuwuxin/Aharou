@@ -21,6 +21,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
@@ -34,7 +36,7 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import com.aharou.R
@@ -59,6 +61,7 @@ import compose.icons.feathericons.RotateCcw
 import compose.icons.feathericons.ZoomIn
 import compose.icons.feathericons.ZoomOut
 import kotlin.math.abs
+import kotlin.math.roundToInt
 
 private const val DEFAULT_ZOOM = 0.9f
 private const val MAX_ZOOM = 2f
@@ -179,7 +182,6 @@ fun ProjectTaskMap(projectId: String, projectTitle: String, tasks: List<ProjectT
             measured.remove(id)
         } else { expanded = expanded + id; suppressed = suppressed - id }
     }
-    val zoomed = remember(outer, zoom) { Density(density * zoom, outer.fontScale) }
     val path = remember { Path() }
     Column(modifier.onSizeChanged { viewportWidth = it.width / density }) {
         header { dismiss ->
@@ -255,12 +257,15 @@ fun ProjectTaskMap(projectId: String, projectTitle: String, tasks: List<ProjectT
             LaunchedEffect(focusId) { bringIntoView(focusId) }
             val firstHit = layout.nodes.firstOrNull { it.id in hitIds }?.id
             LaunchedEffect(query, firstHit) { if (searching) bringIntoView(firstHit) }
-            val left = -panX / zoom
-            val top = -panY / zoom
-            val right = (viewW - panX) / zoom
-            val bottom = (viewH - panY) / zoom
-            val visible = layout.visible(left, top, right, bottom)
+            val visible by remember(layout, viewW, viewH) {
+                derivedStateOf { layout.visible(-panX / zoom, -panY / zoom,
+                    (viewW - panX) / zoom, (viewH - panY) / zoom) }
+            }
             Canvas(Modifier.fillMaxSize()) {
+                val left = -panX / zoom
+                val top = -panY / zoom
+                val right = (viewW - panX) / zoom
+                val bottom = (viewH - panY) / zoom
                 fun sx(x: Float) = (x * zoom + panX) * density
                 fun sy(y: Float) = (y * zoom + panY) * density
                 val thin = Stroke(EDGE_DP * density)
@@ -320,16 +325,18 @@ fun ProjectTaskMap(projectId: String, projectTitle: String, tasks: List<ProjectT
             visible.forEach { node -> key(node.id) {
                 val task = byId[node.id]
                 val unfolded = task != null && node.id in shown
-                Box(Modifier.offset((node.x * zoom + panX).dp, (node.y * zoom + panY).dp)
+                Box(Modifier.offset { IntOffset(((node.x * zoom + panX) * density).roundToInt(),
+                        ((node.y * zoom + panY) * density).roundToInt()) }
+                    .graphicsLayer { scaleX = zoom; scaleY = zoom; transformOrigin = TransformOrigin(0f, 0f) }
                     .wrapContentSize(Alignment.TopStart, unbounded = true)
-                    .width((node.width * zoom).dp)
+                    .width(node.width.dp)
                     .then(if (unfolded) Modifier.onSizeChanged { size ->
-                        val h = size.height / (density * zoom)
+                        val h = size.height / density
                         if (abs((measured[node.id] ?: 0f) - h) > 0.5f) measured[node.id] = h
-                    } else Modifier.height((ProjectTaskMapLayout.NODE_HEIGHT * zoom).dp))
+                    } else Modifier.height(ProjectTaskMapLayout.NODE_HEIGHT.dp))
                     .alpha(if (searching && task != null && node.id !in hitIds) DIM_ALPHA else 1f)
                     .testTag("map_node_" + node.id)) {
-                    CompositionLocalProvider(LocalDensity provides zoomed) {
+                    key(node.id) {
                         if (task == null) ProjectTaskMapRootHeader(projectTitle,
                             stringResource(R.string.project_flow_progress, tasks.count { !it.isRequirementBranch && ProjectWorkflowPlan.delivered(it) }, tasks.count { !it.isRequirementBranch }),
                             rootStyle, onClick = onOpenRoot)
@@ -348,6 +355,23 @@ fun ProjectTaskMap(projectId: String, projectTitle: String, tasks: List<ProjectT
                     }
                 }
             } }
+            fun stepZoom(factor: Float) {
+                val minimum = ProjectTaskMapLayout.minimumZoom(ProjectTaskMapLayout.fitZoom(viewW, viewH, layout.width, layout.height, MAX_ZOOM))
+                val next = ProjectTaskMapLayout.clampZoom(zoom * factor, minimum, MAX_ZOOM)
+                val ratio = next / zoom
+                panX = viewW / 2f - (viewW / 2f - panX) * ratio
+                panY = viewH / 2f - (viewH / 2f - panY) * ratio
+                zoom = next
+            }
+            Row(Modifier.align(Alignment.BottomEnd).padding(Spacing.sm)
+                .background(colors.surface, RoundedCornerShape(Radius.mdLarge))) {
+                IconButton(onClick = { stepZoom(1f / 1.25f) }, modifier = Modifier.testTag("map_zoom_out")) {
+                    Icon(FeatherIcons.ZoomOut, stringResource(R.string.project_map_zoom_out))
+                }
+                IconButton(onClick = { stepZoom(1.25f) }, modifier = Modifier.testTag("map_zoom_in")) {
+                    Icon(FeatherIcons.ZoomIn, stringResource(R.string.project_map_zoom_in))
+                }
+            }
         }
     }
     if (processId == ProjectTaskMapLayout.rootId(projectId)) AdaptiveModalBottomSheet(onDismissRequest = onDismissProcess,

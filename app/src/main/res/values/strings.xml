@@ -3804,6 +3804,8 @@
     <string name="project_process_no_reasoning">模型未返回思考摘要。</string>
     <string name="project_process_reply">完整回复与工具过程</string>
     <string name="project_process_live">正在执行 · 实时思考、回复与工具</string>
+    <string name="project_map_zoom_in">放大导图</string>
+    <string name="project_map_zoom_out">缩小导图</string>
     <string name="project_main_conversation">主会话 / 规划过程</string>
     <string name="project_main_record">主会话记录 %1$d</string>
     <string name="project_member_status_unconfirmed">成员记录尚无终态；是否执行以实时会话为准</string>

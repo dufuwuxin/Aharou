@@ -60,6 +60,7 @@ internal fun sessionContextMetrics(usage: AgentEvent.ContextUsage?, lastInputTok
 
 internal enum class SessionDiagnosticTab(@param:StringRes val title: Int) {
     CONTEXT(R.string.session_diagnostics_context),
+    PLANNING(R.string.project_main_conversation),
     CONVERSATION(R.string.conversation_map_title),
     ACTIVITY(R.string.activity_sheet_title),
     MEMBERS(R.string.session_diagnostics_members),
@@ -98,16 +99,18 @@ internal fun SessionDiagnosticsSheet(
     receipts: List<ToolCallReceiptEntity>, metrics: SessionContextMetrics, injectedText: String?,
     bodyVisible: Boolean, canLocate: (String) -> Boolean, onJump: (String) -> Boolean,
     onDismiss: () -> Unit,
+    projectConversation: (@Composable () -> Unit)? = null,
 ) {
-    var tab by remember(sessionId) { mutableStateOf(SessionDiagnosticTab.CONTEXT) }
+    val tabs = SessionDiagnosticTab.entries.filter { it != SessionDiagnosticTab.PLANNING || projectConversation != null }
+    var tab by remember(sessionId, projectConversation != null) { mutableStateOf(SessionDiagnosticTab.CONTEXT) }
     AdaptiveModalBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.fillMaxWidth().fillMaxHeight(0.88f).testTag("session_diagnostics")) {
             Row(Modifier.fillMaxWidth().padding(horizontal = Spacing.lg)) {
                 Text(stringResource(R.string.session_diagnostics_title), Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
                 TextButton(onClick = onDismiss) { Text(stringResource(R.string.conversation_map_close)) }
             }
-            ScrollableTabRow(selectedTabIndex = tab.ordinal, edgePadding = Spacing.sm) {
-                SessionDiagnosticTab.entries.forEach { candidate ->
+            ScrollableTabRow(selectedTabIndex = tabs.indexOf(tab).coerceAtLeast(0), edgePadding = Spacing.sm) {
+                tabs.forEach { candidate ->
                     Tab(selected = tab == candidate, onClick = { tab = candidate },
                         modifier = Modifier.testTag("diagnostics_tab_${candidate.name}"),
                         text = { Text(stringResource(candidate.title)) })
@@ -126,6 +129,7 @@ internal fun SessionDiagnosticsSheet(
                     if (injectedText == null) Text(stringResource(R.string.session_context_no_snapshot), Modifier.padding(Spacing.lg))
                     else InjectedContextSheet(injectedText, onDismiss, embedded = true)
                 }
+                SessionDiagnosticTab.PLANNING -> projectConversation?.invoke()
                 SessionDiagnosticTab.CONVERSATION -> ConversationMapSheet(sessionId, session, messagesState,
                     bodyVisible, canLocate, onJump, onDismiss, embedded = true)
                 SessionDiagnosticTab.ACTIVITY -> ActivityTimelineSheet(receipts.filter { it.sessionId == sessionId }, onDismiss, embedded = true)
