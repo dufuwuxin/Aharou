@@ -77,4 +77,14 @@ class AccountProviderProtocolTest {
         assertEquals("think", delta.get("reasoning_content").asString)
         assertTrue(delta.getAsJsonArray("tool_calls")[0].asJsonObject.has("function"))
     }
+    @Test fun regionalWireIdsRemainDistinctAndLegacyIdsStayDomestic() {
+        assertEquals(AccountProviderKind.TRAE, AccountProviderKind.fromWireId("trae"))
+        assertEquals(AccountProviderKind.WORKBUDDY, AccountProviderKind.fromWireId("workbuddy"))
+        val endpoints = AccountEndpoints()
+        assertEquals("https://www.workbuddy.ai", endpoints.workbuddy(AccountProviderKind.WORKBUDDY_GLOBAL))
+        assertEquals("https://trae-api-sg.mchost.guru", endpoints.trae(AccountProviderKind.TRAE_GLOBAL))
+        assertEquals("https://api.trae.ai", endpoints.traeAccount(AccountProviderKind.TRAE_GLOBAL))
+        assertEquals("https://ug-normal.trae.ai", endpoints.usage(AccountProviderKind.TRAE_GLOBAL))
+    }
+
 }

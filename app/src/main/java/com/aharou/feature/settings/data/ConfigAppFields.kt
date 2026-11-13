@@ -36,9 +36,11 @@ class ConfigAppFields @Inject constructor(
     private val generalSettings: GeneralSettingsRepository,
     private val toolSafetySettings: ToolSafetySettingsRepository,
     private val promptLanguageSettings: PromptLanguageSettings,
+    private val pluginFields: com.aharou.feature.plugin.data.ConfigPluginFields,
 ) {
 
     fun registerInto(registry: ConfigRegistry) {
+        pluginFields.registerInto(registry)
 
 
         registry.register(

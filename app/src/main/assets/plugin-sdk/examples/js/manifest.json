@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "id": "example.host.js",
+  "name": "JavaScript host plugin example",
+  "description": "Trusted in-process SDKv1 example; package without a compiler.",
+  "version": "1.0.0",
+  "publisher": "Aharou",
+  "hostRuntime": {
+    "runtime": "js",
+    "entry": "plugin.js",
+    "apiVersion": 1
+  }
+}

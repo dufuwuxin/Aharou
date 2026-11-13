@@ -15,7 +15,7 @@ class ModelCostCalculator @Inject constructor(
 ) {
     /**
      * 一组 token 用量的预估费用（USD）；模型无单价返回 null。
-     * 缓存读价缺失时按输入价 [CACHE_READ_DISCOUNT] 倍估算，缓存写价缺失时按输入价 [CACHE_WRITE_MARKUP] 倍估算。
+     * 已使用的计费项缺少单价时返回 null；显式零价与未知单价不同。
      */
     suspend fun costUsd(
         providerId: String,
@@ -27,20 +27,24 @@ class ModelCostCalculator @Inject constructor(
         cacheCreationTokens: Long = 0
     ): Double? {
         val meta = modelMetadataService.resolve(providerId, providerType, model)
-        val inputPrice = meta.inputCostUsdPerM ?: return null
-        val outputPrice = meta.outputCostUsdPerM ?: 0.0
-        val cachePrice = meta.cacheReadCostUsdPerM ?: inputPrice * CACHE_READ_DISCOUNT
-        val cacheWritePrice = meta.cacheWriteCostUsdPerM ?: inputPrice * CACHE_WRITE_MARKUP
-        val uncached = (inputTokens - cachedInputTokens - cacheCreationTokens).coerceAtLeast(0)
-        return (uncached * inputPrice + cachedInputTokens * cachePrice +
-            cacheCreationTokens * cacheWritePrice + outputTokens * outputPrice) / 1_000_000.0
+        return pricedTokenCost(inputTokens, cachedInputTokens, outputTokens, cacheCreationTokens,
+            meta.inputCostUsdPerM, meta.outputCostUsdPerM, meta.cacheReadCostUsdPerM, meta.cacheWriteCostUsdPerM)
     }
 
-    companion object {
-        /** 缓存读价缺失时按输入价的折扣估算。 */
-        const val CACHE_READ_DISCOUNT = 0.1
+}
 
-        /** 缓存写入单价缺失时相对输入价的倍率（Anthropic 官方为 1.25×）。 */
-        const val CACHE_WRITE_MARKUP = 1.25
+internal fun pricedTokenCost(
+    input: Long, cacheRead: Long, output: Long, cacheWrite: Long,
+    inputPrice: Double?, outputPrice: Double?, readPrice: Double?, writePrice: Double?,
+): Double? {
+    if (input < 0 || output < 0 || cacheRead < 0 || cacheWrite < 0 || cacheRead > input || cacheWrite > input - cacheRead) return null
+    val items = listOf(input - cacheRead - cacheWrite to inputPrice, output to outputPrice,
+        cacheRead to readPrice, cacheWrite to writePrice)
+    var cost = 0.0
+    for ((tokens, rate) in items) {
+        if (tokens == 0L) continue
+        if (rate == null || !rate.isFinite() || rate < 0) return null
+        cost += tokens * rate / 1_000_000.0
     }
+    return cost.takeIf { it.isFinite() }
 }

@@ -500,3 +500,15 @@ val checkProotAssets = tasks.register<Exec>("checkProotAssets") {
 
 // assets 合并前必须先生成文档，否则首次构建（或 clean 后）APK 里会没有 docs/。
 tasks.named("preBuild") { dependsOn(syncAiDocs, checkArchitecture, checkProotAssets) }
+
+// Keep the source-only SDK separate from plugin DEX payloads.
+val pluginSdkAssets = layout.buildDirectory.dir("generated/pluginSdkAssets")
+val syncPluginSdk = tasks.register<Sync>("syncPluginSdk") {
+    from("src/main/java/com/aharou/plugin/api") {
+        include("*.java")
+        into("plugin-sdk/src/com/aharou/plugin/api")
+    }
+    into(pluginSdkAssets)
+}
+android.sourceSets.getByName("main").assets.srcDir(pluginSdkAssets)
+tasks.named("preBuild") { dependsOn(syncPluginSdk) }

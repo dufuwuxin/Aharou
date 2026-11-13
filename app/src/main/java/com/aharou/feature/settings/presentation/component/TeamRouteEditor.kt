@@ -28,14 +28,17 @@ internal fun TeamRouteEditor(stages: List<AgentTeamStageForm>, routes: List<Team
     Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
         Text(stringResource(R.string.team_flow_routes), style = MaterialTheme.typography.titleMedium)
         Text(stringResource(R.string.team_flow_route_hint), style = MaterialTheme.typography.bodySmall)
+        if (nodes.size < 2) {
+            Text(stringResource(R.string.team_flow_nodes_required), style = MaterialTheme.typography.bodySmall)
+        }
         Box {
-            OutlinedButton(onClick = { fromMenu = true }, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.team_flow_from, label(from))) }
+            OutlinedButton(onClick = { fromMenu = true }, enabled = nodes.isNotEmpty(), modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.team_flow_from, label(from))) }
             DropdownMenu(fromMenu, { fromMenu = false }) { nodes.forEach { node ->
                 DropdownMenuItem(text = { Text(label(node)) }, onClick = { from = node; fromMenu = false })
             } }
         }
         Box {
-            OutlinedButton(onClick = { toMenu = true }, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.team_flow_to, label(to))) }
+            OutlinedButton(onClick = { toMenu = true }, enabled = nodes.isNotEmpty(), modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.team_flow_to, label(to))) }
             DropdownMenu(toMenu, { toMenu = false }) { nodes.forEach { node ->
                 DropdownMenuItem(text = { Text(label(node)) }, onClick = { to = node; toMenu = false })
             } }

@@ -16,6 +16,21 @@ class TeamFlowGraphTest {
         assertNotNull(TeamFlowGraph.validate(team(emptyList(), emptyList())))
         assertNotNull(TeamFlowGraph.validate(team(emptyList(), listOf("worker", "worker"))))
     }
+    @Test fun administratorMustStillBelongToTheRoster() {
+        assertEquals("ADMIN_NOT_MEMBER", TeamFlowGraph.validate(team(emptyList(), listOf("outsider"))))
+        assertNull(TeamFlowGraph.validate(team(emptyList())))
+    }
+    @Test fun stageEditsKeepNamedTaskIdsAndPreserveIndependentSelectors() {
+        val selector = AgentTeamTaskForm(department = "review", prompt = "independent", id = "selector")
+        val stage = AgentTeamStageForm(members = listOf("worker"), prompt = "first", tasks = listOf(selector)).withFlowTasks()
+        val edited = stage.copy(title = "renamed", prompt = "second").withFlowTasks()
+        assertEquals(stage.id, edited.id)
+        assertEquals(stage.tasks.map { it.id }, edited.tasks.map { it.id })
+        assertEquals("second", edited.tasks.first().prompt)
+        assertEquals(selector, edited.tasks.last())
+        val removed = edited.copy(members = emptyList()).withFlowTasks()
+        assertEquals(listOf(selector), removed.tasks)
+    }
     @Test fun joinsWaitForAllPredecessorsAndUnconnectedNodesAreNotAwakened() {
         val t = team(listOf(TeamRoute(node("a"), node("c")), TeamRoute(node("b"), node("c"))))
         assertEquals(setOf(node("a"), node("b")), TeamFlowGraph.ready(t, emptySet()).toSet())

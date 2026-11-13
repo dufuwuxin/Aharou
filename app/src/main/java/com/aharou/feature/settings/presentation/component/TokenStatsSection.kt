@@ -160,41 +160,7 @@ internal fun TokenStatsSection(
 
         // ── 概览卡片（无数据时保留占位，值显示 -）──
         item(key = "summary_cards") {
-            val summary = state.summary
-            val hasData = summary != null && summary.calls > 0
-            Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
-                ) {
-                    SummaryCard(
-                        label = stringResource(R.string.settings_token_stats_total),
-                        value = if (hasData) formatTokenCount(summary.inputTokens + summary.outputTokens) else "-",
-                        modifier = Modifier.weight(1f)
-                    )
-                    SummaryCard(
-                        label = stringResource(R.string.settings_token_stats_requests),
-                        value = if (hasData) summary.calls.toString() else "-",
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
-                ) {
-                    SummaryCard(
-                        label = stringResource(R.string.settings_token_stats_cost),
-                        value = formatCostUsd(state.totalCostUsd),
-                        modifier = Modifier.weight(1f)
-                    )
-                    SummaryCard(
-                        label = stringResource(R.string.settings_token_stats_cache_hit_rate),
-                        value = if (hasData) formatCacheHitRate(summary) else "-",
-                        sub = if (hasData) formatCache(context, summary.cachedInputTokens, summary.cacheCreationTokens) else null,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-            }
+            TokenUsageOverview(state)
         }
 
         // ── 趋势图（无数据或仅单点时整块不渲染，避免 Vico 空 series / 单点 xStep 异常）──

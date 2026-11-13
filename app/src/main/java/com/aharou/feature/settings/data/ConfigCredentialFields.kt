@@ -61,6 +61,17 @@ class ConfigCredentialFields @Inject constructor(
         registry.register(AutoInjectCollection())
         registry.register(LoginKeyCollection())
         registry.register(vaultNamesField())
+        registry.register(ClosureField(
+            path = "vault.privacy_redaction",
+            displayName = "额外隐私脱敏",
+            description = "对工具结果、日志与审计中的常见凭据、邮箱和大陆手机号额外脱敏；不修改原文件、登录认证或手写消息。默认关闭。",
+            valueSchema = ConfigSchema.Bool,
+            reader = { ConfigValue.Bool(vault.privacyRedaction.value) },
+            writer = { value ->
+                val enabled = (value as? ConfigValue.Bool)?.value ?: throw ConfigError.TypeMismatch("boolean")
+                if (!vault.setPrivacyRedaction(enabled)) throw ConfigError.PermissionDenied("隐私脱敏设置保存失败")
+            },
+        ))
     }
 
     private fun gitHubTokenField(): ConfigField = ClosureField(

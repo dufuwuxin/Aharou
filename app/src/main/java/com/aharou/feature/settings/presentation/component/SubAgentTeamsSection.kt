@@ -132,7 +132,7 @@ internal fun SubAgentTeamsSection(
                 }
             }
         }
-        TeamWorkflowsSection()
+        TeamWorkflowsSection(availableMembers = availableMembers)
     }
 
     detail?.let { entry ->

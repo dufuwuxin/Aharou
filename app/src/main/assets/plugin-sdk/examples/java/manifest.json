@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "id": "example.host.java",
+  "name": "Java host plugin example",
+  "description": "Trusted in-process SDKv1 example; requires offline javac and D8.",
+  "version": "1.0.0",
+  "publisher": "Aharou",
+  "hostRuntime": {
+    "runtime": "dex",
+    "entry": "example.ExamplePlugin",
+    "artifact": "classes.dex",
+    "apiVersion": 1
+  }
+}

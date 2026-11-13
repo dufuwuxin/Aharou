@@ -154,6 +154,29 @@ class PluginManagerRecoveryTest {
         verify { failingRecords.save(oldRecord) }
     }
 
+    @Test fun hostImportNeedsNoContainerAndFailedEnabledUpgradeRetainsOldFilesAndRecord() = runBlocking {
+        val runtime = mockk<com.aharou.feature.plugin.runtime.HostPluginRuntime>(relaxed = true)
+        val hostManager = PluginManager(engine, installer, records, processes, runtime)
+        val oldHost = manifest("1").copy(installSteps = emptyList(), uninstallSteps = emptyList(),
+            verifyCommand = "", hostRuntime = com.aharou.feature.plugin.domain.model.HostRuntimeSpec("js", "old.js"))
+        write("manifest.json", Json.encodeToString(oldHost))
+        records.save(oldRecord.copy(enabled = true))
+        val next = manifest("2").copy(installSteps = emptyList(), uninstallSteps = emptyList(),
+            verifyCommand = "", hostRuntime = com.aharou.feature.plugin.domain.model.HostRuntimeSpec("js", "new.js"))
+        val archive = temp.newFile("host.txplugin")
+        ZipOutputStream(archive.outputStream()).use { zip ->
+            zip.putNextEntry(ZipEntry("manifest.json")); zip.write(Json.encodeToString(next).toByteArray()); zip.closeEntry()
+            zip.putNextEntry(ZipEntry("payload/new.js")); zip.write("var plugin = {};".toByteArray()); zip.closeEntry()
+        }
+        coEvery { runtime.load(any(), any()) } throws IllegalStateException("fixture failed new generation")
+        hostManager.importPackage(archive).getOrThrow()
+        assertTrue(hostManager.install("fixture").isFailure)
+        assertEquals(oldHost, hostManager.readManifest("fixture"))
+        assertEquals(oldRecord.copy(enabled = true), records.get("fixture"))
+        assertEquals("persistent data", File(root, "data/user.txt").readText())
+        coVerify(exactly = 0) { engine.runCommandSyncWithExit(any(), any(), any()) }
+    }
+
     @Test fun timeoutInstallRestoresOldInstallation() = runBlocking {
         manager.importPackage(archive()).getOrThrow()
         coEvery { engine.runCommandSyncWithExit(any(), any(), any()) } returns CommandResult("timed out", null)

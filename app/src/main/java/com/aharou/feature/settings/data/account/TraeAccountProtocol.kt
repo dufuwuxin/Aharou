@@ -15,6 +15,24 @@ import java.io.EOFException
 import java.util.UUID
 
 internal object TraeAccountProtocol {
+    fun balance(payload: JsonObject): String? {
+        val data = payload.obj("data") ?: payload.obj("result") ?: payload.obj("Result") ?: payload
+        if (!data.has("user_entitlement_pack_list")) return null
+        val packs = data.array("user_entitlement_pack_list")
+        if (packs.isEmpty) return null
+        var total = java.math.BigDecimal.ZERO
+        var consumed = java.math.BigDecimal.ZERO
+        for (entry in packs) {
+            val pack = entry.objectOrNull() ?: return null
+            val quota = pack.obj("entitlement_base_info")?.obj("quota") ?: return null
+            val limit = number(quota.get("credits_limit"))?.toBigDecimal() ?: return null
+            val usage = number(pack.obj("usage")?.get("credits_amount"))?.toBigDecimal() ?: return null
+            total += limit
+            consumed += usage
+        }
+        return "${total.subtract(consumed).stripTrailingZeros().toPlainString()} / ${total.stripTrailingZeros().toPlainString()} credits"
+    }
+
     fun models(payload: JsonObject): List<AccountProviderModel> {
         val data = payload.obj("data") ?: payload
         val groups = data.array("function_configs").mapNotNull { it.objectOrNull() }.ifEmpty {

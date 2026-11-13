@@ -4,6 +4,8 @@ import android.content.Context
 import com.aharou.core.security.KeystoreCipher
 import com.aharou.core.util.FileLogger
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -39,6 +41,16 @@ class VaultRepository @Inject constructor(
     private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     private val lock = Any()
     private var cache: Map<String, String>? = null
+    private val _privacyRedaction = MutableStateFlow(prefs.getBoolean("privacy_redaction", false))
+    val privacyRedaction = _privacyRedaction.asStateFlow()
+
+    fun setPrivacyRedaction(enabled: Boolean): Boolean = synchronized(lock) {
+        if (!prefs.edit().putBoolean("privacy_redaction", enabled).commit()) return@synchronized false
+        _privacyRedaction.value = enabled
+        true
+    }
+
+    fun previewRedaction(text: String): String = PrivacyRedaction.redact(redact(text), personalData = true)
 
     /** 解密失败原因（null = 正常）。读盘只在首次进内存时发生一次，与 git 凭据仓库同口径。 */
     private var readFailure: String? = null
@@ -150,7 +162,8 @@ class VaultRepository @Inject constructor(
     fun redact(text: String): String {
         if (text.isEmpty()) return text
         val secrets = synchronized(lock) { load().map { (name, value) -> name to value } }
-        return redactText(text, secrets)
+        val masked = redactText(text, secrets)
+        return if (_privacyRedaction.value) PrivacyRedaction.redact(masked, personalData = true) else masked
     }
 
     /**

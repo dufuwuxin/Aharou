@@ -28,6 +28,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -49,7 +50,7 @@ import compose.icons.feathericons.Upload
 /**
  * 插件二级页：导入 `.txplugin` 包、查看已安装插件、启停常驻服务、卸载。
  *
- * 插件本体在容器里跑（不是往 App 里塞代码），所以这里只负责「装 / 起 / 停 / 卸」四件事与状态展示。
+ * 旧容器包保留原操作，显式宿主包另外提供编译、持久启用与原生界面入口。
  */
 @Composable
 internal fun PluginSettingsSection(
@@ -57,7 +58,12 @@ internal fun PluginSettingsSection(
     marketViewModel: ExtensionsViewModel = hiltViewModel(),
     operitViewModel: OperitMarketViewModel = hiltViewModel(),
 ) {
+    val pluginContext = LocalContext.current
     val plugins by viewModel.plugins.collectAsStateWithLifecycle()
+    val hostView by viewModel.hostView.collectAsStateWithLifecycle()
+    val hostPanelOpen by viewModel.hostPanelOpen.collectAsStateWithLifecycle()
+    val compileOutput by viewModel.compileOutput.collectAsStateWithLifecycle()
+    if (hostPanelOpen) HostPluginPanel(hostView, compileOutput, viewModel::closeHostPanel)
     val busyId by viewModel.busyId.collectAsStateWithLifecycle()
     val event by viewModel.event.collectAsStateWithLifecycle()
 
@@ -170,7 +176,10 @@ internal fun PluginSettingsSection(
                         anyBusy = anyBusy,
                         onLaunch = { runIfIdle { viewModel.launch(plugin.manifest.id) } },
                         onStop = { runIfIdle { viewModel.stop(plugin.manifest.id) } },
-                        onUninstall = { runIfIdle { pendingUninstall = plugin } }
+                        onUninstall = { runIfIdle { pendingUninstall = plugin } },
+                        onCompile = { runIfIdle { viewModel.compile(plugin.manifest.id) } },
+                        onOpen = { runIfIdle { viewModel.openHostView(plugin.manifest.id, pluginContext) } },
+                        onEnabledChange = { enabled -> runIfIdle { viewModel.setEnabled(plugin.manifest.id, enabled) } }
                     )
                 }
             }
@@ -206,6 +215,9 @@ private fun PluginCard(
     onLaunch: () -> Unit,
     onStop: () -> Unit,
     onUninstall: () -> Unit,
+    onCompile: () -> Unit,
+    onOpen: () -> Unit,
+    onEnabledChange: (Boolean) -> Unit,
 ) {
     val manifest = plugin.manifest
     SettingsGroup {
@@ -286,6 +298,12 @@ private fun PluginCard(
                 )
             }
 
+            if (manifest.hostRuntime != null) HostPluginActions(
+                enabled = plugin.enabled, busy = anyBusy,
+                canCompile = manifest.hostRuntime.compileCommand.isNotBlank(),
+                loaded = plugin.status == PluginStatus.RUNNING,
+                onEnabledChange = onEnabledChange, onCompile = onCompile, onOpen = onOpen,
+            )
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (busy) {
                     Text(
@@ -293,6 +311,8 @@ private fun PluginCard(
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.semanticColors.subtleText
                     )
+                } else if (manifest.hostRuntime != null) {
+                    Text(stringResource(R.string.plugin_host_title))
                 } else if (manifest.isService) {
                     if (plugin.status == PluginStatus.RUNNING) {
                         TextButton(onClick = onStop, enabled = !anyBusy) {

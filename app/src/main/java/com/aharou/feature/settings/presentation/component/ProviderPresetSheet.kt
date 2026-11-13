@@ -60,7 +60,7 @@ internal fun ProviderPresetSheet(
             name = accountProviderName(kind),
             type = "OPENAI",
             baseUrl = "https://accounts.aharou.invalid/${kind.wireId}/preset/v1",
-            badge = stringResource(R.string.provider_account_login_badge),
+            badge = stringResource(if (kind == com.aharou.feature.settings.data.account.AccountProviderKind.LOOMY) R.string.provider_account_import_session else R.string.provider_account_login_badge),
         )
     }
     val officialPresets = accountPresets + remember { ProviderPresetLibrary.loadOfficial(context) }

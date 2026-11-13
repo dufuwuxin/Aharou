@@ -1,6 +1,10 @@
 package com.aharou.feature.plugin.domain
 
 import android.os.Build
+import android.content.Context
+import android.view.View
+import com.aharou.feature.plugin.runtime.HostPluginRuntime
+import com.aharou.feature.plugin.runtime.HostPluginCompiler
 import com.aharou.core.util.FileLogger
 import com.aharou.core.util.ProcessIdentity
 import com.aharou.feature.agent.domain.container.ContainerInstaller
@@ -35,9 +39,8 @@ import kotlinx.serialization.json.Json
 /**
  * 插件管理器：把 `.txplugin` 包（zip：manifest.json + payload/）落到容器里安装、启动、停止与卸载。
  *
- * 定位与边界：插件本体（payload 下的脚本与运行时）在**容器**里跑，不进 App 进程——所以这不是「动态加载
- * 代码」，而是「声明式包 + 容器脚本 + 本地服务」，与 Aharou 既有架构一致。宿主只负责读清单、跑安装脚本、
- * 拉起服务、探测端口，以及在设置页里给一个入口。
+ * 未声明 hostRuntime 的包保留原容器行为；显式声明的可信 JS/DEX 由宿主运行时消费。
+ * 宿主插件与应用同 UID，不是安全沙箱；安装及编译均保留旧代直到新代验证成功。
  *
  * 容器内路径映射：宿主 `filesDir/aharou` 经 PRoot 绑定为容器内 `/root/.aharou`（读写），
  * 故插件落在 `filesDir/aharou/plugins/<id>`，容器里就是 `/root/.aharou/plugins/<id>`。
@@ -48,6 +51,8 @@ class PluginManager @Inject constructor(
     private val containerInstaller: ContainerInstaller,
     private val recordStore: PluginRecordStore,
     private val runtimeProcessStore: RuntimeProcessStore,
+    private val hostRuntime: HostPluginRuntime? = null,
+    private val hostCompiler: HostPluginCompiler? = null,
 ) {
     private val json = Json { ignoreUnknownKeys = true }
     private val mutations = Mutex()
@@ -127,73 +132,78 @@ class PluginManager @Inject constructor(
 
     /** 安装失败恢复本次文件前态；data 始终原位保留，不删除用户持久数据。 */
     suspend fun install(id: String): Result<Unit> = withContext(Dispatchers.IO) {
-        mutations.withLock {
-            pluginResult {
-                val root = hostDir(id)
-                val stage = pending[id]
-                val manifest = if (stage != null) {
-                    json.decodeFromString<PluginManifest>(File(stage, MANIFEST_FILE).readText(Charsets.UTF_8))
-                } else readManifest(id) ?: error("插件未导入：$id")
-                ensureContainer()
-                val previous = recordStore.get(id)
-                val backup = Files.createTempDirectory(pluginsRoot().toPath(), ".rollback-").toFile()
-                var changed = false
-                var recovered = true
-                try {
-                    // Snapshot installed binaries too: install scripts may overwrite more than payload/.
-                    copyManagedFiles(root, backup)
-                    currentCoroutineContext().ensureActive()
-                    changed = true
-                    check(root.isDirectory || root.mkdirs()) { "Cannot create plugin directory" }
-                    if (stage != null) {
-                        deleteTree(File(root, PAYLOAD_DIR))
-                        copyTree(File(stage, PAYLOAD_DIR), File(root, PAYLOAD_DIR))
-                        Files.copy(File(stage, MANIFEST_FILE).toPath(), File(root, MANIFEST_FILE).toPath(),
-                            StandardCopyOption.REPLACE_EXISTING)
-                    }
-                    val dir = containerDir(id)
-                    manifest.installSteps.forEachIndexed { index, step ->
-                        val r = engine.runCommandSyncWithExit(envPrefix(dir) + step, null, INSTALL_TIMEOUT_MS)
-                        errorIfFailed(r.exitCode, r.output, "安装步骤 ${index + 1}")
-                    }
-                    if (manifest.verifyCommand.isNotBlank()) {
-                        val r = engine.runCommandSyncWithExit(envPrefix(dir) + manifest.verifyCommand, null, INSTALL_TIMEOUT_MS)
-                        errorIfFailed(r.exitCode, r.output, "自检")
-                    }
-                    currentCoroutineContext().ensureActive()
-                    val record = PluginRecord(manifest.id, manifest.name, manifest.version, System.currentTimeMillis())
-                    recordStore.save(record)
-                    check(recordStore.get(id) == record) { "Plugin installation record was not saved" }
-                } catch (failure: Throwable) {
-                    if (changed) {
-                        try {
-                            managedFiles(root).filter { it.name != MANIFEST_FILE }.forEach { deleteTree(it) }
-                            if (!File(backup, MANIFEST_FILE).exists()) deleteTree(File(root, MANIFEST_FILE))
-                            copyManagedFiles(backup, root)
-                            if (previous == null) recordStore.remove(id) else recordStore.save(previous)
-                            check(recordStore.get(id) == previous) { "Plugin record recovery failed" }
-                        } catch (recoveryFailure: Throwable) {
-                            recovered = false
-                            failure.addSuppressed(IllegalStateException("Plugin recovery failed; backup: $backup", recoveryFailure))
-                        }
-                    }
-                    throw failure
-                } finally {
-                    if (recovered) cleanup(backup)
-                }
-                if (stage != null) {
-                    pending.remove(id, stage)
-                    cleanup(stage)
-                }
-                lastFailure.remove(id)
-                FileLogger.i(TAG, "安装插件完成 $id")
+        mutations.withLock { installUnlocked(id) }
+    }
+
+    private suspend fun installUnlocked(id: String): Result<Unit> = pluginResult {
+        val root = hostDir(id)
+        val stage = pending[id]
+        val manifest = if (stage != null) {
+            json.decodeFromString<PluginManifest>(File(stage, MANIFEST_FILE).readText(Charsets.UTF_8))
+        } else readManifest(id) ?: error("插件未导入：$id")
+        require(manifest.id == id) { "Staged manifest changed plugin identity" }
+        if (manifest.hostRuntime == null || manifest.installSteps.isNotEmpty() || manifest.verifyCommand.isNotBlank()) ensureContainer()
+        val previous = recordStore.get(id)
+        val backup = Files.createTempDirectory(pluginsRoot().toPath(), ".rollback-").toFile()
+        var changed = false
+        var recovered = true
+        try {
+            // Snapshot installed binaries too: install scripts may overwrite more than payload/.
+            copyManagedFiles(root, backup)
+            currentCoroutineContext().ensureActive()
+            changed = true
+            check(root.isDirectory || root.mkdirs()) { "Cannot create plugin directory" }
+            if (stage != null) {
+                deleteTree(File(root, PAYLOAD_DIR))
+                copyTree(File(stage, PAYLOAD_DIR), File(root, PAYLOAD_DIR))
+                Files.copy(File(stage, MANIFEST_FILE).toPath(), File(root, MANIFEST_FILE).toPath(),
+                    StandardCopyOption.REPLACE_EXISTING)
             }
+            val dir = containerDir(id)
+            manifest.installSteps.forEachIndexed { index, step ->
+                val r = engine.runCommandSyncWithExit(envPrefix(dir) + step, null, INSTALL_TIMEOUT_MS)
+                errorIfFailed(r.exitCode, r.output, "安装步骤 ${index + 1}")
+            }
+            if (manifest.verifyCommand.isNotBlank()) {
+                val r = engine.runCommandSyncWithExit(envPrefix(dir) + manifest.verifyCommand, null, INSTALL_TIMEOUT_MS)
+                errorIfFailed(r.exitCode, r.output, "自检")
+            }
+            currentCoroutineContext().ensureActive()
+            if (manifest.hostRuntime != null) requireNotNull(hostRuntime).validate(manifest, root)
+            val record = PluginRecord(manifest.id, manifest.name, manifest.version, System.currentTimeMillis(),
+                enabled = manifest.hostRuntime != null && previous?.enabled == true)
+            recordStore.save(record)
+            check(recordStore.get(id) == record) { "Plugin installation record was not saved" }
+            if (record.enabled) requireNotNull(hostRuntime).load(manifest, root)
+            else if (hostRuntime?.isLoaded(id) == true) hostRuntime.unload(id)
+        } catch (failure: Throwable) {
+            if (changed) {
+                try {
+                    managedFiles(root).filter { it.name != MANIFEST_FILE }.forEach { deleteTree(it) }
+                    if (!File(backup, MANIFEST_FILE).exists()) deleteTree(File(root, MANIFEST_FILE))
+                    copyManagedFiles(backup, root)
+                    if (previous == null) recordStore.remove(id) else recordStore.save(previous)
+                    check(recordStore.get(id) == previous) { "Plugin record recovery failed" }
+                } catch (recoveryFailure: Throwable) {
+                    recovered = false
+                    failure.addSuppressed(IllegalStateException("Plugin recovery failed; backup: $backup", recoveryFailure))
+                }
+            }
+            throw failure
+        } finally {
+            if (recovered) cleanup(backup)
         }
+        if (stage != null) {
+            pending.remove(id, stage)
+            cleanup(stage)
+        }
+        lastFailure.remove(id)
+        FileLogger.i(TAG, "安装插件完成 $id")
     }
 
     /** 启动常驻服务：解析 launchCommand → 起进程 → 轮询端口就绪。非服务型插件不启动。 */
     suspend fun launch(id: String): Result<Unit> {
-        val result = runCatchingLaunch(id)
+        val result = withContext(Dispatchers.IO) { mutations.withLock { runCatchingLaunch(id) } }
         // 失败原因留给 listInstalled 换算成 FAILED 状态与卡片副标题
         result.onSuccess { lastFailure.remove(id) }
             .onFailure { lastFailure[id] = it.message ?: it::class.java.simpleName }
@@ -202,6 +212,12 @@ class PluginManager @Inject constructor(
 
     private suspend fun runCatchingLaunch(id: String): Result<Unit> = pluginResult {
         val manifest = readManifest(id) ?: error("插件未导入：$id")
+        if (manifest.hostRuntime != null) {
+            requireNotNull(hostRuntime).load(manifest, hostDir(id))
+            try { recordStore.setEnabled(id, true) }
+            catch (failure: Throwable) { hostRuntime.unload(id); throw failure }
+            return@pluginResult
+        }
         require(manifest.isService) { "插件 ${manifest.name} 不是常驻服务，无需启动" }
         ensureContainer()
 
@@ -251,8 +267,20 @@ class PluginManager @Inject constructor(
      *
      * 最后等服务端口释放，未释放则报错，避免 UI 仍显示「运行中」。
      */
-    suspend fun stop(id: String): Result<Unit> = pluginResult {
+    suspend fun stop(id: String): Result<Unit> = withContext(Dispatchers.IO) {
+        mutations.withLock { stopUnlocked(id) }
+    }
+
+    private suspend fun stopUnlocked(id: String): Result<Unit> = pluginResult {
         val manifest = readManifest(id)
+        if (manifest?.hostRuntime != null) {
+            val previous = recordStore.get(id)
+            recordStore.setEnabled(id, false)
+            try { requireNotNull(hostRuntime).unload(id) }
+            catch (failure: Throwable) { if (previous != null) recordStore.save(previous); throw failure }
+            lastFailure.remove(id)
+            return@pluginResult
+        }
         val dir = containerDir(id)
 
         // 1. 本会话句柄
@@ -288,7 +316,7 @@ class PluginManager @Inject constructor(
     suspend fun uninstall(id: String): Result<Unit> = withContext(Dispatchers.IO) {
         mutations.withLock {
             pluginResult {
-                stop(id).getOrThrow()
+                stopUnlocked(id).getOrThrow()
                 val manifest = readManifest(id)
                 val dir = containerDir(id)
                 manifest?.uninstallSteps?.forEachIndexed { index, step ->
@@ -314,8 +342,11 @@ class PluginManager @Inject constructor(
                 return@mapNotNull null
             }
             // 失败原因只在本进程内有意义：重启后无从判断上次为什么没起来，回落成「已停止」
-            val failure = if (manifest.isService) lastFailure[record.id] else null
+            val failure = lastFailure[record.id]
             val status = when {
+                manifest.hostRuntime != null && hostRuntime?.isLoaded(record.id) == true -> PluginStatus.RUNNING
+                manifest.hostRuntime != null && failure != null -> PluginStatus.FAILED
+                manifest.hostRuntime != null -> PluginStatus.STOPPED
                 !manifest.isService -> PluginStatus.STOPPED
                 isPortReady(manifest) -> PluginStatus.RUNNING
                 failure != null -> PluginStatus.FAILED
@@ -327,10 +358,40 @@ class PluginManager @Inject constructor(
                 installedAt = record.installedAt,
                 status = status,
                 // 只有失败态有可说的原因，其余态留空避免把内部信息洒到卡片上
-                detail = if (status == PluginStatus.FAILED) failure.orEmpty() else "",
+                detail = failure.orEmpty().ifBlank { hostRuntime?.diagnostic(record.id).orEmpty() },
+                enabled = record.enabled,
             )
         }.sortedBy { it.manifest.name.lowercase() }
     }
+
+    suspend fun compile(id: String): Result<Unit> = withContext(Dispatchers.IO) {
+        mutations.withLock {
+            pluginResult {
+                val manifest = readManifest(id) ?: error("Plugin is not installed")
+                val stage = requireNotNull(hostCompiler).compile(hostDir(id), manifest)
+                pending.put(id, stage)?.let { cleanup(it) }
+                try { installUnlocked(id).getOrThrow() }
+                finally { pending.remove(id, stage); cleanup(stage) }
+            }
+        }
+    }
+
+    suspend fun setEnabled(id: String, enabled: Boolean): Result<Unit> = if (enabled) launch(id) else stop(id)
+
+    suspend fun restoreEnabled() {
+        recordStore.all().values.filter { it.enabled }.forEach { record ->
+            if (readManifest(record.id)?.hostRuntime != null) launch(record.id)
+        }
+    }
+
+    private val emptyHostGenerations = kotlinx.coroutines.flow.MutableStateFlow<Map<String, Long>>(emptyMap())
+    val hostGenerations: kotlinx.coroutines.flow.StateFlow<Map<String, Long>>
+        get() = hostRuntime?.generations ?: emptyHostGenerations
+
+    suspend fun createHostView(id: String, context: Context): View? = requireNotNull(hostRuntime).createView(id, context)
+
+    fun compileOutput(id: String): String = File(hostDir(id), "data/compile-output.txt")
+        .takeIf { it.isFile }?.readText(Charsets.UTF_8).orEmpty()
 
     // ── 内部 ──
 

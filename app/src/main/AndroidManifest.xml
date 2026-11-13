@@ -83,6 +83,13 @@
              分享内容进到新实例、用户在原界面看不到（表现为「分享没反应，退出重点一下才行」）。
              singleTask 保证全局单一实例与单一任务，外部 intent 统一走 onNewIntent。 -->
         <activity
+            android:name=".feature.settings.presentation.component.AccountLoginActivity"
+            android:exported="false"
+            android:process=":account_login"
+            android:excludeFromRecents="true"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:theme="@android:style/Theme.Material.Light.NoActionBar" />
+        <activity
             android:name=".MainActivity"
             android:exported="true"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden"

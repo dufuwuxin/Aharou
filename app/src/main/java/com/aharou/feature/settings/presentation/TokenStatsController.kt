@@ -106,8 +106,9 @@ class TokenStatsController @Inject constructor(
                     // 明细分页：页号或总数变化时重查当前页，其余聚合不重复计算
                     combine(_callsPage, llmCallRecordDao.getCallsCount(start, filterProviderId, filterModel)) { page, total -> page to total }
                         .flatMapLatest { (page, total) ->
-                            llmCallRecordDao.getRecentCalls(start, CALLS_PAGE_SIZE, page * CALLS_PAGE_SIZE, filterProviderId, filterModel)
-                                .map { calls -> Triple(calls, total, page) }
+                            val safePage = page.coerceIn(0, if (total == 0) 0 else (total - 1) / CALLS_PAGE_SIZE)
+                            llmCallRecordDao.getRecentCalls(start, CALLS_PAGE_SIZE, safePage * CALLS_PAGE_SIZE, filterProviderId, filterModel)
+                                .map { calls -> Triple(calls, total, safePage) }
                         },
                     // 可选筛选选项列表（全局不限过滤条件时的渠道与模型列表）
                     combine(
@@ -137,7 +138,7 @@ class TokenStatsController @Inject constructor(
                                 it.record.cacheCreationTokens.toLong()
                             )
                         }
-                        val periodTotal = costStats.sumOf { s ->
+                        val groupCosts = costStats.map { s ->
                             callCostUsd(
                                 s.providerId,
                                 s.model,
@@ -145,9 +146,9 @@ class TokenStatsController @Inject constructor(
                                 s.cachedInputTokens,
                                 s.outputTokens,
                                 s.cacheCreationTokens
-                            ) ?: 0.0
+                            )
                         }
-                        perCall to periodTotal
+                        Triple(perCall, groupCosts.filterNotNull().sum(), groupCosts.count { it == null })
                     }
                     TokenStatsUiState(
                         period = period,
@@ -164,6 +165,7 @@ class TokenStatsController @Inject constructor(
                         modelsTotal = modelPaging.total,
                         totalCostUsd = costs.second,
                         recentCallCosts = costs.first,
+                        unpricedModelGroups = costs.third,
                         filterProviderId = filterProviderId,
                         filterModel = filterModel,
                         availableProviders = availableProviders,
