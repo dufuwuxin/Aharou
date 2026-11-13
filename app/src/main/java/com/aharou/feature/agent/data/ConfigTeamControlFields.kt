@@ -4,9 +4,17 @@ import com.aharou.core.config.ConfigCollection
 import com.aharou.core.config.ConfigError
 import com.aharou.core.config.ConfigField
 import com.aharou.core.config.ConfigRegistry
+import com.aharou.core.config.ConfigRisk
 import com.aharou.core.config.ConfigSchema
 import com.aharou.core.config.ConfigValue
 import com.aharou.core.config.fields.ClosureField
+import com.aharou.core.config.fields.ReadOnlyField
+import com.aharou.feature.agent.domain.subagent.AgentDefinitionScope
+import com.aharou.feature.agent.domain.teamworkflow.TeamWorkflowEntry
+import com.aharou.feature.agent.domain.teamworkflow.TeamWorkflowForm
+import com.aharou.feature.agent.domain.teamworkflow.TeamWorkflowRepository
+import com.aharou.feature.agent.domain.teamworkflow.WorkflowTeamRefForm
+import com.aharou.feature.agent.domain.teamworkflow.toForm
 import com.aharou.feature.agent.domain.subagent.AgentTeamEntry
 import com.aharou.feature.agent.domain.subagent.AgentTeamRepository
 import com.aharou.feature.agent.domain.subagent.AgentTeamStageForm
@@ -19,8 +27,13 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
-class ConfigTeamControlFields @Inject constructor(private val teams: AgentTeamRepository) {
-    fun registerInto(registry: ConfigRegistry) { registry.register(Stages()); registry.register(Teams()) }
+class ConfigTeamControlFields @Inject constructor(
+    private val teams: AgentTeamRepository,
+    private val workflows: TeamWorkflowRepository
+) {
+    fun registerInto(registry: ConfigRegistry) {
+        registry.register(Stages()); registry.register(Teams()); registry.register(Workflows())
+    }
 
     private fun entries(): Map<String, Pair<AgentTeamEntry, Int>> = buildMap {
         teams.listAll().forEach { entry -> entry.team.stages.indices.forEach { index ->
@@ -90,6 +103,95 @@ class ConfigTeamControlFields @Inject constructor(private val teams: AgentTeamRe
         }
         override fun add(payload: ConfigValue): String = throw ConfigError.PermissionDenied("Use the team editor")
         override fun remove(id: String) { throw ConfigError.PermissionDenied("Use the team editor") }
+    }
+
+    /** Uses the same scope-qualified files as the settings editor, never a second settings store. */
+    private inner class Workflows : ConfigCollection {
+        override val basePath = "workflows"
+        override val displayName = "Multi-team workflows"
+        override val description = "Ordered team chains. Ids are scope:UTF8-hex-name; changes apply to the next run."
+
+        private fun id(entry: TeamWorkflowEntry): String =
+            "${entry.scope.name.lowercase()}:" + entry.workflow.name.toByteArray(Charsets.UTF_8)
+                .joinToString("") { "%02x".format(it.toInt() and 0xff) }
+        private fun all() = workflows.listAll().associateBy(::id)
+        private fun entry(id: String) = all()[id] ?: throw ConfigError.InvalidValue("Unknown workflow")
+        override fun childIds() = all().keys.toList()
+
+        private fun save(form: TeamWorkflowForm, originalName: String? = null) {
+            workflows.save(form, originalName)?.let { throw ConfigError.InvalidValue("Failed to save workflow: $it") }
+        }
+
+        private fun text(value: ConfigValue): String =
+            (value as? ConfigValue.Str)?.value ?: throw ConfigError.TypeMismatch("string")
+
+        private fun refs(value: ConfigValue): List<WorkflowTeamRefForm> =
+            ((value as? ConfigValue.Arr)?.value ?: throw ConfigError.TypeMismatch("array")).map { item ->
+                val obj = (item as? ConfigValue.Obj)?.value ?: throw ConfigError.TypeMismatch("object")
+                if (obj.keys.any { it !in setOf("team", "acceptsReject", "lead") }) throw ConfigError.InvalidValue("Unknown team reference field")
+                WorkflowTeamRefForm(
+                    team = text(obj["team"] ?: throw ConfigError.InvalidValue("Missing team")),
+                    acceptsReject = obj["acceptsReject"]?.let {
+                        (it as? ConfigValue.Bool)?.value ?: throw ConfigError.TypeMismatch("boolean")
+                    } ?: true,
+                    lead = obj["lead"]?.let(::text).orEmpty()
+                )
+            }
+
+        private fun rounds(value: ConfigValue): String {
+            val n = (value as? ConfigValue.Int)?.value ?: throw ConfigError.TypeMismatch("integer")
+            if (n !in 1..9) throw ConfigError.InvalidValue("Expected 1..9")
+            return n.toString()
+        }
+
+        override fun fields(forId: String): List<ConfigField> {
+            if (forId !in all()) return emptyList()
+            fun form() = entry(forId).let { it.workflow.toForm(it.scope) }
+            fun field(key: String, schema: ConfigSchema, read: (TeamWorkflowForm) -> ConfigValue,
+                change: (TeamWorkflowForm, ConfigValue) -> TeamWorkflowForm) = ClosureField(
+                path = "$basePath.$forId.$key", displayName = key, description = "Workflow $key; applied next run.",
+                valueSchema = schema, risk = ConfigRisk.SENSITIVE, revertable = key != "name",
+                reader = { read(form()) }, writer = { value ->
+                    val current = form()
+                    save(change(current, value), current.name)
+                })
+            return listOf(
+                field("name", ConfigSchema.Str(), { ConfigValue.Str(it.name) }, { f, v -> f.copy(name = text(v)) }),
+                field("description", ConfigSchema.Str(), { ConfigValue.Str(it.description) }, { f, v -> f.copy(description = text(v)) }),
+                ReadOnlyField(path = "$basePath.$forId.scope", displayName = "scope", description = "Immutable file scope.",
+                    valueSchema = ConfigSchema.Str(), reader = { ConfigValue.Str(form().scope.name.lowercase()) }),
+                field("charter", ConfigSchema.Str(), { ConfigValue.Str(it.charter) }, { f, v -> f.copy(charter = text(v)) }),
+                field("maxRejectRounds", ConfigSchema.Int(1, 9), { ConfigValue.Int(it.maxRejectRounds.toInt()) },
+                    { f, v -> f.copy(maxRejectRounds = rounds(v)) }),
+                field("teams", ConfigSchema.Json, { f -> ConfigValue.Arr(f.teams.map { ref -> ConfigValue.Obj(mapOf(
+                    "team" to ConfigValue.Str(ref.team), "acceptsReject" to ConfigValue.Bool(ref.acceptsReject), "lead" to ConfigValue.Str(ref.lead)
+                )) }) }, { f, v -> f.copy(teams = refs(v)) })
+            )
+        }
+
+        override fun add(payload: ConfigValue): String {
+            val obj = (payload as? ConfigValue.Obj)?.value ?: throw ConfigError.TypeMismatch("object")
+            if (obj.keys.any { it !in setOf("name", "description", "scope", "charter", "maxRejectRounds", "teams") }) {
+                throw ConfigError.InvalidValue("Unknown workflow field")
+            }
+            val scopeText = text(obj["scope"] ?: throw ConfigError.InvalidValue("Missing scope: global or project"))
+            val scope = AgentDefinitionScope.entries.firstOrNull { it.name.lowercase() == scopeText }
+                ?: throw ConfigError.InvalidValue("Expected global or project")
+            val form = TeamWorkflowForm(
+                name = text(obj["name"] ?: throw ConfigError.InvalidValue("Missing name")), scope = scope,
+                description = obj["description"]?.let(::text).orEmpty(), charter = obj["charter"]?.let(::text).orEmpty(),
+                maxRejectRounds = obj["maxRejectRounds"]?.let(::rounds) ?: "2",
+                teams = refs(obj["teams"] ?: throw ConfigError.InvalidValue("Missing teams"))
+            )
+            save(form)
+            return "${scope.name.lowercase()}:" + form.name.trim().toByteArray(Charsets.UTF_8)
+                .joinToString("") { "%02x".format(it.toInt() and 0xff) }
+        }
+
+        override fun remove(id: String) {
+            val current = entry(id)
+            if (!workflows.delete(current.workflow.name, current.scope)) throw ConfigError.InvalidValue("Failed to delete workflow")
+        }
     }
 
     private inner class Stages : ConfigCollection {

@@ -74,7 +74,7 @@ internal fun SubAgentTeamsSection(
     var pendingDelete by remember { mutableStateOf<AgentTeamEntry?>(null) }
     var editorTarget by remember { mutableStateOf<EditorTarget?>(null) }
 
-    Column(modifier = Modifier.fillMaxSize()) {
+    Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         Column(modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.sm)) {
             SettingsGroup {
                 SettingsRow(
@@ -105,8 +105,6 @@ internal fun SubAgentTeamsSection(
         } else {
             Column(
                 modifier = Modifier
-                    .weight(1f)
-                    .verticalScroll(rememberScrollState())
                     .padding(horizontal = Spacing.lg)
                     .padding(bottom = Spacing.xl),
                 verticalArrangement = Arrangement.spacedBy(Spacing.sm)
@@ -134,6 +132,7 @@ internal fun SubAgentTeamsSection(
                 }
             }
         }
+        TeamWorkflowsSection()
     }
 
     detail?.let { entry ->
