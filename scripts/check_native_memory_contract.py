@@ -25,8 +25,12 @@ SETTINGS = BASE / "settings/presentation/component/SettingsScreen.kt"
 MENU = BASE / "settings/presentation/component/SettingsMenuScreen.kt"
 PROJECTS = BASE / "agent/presentation/component/ProjectListScreen.kt"
 GROUPS = BASE / "settings/presentation/component/SettingsGroupScreens.kt"
+MOBILE = DOMAIN / "mobileagent/MobileOperator.kt"
+CROSSCHECK = DOMAIN / "crosscheck/CrossCheckCoordinator.kt"
+STEWARD = DOMAIN / "steward/StewardJudge.kt"
+AUXILIARY_PROMPTS = {MOBILE: "run", CROSSCHECK: "review", STEWARD: "judge"}
 REQUIRED = (PROVIDER, RESOLVER, REPOSITORY, BUILTINS, SPEC, TASK, TEAMS,
-            RUNNER, SESSIONS, SETTINGS, PROJECTS)
+            RUNNER, SESSIONS, SETTINGS, PROJECTS, *AUXILIARY_PROMPTS)
 TOKEN = re.compile(r'"""[\s\S]*?"""|"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|/\*[\s\S]*?\*/|//[^\n]*')
 
 
@@ -94,6 +98,34 @@ def reachable(text: str, entry: str) -> str:
     return "\n".join(parts)
 
 
+def initializers(text: str, name: str) -> list[str]:
+    """Inspect a local value without treating unrelated resource reads as prompts."""
+    code = TOKEN.sub(lambda match: " " * len(match[0]), text)
+    results = []
+    for match in re.finditer(rf"\b(?:val|var)\s+{re.escape(name)}\s*(?::\s*String\??\s*)?=", code):
+        start = match.end()
+        while start < len(text) and text[start].isspace():
+            start += 1
+        depth = 0
+        stop = len(code)
+        for pos in range(start, len(code)):
+            char = code[pos]
+            if char in "([{":
+                depth += 1
+            elif char in ")]}":
+                if depth == 0:
+                    stop = pos
+                    break
+                depth -= 1
+            elif depth == 0 and char in ";\n":
+                if char == "\n" and (code[pos + 1:].lstrip().startswith((".", "?:"))
+                                     or code[start:pos].rstrip().endswith(("?:", "+"))):
+                    continue
+                stop = pos
+                break
+        results.append(text[start:stop])
+    return results
+
 def violations(root: Path) -> list[str]:
     errors: list[str] = []
     texts: dict[Path, str] = {}
@@ -130,6 +162,24 @@ def violations(root: Path) -> list[str]:
     for entry in ("resolve", "resolveRaw"):
         require(RESOLVER, masked(reachable(resolver, entry), strings=True),
                 r"\bcontextLibrary\s*\??\.\s*resolvePrompt\s*\(", f"{entry} must reach native prompt entries")
+    for path, entry in AUXILIARY_PROMPTS.items():
+        source = texts[path]
+        forbid(path, executable(source), r"\bSYSTEM_PROMPT\b",
+               "hardcoded auxiliary SYSTEM_PROMPT remains executable")
+        prompt_values = initializers(reachable(source, entry), "systemPrompt")
+        if not prompt_values:
+            errors.append(f"{path}: {entry} must initialize systemPrompt from native memory")
+        for value in prompt_values:
+            require(path, masked(value, strings=True),
+                    r"^contextLibrary\s*\??\.\s*resolvePromptForContext\s*\(\s*SYSTEM_PROMPT_KEY\b",
+                    f"{entry} must initialize systemPrompt from native memory")
+            forbid(path, masked(value, strings=True),
+                   r"\?:|\.\s*(?:ifBlank|ifEmpty|getOrElse)\s*(?:\{|\()|"
+                   r"\b(?:File|readText|readFileOrNull)\s*\(|\.\s*assets\s*\.\s*open\s*\(",
+                   "auxiliary system prompt must not use a fallback source")
+        forbid(path, source, r'"(?:prompts(?:\.custom)?(?:/[^"\n]*)?|\.no-builtin)"|'
+               r'\b(?:PromptFragmentResolver|customFragmentsByNumber)\b',
+               "legacy auxiliary prompt directory/file fallback")
     repository = texts[REPOSITORY]
     seed_fields = re.findall(r"\b(?:val|var)\s+(\w+)\s*:\s*BuiltinContextEntries\b", repository)
     list_path = masked(reachable(repository, "list"), strings=True)

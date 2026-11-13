@@ -8,6 +8,7 @@ import unittest
 from pathlib import Path
 
 from check_native_memory_contract import (
+    AUXILIARY_PROMPTS,
     BUILTINS,
     GROUPS,
     MENU,
@@ -21,6 +22,7 @@ from check_native_memory_contract import (
     SPEC,
     TASK,
     TEAMS,
+    initializers,
     masked,
     violations,
 )
@@ -116,6 +118,16 @@ FIXTURES = {
 }
 
 
+for path, entry in AUXILIARY_PROMPTS.items():
+    FIXTURES[path] = f'''class Auxiliary {{
+        private const val SYSTEM_PROMPT_KEY = "agent/auxiliary-system.md"
+        fun {entry}(): String {{
+            val systemPrompt = contextLibrary.resolvePromptForContext(SYSTEM_PROMPT_KEY,
+                workspace, sessionId).trim()
+            return complete(systemPrompt = systemPrompt)
+        }}
+    }}'''
+
 class NativeMemoryContractTest(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory(prefix="aharou-native-contract-")
@@ -178,6 +190,84 @@ class NativeMemoryContractTest(unittest.TestCase):
             with self.subTest(expression=expression):
                 self.mutate(RESOLVER, 'contextLibrary.resolvePrompt(name)', expression,
                             'legacy prompt directory/assets fallback')
+
+    def test_auxiliary_hardcoded_prompts_are_rejected(self) -> None:
+        native = 'contextLibrary.resolvePromptForContext(SYSTEM_PROMPT_KEY,\n                workspace, sessionId).trim()'
+        for path in AUXILIARY_PROMPTS:
+            for replacement in ('SYSTEM_PROMPT', '"hardcoded instructions"', '"""hardcoded\n{ instructions }"""'):
+                with self.subTest(path=path, replacement=replacement):
+                    self.mutate(path, native, replacement, 'must initialize systemPrompt from native memory')
+            self.write(path, FIXTURES[path])
+
+    def test_auxiliary_system_prompt_constants_are_rejected(self) -> None:
+        for path in AUXILIARY_PROMPTS:
+            for suffix in ('\nprivate const val SYSTEM_PROMPT = "old instructions"',
+                           '\nval old = "${SYSTEM_PROMPT}"'):
+                with self.subTest(path=path, suffix=suffix):
+                    self.write(path, FIXTURES[path] + suffix)
+                    self.assertTrue(any('hardcoded auxiliary SYSTEM_PROMPT' in error
+                                        for error in violations(self.root)))
+            self.write(path, FIXTURES[path])
+
+    def test_auxiliary_fallbacks_are_rejected(self) -> None:
+        for path in AUXILIARY_PROMPTS:
+            for fallback in (' ?: File(root, "default.md").readText()',
+                             '\n                ?: context.assets.open("fallback.md").readText()',
+                             '\n                .ifBlank { "hardcoded instructions" }',
+                             '.ifEmpty { fallback() }',
+                             '.ifBlank({ "hardcoded instructions" })',
+                             ' ?: "hardcoded instructions"'):
+                with self.subTest(path=path, fallback=fallback):
+                    self.mutate(path, 'workspace, sessionId).trim()', 'workspace, sessionId).trim()' + fallback,
+                                'auxiliary system prompt must not use a fallback source')
+            self.write(path, FIXTURES[path])
+
+    def test_auxiliary_legacy_file_paths_are_rejected(self) -> None:
+        for path in AUXILIARY_PROMPTS:
+            for expression in ('File(root, "prompts.custom").readText()',
+                               'context.assets.open("prompts/agent/default.md").readText()'):
+                with self.subTest(path=path, expression=expression):
+                    self.mutate(path, 'return complete(systemPrompt = systemPrompt)',
+                                'val legacy = ' + expression + '\nreturn complete(systemPrompt = systemPrompt)',
+                                'legacy auxiliary prompt directory/file fallback')
+            self.write(path, FIXTURES[path])
+
+    def test_auxiliary_native_call_cannot_be_a_decoy(self) -> None:
+        for path in AUXILIARY_PROMPTS:
+            with self.subTest(path=path):
+                self.mutate(path, 'val systemPrompt = contextLibrary', 'val unusedPrompt = contextLibrary',
+                            'must initialize systemPrompt from native memory')
+            self.write(path, FIXTURES[path])
+
+    def test_auxiliary_resources_remain_on_demand(self) -> None:
+        for path in AUXILIARY_PROMPTS:
+            self.write(path, FIXTURES[path].replace('return complete(systemPrompt = systemPrompt)', '''
+                val rule = readRule()
+                val state = File(root, "state.json").readText()
+                val optional = readFileOrNull("optional-rule.md")
+                return complete(systemPrompt = systemPrompt)
+            ''') + '''
+                fun readRule(): String = context.assets.open("rules/optional.md").readText()
+                // SYSTEM_PROMPT = "prompts/custom.md"
+                val note = "SYSTEM_PROMPT { is only an example }"
+            ''')
+        self.assertEqual([], violations(self.root))
+
+    def test_each_auxiliary_source_is_required(self) -> None:
+        for path in AUXILIARY_PROMPTS:
+            with self.subTest(path=path):
+                (self.root / path).unlink()
+                self.assertIn(f'{path}: missing required source', violations(self.root))
+            self.write(path, FIXTURES[path])
+
+    def test_prompt_initializer_boundaries(self) -> None:
+        for expression in ('"literal"', '"""multiline\n{ prompt }"""',
+                           'native(key,\n session).trim()\n .ifEmpty { fallback() }',
+                           'native(key)\n ?: fallback()'):
+            with self.subTest(expression=expression):
+                source = 'val systemPrompt: String = ' + expression + '\nval unrelated = readText()'
+                self.assertEqual([expression], initializers(source, 'systemPrompt'))
+        self.assertEqual(['native(key)'], initializers('val systemPrompt = native(key); readText()', 'systemPrompt'))
 
     def test_seed_must_be_reachable_from_list(self) -> None:
         self.mutate(REPOSITORY, 'return sources(root)', 'return memories.list(root)',
