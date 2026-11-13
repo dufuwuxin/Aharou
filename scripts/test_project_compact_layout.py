@@ -54,7 +54,14 @@ class ProjectCompactLayoutContract(unittest.TestCase):
         self.assertIn("onClick = { menuOpen = false; viewModel.stopProject(projectId) }", stop)
         start = region(menu, "else DropdownMenuItem", "(")
         self.assertIn("val executableTasks = tasks.filterNot { it.isRequirementBranch }", workbench)
-        self.assertRegex(start, r"enabled = !state.loading && !state.busy && !planning &&\s*\(selectedBranch != null && !branchHasChildren \|\| executableTasks.any \{ !ProjectWorkflowPlan.delivered\(it\) \}\)")
+        enabled = re.search(r"enabled\s*=\s*(.*?),\s*modifier", start, re.DOTALL)
+        self.assertIsNotNone(enabled)
+        self.assertEqual(
+            "!state.loading && !state.busy && !planning && "
+            "(selectedBranch != null && !branchHasChildren || executableTasks.any { !ProjectWorkflowPlan.delivered(it) } || "
+            "executableTasks.isEmpty() && (!project?.requirements.isNullOrBlank() || !project?.purpose.isNullOrBlank()))",
+            re.sub(r"\s+", " ", enabled.group(1)),
+        )
         self.assertIn("if (selectedBranch != null) viewModel.startRequirementBranch(projectId, selectedBranch.id)", start)
         self.assertIn("else viewModel.startProject(projectId)", start)
 
@@ -117,9 +124,47 @@ class ProjectCompactLayoutContract(unittest.TestCase):
                 self.assert_search(mutant)
         self.assert_search(MAP)
 
+    def assert_zoom_controls(self, task_map):
+        marker = "Row(Modifier.align(Alignment.BottomEnd)"
+        self.assertIn(marker, task_map)
+        controls = region(task_map, marker)
+        self.assertEqual(2, controls.count("IconButton("))
+        for tag, factor in (("map_zoom_in", "1.25f"), ("map_zoom_out", "1f / 1.25f")):
+            self.assertEqual(1, controls.count(f'testTag("{tag}")'))
+            buttons = [region(controls[m.start():], "IconButton", "(")
+                       for m in re.finditer(r"\bIconButton(?=\()", controls)]
+            button = next(call for call in buttons if f'testTag("{tag}")' in call)
+            self.assertIn(f"onClick = {{ stepZoom({factor}) }}", button)
+        step = region(task_map, "fun stepZoom(factor: Float)")
+        for contract in ("ProjectTaskMapLayout.clampZoom(zoom * factor, minimum, MAX_ZOOM)",
+                         "panX = viewW / 2f", "panY = viewH / 2f", "zoom = next"):
+            self.assertIn(contract, step)
+
+    def test_zoom_and_empty_project_start_mutants_are_rejected(self):
+        self.assert_zoom_controls(MAP)
+        for old, new in (('testTag("map_zoom_in")', 'testTag("missing_zoom_in")'),
+                         ('testTag("map_zoom_out")', 'testTag("missing_zoom_out")'),
+                         ("Alignment.BottomEnd", "Alignment.TopEnd"),
+                         ("stepZoom(1.25f)", ""),
+                         ("stepZoom(1f / 1.25f)", ""),
+                         ("stepZoom(1.25f)", "stepZoom(1f / 1.25f)"),
+                         ("stepZoom(1f / 1.25f)", "stepZoom(1.25f)"),
+                         ("ProjectTaskMapLayout.clampZoom(zoom * factor, minimum, MAX_ZOOM)", "zoom * factor")):
+            mutant = MAP.replace(old, new, 1)
+            self.assertNotEqual(mutant, MAP)
+            with self.assertRaises(AssertionError):
+                self.assert_zoom_controls(mutant)
+        for old, new in (("!state.busy && !planning", "!planning"),
+                         ("executableTasks.isEmpty() &&", ""),
+                         ("!project?.purpose.isNullOrBlank()", "true")):
+            mutant = WORKBENCH.replace(old, new, 1)
+            self.assertNotEqual(mutant, WORKBENCH)
+            with self.assertRaises(AssertionError):
+                self.assert_stop(mutant)
+
     def test_legend_is_only_on_demand(self):
-        # The restored compact source removed the legend and persistent zoom rail.
-        for old in ("R.string.project_task_dependency_legend", "R.string.project_map_legend", '"map_zoom_in"', '"map_zoom_out"', '"map_reset"', "ProjectMapIcon("):
+        self.assert_zoom_controls(MAP)
+        for old in ("R.string.project_task_dependency_legend", "R.string.project_map_legend", '"map_reset"', "ProjectMapIcon("):
             self.assertNotIn(old, WORKBENCH + MAP)
         menu = region(MAP, "        header")
         self.assertEqual(3, menu.count("DropdownMenuItem("))

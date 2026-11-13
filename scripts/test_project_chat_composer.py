@@ -103,22 +103,43 @@ class ProjectChatComposerContract(unittest.TestCase):
         self.assertIn("readOnly = true", workbench)
         self.assertIn("if (!readOnly) TextButton(onClick = onEdit)", source("ProjectTaskProcess.kt"))
 
-    def test_root_node_opens_bound_conversation_with_live_streams(self):
-        screen = source("ProjectChatScreen.kt")
-        workbench = source("ProjectTaskWorkbench.kt")
-        task_map = source("ProjectTaskMap.kt")
+    def assert_root_diagnostics_binding(self, screen, workbench):
         for contract in ("rootConversation =", "ProjectRootConversation(records, agent, onToolDetail)",
-                         "it.id in project.flowSessionIds", "it.parentId == null", "it.workspacePath == workspace"):
+                         "it.id in project?.flowSessionIds.orEmpty()", "it.parentId == null", "it.workspacePath == workspace",
+                         "ProjectChatBinding(sessionId.takeIf { ready }, rootConversation)",
+                         "projectConversation = binding.rootConversation"):
             self.assertIn(contract, screen)
-        for contract in ("toggle(rootId)", "rootConversation()", "onOpenRoot = { toggle(rootId) }"):
+        for contract in ("toggle(rootId)", "rootConversation()", "if (diagnostics == null) TextButton(",
+                         "onOpenRoot = { if (diagnostics != null) { onSelectRequirementBranch(null); diagnostics() } else toggle(rootId) }"):
             self.assertIn(contract, workbench)
-        self.assertIn("rootStyle, onClick = onOpenRoot)", task_map)
+
+    def test_root_node_opens_bound_conversation_with_live_streams(self):
+        self.assert_root_diagnostics_binding(source("ProjectChatScreen.kt"), source("ProjectTaskWorkbench.kt"))
+        self.assertIn("projectConversation = projectConversation", source("AIChatPanel.kt"))
+        self.assertIn("SessionDiagnosticTab.PLANNING -> projectConversation?.invoke()", source("SessionDiagnosticsSheet.kt"))
+        self.assertIn("rootStyle, onClick = onOpenRoot)", source("ProjectTaskMap.kt"))
         conversation = source("ProjectTaskConversation.kt")
         self.assertIn("ProjectTaskConversation(selected, agentViewModel, onToolDetail)", conversation)
         self.assertIn("recordState.SaveableStateProvider(selected)", conversation)
         for live_consumer in ("processMessages(sessionId", "processText(sessionId)", "processReasoning(sessionId)", "processTools(sessionId)"):
             self.assertIn(live_consumer, conversation)
         self.assertNotIn("selectSession(", conversation)
+
+    def test_root_diagnostics_rejects_cross_scope_or_disconnected_records(self):
+        screen = source("ProjectChatScreen.kt")
+        workbench = source("ProjectTaskWorkbench.kt")
+        for old, new in (("it.id in project?.flowSessionIds.orEmpty()", "true"),
+                         ("it.parentId == null", "true"),
+                         ("it.workspacePath == workspace", "true"),
+                         ("projectConversation = binding.rootConversation", "projectConversation = {}")):
+            mutant = screen.replace(old, new)
+            self.assertNotEqual(mutant, screen)
+            with self.assertRaises(AssertionError):
+                self.assert_root_diagnostics_binding(mutant, workbench)
+        mutant = workbench.replace("onSelectRequirementBranch(null); diagnostics()", "diagnostics()")
+        self.assertNotEqual(mutant, workbench)
+        with self.assertRaises(AssertionError):
+            self.assert_root_diagnostics_binding(screen, mutant)
 
     def test_read_only_records_retain_validated_acceptance(self):
         process = source("ProjectTaskProcess.kt")
