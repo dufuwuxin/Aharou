@@ -4,6 +4,9 @@
 
 ## 本轮新增能力
 
+- SDKv1 宿主插件：用户可导入/启用/停用 JS 与 DEX 包、查看编译输出并打开 DEX 提供的原生 View。Agent 的 config `plugins.<key>.enabled` 与 `plugins.<key>.compile` 复用同一管理器，`compile_output` 可读；id 中点号在配置键中转为 `~`。原生 View 仍是界面专属，未宣称 Agent 可以渲染 View。插件注册到真实 ToolRegistry，host.call 的 tool/config 分支沿真实会话工具快照与 PermissionGate 执行；模型 HTTP 请求、JSON 响应与逐帧 SSE 真实消费插件钩子。旧容器包保留；不宣称 Root、类热替换、Manifest 权限或原生 ABI 扩展。停止即撤销新入口，在途回调退出后清理；插件可经真实config字段自停用/重载/编译而不等自身执行锁。View绑定运行代，外部停止/升级会关闭并detach旧面板，设置页传当前页面Context；日志消费有界且先脱敏的message。当前源码交付不等于真机 DEX/JNI 验证。
+
+
 - 账号池：同一账号供应商追加登录，有序密文槽位兼容旧单凭据；模型目录并集去重、部分失败明确，最早支持所选模型的可用账号优先，明确故障才顺序切换且流开始后不重放。Android9+使用专用进程/网页目录，Android8保留不承诺隔离的兼容登录；`provider_accounts` 集合与页面共用增删，Loomy配置导入同步模型目录。无痕仅指本地会话隔离，不承诺对供应商匿名，也不将纯状态夹具当作设备实测。
 - 账号接入：保留国内 `trae/workbuddy`，新增 `trae-global/workbuddy-global/loomy`，地区绑定独立凭据类型和请求端点。供应商页及 `providers.<id>.account_service` 使用同一接入；Loomy通过用户主动导入会话并验证模型目录后保存，不提供未经核实的OAuth。敏感只写字段 `account_session` 与页面共用导入，`account_check_in=run` 共用签到；国际/企业等不支持账号不发送签到，不合成积分。受控协议测试不代表用户账号的真实线上登录或到账。
 - 工作流编辑：团队协调者可从现有角色直接选择并原子加入名单；删除阶段或成员清理失效边，运行时图校验不放宽。跨团队每层协调者改为角色选择；UI与 `workflows` 预设继续共用保存和消费者。

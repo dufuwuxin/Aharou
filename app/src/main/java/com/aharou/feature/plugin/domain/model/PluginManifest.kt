@@ -6,8 +6,7 @@ import kotlinx.serialization.Serializable
  * 插件清单：`manifest.json`，位于插件包（`.txplugin`，实为 zip）根目录。
  *
  * 沿用太墟（TaiXu）插件包的字段契约，使现成的 `.txplugin` 包无需改造即可被本应用识别：
- * 清单是静态 JSON，宿主只读它、不执行其中任何代码；插件本体（payload/ 下的脚本与运行时）
- * 在容器里安装与运行，不进入 App 进程。
+ * 未声明 hostRuntime 的旧包仍在容器运行；显式声明的可信 JS/DEX 在宿主同 UID 运行。
  */
 @Serializable
 data class PluginManifest(
@@ -42,10 +41,21 @@ data class PluginManifest(
     val commandLinks: List<String> = emptyList(),
     /** 启动时注入容器的环境变量。 */
     val environment: Map<String, String> = emptyMap(),
+    val hostRuntime: HostRuntimeSpec? = null,
 ) {
     /** 是否常驻服务（有服务端口）。 */
     val isService: Boolean get() = servicePort in 1..65535
 }
+
+/** entry/artifact are relative to payload/; DEX entry is a fully qualified class name. */
+@Serializable
+data class HostRuntimeSpec(
+    val runtime: String,
+    val entry: String,
+    val artifact: String = "",
+    val apiVersion: Int = 1,
+    val compileCommand: String = "",
+)
 
 /** 插件运行状态（内存态，不落盘）。 */
 enum class PluginStatus {
@@ -68,4 +78,5 @@ data class InstalledPlugin(
     val status: PluginStatus = PluginStatus.STOPPED,
     /** 最近一次操作的说明（错误信息或就绪提示）。 */
     val detail: String = "",
+    val enabled: Boolean = false,
 )

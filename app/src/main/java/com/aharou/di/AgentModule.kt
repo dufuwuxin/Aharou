@@ -205,6 +205,7 @@ object AgentModule {
     @Provides
     @Singleton
     fun provideOkHttpClient(
+        hostPlugins: dagger.Lazy<com.aharou.feature.plugin.runtime.HostPluginRuntime>,
         @ApplicationContext context: Context,
         accounts: com.aharou.feature.settings.data.account.AccountProviderManager,
     ): OkHttpClient {
@@ -217,6 +218,9 @@ object AgentModule {
         // 流式 SSE 下读超时是「相邻数据块之间」的等待上限，设为 0（无限制），
         // 慢生成不会因块间隔超时被掐断；首字节前的卡死由上层 watchdog（RetryPolicy）兜底。
         return OkHttpClient.Builder()
+            .addInterceptor(com.aharou.feature.plugin.runtime.HostPluginHttpInterceptor(
+                { hostPlugins.get().onModelRequest(it) }, { hostPlugins.get().onModelEvent(it) },
+            ))
             .addInterceptor(accounts.interceptor())
             .connectTimeout(120, TimeUnit.SECONDS)
             .readTimeout(0, TimeUnit.SECONDS)

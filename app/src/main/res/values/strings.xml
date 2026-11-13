@@ -4093,4 +4093,12 @@
     <string name="account_provider_partial">部分账号拉取失败；当前仅显示成功账号的模型和余额，未把失败账号视为零余额。</string>
     <string name="account_provider_isolation_unavailable">当前为兼容登录，不保证会话隔离。更换账号请在登录页自行退出原网站账号；应用不会主动清理其它网页的登录状态。Android 9 及以上提供独立无痕入口。</string>
     <string name="account_provider_add_account_legacy">添加账号（兼容登录）</string>
+    <string name="plugin_host_title">宿主插件</string>
+    <string name="plugin_host_trust">仅启用你信任的插件：与应用同 UID，不是安全沙箱。停用立即撤销新入口，在途调用结束后清理。</string>
+    <string name="plugin_host_enabled">启用并在下次启动恢复</string>
+    <string name="plugin_host_compile">编译并验证</string>
+    <string name="plugin_host_compile_desc">执行插件声明的编译命令；工具链需自行配置，失败保留旧版本。</string>
+    <string name="plugin_host_open">打开插件界面</string>
+    <string name="plugin_host_no_view">此插件没有提供原生界面。</string>
+    <string name="plugin_host_compile_output">编译输出</string>
 </resources>

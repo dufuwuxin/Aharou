@@ -131,6 +131,34 @@ jobs:
       - name: Build armsolo debug (smoke)
         run: ./gradlew :app:assembleArmsoloDebug --stacktrace
 
+      - name: Verify host plugin SDK and real DEX compilation
+        run: |
+          python3 scripts/test_plugin_sdk.py
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          import subprocess
+          import tempfile
+          import zipfile
+
+          sdk = Path(os.environ.get("ANDROID_SDK_ROOT") or os.environ["ANDROID_HOME"])
+          tools = [p for p in (sdk / "build-tools").glob("*/d8") if all(v.isdigit() for v in p.parent.name.split("."))]
+          platforms = [p for p in (sdk / "platforms").glob("android-*/android.jar") if p.parent.name.removeprefix("android-").isdigit()]
+          if not tools or not platforms:
+              raise SystemExit("Android SDK has no installed D8 or android.jar")
+          d8 = max(tools, key=lambda p: tuple(int(v) for v in p.parent.name.split(".")))
+          android = max(platforms, key=lambda p: int(p.parent.name.removeprefix("android-")))
+          javac = Path(os.environ["JAVA_HOME"]) / "bin" / "javac"
+          cli = "app/src/main/assets/plugin-sdk/build_plugin.py"
+          examples = Path("app/src/main/assets/plugin-sdk/examples")
+          with tempfile.TemporaryDirectory(prefix="host-plugin-sdk-") as folder:
+              output = Path(folder) / "java.txplugin"
+              subprocess.run(["python3", cli, "--source-dir", str(examples / "java"), "--manifest", str(examples / "java/manifest.json"), "--sdk-src", "app/src/main/java", "--javac", str(javac), "--d8", str(d8), "--android-jar", str(android), "--output", str(output)], check=True)
+              with zipfile.ZipFile(output) as package:
+                  assert package.read("payload/classes.dex").startswith(b"dex\n")
+              subprocess.run(["python3", cli, "--source-dir", str(examples / "js"), "--manifest", str(examples / "js/manifest.json"), "--output", str(Path(folder) / "js.txplugin")], check=True)
+          PY
+
       # 单元测试（app/src/test 与 core-agent/src/test 下的 Kotlin 单测）。
       # 只跑 ARM64 debug 变体：
       # 跑全 flavor 6 变体是重复编译，无额外覆盖。

@@ -16,6 +16,7 @@ data class PluginRecord(
     val name: String = "",
     val version: String = "",
     val installedAt: Long = 0L,
+    val enabled: Boolean = false,
 )
 
 @Serializable
@@ -34,18 +35,30 @@ class PluginRecordStore @Inject constructor(
     private fun file(): File = File(containerInstaller.aharouDir, FILE_NAME)
 
     /** 全部安装记录（id → 记录）。 */
+    @Synchronized
     fun all(): Map<String, PluginRecord> = read().installed
 
+    @Synchronized
     fun get(id: String): PluginRecord? = read().installed[id]
 
+    @Synchronized
     fun save(record: PluginRecord) {
         write(read().installed + (record.id to record))
     }
 
+    @Synchronized
     fun remove(id: String) {
         val installed = read().installed
         if (id !in installed) return
         write(installed - id)
+    }
+
+    @Synchronized
+    fun setEnabled(id: String, enabled: Boolean) {
+        val record = get(id) ?: error("Plugin is not installed: $id")
+        val updated = record.copy(enabled = enabled)
+        save(updated)
+        check(get(id) == updated) { "Plugin enable state was not saved" }
     }
 
     private fun read(): PluginRecordData {

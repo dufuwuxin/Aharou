@@ -2,6 +2,9 @@ package com.aharou.feature.plugin.presentation
 
 import android.content.Context
 import android.net.Uri
+import android.view.View
+import android.view.ViewGroup
+import kotlinx.coroutines.CancellationException
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.aharou.feature.plugin.domain.PluginManager
@@ -14,6 +17,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -49,7 +53,67 @@ class PluginViewModel @Inject constructor(
     private val _event = MutableStateFlow<PluginEvent?>(null)
     val event: StateFlow<PluginEvent?> = _event.asStateFlow()
 
+    private val _hostView = MutableStateFlow<View?>(null)
+    val hostView = _hostView.asStateFlow()
+    private val _hostPanelOpen = MutableStateFlow(false)
+    val hostPanelOpen = _hostPanelOpen.asStateFlow()
+    private val _compileOutput = MutableStateFlow("")
+    val compileOutput = _compileOutput.asStateFlow()
+
+    private var hostViewBinding: Pair<String, Long>? = null
+
+    fun setEnabled(id: String, enabled: Boolean) = operate(id) { pluginManager.setEnabled(it, enabled) }
+
+    fun compile(id: String) = operate(id) {
+        val result = pluginManager.compile(it)
+        _compileOutput.value = withContext(Dispatchers.IO) { pluginManager.compileOutput(it) }
+        closeHostPanel()
+        _hostPanelOpen.value = true
+        result
+    }
+
+    fun openHostView(id: String, androidContext: Context = context) = operate(id) {
+        try {
+            val serial = pluginManager.hostGenerations.value[it] ?: error("Plugin is not loaded")
+            val view = pluginManager.createHostView(it, androidContext)
+            if (pluginManager.hostGenerations.value[it] != serial) {
+                detach(view)
+                error("Plugin generation changed while opening View")
+            }
+            closeHostPanel()
+            hostViewBinding = it to serial
+            _hostView.value = view
+            _compileOutput.value = ""
+            _hostPanelOpen.value = true
+            if (pluginManager.hostGenerations.value[it] != serial) {
+                closeHostPanel()
+                error("Plugin generation changed while publishing View")
+            }
+            Result.success(Unit)
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (failure: Throwable) { Result.failure(failure) }
+    }
+
+    private fun detach(view: View?) { view?.let { (it.parent as? ViewGroup)?.removeView(it) } }
+
+    fun closeHostPanel() {
+        _hostPanelOpen.value = false
+        hostViewBinding = null
+        detach(_hostView.value)
+        _hostView.value = null
+    }
+
+    override fun onCleared() {
+        closeHostPanel()
+        super.onCleared()
+    }
+
     init {
+        viewModelScope.launch {
+            pluginManager.hostGenerations.collect { current ->
+                hostViewBinding?.let { (id, serial) -> if (current[id] != serial) closeHostPanel() }
+            }
+        }
         refresh()
     }
 
@@ -98,8 +162,10 @@ class PluginViewModel @Inject constructor(
         if (_busyId.value != null) return
         viewModelScope.launch {
             _busyId.value = id
-            val result = block(id)
-            _busyId.value = null
+            val result = try { block(id) }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Throwable) { Result.failure(failure) }
+            finally { _busyId.value = null }
             _event.value = result.fold(
                 onSuccess = { PluginEvent.Completed },
                 onFailure = { PluginEvent.Failed(it.message ?: it::class.java.simpleName) },

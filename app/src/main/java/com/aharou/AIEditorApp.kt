@@ -364,6 +364,9 @@ class AIEditorApp : Application(), Configuration.Provider {
     internal lateinit var liveUpdateCoordinator: com.aharou.feature.agent.presentation.notification.LiveUpdateCoordinator
 
     /** 长驻作用域：持续把持久化的日志等级同步到 FileLogger。 */
+    @Inject
+    lateinit var hostPluginManager: com.aharou.feature.plugin.domain.PluginManager
+
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun onCreate() {
@@ -403,6 +406,7 @@ class AIEditorApp : Application(), Configuration.Provider {
         configPetFields.registerInto(configRegistry)
         configCredentialFields.registerInto(configRegistry)
         configBackupFields.registerInto(configRegistry)
+        appScope.launch { hostPluginManager.restoreEnabled() }
         // 目录迁移递归扫工作区、审计初始化建目录、SOUL.md 先释放再读回缓存：都是同步磁盘活，放主线程会
         // 顶在首帧前面。三者都不影响首帧（cachedMetadata 是 StateFlow，晚到不影响 UI），一起挑到后台。
         appScope.launch(Dispatchers.IO) {
