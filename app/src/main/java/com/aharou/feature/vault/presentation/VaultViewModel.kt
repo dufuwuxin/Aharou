@@ -20,6 +20,15 @@ class VaultViewModel @Inject constructor(
 
     private val _names = MutableStateFlow<List<String>>(emptyList())
     val names: StateFlow<List<String>> = _names.asStateFlow()
+    val privacyRedaction = repository.privacyRedaction
+    private val _privacyError = MutableStateFlow(false)
+    val privacyError = _privacyError.asStateFlow()
+
+    fun setPrivacyRedaction(enabled: Boolean) = viewModelScope.launch(Dispatchers.IO) {
+        _privacyError.value = !repository.setPrivacyRedaction(enabled)
+    }
+
+    fun previewRedaction(text: String): String = repository.previewRedaction(text)
 
     /** 写入被拒（凭据库解密失败进入只读保护）时置真，由界面提示用户先导出或重置。 */
     private val _writeBlocked = MutableStateFlow(false)

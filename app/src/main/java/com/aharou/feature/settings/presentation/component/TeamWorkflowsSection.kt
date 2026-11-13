@@ -43,12 +43,12 @@ import com.aharou.feature.settings.presentation.TeamWorkflowSettingsState
 import com.aharou.feature.settings.presentation.TeamWorkflowSettingsViewModel
 
 @Composable
-internal fun TeamWorkflowsSection(viewModel: TeamWorkflowSettingsViewModel = hiltViewModel()) {
+internal fun TeamWorkflowsSection(viewModel: TeamWorkflowSettingsViewModel = hiltViewModel(), availableMembers: List<String> = emptyList()) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     TeamWorkflowsContent(
         state, viewModel::startCreate, viewModel::startEdit, viewModel::requestDelete,
         viewModel::updateForm, viewModel::save, viewModel::dismissEditor,
-        viewModel::confirmDelete, viewModel::dismissDelete, viewModel::refresh
+        viewModel::confirmDelete, viewModel::dismissDelete, viewModel::refresh, availableMembers
     )
 }
 
@@ -63,7 +63,8 @@ private fun TeamWorkflowsContent(
     onDismissEditor: () -> Unit,
     onConfirmDelete: () -> Unit,
     onDismissDelete: () -> Unit,
-    onRefresh: () -> Unit
+    onRefresh: () -> Unit,
+    availableMembers: List<String>
 ) {
     Column(
         modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.sm),
@@ -96,7 +97,7 @@ private fun TeamWorkflowsContent(
         }
     }
     state.editor?.let { editor ->
-        WorkflowEditorSheet(state, onChange, onSave, onDismissEditor, editor.originalName != null)
+        WorkflowEditorSheet(state, onChange, onSave, onDismissEditor, editor.originalName != null, availableMembers)
     }
     state.pendingDelete?.let { entry ->
         AlertDialog(
@@ -125,7 +126,8 @@ private fun WorkflowEditorSheet(
     onChange: (TeamWorkflowForm) -> Unit,
     onSave: () -> Unit,
     onDismiss: () -> Unit,
-    editing: Boolean
+    editing: Boolean,
+    availableMembers: List<String>
 ) {
     val form = state.editor?.form ?: return
     AdaptiveModalBottomSheet(
@@ -171,8 +173,20 @@ private fun WorkflowEditorSheet(
                     SettingsRow(title = stringResource(R.string.team_workflow_accepts_reject), trailing = {
                         AppSwitch(ref.acceptsReject, { change(ref.copy(acceptsReject = it)) }, enabled = !state.saving)
                     })
-                    AppTextField(ref.lead, { change(ref.copy(lead = it)) }, label = stringResource(R.string.team_workflow_lead),
-                        enabled = !state.saving, modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.lg))
+                    var choosingLead by remember { mutableStateOf(false) }
+                    Box {
+                        SettingsRow(title = stringResource(R.string.team_workflow_lead),
+                            subtitle = ref.lead.ifBlank { stringResource(R.string.team_workflow_default_lead) },
+                            enabled = !state.saving, onClick = { choosingLead = true })
+                        DropdownMenu(expanded = choosingLead, onDismissRequest = { choosingLead = false }) {
+                            DropdownMenuItem(text = { Text(stringResource(R.string.team_workflow_default_lead)) },
+                                onClick = { change(ref.copy(lead = "")); choosingLead = false })
+                            availableMembers.distinct().forEach { member ->
+                                DropdownMenuItem(text = { Text(member) },
+                                    onClick = { change(ref.copy(lead = member)); choosingLead = false })
+                            }
+                        }
+                    }
                     Row {
                         TextButton(enabled = index > 0 && !state.saving, onClick = {
                             val refs = form.teams.toMutableList()

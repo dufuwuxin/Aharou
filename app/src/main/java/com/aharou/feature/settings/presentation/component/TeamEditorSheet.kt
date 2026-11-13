@@ -43,6 +43,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.aharou.R
@@ -56,6 +57,11 @@ import com.aharou.feature.agent.domain.subagent.AgentTeamForm
 import com.aharou.feature.agent.domain.subagent.AgentTeamSaveError
 import com.aharou.feature.agent.domain.subagent.AgentTeamStageForm
 import com.aharou.feature.agent.domain.subagent.TeamMemberRef
+import com.aharou.feature.agent.domain.subagent.TeamFlowNode
+import com.aharou.feature.agent.domain.subagent.AgentTeam
+import com.aharou.feature.agent.domain.subagent.TeamStage
+import com.aharou.feature.agent.domain.subagent.TeamTask
+import com.aharou.feature.agent.domain.subagent.TeamFlowGraph
 import com.aharou.feature.agent.domain.subagent.withFlowTasks
 import com.aharou.feature.agent.domain.subagent.toForm
 import com.aharou.feature.settings.presentation.AgentTeamSaveState
@@ -110,6 +116,19 @@ internal fun TeamEditorSheet(
     }
 
     var routes by remember(initial) { mutableStateOf(initial?.team?.routes.orEmpty()) }
+    var routesRemoved by remember(initial) { mutableStateOf(false) }
+
+    fun updateStages(updated: List<AgentTeamStageForm>) {
+        stages = updated.mapIndexed { index, stage ->
+            if (stage.rejectTo.isNotBlank() && updated.take(index).none { it.title.trim().equals(stage.rejectTo.trim(), ignoreCase = true) }) {
+                stage.copy(rejectTo = "")
+            } else stage
+        }
+        val nodes = stages.flatMap { stage -> stage.tasks.filter { it.prompt.isNotBlank() }.map { TeamFlowNode(stage.id, it.id) } }.toSet()
+        val kept = routes.filter { it.from in nodes && it.to in nodes }
+        if (kept.size != routes.size) routesRemoved = true
+        routes = kept
+    }
 
     LaunchedEffect(saveState) {
         if (saveState is AgentTeamSaveState.Saved) onSaved()
@@ -117,7 +136,21 @@ internal fun TeamEditorSheet(
 
     // 阶段里可点选的成员：只列团队自己的成员（不是 all availableMembers），避免还没添加的人被选中。
     val stageMembers = remember(members) { members.map { it.name } }
-    val canSave = admins.size == 1 && members.any { it.name == admins.singleOrNull() } && name.isNotBlank() && stages.any { it.members.isNotEmpty() || it.prompt.isNotBlank() }
+    val flowError = TeamFlowGraph.validate(AgentTeam(
+        name = name,
+        description = description,
+        charter = charter,
+        admins = admins,
+        members = members,
+        stages = stages.map { stage -> TeamStage(
+            title = stage.title,
+            tasks = stage.tasks.filter { it.prompt.isNotBlank() }.map { TeamTask(agent = it.agent, prompt = it.prompt, id = it.id) },
+            id = stage.id,
+            isReview = stage.isReview
+        ) },
+        routes = routes
+    ))
+    val canSave = flowError == null && name.isNotBlank() && stages.any { it.members.isNotEmpty() || it.prompt.isNotBlank() }
 
     AdaptiveModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -194,6 +227,11 @@ internal fun TeamEditorSheet(
                             onRemove = {
                                 members = members.filterNot { it.name == ref.name }
                                 admins = admins.filterNot { it == ref.name }
+                                updateStages(stages.map { stage -> stage.copy(
+                                    members = stage.members.filterNot { it.equals(ref.name, ignoreCase = true) },
+                                    tasks = stage.tasks.filterNot { it.agent.equals(ref.name, ignoreCase = true) },
+                                    interfaces = stage.interfaces.filterNot { it.from.equals(ref.name, ignoreCase = true) }
+                                ) })
                             }
                         )
                     }
@@ -231,23 +269,25 @@ internal fun TeamEditorSheet(
                 )
             }
 
-            // One administrator, selected only from this team roster.
+            // Selecting an available administrator also adds them to the team roster.
             SettingsGroupHeader(text = stringResource(R.string.team_editor_admins))
             Text(
-                text = stringResource(R.string.team_editor_admins_hint),
+                text = stringResource(R.string.team_editor_admin_select_hint),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            if (members.isNotEmpty()) {
+            val adminCandidates = (members.map { it.name } + availableMembers).distinct()
+            if (adminCandidates.isNotEmpty()) {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
-                    members.forEach { ref ->
-                        val picked = admins.contains(ref.name)
+                    adminCandidates.forEach { memberName ->
+                        val picked = admins.contains(memberName)
                         FilterChip(
                             selected = picked,
                             onClick = {
-                                admins = listOf(ref.name)
+                                if (members.none { it.name == memberName }) members = members + TeamMemberRef(memberName)
+                                admins = listOf(memberName)
                             },
-                            label = { Text(ref.name) }
+                            label = { Text(memberName) }
                         )
                     }
                 }
@@ -265,7 +305,7 @@ internal fun TeamEditorSheet(
 
             // 流程图：节点按顺序竖向排列，连线走左侧，驳回边用虚线标出
             stages.forEachIndexed { index, stage ->
-                var expanded by remember(index) { mutableStateOf(false) }
+                var expanded by remember(stage.id) { mutableStateOf(false) }
                 ProcessNodeCard(
                     index = index + 1,
                     stage = stage,
@@ -275,8 +315,16 @@ internal fun TeamEditorSheet(
                     rejectTargets = stages.take(index).map { it.title.trim() }.filter { it.isNotEmpty() },
                     expanded = expanded,
                     onToggleExpand = { expanded = it },
-                    onChange = { updated -> stages = stages.toMutableList().also { it[index] = updated.withFlowTasks() } },
-                    onRemove = { stages = stages.filterIndexed { i, _ -> i != index } },
+                    onChange = { updated ->
+                        updateStages(stages.mapIndexed { i, current ->
+                            when {
+                                i == index -> updated.withFlowTasks()
+                                stage.title.isNotBlank() && current.rejectTo.trim().equals(stage.title.trim(), ignoreCase = true) -> current.copy(rejectTo = updated.title.trim())
+                                else -> current
+                            }
+                        })
+                    },
+                    onRemove = { updateStages(stages.filterIndexed { i, _ -> i != index }) },
                     canRemove = stages.size > 1,
                     members = stageMembers
                 )
@@ -293,6 +341,12 @@ internal fun TeamEditorSheet(
 
             TeamFlowMap(admins, stages, routes)
             TeamRouteEditor(stages, routes) { routes = it }
+            if (routesRemoved) {
+                Text(stringResource(R.string.team_flow_removed_endpoints), color = MaterialTheme.colorScheme.error)
+            }
+            if (flowError != null) {
+                Text(stringResource(R.string.team_flow_invalid), color = MaterialTheme.colorScheme.error)
+            }
 
             // 5. 团队公约：团队的用途介绍，也是每个成员指令前的共同约束
             SettingsGroupHeader(text = stringResource(R.string.team_editor_charter))
@@ -384,6 +438,7 @@ private fun StageEditor(
                         // with 侧有意不清：目标可以是部门/标签，未必是本阶段成员
                         onChange(stage.copy(
                             members = next,
+                            tasks = stage.tasks.filter { it.agent.isBlank() || it.agent in next },
                             interfaces = stage.interfaces.filter { edge -> next.any { it.equals(edge.from, ignoreCase = true) } }
                         ))
                     },
@@ -503,7 +558,7 @@ private fun MemberRow(ref: TeamMemberRef, onLevelChange: (Int) -> Unit, onRemove
             )
         }
         LevelStepper(level = ref.level, onChange = onLevelChange)
-        IconButton(onClick = onRemove, modifier = Modifier.size(24.dp)) {
+        IconButton(onClick = onRemove, modifier = Modifier.size(24.dp).testTag("team-member-remove-${ref.name}")) {
             Icon(
                 imageVector = Icons.Default.Close,
                 contentDescription = stringResource(R.string.common_remove),

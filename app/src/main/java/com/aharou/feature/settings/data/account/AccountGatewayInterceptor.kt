@@ -20,8 +20,7 @@ class AccountGatewayInterceptor internal constructor(private val manager: Accoun
         if (request.url.host != AccountProviderManager.SENTINEL) return chain.proceed(request)
         return try {
             manager.withParentCall(chain.call()) {
-                val id = request.url.pathSegments.getOrNull(1) ?: throw AccountProviderException("invalid_gateway", "Missing account ID", 400)
-                manager.withAccountRevision(id) { dispatch(request) }
+                dispatch(request)
             }
         } catch (error: AccountProviderException) {
             error(request, error.httpStatus, error.errorCode, error.message ?: "Account provider request failed")
@@ -43,9 +42,14 @@ class AccountGatewayInterceptor internal constructor(private val manager: Accoun
         val id = segments[1]
         val endpoint = segments.drop(3).joinToString("/")
         if (endpoint == "models" && request.method == "GET") {
-            val models = manager.catalog(id, kind)
+            val directory = manager.poolCatalog(id, kind)
+            val models = directory.models
             val result = JsonObject().apply {
                 addProperty("object", "list")
+                addProperty("partial", directory.issues.isNotEmpty())
+                add("account_errors", JsonArray().apply { directory.issues.forEach { issue -> add(JsonObject().apply {
+                    addProperty("account_id", issue.accountId); addProperty("code", issue.errorCode)
+                }) } })
                 add("data", JsonArray().apply { models.forEach { model -> add(JsonObject().apply { addProperty("id", model.id); addProperty("object", "model"); addProperty("owned_by", kind.wireId) }) } })
             }
             return response(request, ResponseBody.create(AccountProviderManager.JSON, result.toString()))
@@ -53,27 +57,53 @@ class AccountGatewayInterceptor internal constructor(private val manager: Accoun
         if (endpoint != "chat/completions" || request.method != "POST") throw AccountProviderException("unsupported_endpoint", "Account gateway only supports models and chat/completions", 404)
         val body = readRequest(request)
         val modelId = body.text("model") ?: throw AccountProviderException("invalid_model", "A model ID is required", 400)
-        val model = manager.catalog(id, kind).firstOrNull { it.id == modelId } ?: throw AccountProviderException("unknown_model", "Model is absent from the current provider catalog", 400)
         val streaming = body.get("stream")?.asBoolean == true
+        val slots = manager.accounts(id, kind)
+        if (slots.isEmpty()) throw AccountProviderException("login_required", "Sign in to the account provider", 401)
+        var failure: IOException? = null
+        for (slot in slots) {
+            try {
+                val completed = manager.withPoolAccount(id, kind, slot.accountId) {
+                    val model = manager.catalogForAccount(id, kind).firstOrNull { it.id == modelId } ?: return@withPoolAccount null
+                    complete(request, id, kind, body, model, streaming)
+                }
+                if (completed != null) return completed
+            } catch (error: AccountProviderException) {
+                if (error.httpStatus !in setOf(401, 402, 403, 429)) throw error
+                failure = error
+            } catch (error: IOException) {
+                // Retrying after a write/read timeout can duplicate a billable completion.
+                if (error !is java.net.ConnectException && error !is java.net.UnknownHostException &&
+                    error !is java.net.NoRouteToHostException && error !is javax.net.ssl.SSLHandshakeException) throw error
+                failure = error
+            }
+        }
+        throw failure ?: AccountProviderException("unknown_model", "Model is absent from the account pool catalogs", 400)
+    }
+
+    private fun complete(request: Request, id: String, kind: AccountProviderKind, body: JsonObject, model: AccountProviderModel, streaming: Boolean): Response {
+        val modelId = model.id
         val upstreamBody = when (kind) {
-            AccountProviderKind.TRAE -> TraeAccountProtocol.request(body, model)
-            AccountProviderKind.WORKBUDDY -> body.deepCopy().apply { addProperty("stream", true); remove("stream_options") }
+            AccountProviderKind.LOOMY -> LoomyAccountProtocol.request(body)
+            AccountProviderKind.TRAE, AccountProviderKind.TRAE_GLOBAL -> TraeAccountProtocol.request(body, model)
+            AccountProviderKind.WORKBUDDY, AccountProviderKind.WORKBUDDY_GLOBAL -> body.deepCopy().apply { addProperty("stream", true); remove("stream_options") }
             else -> body.deepCopy().apply { remove("reasoning_effort") }
         }
         val upstreamUrl = when (kind) {
+            AccountProviderKind.LOOMY -> manager.endpoints.loomy + "/api/v1/chat/completions"
             AccountProviderKind.RACCOON -> manager.endpoints.raccoon + "/api/web/llm/v2/chat/completions"
-            AccountProviderKind.WORKBUDDY -> manager.endpoints.workbuddy + "/v2/chat/completions"
-            AccountProviderKind.TRAE -> manager.endpoints.trae + "/api/agent/v3/llm_utils_chat"
+            AccountProviderKind.WORKBUDDY, AccountProviderKind.WORKBUDDY_GLOBAL -> manager.endpoints.workbuddy(kind) + "/v2/chat/completions"
+            AccountProviderKind.TRAE, AccountProviderKind.TRAE_GLOBAL -> manager.endpoints.trae(kind) + "/api/agent/v3/llm_utils_chat"
         }
         val upstream = manager.authorized(id, kind, upstreamUrl, "POST", upstreamBody)
         if (!upstream.isSuccessful) {
             val status = upstream.code
-            manager.readJson(upstream)
-            throw AccountProviderException("upstream_http", "Account provider returned HTTP $status", if (status in setOf(401, 402, 403, 429)) status else 502)
+            upstream.close()
+            throw AccountProviderException("upstream_http", "Account provider returned HTTP $status", if (status in 400..499) status else 502)
         }
         val rawBody = upstream.body ?: run { upstream.close(); throw AccountProviderException("empty_response", "Account provider returned no body") }
         try {
-            if (kind == AccountProviderKind.TRAE) {
+            if (kind.isTrae) {
                 if (rawBody.contentType()?.subtype?.contains("json") == true) {
                     manager.readJson(upstream)
                     throw AccountProviderException("invalid_stream", "Trae returned JSON instead of its native event stream")

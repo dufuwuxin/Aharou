@@ -15,6 +15,11 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import com.aharou.core.ui.AppSwitch
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -52,6 +57,13 @@ import compose.icons.feathericons.Plus
 internal fun VaultSection(viewModel: VaultViewModel = hiltViewModel()) {
     val names by viewModel.names.collectAsStateWithLifecycle()
     val writeBlocked by viewModel.writeBlocked.collectAsStateWithLifecycle()
+    val privacyEnabled by viewModel.privacyRedaction.collectAsStateWithLifecycle()
+    val privacyError by viewModel.privacyError.collectAsStateWithLifecycle()
+    var previewInput by remember { mutableStateOf("") }
+    var previewOutput by remember { mutableStateOf("") }
+    LaunchedEffect(previewInput) {
+        previewOutput = withContext(Dispatchers.IO) { viewModel.previewRedaction(previewInput) }
+    }
     var showAdd by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf<String?>(null) }
     var confirmReset by remember { mutableStateOf(false) }
@@ -70,6 +82,30 @@ internal fun VaultSection(viewModel: VaultViewModel = hiltViewModel()) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = Spacing.lg, vertical = 12.dp)
             )
+        }
+
+        SettingsGroupHeader(text = stringResource(R.string.vault_privacy_title))
+        SettingsGroup {
+            SettingsRow(
+                title = stringResource(R.string.vault_privacy_enable),
+                subtitle = stringResource(R.string.vault_privacy_scope),
+                trailing = { AppSwitch(checked = privacyEnabled, onCheckedChange = { viewModel.setPrivacyRedaction(it) }) },
+            )
+            if (privacyError) {
+                Text(stringResource(R.string.vault_privacy_save_failed), color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(Spacing.md))
+            }
+            SettingsDivider()
+            Column(Modifier.fillMaxWidth().padding(Spacing.md), verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                Text(stringResource(R.string.vault_privacy_preview_hint), style = MaterialTheme.typography.bodySmall)
+                AppTextField(value = previewInput, onValueChange = { previewInput = it.take(8192) },
+                    label = stringResource(R.string.vault_privacy_preview_input), minLines = 2, maxLines = 5)
+                if (previewOutput.isNotEmpty()) {
+                    SelectionContainer { Text(previewOutput, style = MaterialTheme.typography.bodySmall) }
+                }
+                Text(stringResource(R.string.vault_privacy_limits), style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
 
         SettingsGroupHeader(text = stringResource(R.string.vault_list_header))

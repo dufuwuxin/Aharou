@@ -507,7 +507,7 @@ fun ProviderEditorScreen(
                             .padding(bottom = 70.dp),
                         verticalArrangement = Arrangement.spacedBy(Spacing.sm)
                     ) {
-                    ProviderBasicGroup(
+                    if (accountKind == null) ProviderBasicGroup(
                         name = name,
                         onNameChange = { name = it },
                         apiKey = apiKey,
@@ -523,7 +523,7 @@ fun ProviderEditorScreen(
                         onOpenType = { showTypeSheet = true },
                         accountMode = accountKind != null,
                     )
-                    accountKind?.let { kind ->
+                    accountKind?.let { kind -> SettingsGroup { ProviderTextFieldRow(label = stringResource(R.string.account_provider_display_name), value = name, onValueChange = { name = it }) }
                         ProviderAccountGroup(accountManager, currentConfig(), kind) { remoteModels ->
                             models.clear()
                             models.addAll(remoteModels)
@@ -564,7 +564,7 @@ fun ProviderEditorScreen(
                         )
                         }
                         if (accountKind == null) ProviderServiceTierRow(type, customHeaders, useResponseApi) { useResponseApi = it }
-                        if (type == ProviderType.OPENAI) {
+                        if (accountKind == null && type == ProviderType.OPENAI) {
                             SettingsDivider()
                             ProviderSwitchRow(
                                 title = stringResource(R.string.provider_cache_openai_chat_title),
@@ -582,7 +582,7 @@ fun ProviderEditorScreen(
                                 onCheckedChange = { anthropicCacheBreakpoints = it }
                             )
                         }
-                        SettingsDivider()
+                        if (accountKind == null) { SettingsDivider()
                         ProviderSwitchRow(
                             title = stringResource(R.string.provider_multi_key_title),
                             subtitle = stringResource(R.string.provider_multi_key_subtitle),
@@ -612,7 +612,7 @@ fun ProviderEditorScreen(
                                 }
                             )
                         }
-                        SettingsDivider()
+                        }; SettingsDivider()
                         SettingsRow(
                             icon = null,
                             title = stringResource(R.string.proxy_title),

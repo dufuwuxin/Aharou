@@ -55,6 +55,7 @@ class ConfigProviderFields @Inject constructor(
 
     fun registerInto(registry: ConfigRegistry) {
         registry.register(ProviderCollection())
+        registry.register(AccountCollection())
     }
 
     private fun snapshot(id: String): AIProviderConfig? =
@@ -62,6 +63,22 @@ class ConfigProviderFields @Inject constructor(
 
     private fun save(updated: AIProviderConfig) =
         runBlocking { providers.saveProvider(updated) }
+
+    private suspend fun refreshAccountModels(id: String) {
+        val initial = providers.getProviderById(id) ?: throw ConfigError.InvalidValue("供应商不存在")
+        val kind = accounts.kind(initial.baseUrl) ?: throw ConfigError.InvalidValue("不是账号供应商")
+        val version = accounts.accountVersion(id)
+        val models = accounts.snapshot(id, kind).models.map { it.id }
+        val current = providers.getProviderById(id) ?: throw ConfigError.InvalidValue("供应商已移除")
+        accounts.persistSnapshot(id, version, providers, current.copy(models = models,
+            defaultModel = current.defaultModel.takeIf { it in models } ?: models.firstOrNull().orEmpty(),
+            selectedModel = current.selectedModel.takeIf { it in models } ?: models.firstOrNull().orEmpty()))
+    }
+
+    private fun importAccountSession(id: String, session: String) = runBlocking {
+        accounts.importLoomySession(id, session)
+        refreshAccountModels(id)
+    }
 
     /** 解析多 Key 串：每行 `值|权重`，与 AIProviderRepositoryImpl 的存储格式一致。 */
     private fun parseProviderKeys(text: String): List<ProviderKey> =
@@ -85,6 +102,53 @@ class ConfigProviderFields @Inject constructor(
                 val sep = line.indexOf(':')
                 line.substring(0, sep).trim() to line.substring(sep + 1).trim()
             }
+
+    private inner class AccountCollection : ConfigCollection {
+        override val basePath = "provider_accounts"
+        override val displayName = "供应商账号池"
+        override val description = "按首次登录顺序列出账号；remove仅移除一个账号。add仅支持用户导入Loomy会话，网页登录仍由用户主动完成。"
+        private fun slots(): List<Triple<String, String, com.aharou.feature.settings.data.account.AccountPoolEntry>> =
+            runBlocking { providers.getAllProviders().first() }.flatMap { provider ->
+                val kind = accounts.kind(provider.baseUrl) ?: return@flatMap emptyList()
+                accounts.accounts(provider.id, kind).map { slot ->
+                    val key = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString((provider.id + ":" + slot.accountId).toByteArray(Charsets.UTF_8))
+                    Triple(key, provider.id, slot)
+                }
+            }
+        override fun childIds(): List<String> = slots().map { it.first }
+        override fun fields(forId: String): List<ConfigField> {
+            val slot = slots().firstOrNull { it.first == forId } ?: return emptyList()
+            return listOf(
+                ReadOnlyField(path = "$basePath.$forId.provider_id", displayName = "供应商ID", description = "账号所属供应商", valueSchema = ConfigSchema.Str(), reader = { ConfigValue.Str(slot.second) }),
+                ReadOnlyField(path = "$basePath.$forId.position", displayName = "优先顺序", description = "最早可用账号优先", valueSchema = ConfigSchema.Int(), reader = { ConfigValue.Int(slot.third.position) }),
+            )
+        }
+        override fun add(payload: ConfigValue): String {
+            val obj = (payload as? ConfigValue.Obj)?.value ?: throw ConfigError.TypeMismatch("object")
+            val id = (obj["provider_id"] as? ConfigValue.Str)?.value ?: throw ConfigError.InvalidValue("缺少provider_id")
+            // `apiKey` is an existing redacted add-payload key; never use an unredacted session key.
+            val session = (obj["apiKey"] as? ConfigValue.Str)?.value ?: throw ConfigError.InvalidValue("缺少用户提供的会话")
+            val provider = snapshot(id) ?: throw ConfigError.InvalidValue("供应商不存在")
+            if (accounts.kind(provider.baseUrl) != com.aharou.feature.settings.data.account.AccountProviderKind.LOOMY) throw ConfigError.InvalidValue("网页登录请在供应商页面添加账号")
+            val old = childIds().toSet()
+            importAccountSession(id, session)
+            return childIds().first { it !in old }
+        }
+        override fun remove(id: String) {
+            val slot = slots().firstOrNull { it.first == id } ?: throw ConfigError.InvalidValue("账号不存在")
+            val provider = snapshot(slot.second) ?: throw ConfigError.InvalidValue("供应商不存在")
+            val kind = accounts.kind(provider.baseUrl) ?: throw ConfigError.InvalidValue("不是账号供应商")
+            accounts.removeAccount(provider.id, kind, slot.third.accountId)
+            runBlocking {
+                val version = accounts.accountVersion(provider.id)
+                val modelIds = if (accounts.isLoggedIn(provider.id)) accounts.snapshot(provider.id, kind).models.map { it.id } else emptyList()
+                val current = providers.getProviderById(provider.id) ?: provider
+                accounts.persistSnapshot(provider.id, version, providers, current.copy(models = modelIds,
+                    defaultModel = current.defaultModel.takeIf { it in modelIds } ?: modelIds.firstOrNull().orEmpty(),
+                    selectedModel = current.selectedModel.takeIf { it in modelIds } ?: modelIds.firstOrNull().orEmpty()))
+            }
+        }
+    }
 
     private inner class ProviderCollection : ConfigCollection {
         override val basePath = "providers"
@@ -122,6 +186,16 @@ class ConfigProviderFields @Inject constructor(
                     val s = (v as? ConfigValue.Str)?.value ?: throw ConfigError.TypeMismatch("string")
                     val current = snapshot(forId) ?: throw ConfigError.InvalidValue("供应商不存在：$forId")
                     save(write(current, s))
+                },
+            )
+
+            fun accountAction(field: String, name: String, desc: String, risk: ConfigRisk = ConfigRisk.NORMAL,
+                execute: (AIProviderConfig, String) -> Unit) = ClosureField(
+                path = "$basePath.$forId.$field", displayName = "$name（$forId）", description = desc,
+                valueSchema = ConfigSchema.Str(), risk = risk, revertable = false,
+                reader = { ConfigValue.Str("") }, writer = { value ->
+                    val text = (value as? ConfigValue.Str)?.value ?: throw ConfigError.TypeMismatch("string")
+                    execute(snapshot(forId) ?: throw ConfigError.InvalidValue("供应商不存在"), text)
                 },
             )
 
@@ -191,10 +265,28 @@ class ConfigProviderFields @Inject constructor(
             if (!exists) return emptyList()
 
             return listOf(
+                accountAction(
+                    field = "account_session", name = "Loomy会话导入",
+                    desc = "用户主动提供自己的Loomy会话；验证后保存账号池，并同步合并模型目录，不返回凭据。",
+                    risk = ConfigRisk.SENSITIVE,
+                    execute = { p, value ->
+                        if (accounts.kind(p.baseUrl) != com.aharou.feature.settings.data.account.AccountProviderKind.LOOMY) throw ConfigError.InvalidValue("仅Loomy支持此入口")
+                        importAccountSession(p.id, value)
+                    },
+                ),
+                accountAction(
+                    field = "account_check_in", name = "账号签到",
+                    desc = "写入run执行签到；不支持的地区或企业账号不发签到请求，奖励以服务端实际入账为准。",
+                    execute = { p, value ->
+                        if (value != "run") throw ConfigError.InvalidValue("请写入run执行")
+                        val kind = accounts.kind(p.baseUrl) ?: throw ConfigError.InvalidValue("不是账号供应商")
+                        runBlocking { accounts.checkIn(p.id, kind) }
+                    },
+                ),
                 str(
                     field = "account_service",
                     name = "账号供应商",
-                    desc = "账号接入：trae / workbuddy / raccoon。设置后改用本机原生账号连接；登录须由用户在供应商页完成。",
+                    desc = "账号接入：trae / trae-global / workbuddy / workbuddy-global / raccoon / loomy。旧标识为国内版；Loomy由用户主动导入session，其余登录由用户在供应商页完成。",
                     revertable = false,
                     read = { accounts.kind(it.baseUrl)?.wireId.orEmpty() },
                     write = { p, s ->
@@ -494,7 +586,10 @@ class ConfigProviderFields @Inject constructor(
                     read = { it.openaiChatCacheKey },
                     write = { p, b -> p.copy(openaiChatCacheKey = b) },
                 ),
-            )
+            ).filter { field ->
+                val accountMode = snapshot(forId)?.let { accounts.kind(it.baseUrl) != null } == true
+                !accountMode || field.path.substringAfterLast('.') !in setOf("api_key", "api_keys", "multi_key_enabled", "key_rotation_strategy", "key_cooldown_minutes", "key_switch_status_codes", "type", "use_full_url", "use_response_api", "service_tier", "custom_headers", "openai_chat_cache_key", "anthropic_cache_breakpoints")
+            }
         }
 
         override val addPayloadSchema: ConfigSchema = ConfigSchema.Json

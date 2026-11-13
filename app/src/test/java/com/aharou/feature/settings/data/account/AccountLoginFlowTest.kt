@@ -150,4 +150,69 @@ class AccountLoginFlowTest {
             assertFalse(error.httpStatus == 401)
         }
     }
+    @Test fun globalWorkBuddyLoginAndRefreshUseOnlyGlobalEndpoints() = runBlocking {
+        MockWebServer().use { global ->
+            MockWebServer().use { domestic ->
+                val base = global.url("/").toString().trimEnd('/')
+                val cn = domestic.url("/").toString().trimEnd('/')
+                val manager = AccountProviderManager(Vault(), OkHttpClient.Builder().followRedirects(false).build(), AccountEndpoints(workbuddy = cn, workbuddyGlobal = base))
+                global.enqueue(MockResponse().setBody("""{"code":0,"data":{"state":"s","authUrl":"https://www.workbuddy.ai/login"}}"""))
+                global.enqueue(MockResponse().setBody("""{"code":0,"data":{"accessToken":"fixture-a","refreshToken":"fixture-r"}}"""))
+                global.enqueue(MockResponse().setBody("""{"code":0,"data":{"uid":"u"}}"""))
+                val login = manager.beginLogin("id", AccountProviderKind.WORKBUDDY_GLOBAL)
+                manager.awaitLogin(login)
+                global.enqueue(MockResponse().setBody("""{"code":0,"data":{"accessToken":"fixture-b","refreshToken":"fixture-next"}}"""))
+                manager.refresh("id", AccountProviderKind.WORKBUDDY_GLOBAL, "fixture-a")
+                assertEquals("/v2/plugin/auth/state?platform=CLI", global.takeRequest().path)
+                assertEquals("/v2/plugin/auth/token?state=s", global.takeRequest().path)
+                assertEquals("/v2/plugin/login/account?state=s", global.takeRequest().path)
+                val refresh = global.takeRequest()
+                assertEquals("/v2/plugin/auth/token/refresh", refresh.path)
+                assertEquals("https://www.workbuddy.ai", refresh.getHeader("Origin"))
+                global.enqueue(MockResponse().setBody("""{"data":{"models":[{"id":"m"}]}}"""))
+                global.enqueue(MockResponse().setBody("""{"data":{"Accounts":[{"CycleCapacitySize":100,"CycleCapacityRemain":75}]}}"""))
+                assertEquals("75 / 100 cycle credits", manager.snapshot("id", AccountProviderKind.WORKBUDDY_GLOBAL).balance)
+                assertEquals("/v3/config", global.takeRequest(1, TimeUnit.SECONDS)!!.path)
+                assertEquals("/v2/billing/meter/get-user-resource", global.takeRequest(1, TimeUnit.SECONDS)!!.path)
+                assertEquals(0, domestic.requestCount)
+                try { manager.credential("id", AccountProviderKind.WORKBUDDY); fail("Cross-region credentials must fail") }
+                catch (error: AccountProviderException) { assertEquals("account_mismatch", error.errorCode) }
+            }
+        }
+    }
+
+    @Test fun globalTraeAuthorizationUsesInternationalWebsiteAndCancellationRejectsCallback() = runBlocking {
+        val manager = AccountProviderManager(Vault(), OkHttpClient())
+        val login = manager.beginLogin("id", AccountProviderKind.TRAE_GLOBAL)
+        assertTrue(login.url.startsWith("https://www.trae.ai/authorization?"))
+        manager.cancelLogin(login)
+        assertFalse(manager.acceptCallback(login, login.callbackPrefix + "?code=late&state=" + login.state))
+        assertFalse(manager.isLoggedIn("id"))
+    }
+
+    @Test fun globalTraeExchangeRefreshAndBalanceNeverUseDomesticHost() = runBlocking {
+        MockWebServer().use { global ->
+            MockWebServer().use { domestic ->
+                val base = global.url("/").toString().trimEnd('/')
+                val manager = AccountProviderManager(Vault(), OkHttpClient.Builder().followRedirects(false).build(), AccountEndpoints(traeAccount = domestic.url("/").toString().trimEnd('/'), traeGlobalAccount = base, traeGlobal = base, traeGlobalUsage = base))
+                val login = manager.beginLogin("id", AccountProviderKind.TRAE_GLOBAL)
+                assertTrue(manager.acceptCallback(login, login.callbackPrefix + "?code=fixture-code&state=" + login.state))
+                global.enqueue(MockResponse().setBody("""{"Result":{"Token":"fixture-a","RefreshToken":"fixture-r"}}"""))
+                manager.awaitLogin(login)
+                val exchange = global.takeRequest(1, TimeUnit.SECONDS)!!
+                assertEquals("/trae/api/v3/oauth/ExchangeToken", exchange.path)
+                assertEquals("en1oxy7wnw8j9n", json(exchange.body.readUtf8()).get("ClientID").asString)
+                global.enqueue(MockResponse().setBody("""{"Result":{"Token":"fixture-b","RefreshToken":"fixture-next"}}"""))
+                manager.refresh("id", AccountProviderKind.TRAE_GLOBAL, "fixture-a")
+                assertEquals("/cloudide/api/v3/trae/oauth/ExchangeToken", global.takeRequest(1, TimeUnit.SECONDS)!!.path)
+                global.enqueue(MockResponse().setBody("""{"data":{"config_info_list":[{"config_name":"m"}]}}"""))
+                global.enqueue(MockResponse().setBody("""{"data":{"user_entitlement_pack_list":[{"entitlement_base_info":{"quota":{"credits_limit":100}},"usage":{"credits_amount":25}}]}}"""))
+                assertEquals("75 / 100 credits", manager.snapshot("id", AccountProviderKind.TRAE_GLOBAL).balance)
+                assertEquals("/api/ide/v1/get_detail_param", global.takeRequest(1, TimeUnit.SECONDS)!!.path)
+                assertEquals("/trae/api/v1/pay/ide_user_ent_usage", global.takeRequest(1, TimeUnit.SECONDS)!!.path)
+                assertEquals(0, domestic.requestCount)
+            }
+        }
+    }
+
 }

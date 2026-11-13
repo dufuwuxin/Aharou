@@ -125,6 +125,10 @@ class AIEditorApp : Application(), Configuration.Provider {
     }
 
     override fun attachBaseContext(base: android.content.Context) {
+        if (getProcessNameCompat(base).endsWith(":account_login")) {
+            super.attachBaseContext(base)
+            return
+        }
         // 最早入口：在任何 Hilt 注入/业务初始化之前就绪日志与崩溃落盘。
         // 启动早期（如 Hilt 注入链实例化 @Singleton 工具）的崩溃若发生在 FileLogger 初始化之前
         // 会不留任何痕迹，故把日志与全局崩溃处理器提到 attachBaseContext 最前。
@@ -363,10 +367,8 @@ class AIEditorApp : Application(), Configuration.Provider {
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun onCreate() {
-        if (isCrashProcess(this)) {
-            // 崩溃错误页运行在独立 :crash 进程中。
-            // 坚决不执行 super.onCreate()（避免触发 Hilt 的 @Inject 字段注入与隐式业务类加载），
-            // 也坚决不启动主进程业务协程、数据库访问或常驻服务，使错误页拥有纯净轻量的渲染环境。
+        if (isCrashProcess(this) || getProcessNameCompat(this).endsWith(":account_login")) {
+            // 轻量子进程不能触发 Hilt 业务注入、数据库或主进程常驻服务。
             return
         }
         super.onCreate()

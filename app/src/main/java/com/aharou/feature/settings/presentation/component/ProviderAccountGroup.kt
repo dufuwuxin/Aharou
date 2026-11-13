@@ -1,8 +1,5 @@
 package com.aharou.feature.settings.presentation.component
 
-import android.webkit.WebResourceRequest
-import android.webkit.WebView
-import android.webkit.WebViewClient
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -10,7 +7,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -24,9 +20,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import com.aharou.R
 import com.aharou.core.theme.Spacing
 import com.aharou.feature.settings.data.account.AccountLogin
@@ -65,6 +58,9 @@ internal fun rememberAccountProviderManager(): AccountProviderManager {
 internal fun accountProviderName(kind: AccountProviderKind): String = stringResource(
     when (kind) {
         AccountProviderKind.TRAE -> R.string.provider_account_trae
+        AccountProviderKind.TRAE_GLOBAL -> R.string.provider_account_trae_global
+        AccountProviderKind.WORKBUDDY_GLOBAL -> R.string.provider_account_workbuddy_global
+        AccountProviderKind.LOOMY -> R.string.provider_account_loomy
         AccountProviderKind.WORKBUDDY -> R.string.provider_account_workbuddy
         AccountProviderKind.RACCOON -> R.string.provider_account_raccoon
     }
@@ -83,11 +79,14 @@ internal fun ProviderAccountGroup(
     val context = LocalContext.current.applicationContext
     val repository = remember(context) { EntryPointAccessors.fromApplication(context, AccountProviderEntryPoint::class.java).providerRepository() }
     var loggedIn by remember(providerId, kind) { mutableStateOf(false) }
+    var accounts by remember(providerId, kind) { mutableStateOf(emptyList<com.aharou.feature.settings.data.account.AccountPoolEntry>()) }
     var snapshot by remember(providerId, kind) { mutableStateOf<AccountSnapshot?>(null) }
     var login by remember(providerId, kind) { mutableStateOf<AccountLogin?>(null) }
     var operation by remember(providerId, kind) { mutableStateOf<Job?>(null) }
     var busy by remember(providerId, kind) { mutableStateOf(false) }
     var error by remember(providerId, kind) { mutableStateOf<String?>(null) }
+    var session by remember(providerId, kind) { mutableStateOf("") }
+    var checkInStatus by remember(providerId, kind) { mutableStateOf<com.aharou.feature.settings.data.account.AccountCheckInStatus?>(null) }
     val modelsCallback = androidx.compose.runtime.rememberUpdatedState(onModels)
 
     suspend fun refresh() {
@@ -117,12 +116,16 @@ internal fun ProviderAccountGroup(
                 error = (failure as? AccountProviderException)?.errorCode ?: "network_error"
             } finally {
                 busy = false
-                loggedIn = withContext(Dispatchers.IO) { manager.isLoggedIn(providerId) }
+                withContext(kotlinx.coroutines.NonCancellable) {
+                    accounts = withContext(Dispatchers.IO) { manager.accounts(providerId, kind) }
+                    loggedIn = accounts.isNotEmpty()
+                }
             }
         }
     }
     LaunchedEffect(providerId, kind) {
-        loggedIn = withContext(Dispatchers.IO) { manager.isLoggedIn(providerId) }
+        accounts = withContext(Dispatchers.IO) { manager.accounts(providerId, kind) }
+        loggedIn = accounts.isNotEmpty()
         if (loggedIn) launchOperation { refresh() }
     }
     DisposableEffect(providerId, kind) {
@@ -134,6 +137,18 @@ internal fun ProviderAccountGroup(
 
     SettingsGroupHeader(text = stringResource(R.string.provider_account_title))
     SettingsGroup {
+        if (kind == AccountProviderKind.LOOMY) {
+            com.aharou.core.ui.AppTextField(
+                value = session,
+                onValueChange = { session = it },
+                label = stringResource(R.string.provider_account_loomy_session),
+                visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                modifier = Modifier.fillMaxWidth().padding(Spacing.md),
+                enabled = !busy,
+                singleLine = true,
+            )
+            Text(stringResource(R.string.provider_account_loomy_import_help), modifier = Modifier.padding(Spacing.md), style = MaterialTheme.typography.bodySmall)
+        }
         SettingsRow(
             title = accountProviderName(kind),
             subtitle = stringResource(if (loggedIn) R.string.provider_account_signed_in else R.string.provider_account_signed_out),
@@ -141,6 +156,15 @@ internal fun ProviderAccountGroup(
                 TextButton(enabled = !busy, onClick = {
                     launchOperation {
                         repository.saveProvider(providerState.value)
+                        if (kind == AccountProviderKind.LOOMY) {
+                            val imported = session
+                            session = ""
+                            manager.importLoomySession(providerId, imported)
+                            loggedIn = true
+                            snapshot = null
+                            refresh()
+                            return@launchOperation
+                        }
                         val attempt = manager.beginLogin(providerId, kind)
                         login = attempt
                         try {
@@ -154,7 +178,7 @@ internal fun ProviderAccountGroup(
                             login = null
                         }
                     }
-                }) { Text(stringResource(if (loggedIn) R.string.provider_account_sign_in_again else R.string.provider_account_sign_in)) }
+                }) { Text(stringResource(if (kind == AccountProviderKind.LOOMY) R.string.provider_account_import_session else if (android.os.Build.VERSION.SDK_INT >= 28) R.string.account_provider_add_account else R.string.account_provider_add_account_legacy)) }
             },
         )
         SettingsDivider()
@@ -168,7 +192,54 @@ internal fun ProviderAccountGroup(
                 }
             },
         )
+        SettingsRow(
+            title = stringResource(R.string.provider_account_check_in),
+            subtitle = stringResource(when (checkInStatus) {
+                com.aharou.feature.settings.data.account.AccountCheckInStatus.CLAIMED -> R.string.provider_account_check_in_claimed
+                com.aharou.feature.settings.data.account.AccountCheckInStatus.ALREADY_CHECKED -> R.string.provider_account_check_in_already
+                com.aharou.feature.settings.data.account.AccountCheckInStatus.UNKNOWN -> R.string.provider_account_check_in_unknown
+                com.aharou.feature.settings.data.account.AccountCheckInStatus.UNSUPPORTED -> R.string.provider_account_check_in_unsupported
+                null -> R.string.provider_account_check_in_help
+            }),
+            trailing = {
+                TextButton(enabled = loggedIn && !busy, onClick = {
+                    launchOperation {
+                        checkInStatus = null
+                        val result = manager.checkIn(providerId, kind)
+                        checkInStatus = result.status
+                        if (result.status != com.aharou.feature.settings.data.account.AccountCheckInStatus.UNSUPPORTED) refresh()
+                    }
+                }) { Text(stringResource(R.string.provider_account_check_in)) }
+            },
+        )
+        accounts.forEach { slot ->
+            SettingsDivider()
+            SettingsRow(
+                title = stringResource(R.string.account_provider_slot, slot.position),
+                trailing = {
+                    Row {
+                        TextButton(enabled = !busy, onClick = {
+                            launchOperation { checkInStatus = manager.checkInAccount(providerId, kind, slot.accountId).status }
+                        }) { Text(stringResource(R.string.provider_account_check_in)) }
+                        TextButton(enabled = !busy, onClick = {
+                            launchOperation {
+                                withContext(Dispatchers.IO) { manager.removeAccount(providerId, kind, slot.accountId) }
+                                snapshot = null
+                                if (manager.isLoggedIn(providerId)) refresh() else {
+                                    val version = manager.accountVersion(providerId)
+                                    val current = repository.getProviderById(providerId) ?: providerState.value
+                                    manager.persistSnapshot(providerId, version, repository, current.copy(models = emptyList(), defaultModel = "", selectedModel = ""))
+                                    modelsCallback.value(emptyList())
+                                }
+                            }
+                        }) { Text(stringResource(R.string.account_provider_remove_account)) }
+                    }
+                },
+            )
+        }
+        Text(stringResource(R.string.account_provider_pool_hint), modifier = Modifier.padding(Spacing.md), style = MaterialTheme.typography.bodySmall)
         snapshot?.let { current ->
+            if (current.accountIssues.isNotEmpty()) Text(stringResource(R.string.account_provider_partial), modifier = Modifier.padding(Spacing.md), color = MaterialTheme.colorScheme.error)
             Text(
                 stringResource(R.string.provider_account_updated, DateFormat.getDateTimeInstance().format(Date(current.fetchedAt))),
                 style = MaterialTheme.typography.bodySmall,
@@ -194,6 +265,7 @@ internal fun ProviderAccountGroup(
             Text(
                 text = stringResource(
                     when (code) {
+                        "isolated_login_requires_api28" -> R.string.account_provider_isolation_unavailable
                         "login_required", "account_mismatch", "invalid_credentials" -> R.string.provider_account_auth_failed
                         "login_expired", "invalid_login" -> R.string.provider_account_login_failed
                         "account_changed" -> R.string.provider_account_changed
@@ -224,7 +296,11 @@ internal fun ProviderAccountGroup(
                     launchOperation {
                         withContext(Dispatchers.IO) { manager.logout(providerId) }
                         snapshot = null
+                        checkInStatus = null
+                        session = ""
                         loggedIn = false
+                        accounts = emptyList()
+                        modelsCallback.value(emptyList())
                     }
                 },
             )
@@ -241,36 +317,35 @@ internal fun ProviderAccountGroup(
 
 @Composable
 private fun AccountLoginDialog(login: AccountLogin, manager: AccountProviderManager, onDismiss: () -> Unit) {
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
-            Column {
-                Row(modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.md), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(stringResource(R.string.provider_account_login_title), modifier = Modifier.padding(vertical = Spacing.md))
-                    TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_close)) }
+    if (android.os.Build.VERSION.SDK_INT < 28) {
+        AccountLegacyLoginDialog(login, manager, onDismiss)
+        return
+    }
+    val context = LocalContext.current
+    DisposableEffect(login) {
+        var remote: android.os.ResultReceiver? = null
+        var disposed = false
+        val receiver = object : android.os.ResultReceiver(android.os.Handler(android.os.Looper.getMainLooper())) {
+            @Suppress("DEPRECATION")
+            override fun onReceiveResult(resultCode: Int, resultData: android.os.Bundle?) {
+                when (resultCode) {
+                    AccountLoginActivity.READY -> {
+                        remote = resultData?.getParcelable(AccountLoginActivity.RECEIVER)
+                        if (disposed) remote?.send(0, android.os.Bundle.EMPTY)
+                    }
+                    AccountLoginActivity.CALLBACK -> {
+                        val url = resultData?.getString(AccountLoginActivity.URL) ?: return
+                        if (!disposed && !manager.acceptCallback(login, url)) onDismiss()
+                    }
+                    AccountLoginActivity.CANCELLED -> if (!disposed) onDismiss()
                 }
-                AndroidView(
-                    modifier = Modifier.fillMaxSize(),
-                    factory = { context ->
-                        WebView(context).apply {
-                            settings.javaScriptEnabled = true
-                            settings.domStorageEnabled = true
-                            settings.allowFileAccess = false
-                            settings.allowContentAccess = false
-                            settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
-                            settings.safeBrowsingEnabled = true
-                            webViewClient = object : WebViewClient() {
-                                override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
-                                    val url = request.url
-                                    if (manager.acceptCallback(login, url.toString())) return true
-                                    return url.scheme !in setOf("https", "http") || (url.scheme == "http" && url.host != "127.0.0.1")
-                                }
-                            }
-                            loadUrl(login.url)
-                        }
-                    },
-                    onRelease = { webView -> webView.stopLoading(); webView.destroy() },
-                )
             }
         }
+        context.startActivity(android.content.Intent(context, AccountLoginActivity::class.java).apply {
+            putExtra(AccountLoginActivity.URL, login.url)
+            putExtra(AccountLoginActivity.CALLBACK_PREFIX, login.callbackPrefix)
+            putExtra(AccountLoginActivity.RECEIVER, receiver)
+        })
+        onDispose { disposed = true; remote?.send(0, android.os.Bundle.EMPTY) }
     }
 }

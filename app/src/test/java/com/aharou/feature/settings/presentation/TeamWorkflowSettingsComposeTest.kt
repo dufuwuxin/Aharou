@@ -71,7 +71,7 @@ class TeamWorkflowSettingsComposeTest {
     @Test fun editorClicksKeepAnInvalidChainOpenThenPersistAndDisplayTheCorrectedPreset() {
         val name = "click-release"
         val file = File(repository.workflowsRoot(AgentDefinitionScope.GLOBAL), "$name.md")
-        compose.setContent { MaterialTheme { TeamWorkflowsSection(viewModel) } }
+        compose.setContent { MaterialTheme { TeamWorkflowsSection(viewModel, availableMembers = listOf("coordinator-role")) } }
         awaitRepositoryIdle()
         assertEquals(listOf("build", "review"), viewModel.state.value.availableTeams)
         assertTrue(repository.listAll().isEmpty())
@@ -93,6 +93,10 @@ class TeamWorkflowSettingsComposeTest {
         assertTrue(repository.listAll().isEmpty())
 
         chooseTeam(2, "review")
+        compose.onAllNodesWithText(compose.activity.getString(R.string.team_workflow_lead))[0]
+            .performScrollTo().performClick()
+        compose.onNodeWithText("coordinator-role").performClick()
+        assertEquals("coordinator-role", viewModel.state.value.editor!!.form.teams[0].lead)
         saveThroughEditor()
 
         assertNull(viewModel.state.value.saveError)
@@ -102,6 +106,7 @@ class TeamWorkflowSettingsComposeTest {
         assertNotNull(parsed)
         assertEquals(name, parsed!!.name)
         assertEquals(listOf("build", "review"), parsed.teams.map { it.teamName })
+        assertEquals("coordinator-role", parsed.teams[0].lead)
         assertEquals(file.absolutePath, parsed.filePath)
         val saved = repository.listAll().single()
         assertEquals(AgentDefinitionScope.GLOBAL, saved.scope)

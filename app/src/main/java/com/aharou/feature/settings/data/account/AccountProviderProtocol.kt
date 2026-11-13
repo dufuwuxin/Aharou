@@ -8,7 +8,11 @@ import java.io.IOException
 import java.util.Base64
 
 enum class AccountProviderKind(val wireId: String) {
-    TRAE("trae"), WORKBUDDY("workbuddy"), RACCOON("raccoon");
+    TRAE("trae"), WORKBUDDY("workbuddy"), RACCOON("raccoon"),
+    TRAE_GLOBAL("trae-global"), WORKBUDDY_GLOBAL("workbuddy-global"), LOOMY("loomy");
+
+    val isTrae: Boolean get() = this == TRAE || this == TRAE_GLOBAL
+    val isWorkBuddy: Boolean get() = this == WORKBUDDY || this == WORKBUDDY_GLOBAL
 
     companion object {
         fun fromWireId(value: String): AccountProviderKind? = entries.firstOrNull { it.wireId == value }
@@ -24,7 +28,7 @@ data class AccountProviderModel(
     internal val modelName: String? = null,
 )
 
-data class AccountSnapshot(val models: List<AccountProviderModel>, val balance: String?, val fetchedAt: Long, val balanceError: String? = null)
+data class AccountSnapshot(val models: List<AccountProviderModel>, val balance: String?, val fetchedAt: Long, val balanceError: String? = null, val accountIssues: List<AccountPoolIssue> = emptyList())
 
 class AccountProviderException(val errorCode: String, message: String, val httpStatus: Int = 502) : IOException(message)
 
@@ -34,7 +38,18 @@ internal data class AccountEndpoints(
     val workbuddyBilling: String = "https://www.codebuddy.cn",
     val trae: String = "https://trae-api-cn.mchost.guru",
     val traeAccount: String = "https://api.trae.cn",
-)
+    val workbuddyGlobal: String = "https://www.workbuddy.ai",
+    val traeGlobal: String = "https://trae-api-sg.mchost.guru",
+    val traeGlobalAccount: String = "https://api.trae.ai",
+    val traeGlobalUsage: String = "https://ug-normal.trae.ai",
+    val loomy: String = "https://loomyad.xunfei.cn",
+) {
+    fun workbuddy(kind: AccountProviderKind): String = if (kind == AccountProviderKind.WORKBUDDY_GLOBAL) workbuddyGlobal else workbuddy
+    fun billing(kind: AccountProviderKind): String = if (kind == AccountProviderKind.WORKBUDDY_GLOBAL) workbuddyGlobal else workbuddyBilling
+    fun trae(kind: AccountProviderKind): String = if (kind == AccountProviderKind.TRAE_GLOBAL) traeGlobal else trae
+    fun traeAccount(kind: AccountProviderKind): String = if (kind == AccountProviderKind.TRAE_GLOBAL) traeGlobalAccount else traeAccount
+    fun usage(kind: AccountProviderKind): String = if (kind == AccountProviderKind.TRAE_GLOBAL) traeGlobalUsage else traeAccount
+}
 
 internal fun JsonObject.text(key: String): String? = get(key)?.takeIf { it.isJsonPrimitive }?.asString?.takeIf { it.isNotBlank() }
 internal fun JsonObject.obj(key: String): JsonObject? = get(key)?.takeIf { it.isJsonObject }?.asJsonObject
@@ -62,7 +77,7 @@ internal object AccountProviderProtocol {
             "12153" -> throw AccountProviderException("login_required", "Provider login session is no longer valid", 401)
         }
         val error = value.get("error")
-        if ((code != null && code != "0" && code != "200") || (error != null && !error.isJsonNull)) {
+        if ((code != null && code !in setOf("0", "200", "000000")) || (error != null && !error.isJsonNull)) {
             // Do not include upstream messages: they may echo request credentials.
             throw AccountProviderException("upstream_error", "Account provider rejected the request${code?.takeIf { it.matches(Regex("[0-9]{1,8}")) }?.let { " (code $it)" } ?: ""}")
         }
@@ -72,14 +87,15 @@ internal object AccountProviderProtocol {
 
     fun models(kind: AccountProviderKind, payload: JsonObject): List<AccountProviderModel> {
         check(payload)
-        if (kind == AccountProviderKind.TRAE) return TraeAccountProtocol.models(payload)
+        if (kind.isTrae) return TraeAccountProtocol.models(payload)
+        if (kind == AccountProviderKind.LOOMY) return LoomyAccountProtocol.models(payload)
         val data = payload.obj("data") ?: payload
         val rows = when (kind) {
             AccountProviderKind.RACCOON -> data.array("categories").flatMap { category ->
                 val group = category.objectOrNull() ?: return@flatMap emptyList()
                 if (group.text("type") != null && group.text("type") != "chat") emptyList() else group.array("models").toList()
             }
-            AccountProviderKind.WORKBUDDY -> {
+            AccountProviderKind.WORKBUDDY, AccountProviderKind.WORKBUDDY_GLOBAL -> {
                 val agents = data.array("agents").toList().ifEmpty { data.obj("agent")?.array("agents")?.toList().orEmpty() }
                 val cli = agents.mapNotNull { it.objectOrNull() }.firstOrNull { it.text("name") == "cli" }
                 val allowed = cli?.array("models")?.mapNotNull { it.takeIf { value -> value.isJsonPrimitive && value.asJsonPrimitive.isString }?.asString }?.toSet()
@@ -105,13 +121,15 @@ internal object AccountProviderProtocol {
         val data = payload.obj("data") ?: payload
         return when (kind) {
             AccountProviderKind.RACCOON -> (number(data.get("total_chargeable_points")) ?: number(data.get("available_points")))?.let { "$it points" }
-            AccountProviderKind.TRAE -> {
+            AccountProviderKind.LOOMY -> LoomyAccountProtocol.balance(payload)
+            AccountProviderKind.TRAE, AccountProviderKind.TRAE_GLOBAL -> {
+                TraeAccountProtocol.balance(payload)?.let { return it }
                 val summary = data.obj("usage_summary") ?: return null
                 val total = number(summary.get("total_amount"))?.toBigDecimal() ?: return null
                 val consumed = number(summary.get("consumed_amount"))?.toBigDecimal() ?: return null
                 "${total.subtract(consumed).stripTrailingZeros().toPlainString()} credits (official summary)"
             }
-            AccountProviderKind.WORKBUDDY -> {
+            AccountProviderKind.WORKBUDDY, AccountProviderKind.WORKBUDDY_GLOBAL -> {
                 val resourceData = data.obj("Response")?.obj("Data") ?: data
                 if (!resourceData.has("Accounts")) return null
                 val resources = resourceData.array("Accounts").toList()
