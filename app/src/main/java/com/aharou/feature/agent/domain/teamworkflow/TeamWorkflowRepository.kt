@@ -42,8 +42,14 @@ class TeamWorkflowRepository @Inject constructor(
             it.scope == scope && it.workflow.name.equals(name.trim(), ignoreCase = true)
         } ?: return false
         val filePath = entry.workflow.filePath ?: return false
-        if (!fileAccess.isFile(filePath)) return false
-        return runCatching { fileAccess.delete(filePath); true }.getOrDefault(false)
+        return try {
+            val access = fileAccess.checked()
+            if (!access.isFile(filePath)) false else {
+                access.delete(filePath)
+                !access.exists(filePath)
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (_: Exception) { false }
     }
 
     /** 指定作用域的预设目录（容器路径）。 */
@@ -100,14 +106,25 @@ class TeamWorkflowRepository @Inject constructor(
             // 名字未改时写回原文件，不能按 name 重拼：文件名可能与 frontmatter 的 name 大小写不同。
             val target = existingFile?.takeIf { overwritingSelf && fileAccess.isFile(it) }
                 ?: "$root/$name.md"
-            fileAccess.writeFile(target, TeamWorkflowParser.serialize(form), overwrite = true)
-            if (!overwritingSelf && existingFile != null && existingFile != target && fileAccess.isFile(existingFile)) {
-                runCatching { fileAccess.delete(existingFile) }.onFailure {
-                    FileLogger.w(TAG, "重命名后删除旧工作流预设失败: $existingFile")
+            val access = fileAccess.checked()
+            val before = if (access.isFile(target)) access.readFile(target) else null
+            val content = TeamWorkflowParser.serialize(form)
+            try {
+                access.writeFile(target, content, overwrite = true)
+                check(access.isFile(target) && access.readFile(target) == content) { "Workflow write not persisted" }
+                if (!overwritingSelf && existingFile != null && existingFile != target && access.isFile(existingFile)) {
+                    access.delete(existingFile)
+                    check(!access.exists(existingFile)) { "Old workflow file was not removed" }
                 }
+                null
+            } catch (failure: Exception) {
+                try {
+                    if (before == null) access.delete(target) else access.writeFile(target, before, overwrite = true)
+                } catch (restore: Exception) { failure.addSuppressed(restore) }
+                throw failure
             }
-            null
         } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
             FileLogger.e(TAG, "保存工作流预设失败: $name", e)
             TeamWorkflowSaveError.IO_FAILED
         }

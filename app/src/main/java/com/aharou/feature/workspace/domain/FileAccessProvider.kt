@@ -34,6 +34,9 @@ data class FileEntry(
  */
 interface FileAccessProvider {
 
+    /** Persistence transactions handle failures themselves instead of accepting safe UI fallbacks. */
+    fun checked(): FileAccessProvider = this
+
     /**
      * 读取文件全文文本。文件不存在时抛 [NoSuchFileException]。
      * 远程模式对超过实现上限的文件抛 [RemoteOutputTooLargeException]，避免整篇读进内存。

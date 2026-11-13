@@ -46,6 +46,8 @@ class DelegatingFileAccess private constructor(
      * 只看全局 mode 会让「工作区 → SSH 容器」的覆盖形同虚设：那个工作区的技能、文件工具、
      * 记忆全都会继续读写本地，而命令却跑到了服务器上，两边看到的根本不是同一套文件。
      */
+    override fun checked(): FileAccessProvider = delegate().checked()
+
     private fun delegate(): FileAccessProvider {
         val remote = if (boundWorkspace != null) {
             profileResolver.forWorkspace(boundWorkspace).mode == ExecutionMode.REMOTE_SSH

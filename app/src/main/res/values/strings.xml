@@ -4024,7 +4024,7 @@
     <string name="context_memory_shared_roles">共享给这些角色（每行一个角色名）</string>
     <string name="settings_local_model_import">导入已校验的 GGUF 文件</string>
     <string name="team_workflows_title">多团队工作流</string>
-    <string name="team_workflows_hint">按顺序连接已有团队，保存为预设；在项目工作流入口启动，不会在此执行。</string>
+    <string name="team_workflows_hint">按顺序连接已有团队并保存为预设；在对话中指定工作流名称和目标，由团队工具执行，过程保存在会话记录中。此处只管理预设。</string>
     <string name="team_workflows_empty">暂无工作流，请先创建至少两个团队，再连接为工作流。</string>
     <string name="team_workflows_loading">正在读取工作流…</string>
     <string name="team_workflows_load_failed">读取失败，保留已有列表，请重试。</string>

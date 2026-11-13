@@ -351,3 +351,11 @@ Second-pass corrections: long-session creation routes to project creation; expli
 The unified tool browser and six-action creation sheet reuse existing execution and permission paths. Project deletion removes project/task metadata only, uses the project workspace, and rejects active execution; it never deletes workspace files or conversation entities. Compact project controls are newly integrated and require device verification.
 
 本轮入口整合：项目页统一会话/项目创建，模型列表统一工作区模型顺序，思考强度保留；阶段模型及其配置通道已退役。记忆库的角色注入/主代理注入、摘要与正文仍通过原生 context_library 配置与 memory 工具读写。Beta 工作流已移除，发布仅使用 CI 与正式 Release。
+
+## Major-upgrade closure, 2026-11-13
+
+- Workflow presets now have a real create/edit/delete-confirmation consumer within the team settings screen, backed by TeamWorkflowRepository and the same `workflows` configuration collection. Runtime execution/history/stop/retry still use the existing conversation/team/project paths; the preset editor does not pretend to execute a workflow.
+- Native worldbook metadata now exposes ownerRole/sharedWithRoles in the editor and existing JSON config field. This changes automatic participation, not filesystem read authority.
+- Local model rows can import catalog-matching GGUF documents through SAF. Imports and JNI loading verify size, format and SHA-256; invalid/cancelled imports preserve the old file. This is not support for arbitrary model backends.
+- Plugin upgrades stage and recover managed files/records on failure without deleting top-level persistent data; uninstall checks stop and script outcomes. External script side effects and power-loss recovery are not guaranteed.
+- Persona/core compatibility settings edit native memory only; ordinary-memory switch, explicit OFF and deletion receipts remain distinct.

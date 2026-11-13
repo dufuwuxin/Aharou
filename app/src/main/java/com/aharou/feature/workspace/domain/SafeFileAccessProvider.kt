@@ -13,6 +13,7 @@ import java.nio.charset.Charset
 class SafeFileAccessProvider(
     private val delegate: FileAccessProvider,
 ) : FileAccessProvider by delegate {
+    override fun checked(): FileAccessProvider = delegate.checked()
 
     private fun <T> guard(op: String, fallback: T, block: () -> T): T = try {
         block()

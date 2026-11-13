@@ -79,7 +79,7 @@ class TeamControlIntegrationTest {
             assertEquals(listOf(listOf("src/a.kt"), listOf("src/b.kt")), team.stages.single().tasks.map { it.writePaths })
         }
         val registry = ConfigRegistry::class.java.getDeclaredConstructor().apply { isAccessible = true }.newInstance()
-        ConfigTeamControlFields(repository).registerInto(registry)
+        ConfigTeamControlFields(repository, io.mockk.mockk(relaxed = true)).registerInto(registry)
         val collection = registry.collection("team.stages")!!
         val id = collection.childIds().single()
         assertFalse(id.contains('.'))

@@ -1,6 +1,6 @@
 # Operit2-inspired major upgrade
 
-Status: in development, not a release or a claim of feature parity.
+Status: the major-upgrade implementation is integrated; final full CI and release acceptance are pending. This is not a claim of complete Operit2 feature parity.
 
 ## Request and reference
 
@@ -79,3 +79,23 @@ The candidate correction isolates the unused HTTP dependency in the repository t
 | Preserve existing functionality and data; no errors/warnings | Targeted preservation tests are only partial evidence. Failed full CI and remaining release-build messages preclude acceptance. |
 
 No scope checkbox was closed by this re-audit. Device verification remains prohibited by the user; missing device evidence must not be replaced by shadow-screen use or a request that the user perform it.
+
+## Current major-upgrade closure (2026-11-13)
+
+The user explicitly selected completion of the whole major-upgrade scope before release, then authorized **complete CI and controlled acceptance** instead of device installation, shadow-screen use or cellular model downloads. Device interaction, actual model inference performance and arbitrary foreign package-host compatibility remain unmeasured and are not release claims. This does not waive software implementation or complete CI.
+
+| Requirement | Current implementation and controlled evidence | Final gate |
+| --- | --- | --- |
+| Design system and reachable original UI | Existing AppThemeHost, project home/chat/settings routes, contrast and real Compose branch consumers retained; new forms use existing settings components | Full app/Compose CI; no device screenshot claim |
+| Editable workflows and execution lifecycle | TeamWorkflowsSection + TeamWorkflowSettingsViewModel + workflows config collection share TeamWorkflowRepository; existing WorkflowRunner and project controller retain execution/history/stop/retry behavior | VM, persistence-failure, orchestrator and project workflow suites |
+| Role/shared memory | ownerRole/sharedWithRoles are serialized in existing worldbook metadata, consumed by request planning and named lookup; ordinary inheritance, audience/project/session gates remain active | Native round-trip, ownership and isolation negative cases |
+| Graph and explainability | Existing confidence/importance/tags/source paths/weights/relations and graph projection remain connected to search and library UI; user-authored metadata is not presented as a measured fact | Worldbook/search/graph/identity tests |
+| Explicit cloud query | Existing opt-in HTTPS endpoint sends query/limit only, default off, independent local lookup and explicit timeout/IO failures | Cloud settings/transport/search suites |
+| Tool/script binding | Existing role allowed/disallowed tool definitions and dynamically registered script tools use the real registry and permission execution path; skill ownership is preserved | Role binding, tool policy, command context and permission suites |
+| Package lifecycle | Plugin upgrade stages before replacement, snapshots managed files, restores failed installs and records, keeps data; uninstall checks stop/script outcomes; existing Aharou/Operit browsing and compatible skill import retained | 14 PluginManagerRecovery tests plus market repository/VM suites |
+| Local models | Four existing checksum-pinned GGUF choices; explicit backend/format metadata, SAF import, bounds/hash validation before atomic replacement and before JNI loading | Catalog and LocalModelFiles tests; device runtime remains unmeasured |
+| Compatibility and delivery | One-time native profile/core migration, durable deletion receipts, scoped settings and fresh Debug builds verified locally | Independent review, final full app/core CI and signed downloadable Release |
+
+Local major-domain run: 29 suites / 242 tests, zero failures/errors/skips. Later integrated workflow-settings run: 20 suites / 160 tests, zero failures/errors/skips, including the new 9 VM and 2 durable-file failure cases. These overlapping runs must not be added together as a unique-test count. Raw workflow-stage XML is retained at `/tmp/aharou-major-accepted-xml`. Final remote CI, not these subsets, establishes the final app/core totals and revision identity.
+
+Checkpoint CI `43374365271` at `fa8003d3` executed 2513 app tests with one failure: an old Compose test still expected the removed project-chat suffix. The repaired consumer now asserts raw request text, discussion session and workspace separately. This failed run is not the final acceptance run.
