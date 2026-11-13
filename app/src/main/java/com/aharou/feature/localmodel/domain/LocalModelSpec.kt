@@ -6,6 +6,9 @@ package com.aharou.feature.localmodel.domain
  * [sizeBytes] 与 [sha256] 都是官方发布值：字节数用来判「下完没有」，sha256 用来判「下对没有」。
  * 只看文件在不在会把上次断点留下的半成品当成就绪，所以两样都要。
  */
+enum class LocalModelFormat { GGUF }
+enum class LocalModelBackend { LLAMA_CPP }
+
 data class LocalModelSpec(
     /** 稳定标识，也是落盘目录名：`filesDir/local_models/<id>/`。 */
     val id: String,
@@ -23,6 +26,8 @@ data class LocalModelSpec(
     val urls: List<String>,
     /** 上下文窗口上限（token）；真实值以 GGUF 元数据为准，这里只供 UI 展示与预估显存。 */
     val contextSize: Long,
+    val format: LocalModelFormat = LocalModelFormat.GGUF,
+    val backend: LocalModelBackend = LocalModelBackend.LLAMA_CPP,
 )
 
 /**

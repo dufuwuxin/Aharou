@@ -180,7 +180,7 @@ class LocalLlmEngine @Inject constructor(
         if (!manager.isReady(id)) {
             throw IOException(context.getString(R.string.settings_local_model_not_downloaded))
         }
-        val file = manager.modelFile(id)
+        val file = manager.verifiedModelFile(id)
         if (!file.isFile) {
             throw IOException(context.getString(R.string.settings_local_model_not_downloaded))
         }

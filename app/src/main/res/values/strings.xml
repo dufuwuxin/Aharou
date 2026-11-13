@@ -4019,4 +4019,8 @@
     <string name="provider_account_exhausted">账号额度已耗尽，请在服务方查看额度详情。</string>
     <string name="provider_account_rate_limited">上游暂时限制此账号或模型的调用频率，请稍后再试。</string>
     <string name="provider_account_notice">仅使用你有权使用的账号。模型、倍率和积分以上游实时返回为准，活动倍率可能变化；缺失值不代表免费。第三方接口可能调整或限制使用。</string>
+    <string name="context_memory_owner">所属角色（留空为共享库）</string>
+    <string name="context_memory_owner_help">仅所属角色和明确共享的角色自动使用。普通共享记忆仍服从成员的记忆继承开关；文件读取权限不因此改变。</string>
+    <string name="context_memory_shared_roles">共享给这些角色（每行一个角色名）</string>
+    <string name="settings_local_model_import">导入已校验的 GGUF 文件</string>
 </resources>

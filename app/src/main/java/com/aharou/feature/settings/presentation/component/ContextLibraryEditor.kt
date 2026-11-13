@@ -223,6 +223,8 @@ private fun WorldbookStructuredEditor(
     var triggers by rememberSaveable { mutableStateOf(rules.triggers.joinToString("\n")) }
     var excludes by rememberSaveable { mutableStateOf(rules.excludes.joinToString("\n")) }
     var roles by rememberSaveable { mutableStateOf(rules.roles.joinToString("\n")) }
+    var owner by rememberSaveable { mutableStateOf(rules.ownerRole.orEmpty()) }
+    var sharedWith by rememberSaveable { mutableStateOf(rules.sharedWithRoles.joinToString("\n")) }
     var active by rememberSaveable { mutableStateOf(rules.enabled) }
     var matchAll by rememberSaveable { mutableStateOf(rules.matchAll) }
     var caseSensitive by rememberSaveable { mutableStateOf(rules.caseSensitive) }
@@ -264,6 +266,10 @@ private fun WorldbookStructuredEditor(
             }
             if (advanced) SettingsGroup {
                 Column(Modifier.padding(Spacing.lg), verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
+                    AppTextField(owner, { owner = it }, label = stringResource(R.string.context_memory_owner),
+                        supportingText = { Text(stringResource(R.string.context_memory_owner_help)) }, enabled = enabled)
+                    AppTextField(sharedWith, { sharedWith = it }, label = stringResource(R.string.context_memory_shared_roles),
+                        singleLine = false, minLines = 2, enabled = enabled)
                     AppTextField(roles, { roles = it }, label = stringResource(R.string.context_worldbook_roles),
                         supportingText = { Text(stringResource(R.string.context_worldbook_roles_help)) },
                         singleLine = false, minLines = 2, enabled = enabled)
@@ -284,7 +290,8 @@ private fun WorldbookStructuredEditor(
                 Button(enabled = enabled && valid, onClick = {
                     onApply(rules.copy(enabled = active, triggers = worldbookLines(triggers), excludes = worldbookLines(excludes),
                         matchAll = matchAll, caseSensitive = caseSensitive, priority = requireNotNull(priorityValue),
-                        roles = worldbookLines(roles), confidence = confidenceValue, importance = importanceValue))
+                        roles = worldbookLines(roles), confidence = confidenceValue, importance = importanceValue,
+                        ownerRole = owner.trim().takeIf { it.isNotEmpty() }, sharedWithRoles = worldbookLines(sharedWith)))
                 }) { Text(stringResource(R.string.context_worldbook_apply)) }
             }
         }

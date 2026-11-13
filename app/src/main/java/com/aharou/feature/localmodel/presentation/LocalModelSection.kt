@@ -5,7 +5,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -39,6 +45,15 @@ internal fun LocalModelSection() {
     val vm: LocalModelViewModel = hiltViewModel()
     val statuses by vm.statuses.collectAsStateWithLifecycle()
     val state by vm.state.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    var importId by rememberSaveable { mutableStateOf<String?>(null) }
+    val importFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        val id = importId
+        importId = null
+        if (uri != null && id != null) vm.importModel(id) {
+            context.contentResolver.openInputStream(uri) ?: throw java.io.IOException("Cannot open model document")
+        }
+    }
 
     SettingsGroupHeader(text = stringResource(R.string.settings_local_model_section_title))
 
@@ -121,6 +136,11 @@ internal fun LocalModelSection() {
                     }
                 }
             )
+
+            TextButton(enabled = !busy, onClick = {
+                importId = spec.id
+                importFile.launch(arrayOf("*/*"))
+            }) { Text(stringResource(R.string.settings_local_model_import)) }
 
             // 与上一行标题文字对齐：行内左内边距 + 图标宽 + 图标后间距
             Text(

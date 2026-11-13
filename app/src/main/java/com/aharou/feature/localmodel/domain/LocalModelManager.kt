@@ -77,6 +77,34 @@ class LocalModelManager @Inject constructor(
         return File(modelDir(id), spec.fileName)
     }
 
+    fun verifiedModelFile(id: String): File {
+        val spec = spec(id) ?: throw IllegalArgumentException("Unknown local model: $id")
+        return modelFile(id).also { LocalModelFiles.verify(it, spec) }
+    }
+
+    suspend fun importModel(id: String, source: () -> java.io.InputStream,
+                            onState: (LocalModelState) -> Unit = {}): File = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            val spec = spec(id) ?: throw IllegalArgumentException("Unknown local model: $id")
+            val job = currentCoroutineContext()[Job]
+            activeJob = job
+            try {
+                onState(LocalModelState.Verifying(id))
+                val coroutine = currentCoroutineContext()
+                source().use { LocalModelFiles.import(it, modelFile(id), spec) { coroutine.ensureActive() } }
+                onState(LocalModelState.Ready(id))
+                modelFile(id)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                onState(LocalModelState.Failed(id, e.message.orEmpty()))
+                throw e
+            } finally {
+                if (activeJob === job) activeJob = null
+            }
+        }
+    }
+
     /**
      * 本机能否跑端侧推理：只看 ABI 是不是 arm64-v8a。
      *
@@ -152,8 +180,11 @@ class LocalModelManager @Inject constructor(
     ): File {
         val target = modelFile(spec.id)
         if (!force && target.isFile && target.length() == spec.sizeBytes) {
-            onState(LocalModelState.Ready(spec.id))
-            return target
+            val verified = try { LocalModelFiles.verify(target, spec); true } catch (_: IOException) { false }
+            if (verified) {
+                onState(LocalModelState.Ready(spec.id))
+                return target
+            }
         }
         if (!isSupportedOnThisDevice()) {
             throw IOException(context.getString(R.string.settings_local_model_not_supported))
@@ -185,13 +216,8 @@ class LocalModelManager @Inject constructor(
             throw IOException(context.getString(R.string.settings_local_model_hash_mismatch))
         }
         currentCoroutineContext().ensureActive()
-        if (target.exists() && !target.delete()) {
-            throw IOException("无法覆盖旧的模型文件：${target.absolutePath}")
-        }
-        // renameTo 同分区是原子的：不会出现「文件存在但只写了一半」的中间态
-        if (!part.renameTo(target)) {
-            throw IOException("模型文件落盘失败：${target.absolutePath}")
-        }
+        java.nio.file.Files.move(part.toPath(), target.toPath(),
+            java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
         FileLogger.i(TAG, "端侧模型已就绪：${spec.id}（${formatBytes(spec.sizeBytes)}）")
         onState(LocalModelState.Ready(spec.id))
         return target

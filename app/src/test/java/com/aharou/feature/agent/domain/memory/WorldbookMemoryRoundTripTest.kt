@@ -19,6 +19,7 @@ class WorldbookMemoryRoundTripTest {
     private val rules = WorldbookRules(triggers = listOf("Android", "a\"b\nnext"), excludes = listOf("ignore"),
         matchAll = true, caseSensitive = true, priority = 9, roles = listOf("reviewer"),
         audiences = listOf(WorldbookAudience.ROLE), confidence = 0.6, importance = 80,
+        ownerRole = "reviewer", sharedWithRoles = listOf("writer"),
         relations = listOf(WorldbookRelation("target-id", WorldbookRelationType.SUPPORTS)))
 
     private fun create(root: File, name: String = "entry", metadata: WorldbookRules = rules): Memory {

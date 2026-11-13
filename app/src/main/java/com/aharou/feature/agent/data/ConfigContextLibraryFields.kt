@@ -99,7 +99,7 @@ class ConfigContextLibraryFields @Inject constructor(
                 },
             )
             return listOf(
-                text("worldbook", "世界书JSON：enabled、triggers、excludes、matchAll、caseSensitive、priority、roles（精确角色名）、audiences（MAIN/ROLE）、confidence（0..1）、importance（0..100）、relations（target/type）；可信度与重要性为用户标注", { it.worldbook.toJson() }, { e, v ->
+                text("worldbook", "世界书JSON：enabled、triggers、excludes、matchAll、caseSensitive、priority、roles（精确角色名）、ownerRole（所属角色或null）、sharedWithRoles（共享角色名数组）、audiences（MAIN/ROLE）、confidence（0..1）、importance（0..100）、relations（target/type）；可信度与重要性为用户标注", { it.worldbook.toJson() }, { e, v ->
                     val rules = try { WorldbookRules.fromJson(v) } catch (_: IllegalArgumentException) {
                         throw ConfigError.InvalidValue("Invalid worldbook JSON or metadata range")
                     }

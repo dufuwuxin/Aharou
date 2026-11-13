@@ -16,6 +16,23 @@ class WorldbookRulesTest {
         ContextLoad.FULL, ContextOrigin.MEMORY, id, worldbook = rules,
     )
 
+    @Test fun ownedMemoryIsSharedOnlyWithExplicitRolesAndKeepsInheritanceGates() {
+        val rules = WorldbookRules(ownerRole = "writer", sharedWithRoles = listOf("reviewer"))
+        assertEquals(rules, WorldbookRules.fromJson(rules.toJson()))
+        assertNotNull(rules.omission("", WorldbookAudience.MAIN, null))
+        assertNotNull(rules.omission("", WorldbookAudience.ROLE, "stranger"))
+        assertNull(rules.omission("", WorldbookAudience.ROLE, "writer"))
+        assertNull(rules.omission("", WorldbookAudience.ROLE, "reviewer"))
+        val owned = entry("owned", rules)
+        assertEquals(listOf("owned"), ContextLibraryPlanner.plan(listOf(owned),
+            injectionCategory = ContextCategory.ROLE_INJECTED, roleName = "reviewer").full.map { it.id })
+        assertTrue(ContextLibraryPlanner.plan(listOf(owned), injectionCategory = ContextCategory.ROLE_INJECTED,
+            roleName = "reviewer", memoryAllowed = false).full.isEmpty())
+        assertTrue(ContextLibraryPlanner.plan(listOf(owned), injectionCategory = ContextCategory.ROLE_INJECTED,
+            roleName = "stranger").full.isEmpty())
+        assertNull(WorldbookRules.fromJson("{}").ownerRole)
+    }
+
     @Test fun matchingUsesCurrentTextAndHonorsExclusionCaseAndAll() {
         val rules = WorldbookRules(triggers = listOf("Kotlin", "Android"), excludes = listOf("ignore"), matchAll = true)
         assertNull(rules.omission("kotlin ANDROID", WorldbookAudience.MAIN, null))

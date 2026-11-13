@@ -73,6 +73,22 @@ class LocalModelViewModel @Inject constructor(
         }
     }
 
+    fun importModel(id: String, source: () -> java.io.InputStream) {
+        if (_state.value is LocalModelState.Downloading || _state.value is LocalModelState.Verifying) return
+        viewModelScope.launch {
+            try {
+                manager.importModel(id, source) { _state.value = it }
+            } catch (e: CancellationException) {
+                _state.value = LocalModelState.Idle
+                throw e
+            } catch (e: Exception) {
+                _state.value = LocalModelState.Failed(id, e.message.orEmpty())
+            } finally {
+                refresh()
+            }
+        }
+    }
+
     /** 删除该模型的全部落盘数据（正式文件 + 半成品），并刷新列表。 */
     fun delete(id: String) {
         manager.delete(id)

@@ -36,9 +36,12 @@ data class WorldbookRules(
     val keywordWeight: Double = 1.0,
     val tagWeight: Double = 1.0,
     val roleTags: List<String> = emptyList(),
+    val ownerRole: String? = null,
+    val sharedWithRoles: List<String> = emptyList(),
 ) {
     init {
-        require((triggers + excludes + roles + tags + roleTags).none { it.isBlank() }) { "Worldbook terms must not be blank" }
+        require((triggers + excludes + roles + tags + roleTags + sharedWithRoles).none { it.isBlank() }) { "Worldbook terms must not be blank" }
+        require(ownerRole == null || ownerRole.isNotBlank()) { "Memory owner must not be blank" }
         require(confidence == null || (confidence.isFinite() && confidence in 0.0..1.0)) { "Confidence must be within 0..1" }
         require(importance == null || importance in 0..100) { "Importance must be within 0..100" }
         require(keywordWeight.isFinite() && keywordWeight in 0.0..8.0) { "Keyword weight must be within 0..8" }
@@ -48,6 +51,8 @@ data class WorldbookRules(
     /** No history, model output or entry text is substituted for a missing current user input. */
     fun omission(userText: String, audience: WorldbookAudience, roleName: String?, roleTags: List<String> = emptyList()): String? = when {
         !enabled -> "worldbook disabled"
+        ownerRole != null && (audience != WorldbookAudience.ROLE || roleName == null ||
+            roleName != ownerRole && roleName !in sharedWithRoles) -> "worldbook: not owned or shared with this role"
         audiences.isNotEmpty() && audience !in audiences -> "worldbook: different audience"
         roles.isNotEmpty() && (audience != WorldbookAudience.ROLE || roleName !in roles) -> "worldbook: different or missing role"
         this.roleTags.isNotEmpty() && (audience != WorldbookAudience.ROLE || roleName == null ||
@@ -65,6 +70,7 @@ data class WorldbookRules(
         append("priority=$priority; confidence=${confidence ?: "unknown"}; importance=${importance ?: "unknown"}; user-authored")
         append("; keywordWeight=$keywordWeight; tagWeight=$tagWeight; tags=${tags.joinToString()}")
         append("; roleTags=${roleTags.joinToString()}")
+        append("; ownerRole=${ownerRole ?: "shared"}; sharedWithRoles=${sharedWithRoles.joinToString()}")
         relations.forEach { append("; ${it.type.name}->${it.target}; weight=${it.weight}") }
     }
 

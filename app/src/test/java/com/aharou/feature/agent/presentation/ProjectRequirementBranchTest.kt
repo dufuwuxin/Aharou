@@ -302,7 +302,9 @@ class ProjectRequirementBranchTest {
             sent += request to target
             // Deterministic model stand-in: only the explicit planning request calls the real scoped tool.
             if (request == "Plan five tasks") {
-                assertTrue(arg<String>(1).contains("Selected requirement branch: id=\"branch\""))
+                assertEquals(request, arg<String>(1))
+                assertEquals("discussion", target)
+                assertEquals("w", arg<String>(4))
                 val result = kotlinx.coroutines.runBlocking {
                     tool.executeWithContext(mapOf("action" to kotlinx.serialization.json.JsonPrimitive("plan"),
                         "requirement" to kotlinx.serialization.json.JsonPrimitive(request)),
