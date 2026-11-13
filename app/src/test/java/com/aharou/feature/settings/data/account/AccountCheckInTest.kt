@@ -15,7 +15,7 @@ class AccountCheckInTest {
     }
     private fun manager(server: MockWebServer): AccountProviderManager {
         val base = server.url("/").toString().trimEnd('/')
-        return AccountProviderManager(Vault(), OkHttpClient.Builder().followRedirects(false).build(),
+        return AccountProviderManager(Vault(), OkHttpClient.Builder().connectionSpecs(listOf(okhttp3.ConnectionSpec.CLEARTEXT)).followRedirects(false).build(),
             AccountEndpoints(workbuddyBilling = base, raccoon = base, traeAccount = base))
     }
     @Test fun personalCheckInDoesNotInventRewardAndDuplicateIsNotNewCredit() = runBlocking {

@@ -19,7 +19,7 @@ class LoomyAccountProtocolTest {
     @Test fun validatedSessionUsesProtocolCatalogBalanceAndStreamingRoutes() = runBlocking {
         MockWebServer().use { server ->
             val base = server.url("/").toString().trimEnd('/')
-            val manager = AccountProviderManager(Vault(), OkHttpClient.Builder().followRedirects(false).build(), AccountEndpoints(loomy = base))
+            val manager = AccountProviderManager(Vault(), OkHttpClient.Builder().connectionSpecs(listOf(okhttp3.ConnectionSpec.CLEARTEXT)).followRedirects(false).build(), AccountEndpoints(loomy = base))
             val catalog = """{"code":"000000","data":[{"id":"m","name":"Model"}]}"""
             server.enqueue(MockResponse().setBody(catalog))
             manager.importLoomySession("id", "fixture-session")
@@ -35,7 +35,7 @@ class LoomyAccountProtocolTest {
             for (stream in listOf(true, false)) {
                 server.enqueue(MockResponse().setBody(catalog))
                 server.enqueue(MockResponse().setHeader("Content-Type", "text/event-stream").setBody("data: {\"choices\":[{\"delta\":{\"content\":\"hello\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"))
-                val client = OkHttpClient.Builder().addInterceptor(manager.interceptor()).build()
+                val client = OkHttpClient.Builder().connectionSpecs(listOf(okhttp3.ConnectionSpec.CLEARTEXT)).addInterceptor(manager.interceptor()).build()
                 val request = Request.Builder().url(manager.baseUrl(AccountProviderKind.LOOMY, "id") + "/chat/completions")
                     .post("""{"model":"m","messages":[{"role":"user","content":"hi"}],"stream":$stream}""".toRequestBody()).build()
                 client.newCall(request).execute().use { response -> assertEquals(200, response.code); assertTrue(response.body!!.string().contains("hello")) }
@@ -50,7 +50,7 @@ class LoomyAccountProtocolTest {
     }
     @Test fun nonZeroBusinessCodeDoesNotBecomeSuccessfulSessionImport() = runBlocking {
         MockWebServer().use { server ->
-            val manager = AccountProviderManager(Vault(), OkHttpClient(), AccountEndpoints(loomy = server.url("/").toString().trimEnd('/')))
+            val manager = AccountProviderManager(Vault(), OkHttpClient.Builder().connectionSpecs(listOf(okhttp3.ConnectionSpec.CLEARTEXT)).build(), AccountEndpoints(loomy = server.url("/").toString().trimEnd('/')))
             server.enqueue(MockResponse().setBody("""{"code":"000001","data":[{"id":"m"}]}"""))
             try { manager.importLoomySession("id", "fixture-invalid"); fail("Nonzero business code must fail") }
             catch (_: AccountProviderException) { assertFalse(manager.isLoggedIn("id")) }
@@ -59,7 +59,7 @@ class LoomyAccountProtocolTest {
 
     @Test fun invalidSessionDoesNotReplaceSavedCredential() = runBlocking {
         MockWebServer().use { server ->
-            val manager = AccountProviderManager(Vault(), OkHttpClient(), AccountEndpoints(loomy = server.url("/").toString().trimEnd('/')))
+            val manager = AccountProviderManager(Vault(), OkHttpClient.Builder().connectionSpecs(listOf(okhttp3.ConnectionSpec.CLEARTEXT)).build(), AccountEndpoints(loomy = server.url("/").toString().trimEnd('/')))
             server.enqueue(MockResponse().setResponseCode(401).setBody("""{"code":12153}"""))
             try { manager.importLoomySession("id", "fixture-invalid"); fail("Validate before save") }
             catch (_: AccountProviderException) { assertFalse(manager.isLoggedIn("id")) }
@@ -68,7 +68,7 @@ class LoomyAccountProtocolTest {
     @Test fun logoutOrCancellationRejectsPendingSessionImport() = runBlocking {
         for (cancel in listOf(false, true)) {
             MockWebServer().use { server ->
-                val manager = AccountProviderManager(Vault(), OkHttpClient(), AccountEndpoints(loomy = server.url("/").toString().trimEnd('/')))
+                val manager = AccountProviderManager(Vault(), OkHttpClient.Builder().connectionSpecs(listOf(okhttp3.ConnectionSpec.CLEARTEXT)).build(), AccountEndpoints(loomy = server.url("/").toString().trimEnd('/')))
                 server.enqueue(MockResponse().setBody("""{"code":0,"data":[{"id":"m"}]}""").setBodyDelay(250, java.util.concurrent.TimeUnit.MILLISECONDS))
                 val operation = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.currentCoroutineContext()).async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
                     try { manager.importLoomySession("id", "fixture-session") }

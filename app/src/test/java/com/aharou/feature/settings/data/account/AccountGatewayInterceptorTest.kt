@@ -110,14 +110,14 @@ class AccountGatewayInterceptorTest {
                 MockWebServer().use { domestic ->
                     val base = global.url("/").toString().trimEnd('/')
                     val cn = domestic.url("/").toString().trimEnd('/')
-                    val manager = AccountProviderManager(Vault(), OkHttpClient.Builder().followRedirects(false).build(), AccountEndpoints(workbuddy = cn, trae = cn, workbuddyGlobal = base, traeGlobal = base))
+                    val manager = AccountProviderManager(Vault(), OkHttpClient.Builder().connectionSpecs(listOf(okhttp3.ConnectionSpec.CLEARTEXT)).followRedirects(false).build(), AccountEndpoints(workbuddy = cn, trae = cn, workbuddyGlobal = base, traeGlobal = base))
                     manager.importCredentials("id", kind, """{"accessToken":"fixture"}""")
                     val catalog = if (kind.isTrae) """{"data":{"config_info_list":[{"config_name":"m","model_detail_list":[{"model_name":"native-model"}]}]}}""" else """{"data":{"models":[{"id":"m"}]}}"""
                     val stream = if (kind.isTrae) "event: output\ndata: {\"response\":\"hello\"}\n\nevent: done\ndata: {\"finish_reason\":\"stop\"}\n\n" else "data: {\"choices\":[{\"delta\":{\"content\":\"hello\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
                     for (streaming in listOf(true, false)) {
                         global.enqueue(MockResponse().setBody(catalog))
                         global.enqueue(MockResponse().setHeader("Content-Type", "text/event-stream").setBody(stream))
-                        val client = OkHttpClient.Builder().addInterceptor(manager.interceptor()).build()
+                        val client = OkHttpClient.Builder().connectionSpecs(listOf(okhttp3.ConnectionSpec.CLEARTEXT)).addInterceptor(manager.interceptor()).build()
                         val request = Request.Builder().url(manager.baseUrl(kind, "id") + "/chat/completions").post("""{"model":"m","stream":$streaming,"messages":[{"role":"user","content":"hi"}]}""".toRequestBody()).build()
                         client.newCall(request).execute().use { response -> assertEquals(200, response.code); assertTrue(response.body!!.string().contains("hello")) }
                         val directory = global.takeRequest(1, TimeUnit.SECONDS)!!

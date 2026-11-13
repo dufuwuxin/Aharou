@@ -155,7 +155,7 @@ class AccountLoginFlowTest {
             MockWebServer().use { domestic ->
                 val base = global.url("/").toString().trimEnd('/')
                 val cn = domestic.url("/").toString().trimEnd('/')
-                val manager = AccountProviderManager(Vault(), OkHttpClient.Builder().followRedirects(false).build(), AccountEndpoints(workbuddy = cn, workbuddyGlobal = base))
+                val manager = AccountProviderManager(Vault(), OkHttpClient.Builder().connectionSpecs(listOf(okhttp3.ConnectionSpec.CLEARTEXT)).followRedirects(false).build(), AccountEndpoints(workbuddy = cn, workbuddyGlobal = base))
                 global.enqueue(MockResponse().setBody("""{"code":0,"data":{"state":"s","authUrl":"https://www.workbuddy.ai/login"}}"""))
                 global.enqueue(MockResponse().setBody("""{"code":0,"data":{"accessToken":"fixture-a","refreshToken":"fixture-r"}}"""))
                 global.enqueue(MockResponse().setBody("""{"code":0,"data":{"uid":"u"}}"""))
@@ -182,7 +182,7 @@ class AccountLoginFlowTest {
     }
 
     @Test fun globalTraeAuthorizationUsesInternationalWebsiteAndCancellationRejectsCallback() = runBlocking {
-        val manager = AccountProviderManager(Vault(), OkHttpClient())
+        val manager = AccountProviderManager(Vault(), OkHttpClient.Builder().connectionSpecs(listOf(okhttp3.ConnectionSpec.CLEARTEXT)).build())
         val login = manager.beginLogin("id", AccountProviderKind.TRAE_GLOBAL)
         assertTrue(login.url.startsWith("https://www.trae.ai/authorization?"))
         manager.cancelLogin(login)
@@ -194,7 +194,7 @@ class AccountLoginFlowTest {
         MockWebServer().use { global ->
             MockWebServer().use { domestic ->
                 val base = global.url("/").toString().trimEnd('/')
-                val manager = AccountProviderManager(Vault(), OkHttpClient.Builder().followRedirects(false).build(), AccountEndpoints(traeAccount = domestic.url("/").toString().trimEnd('/'), traeGlobalAccount = base, traeGlobal = base, traeGlobalUsage = base))
+                val manager = AccountProviderManager(Vault(), OkHttpClient.Builder().connectionSpecs(listOf(okhttp3.ConnectionSpec.CLEARTEXT)).followRedirects(false).build(), AccountEndpoints(traeAccount = domestic.url("/").toString().trimEnd('/'), traeGlobalAccount = base, traeGlobal = base, traeGlobalUsage = base))
                 val login = manager.beginLogin("id", AccountProviderKind.TRAE_GLOBAL)
                 assertTrue(manager.acceptCallback(login, login.callbackPrefix + "?code=fixture-code&state=" + login.state))
                 global.enqueue(MockResponse().setBody("""{"Result":{"Token":"fixture-a","RefreshToken":"fixture-r"}}"""))

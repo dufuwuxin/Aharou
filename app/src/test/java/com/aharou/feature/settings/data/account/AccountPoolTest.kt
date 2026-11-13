@@ -27,6 +27,7 @@ class AccountPoolTest {
         override fun read(id: String) = values[id]
         override fun write(id: String, value: String?) { if (value == null) values.remove(id) else values[id] = value }
     }
+    private fun newServer() = MockWebServer().apply { start(java.net.InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1)), 0) }
     private val kind = AccountProviderKind.RACCOON
     private fun json(value: String) = JsonParser.parseString(value).asJsonObject
     private fun client() = OkHttpClient.Builder().connectionSpecs(listOf(ConnectionSpec.CLEARTEXT)).followRedirects(false).retryOnConnectionFailure(false).build()
@@ -34,7 +35,7 @@ class AccountPoolTest {
         AccountCredential(service, token, null, null, "device-$user", user)
     private fun pool(vararg users: String): String = AccountPool(kind, users.map { PoolAccount(it, credential(it)) }).json().toString()
     private fun manager(server: MockWebServer, vault: Vault = Vault(), http: OkHttpClient = client()): AccountProviderManager =
-        AccountProviderManager(vault, http, AccountEndpoints(raccoon = server.url("/").toString().trimEnd('/')))
+        AccountProviderManager(vault, http, AccountEndpoints(raccoon = server.url("/").newBuilder().host("127.0.0.1").build().toString().trimEnd('/')))
     private fun catalog(vararg models: String) = MockResponse().setBody(JsonObject().apply {
         add("data", JsonObject().apply { add("categories", JsonArray().apply { add(JsonObject().apply {
             addProperty("type", "chat"); add("models", JsonArray().apply { models.forEach { id -> add(JsonObject().apply { addProperty("name", id) }) } })
@@ -42,7 +43,7 @@ class AccountPoolTest {
     }.toString())
     private fun answer(text: String = "ok") = MockResponse().setHeader("Content-Type", "application/json").setBody("""{"choices":[{"message":{"role":"assistant","content":"$text"}}]}""")
     private fun chat(manager: AccountProviderManager, model: String = "m", stream: Boolean = false): okhttp3.Response =
-        OkHttpClient.Builder().addInterceptor(manager.interceptor()).build().newCall(Request.Builder()
+        OkHttpClient.Builder().connectionSpecs(listOf(ConnectionSpec.CLEARTEXT)).addInterceptor(manager.interceptor()).build().newCall(Request.Builder()
             .url(manager.baseUrl(kind, "id") + "/chat/completions")
             .post("""{"model":"$model","stream":$stream,"messages":[{"role":"user","content":"hello"}]}""".toRequestBody("application/json".toMediaType())).build()).execute()
 
@@ -87,7 +88,7 @@ class AccountPoolTest {
     }
 
     @Test fun threeCatalogsUnionInFirstSeenOrderAndPartialIsExplicit() {
-        MockWebServer().use { server ->
+        newServer().use { server ->
             server.enqueue(catalog("a", "shared")); server.enqueue(catalog("shared", "b")); server.enqueue(MockResponse().setResponseCode(403).setBody("{}"))
             val manager = manager(server)
             manager.importCredentials("id", kind, pool("first", "second", "third"))
@@ -102,7 +103,7 @@ class AccountPoolTest {
     }
 
     @Test fun firstQuotaFailureUsesSecondAndNeverTouchesThird() {
-        MockWebServer().use { server ->
+        newServer().use { server ->
             server.enqueue(catalog("m")); server.enqueue(MockResponse().setResponseCode(402).setBody("{}"))
             server.enqueue(catalog("m")); server.enqueue(answer())
             val manager = manager(server)
@@ -115,7 +116,7 @@ class AccountPoolTest {
     }
 
     @Test fun onlyAccountsAdvertisingTheSelectedModelAreInvoked() {
-        MockWebServer().use { server ->
+        newServer().use { server ->
             server.enqueue(catalog("other")); server.enqueue(catalog("m")); server.enqueue(answer())
             val manager = manager(server)
             manager.importCredentials("id", kind, pool("first", "second", "third"))
@@ -127,7 +128,7 @@ class AccountPoolTest {
     }
 
     @Test fun connectionEstablishmentFailureMayUseSecondAccount() {
-        MockWebServer().use { server ->
+        newServer().use { server ->
             server.enqueue(catalog("m")); server.enqueue(catalog("m")); server.enqueue(answer())
             val http = client().newBuilder().addInterceptor { chain ->
                 if (chain.request().url.encodedPath.endsWith("/chat/completions") && chain.request().header("Authorization") == "Bearer fixture-first") throw java.net.ConnectException("fixture connection failure")
@@ -141,7 +142,7 @@ class AccountPoolTest {
     }
 
     @Test fun client400DoesNotFailOver() {
-        MockWebServer().use { server ->
+        newServer().use { server ->
             server.enqueue(catalog("m")); server.enqueue(MockResponse().setResponseCode(400).setBody("{}"))
             val manager = manager(server)
             manager.importCredentials("id", kind, pool("first", "second"))
@@ -151,7 +152,7 @@ class AccountPoolTest {
     }
 
     @Test fun onceStreamingOutputStartsNoOtherAccountIsReplayed() {
-        MockWebServer().use { server ->
+        newServer().use { server ->
             server.enqueue(catalog("m"))
             server.enqueue(MockResponse().setHeader("Content-Type", "text/event-stream").setBody("data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\ndata: {\"code\":14018}\n\n"))
             val manager = manager(server)
@@ -165,7 +166,7 @@ class AccountPoolTest {
     }
 
     @Test fun removingOneSlotRejectsLateReadsAndKeepsTheOtherAccount() {
-        MockWebServer().use { server ->
+        newServer().use { server ->
             val entered = CountDownLatch(1); val release = CountDownLatch(1)
             server.dispatcher = object : Dispatcher() {
                 override fun dispatch(request: RecordedRequest): MockResponse {
@@ -194,7 +195,7 @@ class AccountPoolTest {
     }
 
     @Test fun appendedLoomySessionDoesNotReplaceExistingAccount() = runBlocking {
-        MockWebServer().use { server ->
+        newServer().use { server ->
             repeat(2) { server.enqueue(MockResponse().setBody("""{"code":"000000","data":[{"id":"fixture-model"}]}""")) }
             val manager = AccountProviderManager(Vault(), client(), AccountEndpoints(loomy = server.url("/").toString().trimEnd('/')))
             manager.importLoomySession("id", "fixture-session-one")
@@ -204,7 +205,7 @@ class AccountPoolTest {
     }
 
     @Test fun consecutiveWorkBuddyLoginsAppendAndKnownUserKeepsPosition() = runBlocking {
-        MockWebServer().use { server ->
+        newServer().use { server ->
             val manager = AccountProviderManager(Vault(), client(), AccountEndpoints(workbuddy = server.url("/").toString().trimEnd('/')))
             suspend fun login(user: String, token: String) {
                 server.enqueue(MockResponse().setBody("""{"data":{"state":"fixture-state","authUrl":"https://copilot.tencent.com/login"}}"""))
@@ -225,7 +226,7 @@ class AccountPoolTest {
     }
 
     @Test fun cancellationDuringTokenExchangeCannotAppendLateAccount() = runBlocking {
-        MockWebServer().use { server ->
+        newServer().use { server ->
             val manager = AccountProviderManager(Vault(), client(), AccountEndpoints(workbuddy = server.url("/").toString().trimEnd('/')))
             server.enqueue(MockResponse().setBody("""{"data":{"state":"fixture-state","authUrl":"https://copilot.tencent.com/login"}}"""))
             val login = manager.beginLogin("id", AccountProviderKind.WORKBUDDY)
@@ -255,7 +256,7 @@ class AccountPoolTest {
     }
 
     @Test fun lowercaseAuthorizationCannotOverrideCredentialOnNormalOr401Retry() {
-        MockWebServer().use { server ->
+        newServer().use { server ->
             server.enqueue(MockResponse().setResponseCode(401).setBody("{}"))
             server.enqueue(MockResponse().setBody("""{"data":{"access_token":"fixture-rotated","refresh_token":"fixture-refresh-two"}}"""))
             server.enqueue(MockResponse().setBody("{}"))

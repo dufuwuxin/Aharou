@@ -26,7 +26,7 @@ class AccountConfigConsumerTest {
 
     @Test fun bothConfigImportsPersistMergedModelsAndDefaultsWithoutOpeningEditor() {
         for (collectionImport in listOf(false, true)) MockWebServer().use { server ->
-            val manager = AccountProviderManager(Vault(), OkHttpClient(), AccountEndpoints(loomy = server.url("/").toString().trimEnd('/')))
+            val manager = AccountProviderManager(Vault(), OkHttpClient.Builder().connectionSpecs(listOf(okhttp3.ConnectionSpec.CLEARTEXT)).build(), AccountEndpoints(loomy = server.url("/").toString().trimEnd('/')))
             var provider = AIProviderConfig("provider", "Loomy", ProviderType.OPENAI, "",
                 baseUrl = manager.baseUrl(AccountProviderKind.LOOMY, "provider"), defaultModel = "")
             val repository = mockk<AIProviderRepository>()
