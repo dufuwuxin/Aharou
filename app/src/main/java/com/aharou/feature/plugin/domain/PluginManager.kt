@@ -15,11 +15,19 @@ import com.aharou.feature.plugin.domain.model.PluginStatus
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
+import java.nio.file.Files
+import java.nio.file.LinkOption
+import java.nio.file.StandardCopyOption
 import java.util.concurrent.ConcurrentHashMap
 import java.util.zip.ZipFile
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -42,6 +50,8 @@ class PluginManager @Inject constructor(
     private val runtimeProcessStore: RuntimeProcessStore,
 ) {
     private val json = Json { ignoreUnknownKeys = true }
+    private val mutations = Mutex()
+    private val pending = ConcurrentHashMap<String, File>()
 
     /** 正在运行的插件服务句柄（内存态；App 重启后为空，靠端口探测与进程账本兜底）。 */
     private val running = ConcurrentHashMap<String, TrackedStdioProcess>()
@@ -67,81 +77,118 @@ class PluginManager @Inject constructor(
         return runCatching { json.decodeFromString<PluginManifest>(f.readText(Charsets.UTF_8)) }.getOrNull()
     }
 
-    /**
-     * 导入一个插件包：校验 zip 结构、读出 manifest.json、把 payload/ 解到插件目录。
-     * 只落盘，不执行任何脚本（安装是 [install] 的事）。
-     */
+    /** 导入只写暂存目录；安装成功前不替换正在使用的清单与文件。 */
     suspend fun importPackage(zipFile: File): Result<PluginManifest> = withContext(Dispatchers.IO) {
-        runCatching {
-            require(zipFile.isFile) { "插件包不存在：${zipFile.path}" }
-            val (manifestText, manifest) = ZipFile(zipFile).use { zip ->
-                val entry = zip.getEntry(MANIFEST_FILE) ?: error("包内缺少 $MANIFEST_FILE")
-                val text = zip.getInputStream(entry).bufferedReader(Charsets.UTF_8).use { it.readText() }
-                text to json.decodeFromString<PluginManifest>(text)
-            }
-            require(manifest.id.isNotBlank()) { "manifest 缺少 id" }
-            require(manifest.name.isNotBlank()) { "manifest 缺少 name" }
-            require(manifest.schemaVersion <= SUPPORTED_SCHEMA_VERSION) {
-                "插件包清单版本 ${manifest.schemaVersion} 高于本应用支持的 $SUPPORTED_SCHEMA_VERSION，请先升级应用"
-            }
-            // 架构不符的包在容器里跑不起来，等安装脚本报错更难查，导入时就拦下
-            require(manifest.architectures.isEmpty() || manifest.architectures.any { abiSupported(it) }) {
-                "插件包不支持本机架构（需要 ${manifest.architectures.joinToString("/")}，" +
-                    "本机 ${Build.SUPPORTED_ABIS.joinToString("/")}）"
-            }
-
-            val root = hostDir(manifest.id)
-            // 重装：先清掉旧 payload，避免残留旧版本文件
-            File(root, PAYLOAD_DIR).deleteRecursively()
-            root.mkdirs()
-
-            ZipFile(zipFile).use { zip ->
-                val entries = zip.entries()
-                while (entries.hasMoreElements()) {
-                    val e = entries.nextElement()
-                    if (e.isDirectory) continue
-                    if (!e.name.startsWith("$PAYLOAD_DIR/")) continue
-                    val out = File(root, e.name)
-                    // 防 zip-slip：解出的路径必须仍在插件目录内
-                    require(out.canonicalPath.startsWith(root.canonicalPath + File.separator)) {
-                        "包内路径越界：${e.name}"
+        mutations.withLock {
+            pluginResult {
+                require(zipFile.isFile) { "插件包不存在：${zipFile.path}" }
+                ZipFile(zipFile).use { zip ->
+                    val entry = zip.getEntry(MANIFEST_FILE) ?: error("包内缺少 $MANIFEST_FILE")
+                    val text = zip.getInputStream(entry).bufferedReader(Charsets.UTF_8).use { it.readText() }
+                    val manifest = json.decodeFromString<PluginManifest>(text)
+                    require(manifest.id.isNotBlank()) { "manifest 缺少 id" }
+                    require(manifest.name.isNotBlank()) { "manifest 缺少 name" }
+                    require(manifest.schemaVersion <= SUPPORTED_SCHEMA_VERSION) {
+                        "插件包清单版本 ${manifest.schemaVersion} 高于本应用支持的 $SUPPORTED_SCHEMA_VERSION，请先升级应用"
                     }
-                    out.parentFile?.mkdirs()
-                    zip.getInputStream(e).use { input -> out.outputStream().use { input.copyTo(it) } }
+                    require(manifest.architectures.isEmpty() || manifest.architectures.any { abiSupported(it) }) {
+                        "插件包不支持本机架构（需要 ${manifest.architectures.joinToString("/")}，" +
+                            "本机 ${Build.SUPPORTED_ABIS.joinToString("/")}）"
+                    }
+                    hostDir(manifest.id) // Validate the id and plugin root before creating staging files.
+                    val stage = Files.createTempDirectory(pluginsRoot().toPath(), ".import-").toFile()
+                    var retained = false
+                    try {
+                        val payload = File(stage, PAYLOAD_DIR).apply { mkdirs() }
+                        val entries = zip.entries()
+                        while (entries.hasMoreElements()) {
+                            currentCoroutineContext().ensureActive()
+                            val e = entries.nextElement()
+                            if (e.isDirectory || !e.name.startsWith("$PAYLOAD_DIR/")) continue
+                            val out = File(stage, e.name)
+                            require(out.canonicalPath.startsWith(payload.canonicalPath + File.separator)) {
+                                "包内路径越界：${e.name}"
+                            }
+                            out.parentFile?.mkdirs()
+                            zip.getInputStream(e).use { input -> out.outputStream().use { input.copyTo(it) } }
+                        }
+                        File(stage, MANIFEST_FILE).writeText(text, Charsets.UTF_8)
+                        currentCoroutineContext().ensureActive()
+                        pending.put(manifest.id, stage)?.let { cleanup(it) }
+                        retained = true
+                        manifest
+                    } finally {
+                        if (!retained) cleanup(stage)
+                    }
                 }
             }
-            File(root, MANIFEST_FILE).writeText(manifestText, Charsets.UTF_8)
-            FileLogger.i(TAG, "导入插件 ${manifest.id} v${manifest.version}")
-            manifest
         }
     }
 
-    /** 安装：在容器里依次执行 installSteps，再跑 verifyCommand。任一步失败即中止并返回错误。 */
-    suspend fun install(id: String): Result<Unit> = runCatching {
-        val manifest = readManifest(id) ?: error("插件未导入：$id")
-        ensureContainer()
-        val dir = containerDir(id)
-        manifest.installSteps.forEachIndexed { index, step ->
-            // 只拿文本判不了成败：脚本非零退出（缺依赖、下载失败）会静默算作装好
-            val r = engine.runCommandSyncWithExit(envPrefix(dir) + step, null, INSTALL_TIMEOUT_MS)
-            if (r.output.isNotBlank()) FileLogger.d(TAG, "install step ${index + 1} 输出：${r.output.take(400)}")
-            errorIfFailed(r.exitCode, r.output, "安装步骤 ${index + 1}")
+    /** 安装失败恢复本次文件前态；data 始终原位保留，不删除用户持久数据。 */
+    suspend fun install(id: String): Result<Unit> = withContext(Dispatchers.IO) {
+        mutations.withLock {
+            pluginResult {
+                val root = hostDir(id)
+                val stage = pending[id]
+                val manifest = if (stage != null) {
+                    json.decodeFromString<PluginManifest>(File(stage, MANIFEST_FILE).readText(Charsets.UTF_8))
+                } else readManifest(id) ?: error("插件未导入：$id")
+                ensureContainer()
+                val previous = recordStore.get(id)
+                val backup = Files.createTempDirectory(pluginsRoot().toPath(), ".rollback-").toFile()
+                var changed = false
+                var recovered = true
+                try {
+                    // Snapshot installed binaries too: install scripts may overwrite more than payload/.
+                    copyManagedFiles(root, backup)
+                    currentCoroutineContext().ensureActive()
+                    changed = true
+                    check(root.isDirectory || root.mkdirs()) { "Cannot create plugin directory" }
+                    if (stage != null) {
+                        deleteTree(File(root, PAYLOAD_DIR))
+                        copyTree(File(stage, PAYLOAD_DIR), File(root, PAYLOAD_DIR))
+                        Files.copy(File(stage, MANIFEST_FILE).toPath(), File(root, MANIFEST_FILE).toPath(),
+                            StandardCopyOption.REPLACE_EXISTING)
+                    }
+                    val dir = containerDir(id)
+                    manifest.installSteps.forEachIndexed { index, step ->
+                        val r = engine.runCommandSyncWithExit(envPrefix(dir) + step, null, INSTALL_TIMEOUT_MS)
+                        errorIfFailed(r.exitCode, r.output, "安装步骤 ${index + 1}")
+                    }
+                    if (manifest.verifyCommand.isNotBlank()) {
+                        val r = engine.runCommandSyncWithExit(envPrefix(dir) + manifest.verifyCommand, null, INSTALL_TIMEOUT_MS)
+                        errorIfFailed(r.exitCode, r.output, "自检")
+                    }
+                    currentCoroutineContext().ensureActive()
+                    val record = PluginRecord(manifest.id, manifest.name, manifest.version, System.currentTimeMillis())
+                    recordStore.save(record)
+                    check(recordStore.get(id) == record) { "Plugin installation record was not saved" }
+                } catch (failure: Throwable) {
+                    if (changed) {
+                        try {
+                            managedFiles(root).filter { it.name != MANIFEST_FILE }.forEach { deleteTree(it) }
+                            if (!File(backup, MANIFEST_FILE).exists()) deleteTree(File(root, MANIFEST_FILE))
+                            copyManagedFiles(backup, root)
+                            if (previous == null) recordStore.remove(id) else recordStore.save(previous)
+                            check(recordStore.get(id) == previous) { "Plugin record recovery failed" }
+                        } catch (recoveryFailure: Throwable) {
+                            recovered = false
+                            failure.addSuppressed(IllegalStateException("Plugin recovery failed; backup: $backup", recoveryFailure))
+                        }
+                    }
+                    throw failure
+                } finally {
+                    if (recovered) cleanup(backup)
+                }
+                if (stage != null) {
+                    pending.remove(id, stage)
+                    cleanup(stage)
+                }
+                lastFailure.remove(id)
+                FileLogger.i(TAG, "安装插件完成 $id")
+            }
         }
-        if (manifest.verifyCommand.isNotBlank()) {
-            val result = engine.runCommandSyncWithExit(envPrefix(dir) + manifest.verifyCommand, null, INSTALL_TIMEOUT_MS)
-            errorIfFailed(result.exitCode, result.output, "自检")
-        }
-        recordStore.save(
-            PluginRecord(
-                id = manifest.id,
-                name = manifest.name,
-                version = manifest.version,
-                installedAt = System.currentTimeMillis(),
-            )
-        )
-        FileLogger.i(TAG, "安装插件完成 ${manifest.id}")
-        // 重新装过一遍，旧的启动失败原因不再作数
-        lastFailure.remove(manifest.id)
     }
 
     /** 启动常驻服务：解析 launchCommand → 起进程 → 轮询端口就绪。非服务型插件不启动。 */
@@ -153,14 +200,14 @@ class PluginManager @Inject constructor(
         return result
     }
 
-    private suspend fun runCatchingLaunch(id: String): Result<Unit> = runCatching {
+    private suspend fun runCatchingLaunch(id: String): Result<Unit> = pluginResult {
         val manifest = readManifest(id) ?: error("插件未导入：$id")
         require(manifest.isService) { "插件 ${manifest.name} 不是常驻服务，无需启动" }
         ensureContainer()
 
         if (isPortReady(manifest)) {
             FileLogger.i(TAG, "插件 ${id} 服务已在运行")
-            return@runCatching
+            return@pluginResult
         }
 
         val dir = containerDir(id)
@@ -181,7 +228,7 @@ class PluginManager @Inject constructor(
         while (System.currentTimeMillis() < deadline) {
             if (isPortReady(manifest)) {
                 FileLogger.i(TAG, "插件 ${id} 服务就绪（端口 ${manifest.servicePort}）")
-                return@runCatching
+                return@pluginResult
             }
             if (!handle.process.isAlive) {
                 handle.clearLedger()
@@ -204,26 +251,28 @@ class PluginManager @Inject constructor(
      *
      * 最后等服务端口释放，未释放则报错，避免 UI 仍显示「运行中」。
      */
-    suspend fun stop(id: String): Result<Unit> = runCatching {
+    suspend fun stop(id: String): Result<Unit> = pluginResult {
         val manifest = readManifest(id)
         val dir = containerDir(id)
 
         // 1. 本会话句柄
-        running.remove(id)?.let { handle ->
-            handle.pid?.let { pid -> ProcessIdentity.terminateTree(ProcessIdentity.Handle(pid, null)) }
+        running[id]?.let { handle ->
+            handle.pid?.let { pid ->
+                check(ProcessIdentity.terminateTree(ProcessIdentity.Handle(pid, null))) { "停止失败：进程 $pid 未退出" }
+            }
             handle.clearLedger()
+            running.remove(id, handle)
         }
 
         // 2. 账本残留（上次会话遗留）
         val tag = tagOf(id)
         runtimeProcessStore.stale()
             .filter { it.command == tag }
-            .forEach { runtimeProcessStore.terminate(it) }
+            .forEach { check(runtimeProcessStore.terminate(it)) { "停止失败：遗留进程 ${it.pid} 未退出" } }
 
-        // 3. 兜底：按插件目录杀（pkill 不可用时静默跳过）
-        runCatching {
-            engine.runCommandSync("pkill -f '$dir/[a-z]' 2>/dev/null; true", null, PKILL_TIMEOUT_MS)
-        }
+        // pkill 的 1 表示没有匹配进程；其它失败（包括超时）不能当作已停止。
+        val stopped = engine.runCommandSyncWithExit("pkill -f '$dir/[a-z]' 2>/dev/null", null, PKILL_TIMEOUT_MS)
+        if (stopped.exitCode != 1) errorIfFailed(stopped.exitCode, stopped.output, "停止插件")
 
         // 4. 等端口释放；仍被占用则视为失败
         if (manifest != null && manifest.isService) {
@@ -235,17 +284,25 @@ class PluginManager @Inject constructor(
         lastFailure.remove(id)
     }
 
-    /** 卸载：先停服务、跑 uninstallSteps，再删目录与记录。 */
-    suspend fun uninstall(id: String): Result<Unit> = runCatching {
-        stop(id)
-        val manifest = readManifest(id)
-        val dir = containerDir(id)
-        manifest?.uninstallSteps?.forEach { step ->
-            runCatching { engine.runCommandSync(envPrefix(dir) + step, null, INSTALL_TIMEOUT_MS) }
+    /** 停止或任一卸载步骤失败时，不删除目录与安装记录。 */
+    suspend fun uninstall(id: String): Result<Unit> = withContext(Dispatchers.IO) {
+        mutations.withLock {
+            pluginResult {
+                stop(id).getOrThrow()
+                val manifest = readManifest(id)
+                val dir = containerDir(id)
+                manifest?.uninstallSteps?.forEachIndexed { index, step ->
+                    val r = engine.runCommandSyncWithExit(envPrefix(dir) + step, null, INSTALL_TIMEOUT_MS)
+                    errorIfFailed(r.exitCode, r.output, "卸载步骤 ${index + 1}")
+                }
+                currentCoroutineContext().ensureActive()
+                deleteTree(hostDir(id))
+                recordStore.remove(id)
+                check(recordStore.get(id) == null) { "Plugin uninstall record was not removed" }
+                pending.remove(id)?.let { cleanup(it) }
+                FileLogger.i(TAG, "卸载插件 $id")
+            }
         }
-        hostDir(id).deleteRecursively()
-        recordStore.remove(id)
-        FileLogger.i(TAG, "卸载插件 $id")
     }
 
     /** 列出已安装插件：记录 + 目录里的清单 + 实时状态。目录已不存在的记录视为孤儿，顺手清掉。 */
@@ -276,6 +333,45 @@ class PluginManager @Inject constructor(
     }
 
     // ── 内部 ──
+
+    private suspend fun <T> pluginResult(block: suspend () -> T): Result<T> = try {
+        Result.success(block())
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (failure: Throwable) {
+        Result.failure(failure)
+    }
+
+    private fun managedFiles(root: File): List<File> =
+        if (!root.exists()) emptyList() else checkNotNull(root.listFiles()) { "Cannot list $root" }
+            .filter { it.name != "data" }
+
+    private fun copyManagedFiles(from: File, to: File) {
+        managedFiles(from).forEach { copyTree(it, File(to, it.name)) }
+    }
+
+    // Do not follow installed symlinks into data/ or paths outside this transaction.
+    private fun copyTree(from: File, to: File) {
+        Files.walk(from.toPath()).use { paths ->
+            paths.forEach { source ->
+                val target = to.toPath().resolve(from.toPath().relativize(source))
+                Files.createDirectories(target.parent)
+                Files.copy(source, target, LinkOption.NOFOLLOW_LINKS,
+                    StandardCopyOption.COPY_ATTRIBUTES, StandardCopyOption.REPLACE_EXISTING)
+            }
+        }
+    }
+
+    private fun deleteTree(file: File) {
+        if (!Files.exists(file.toPath(), LinkOption.NOFOLLOW_LINKS)) return
+        Files.walk(file.toPath()).use { paths ->
+            paths.sorted(Comparator.reverseOrder()).forEach { Files.delete(it) }
+        }
+    }
+
+    private fun cleanup(file: File) {
+        runCatching { deleteTree(file) }.onFailure { FileLogger.w(TAG, "Plugin temporary cleanup failed: $file") }
+    }
 
     private suspend fun ensureContainer() {
         if (!engine.isContainerInstalled()) engine.ensureInstalled()
