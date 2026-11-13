@@ -38,7 +38,9 @@ class PluginHostViewModelTest {
         coVerify { manager.setEnabled("fixture", true) }
         model.compile("fixture")
         // compileOutput is intentionally read on Dispatchers.IO, not on the main test dispatcher.
-        kotlinx.coroutines.withTimeout(5000) { model.hostPanelOpen.first { it } }
+        kotlinx.coroutines.withContext(Dispatchers.Default) {
+            kotlinx.coroutines.withTimeout(5000) { model.hostPanelOpen.first { it } }
+        }
         assertEquals("fixture compiler stderr", model.compileOutput.value)
         assertTrue(model.hostPanelOpen.value)
         coVerify { manager.compile("fixture") }
