@@ -47,6 +47,7 @@ import javax.inject.Inject
  */
 class ConfigTool @Inject constructor(
     @param:ApplicationContext private val context: Context,
+    private val teamFields: com.aharou.feature.agent.data.ConfigTeamControlFields,
 ) : AgentTool() {
 
     private companion object {
@@ -114,7 +115,7 @@ class ConfigTool @Inject constructor(
             ?: return ToolResult.Error("缺少 action（list / get / set）", "MISSING_ACTION")
         val path = (args["path"] as? JsonPrimitive)?.contentOrNull?.trim().orEmpty()
         if (path.startsWith(com.aharou.core.config.TeamEditCapability.PREFIX)) {
-            return teamCapabilityRequest(context, action, path, (args["value"] as? JsonPrimitive)?.contentOrNull, workspace)
+            return teamCapabilityRequest(context, action, path, (args["value"] as? JsonPrimitive)?.contentOrNull, workspace, teamFields)
         }
         return try {
             val registry = ConfigRegistry.get()

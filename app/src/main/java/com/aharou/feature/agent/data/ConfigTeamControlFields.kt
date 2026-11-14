@@ -31,6 +31,9 @@ class ConfigTeamControlFields @Inject constructor(
     private val teams: AgentTeamRepository,
     private val workflows: TeamWorkflowRepository
 ) {
+    fun forWorkspace(workspace: String): ConfigTeamControlFields =
+        ConfigTeamControlFields(teams.forWorkspace(workspace), workflows.forWorkspace(workspace))
+
     fun registerInto(registry: ConfigRegistry) {
         registry.register(Stages()); registry.register(Teams()); registry.register(Workflows())
     }

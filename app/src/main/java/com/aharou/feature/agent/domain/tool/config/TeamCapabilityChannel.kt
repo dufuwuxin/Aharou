@@ -10,10 +10,11 @@ import com.aharou.feature.agent.domain.tool.ToolResult
 import kotlinx.serialization.json.*
 import java.util.UUID
 
-internal fun teamCapabilityRequest(context: Context, action: String, address: String, raw: String?, workspace: String?): ToolResult =
+internal fun teamCapabilityRequest(context: Context, action: String, address: String, raw: String?, workspace: String?,
+    fields: com.aharou.feature.agent.data.ConfigTeamControlFields): ToolResult =
     try {
         TeamEditCapability.use(address, workspace) { path ->
-            val registry = ConfigRegistry.get()
+            val registry = ConfigRegistry.isolated().also { fields.forWorkspace(requireNotNull(workspace)).registerInto(it) }
             if (path.isEmpty()) {
                 require(action == "get" || action == "list") { "Choose a returned field address first" }
                 ToolResult.Success(buildJsonObject {

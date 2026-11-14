@@ -16,6 +16,8 @@ import javax.inject.Singleton
 class AgentTeamRepository @Inject constructor(
     private val fileAccess: FileAccessProvider
 ) {
+    fun forWorkspace(workspace: String): AgentTeamRepository = AgentTeamRepository(fileAccess.forWorkspace(workspace).checked())
+
     val globalRoot: String = "~/.aharou/teams"
     val projectRoot: String = "${WorkspacePathMapper.CONTAINER_ROOT}/.aharou/teams"
 

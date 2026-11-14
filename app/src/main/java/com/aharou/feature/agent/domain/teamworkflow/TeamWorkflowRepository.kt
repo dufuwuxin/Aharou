@@ -23,6 +23,9 @@ class TeamWorkflowRepository @Inject constructor(
     private val fileAccess: FileAccessProvider,
     private val teamRepository: AgentTeamRepository
 ) {
+    fun forWorkspace(workspace: String): TeamWorkflowRepository =
+        TeamWorkflowRepository(fileAccess.forWorkspace(workspace).checked(), teamRepository.forWorkspace(workspace))
+
     val globalRoot: String = "~/.aharou/workflows"
     val projectRoot: String = "${WorkspacePathMapper.CONTAINER_ROOT}/.aharou/workflows"
 

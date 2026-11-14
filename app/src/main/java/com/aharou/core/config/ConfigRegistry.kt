@@ -124,6 +124,8 @@ class ConfigRegistry private constructor() {
          */
         @Volatile private var INSTANCE: ConfigRegistry? = null
 
+        fun isolated(): ConfigRegistry = ConfigRegistry()
+
         fun get(): ConfigRegistry =
             INSTANCE ?: error("ConfigRegistry not initialized; call init() from Application.onCreate")
 
