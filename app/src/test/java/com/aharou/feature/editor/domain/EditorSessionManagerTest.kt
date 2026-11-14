@@ -29,6 +29,25 @@ class EditorSessionManagerTest {
         scrollY = 0,
     )
 
+    @Test fun olderSaveAcknowledgementKeepsTheNewerDraftAndUpdatesOnlyItsSavedBaseline() {
+        EditorSessionManager.saveSnapshot("/a", snapshot("new draft").copy(dirty = true, baselineContent = "disk"))
+        EditorSessionManager.markSaved("/a", "submitted draft")
+        val remaining = requireNotNull(EditorSessionManager.snapshot("/a"))
+        assertEquals("new draft", remaining.content)
+        assertEquals("submitted draft", remaining.baselineContent)
+        assertTrue(remaining.dirty)
+        EditorSessionManager.markSaved("/a", "new draft")
+        assertNull(EditorSessionManager.snapshot("/a"))
+    }
+
+    @Test fun restoredDraftIsNotTheSavedBaselineAfterEditAndUndo() {
+        val draft = snapshot("unsaved draft").copy(dirty = true, baselineContent = "saved disk")
+        EditorSessionManager.saveSnapshot("/a", draft)
+        val restored = requireNotNull(EditorSessionManager.snapshot("/a"))
+        assertTrue(restored.content != restored.baselineContent)
+        assertEquals("saved disk", restored.baselineContent)
+    }
+
     // ---------- open ----------
 
     @Test

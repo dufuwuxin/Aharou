@@ -66,7 +66,8 @@ class TerminalTab(
      */
     val workspacePath: String? = null,
     val client: com.termux.terminal.TerminalSessionClient? = null,
-    runState: RunState
+    runState: RunState,
+    val exitReceiptToken: String? = null
 ) {
     var title: String = title
         internal set

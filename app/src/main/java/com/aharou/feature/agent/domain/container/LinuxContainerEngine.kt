@@ -1,5 +1,4 @@
 package com.aharou.feature.agent.domain.container
-import com.aharou.core.util.BoundedLineReader
 import com.aharou.core.util.FileLogger
 import com.aharou.core.util.LINE_TRUNCATED_NOTE
 import com.aharou.core.util.ProcessIdentity
@@ -27,7 +26,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import java.io.InputStreamReader
+import com.aharou.core.util.ProcessLineReader
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -112,6 +111,7 @@ class LinuxContainerEngine @Inject constructor(
      * 用户填凭据」而非「卡死」，watchdog 不应按常规超时强杀，详见其改造注释。
      */
     private val credentialPromptInFlight = java.util.concurrent.atomic.AtomicInteger(0)
+    private val outputReaders = java.util.concurrent.ConcurrentHashMap<Process, ProcessLineReader>()
 
     /** 凭据请求进入途（bridge 收到 helper 的 cred-req 时调）。 */
     fun incPromptInFlight() { credentialPromptInFlight.incrementAndGet() }
@@ -251,6 +251,8 @@ class LinuxContainerEngine @Inject constructor(
         val timedOut = AtomicBoolean(false)
         // 看门狗跑在独立 scope（独立 Job）上：若放进包裹 emit 的 coroutineScope 里，emit 的
         // Job 与 flow 收集者不一致会触发「Flow invariant is violated」。这里仅用它在超时时杀进程。
+        val reader = ProcessLineReader(process.inputStream) { process.isAlive }
+        outputReaders[process] = reader
         val watchScope = CoroutineScope(Dispatchers.IO + Job())
         val watchdog = launchKillWatchdog(watchScope, process, identity, effectiveTimeout, timedOut, command)
         // 取消监听挂在当前 job 下、用 awaitCancellation 挂起：父 job 一取消它就立刻走到 finally。
@@ -260,23 +262,23 @@ class LinuxContainerEngine @Inject constructor(
             try {
                 awaitCancellation()
             } finally {
+                outputReaders[process]?.fail(CancellationException("Command cancelled"))
                 if (process.isAlive) {
                     FileLogger.i(TAG, "命令被取消，终止进程: ${sanitizeCommandForLog(command)}")
                     terminateTree(process, identity, command)
                 }
             }
         }
-        val reader = BoundedLineReader(InputStreamReader(process.inputStream))
         try {
             while (true) {
                 val line = reader.readLine() ?: break
                 emit(CommandEvent.Line(if (line.truncated) "${line.text}\n$LINE_TRUNCATED_NOTE" else line.text))
             }
-            val exitCode = process.waitFor()
+            val exitCode = awaitExit(process, timedOut)
             watchdog.cancel()
             processKiller.cancel()
             if (timedOut.get()) {
-                FileLogger.w(TAG, "命令超时(${effectiveTimeout}ms)已终止: ${sanitizeCommandForLog(command)}")
+                FileLogger.w(TAG, "命令超时(${effectiveTimeout}ms)，输出等待已中断: ${sanitizeCommandForLog(command)}")
                 emit(CommandEvent.Line(timeoutNotice(effectiveTimeout)))
                 emit(CommandEvent.Exit(null))
             } else {
@@ -294,7 +296,7 @@ class LinuxContainerEngine @Inject constructor(
             // 非 IO 异常也转成一行提示 + Exit，避免 flow 异常终止丢掉已输出内容。
             watchdog.cancel()
             if (timedOut.get()) {
-                FileLogger.w(TAG, "命令超时(${effectiveTimeout}ms)已终止(readLine 异常): ${sanitizeCommandForLog(command)}", e)
+                FileLogger.w(TAG, "命令超时(${effectiveTimeout}ms)，输出等待已中断(readLine 异常): ${sanitizeCommandForLog(command)}", e)
                 emit(CommandEvent.Line(timeoutNotice(effectiveTimeout)))
                 emit(CommandEvent.Exit(null))
             } else {
@@ -303,6 +305,7 @@ class LinuxContainerEngine @Inject constructor(
                 emit(CommandEvent.Exit(null))
             }
         } finally {
+            outputReaders.remove(process)?.close()
             // 协程取消（用户离开页面等）时确保子进程被回收，避免泄漏
             processKiller.cancel()
             watchdog.cancel()
@@ -400,6 +403,8 @@ class LinuxContainerEngine @Inject constructor(
                 ?: ProcessIdentity.childPids().minus(childrenBefore).minOrNull()?.let { ProcessIdentity.Handle(it, null) }
             identity?.let { runtimeProcessStore.record(it.pid, it.startTimeTicks, command) }
             val timedOut = AtomicBoolean(false)
+            val reader = ProcessLineReader(process.inputStream) { process.isAlive }
+            outputReaders[process] = reader
             // 取消监听挂在当前 job 下、用 awaitCancellation 挂起：父 job 一取消它就立刻走到 finally。
             // 不能用 invokeOnCompletion——默认重载只在 job 完成时回调，而命令卡在阻塞的 readLine 上时
             // 协程不响应取消、job 停在 cancelling 永不完成，钩子便永远不触发、进程也就杀不掉。
@@ -407,6 +412,7 @@ class LinuxContainerEngine @Inject constructor(
                 try {
                     awaitCancellation()
                 } finally {
+                    outputReaders[process]?.fail(CancellationException("Command cancelled"))
                     if (process.isAlive) {
                         FileLogger.i(TAG, "命令被取消，终止进程: ${sanitizeCommandForLog(command)}")
                         terminateTree(process, identity, command)
@@ -423,14 +429,17 @@ class LinuxContainerEngine @Inject constructor(
             try {
                 coroutineScope {
                     val watchdog = launchKillWatchdog(this, process, identity, effectiveTimeout, timedOut, command)
-                    val reader = BoundedLineReader(InputStreamReader(process.inputStream))
                     try {
                         while (true) {
                             val line = reader.readLine() ?: break
                             output.append(if (line.truncated) "${line.text}\n$LINE_TRUNCATED_NOTE" else line.text)
                             output.append("\n")
                         }
-                        exitCode = process.waitFor()
+                        exitCode = awaitExit(process, timedOut)
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (failure: java.io.IOException) {
+                        if (!timedOut.get()) throw failure
                     } finally {
                         watchdog.cancel()
                         runCatching { reader.close() }
@@ -438,11 +447,12 @@ class LinuxContainerEngine @Inject constructor(
                 }
             } finally {
                 processKiller.cancel()
+                outputReaders.remove(process)?.close()
                 terminateTree(process, identity, command)
             }
 
             if (timedOut.get()) {
-                FileLogger.w(TAG, "命令超时(${effectiveTimeout}ms)已终止: ${sanitizeCommandForLog(command)}")
+                FileLogger.w(TAG, "命令超时(${effectiveTimeout}ms)，输出等待已中断: ${sanitizeCommandForLog(command)}")
                 output.append(timeoutNotice(effectiveTimeout))
                 output.append("\n")
                 ExecResult(output.build(), null, output.truncated)
@@ -475,26 +485,10 @@ class LinuxContainerEngine @Inject constructor(
         timeoutMs: Long,
         timedOut: AtomicBoolean,
         command: String
-    ): Job = scope.launch {
-        var remaining = timeoutMs
-        var totalWaited = 0L
-        while (true) {
-            delay(remaining)
-            if (!process.isAlive) return@launch
-            totalWaited += remaining
-            val inflight = credentialPromptInFlight.get()
-            if (inflight > 0 && totalWaited < MAX_TIMEOUT_MS) {
-                // 凭据弹窗在途：宽限 1min（不超过绝对上限），再回查。
-                FileLogger.i(TAG, "凭据弹窗在途(${inflight})，watchdog 暂缓，再等 60000ms: ${sanitizeCommandForLog(command)}")
-                remaining = minOf(60_000L, MAX_TIMEOUT_MS - totalWaited)
-                continue
-            }
-            // 不在途，或已达 30min 绝对上限：正常超时终止。
-            timedOut.set(true)
-            FileLogger.w(TAG, "命令执行超过 ${timeoutMs}ms（累计等待 ${totalWaited}ms，inflight=${inflight}），终止进程: ${sanitizeCommandForLog(command)}")
-            terminateTree(process, identity, command)
-            return@launch
-        }
+    ): Job = launchContainerCommandWatchdog(scope, timeoutMs, MAX_TIMEOUT_MS, timedOut,
+        credentialPromptInFlight::get, sanitizeCommandForLog(command)) {
+        outputReaders[process]?.fail(java.io.IOException("Command output deadline exceeded"))
+        terminateTree(process, identity, command)
     }
 
     /**
@@ -526,9 +520,14 @@ class LinuxContainerEngine @Inject constructor(
         }
     }
 
+    private suspend fun awaitExit(process: Process, timedOut: AtomicBoolean): Int? {
+        while (process.isAlive && !timedOut.get()) delay(25)
+        return if (timedOut.get()) null else process.exitValue()
+    }
+
     /** 超时提示行（拼进输出，喂回模型/展示给用户）。 */
     private fun timeoutNotice(timeoutMs: Long): String =
-        "[命令执行超时：超过 ${timeoutMs}ms 已被强制终止]"
+        "[命令执行超时：超过 ${timeoutMs}ms，输出等待已中断；子进程终止状态见日志]"
 
     /**
      * 启动进程。rootfs/proot 安装就绪则用 PRoot 进入容器；

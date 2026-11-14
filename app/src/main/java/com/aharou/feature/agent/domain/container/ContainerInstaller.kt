@@ -720,9 +720,16 @@ class ContainerInstaller @Inject constructor(
      * 已经没了，残缺目录不会再被 [isInstalledFor] 当成装好的容器，下次进容器会先删干净再重新解压。
      */
     private fun purgeRootfs(dir: File, marker: File, onProgress: (Int) -> Unit) {
+        val rootLink = Files.isSymbolicLink(dir.toPath())
+        if (rootLink) {
+            if (!dir.delete()) throw java.io.IOException("Cannot remove container root link")
+            onProgress(1)
+            return
+        }
         if (!dir.exists()) return
-        marker.delete()
+        if (marker.exists() && !marker.delete()) throw java.io.IOException("Cannot remove container installation marker")
         val count = deleteTree(dir, 0, onProgress)
+        if (dir.exists()) throw java.io.IOException("Container directory still exists after reset")
         FileLogger.i(TAG, "已删除 rootfs ${dir.name}，共 $count 项")
     }
 
@@ -743,15 +750,19 @@ class ContainerInstaller @Inject constructor(
             val entry = pending.removeLast()
             if (isRealDirectory(entry)) {
                 dirs.addLast(entry)
-                entry.listFiles()?.forEach { pending.addLast(it) }
-            } else if (entry.delete()) {
+                val children = entry.listFiles() ?: throw java.io.IOException("Cannot enumerate container directory: ${entry.name}")
+                children.forEach { pending.addLast(it) }
+            } else {
+                if (!entry.delete() && entry.exists()) throw java.io.IOException("Cannot remove container entry: ${entry.name}")
                 count++
                 if (count % DELETE_PROGRESS_STEP == 0) onProgress(count)
             }
         }
         // 目录得等自己空了才删得掉：dirs 按自浅入深的发现顺序入队，从队尾往回删即先深后浅。
         while (dirs.isNotEmpty()) {
-            if (dirs.removeLast().delete()) count++
+            val directory = dirs.removeLast()
+            if (!directory.delete() && directory.exists()) throw java.io.IOException("Cannot remove container directory: ${directory.name}")
+            count++
         }
         onProgress(count)
         return count

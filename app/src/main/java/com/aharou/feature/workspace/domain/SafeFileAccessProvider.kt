@@ -14,10 +14,12 @@ class SafeFileAccessProvider(
     private val delegate: FileAccessProvider,
 ) : FileAccessProvider by delegate {
     override fun checked(): FileAccessProvider = delegate.checked()
+    override fun forWorkspace(workspacePath: String): FileAccessProvider = SafeFileAccessProvider(delegate.forWorkspace(workspacePath))
 
     private fun <T> guard(op: String, fallback: T, block: () -> T): T = try {
         block()
     } catch (t: Throwable) {
+        if (t is kotlinx.coroutines.CancellationException) throw t
         FileLogger.w("SafeFileAccess", "远程文件操作失败 [$op]: ${t.message}")
         fallback
     }

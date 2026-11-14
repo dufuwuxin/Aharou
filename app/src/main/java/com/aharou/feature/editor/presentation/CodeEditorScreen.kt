@@ -43,6 +43,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
@@ -118,6 +119,7 @@ fun CodeEditorScreen(
     val snapshots by EditorSessionManager.snapshots.collectAsStateWithLifecycle()
     LaunchedEffect(path) { EditorSessionManager.open(path) }
     val activePath = sessionActivePath.ifBlank { path }
+    val currentActivePath by rememberUpdatedState(activePath)
     // 定义跳转用「工作区内为 ~/workspace/…」的统一写法，当前路径也归一化后比对，
     // 免得同一个文件因为写法不同被当成两个路径、在标签栏里开出两份。
     val normalizedActivePath = viewModel.displayPath(activePath)
@@ -163,6 +165,7 @@ fun CodeEditorScreen(
         canRedo = false
         dirty = snapshots[activePath]?.dirty == true
         pendingLeave = null
+        saveConflictDiskContent = null
         cursorLine = snapshots[activePath]?.cursorLine ?: 1
         cursorColumn = snapshots[activePath]?.cursorColumn ?: 1
         editorFind.close()
@@ -200,20 +203,21 @@ fun CodeEditorScreen(
         viewModel.saveEvents.collect { result ->
             when (result) {
                 is SaveResult.Success -> {
-                    // 写盘完成后对应的未保存快照作废（内容已经落到磁盘上）。
-                    EditorSessionManager.forget(result.path)
-                    if (result.path == activePath) {
-                        baselineText.value = pendingSaveText
-                        dirty = false
+                    EditorSessionManager.markSaved(result.path, result.content)
+                    if (result.path == currentActivePath) {
+                        baselineText.value = result.content
+                        dirty = editorRef.value?.text?.toString()?.let { it != result.content } ?: dirty
                     }
                     Toast.makeText(context, savedText, Toast.LENGTH_SHORT).show()
                     // 待确认的离开动作只跟着「当前标签」走：保存的是别的标签时不能顺手把页面换掉。
                     pendingLeave?.let { leave ->
                         pendingLeave = null
-                        if (result.path == activePath) leave.action()
+                        if (result.path == currentActivePath && !dirtyState.value) leave.action()
                     }
                 }
-                is SaveResult.Conflict -> { pendingLeave = null; saveConflictDiskContent = result.diskContent }
+                is SaveResult.Conflict -> if (result.path == currentActivePath) {
+                    pendingLeave = null; saveConflictDiskContent = result.diskContent
+                }
                 is SaveResult.Error -> {
                     pendingLeave = null
                     Toast.makeText(
@@ -253,7 +257,8 @@ fun CodeEditorScreen(
                 dirty = dirty,
                 cursorLine = cursorLine,
                 cursorColumn = cursorColumn,
-                scrollY = editor.scrollY
+                scrollY = editor.scrollY,
+                baselineContent = baselineText.value
             )
         )
     }
@@ -444,7 +449,7 @@ fun CodeEditorScreen(
             is EditorUiState.Success -> Box(modifier = content) {
                 // 有未保存快照时用快照文本而不是磁盘内容——切走再切回来，改动不能消失。
                 val surfaceState = remember(activePath, s.content) {
-                    snapshots[activePath]?.let { s.copy(content = it.content) } ?: s
+                    snapshots[activePath]?.let { s.copy(content = it.content, baselineContent = it.baselineContent ?: s.baselineContent) } ?: s
                 }
                 // 按「文档」重建编辑器：大屏右栏常驻在聊天页里，切文件时这个组合位置不变，
                 // AndroidView 的 factory 不会重跑，而内容与语法语言只在 factory 里设，
@@ -760,7 +765,7 @@ private fun EditorSurface(
         }
     )
 
-    LaunchedEffect(state.content) { baselineText.value = state.content }
+    LaunchedEffect(state.baselineContent) { baselineText.value = state.baselineContent }
 
     // 深浅主题切换时重设配色，而非重建编辑器——保住未保存内容与撤销栈。
     val editor = editorRef.value

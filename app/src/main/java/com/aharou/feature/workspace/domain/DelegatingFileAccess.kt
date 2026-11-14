@@ -64,7 +64,7 @@ class DelegatingFileAccess private constructor(
             modeHolder,
             profileResolver,
             localLeg.forWorkspace(workspacePath),
-            remoteLeg,
+            remoteLeg.forWorkspace(workspacePath),
             workspacePath,
         )
     }

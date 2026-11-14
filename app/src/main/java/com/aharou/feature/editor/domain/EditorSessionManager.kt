@@ -22,7 +22,8 @@ object EditorSessionManager {
         val dirty: Boolean,
         val cursorLine: Int,
         val cursorColumn: Int,
-        val scrollY: Int
+        val scrollY: Int,
+        val baselineContent: String? = null
     )
 
     private val _tabs = MutableStateFlow<List<String>>(emptyList())
@@ -63,6 +64,12 @@ object EditorSessionManager {
 
     fun saveSnapshot(path: String, snapshot: Snapshot) {
         _snapshots.value = _snapshots.value + (path to snapshot)
+    }
+
+    fun markSaved(path: String, content: String) {
+        val current = _snapshots.value[path] ?: return
+        if (current.content == content) forget(path)
+        else _snapshots.value = _snapshots.value + (path to current.copy(dirty = true, baselineContent = content))
     }
 
     fun forget(path: String) {

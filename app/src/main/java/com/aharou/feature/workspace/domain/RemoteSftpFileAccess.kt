@@ -14,6 +14,7 @@ import kotlinx.coroutines.withContext
 import net.schmizz.sshj.sftp.FileMode
 import net.schmizz.sshj.sftp.OpenMode
 import net.schmizz.sshj.sftp.RemoteFile
+import net.schmizz.sshj.sftp.RenameFlags
 import net.schmizz.sshj.sftp.SFTPClient
 import net.schmizz.sshj.sftp.SFTPException
 import net.schmizz.sshj.xfer.FilePermission
@@ -55,10 +56,34 @@ class RemoteSftpFileAccess @Inject constructor(
     private val workspaceRepository: WorkspaceRepository
 ) : FileAccessProvider {
 
-    private val sftpMutex = Mutex()
+    private var sftpMutex = Mutex()
+    private var boundWorkspace: String? = null
+    private var boundEndpoint: Triple<String, Int, String>? = null
+    private var boundHome: String? = null
+
+    override fun checked(): FileAccessProvider = forWorkspace(currentWorkspaceRoot())
+
+    override fun forWorkspace(workspacePath: String): FileAccessProvider {
+        if (workspacePath.isBlank()) return this
+        val root = if (workspacePath == CONTAINER_ROOT) currentWorkspaceRoot() else workspacePath
+        return RemoteSftpFileAccess(connection, workspaceRepository).also {
+            it.sftpMutex = sftpMutex
+            it.boundWorkspace = root
+            it.boundHome = connection.remoteHome
+            it.boundEndpoint = connection.config?.let { config -> Triple(config.host, config.port, config.username) }
+        }
+    }
+
+    private fun requireBoundTarget() {
+        if (boundWorkspace == null) return
+        val current = connection.config?.let { Triple(it.host, it.port, it.username) }
+        check(boundEndpoint != null && current == boundEndpoint) { "SSH_CONNECTION_CHANGED" }
+    }
 
     /** 当前选中工作区在远程服务器上的真实路径（如 /data/.../test/111）。 */
     private fun currentWorkspaceRoot(): String {
+        requireBoundTarget()
+        boundWorkspace?.let { return it }
         val cfg = connection.config ?: throw IllegalStateException("SSH 未连接")
         // currentPath() 远程模式返回选中工作区的远程绝对路径；未选中时回退到 remoteWorkspacePath
         val path = workspaceRepository.currentPath()
@@ -67,7 +92,7 @@ class RemoteSftpFileAccess @Inject constructor(
 
     /** 把 AI 路径映射到远程服务器上的真实路径。 */
     private fun toRemotePath(path: String): String =
-        remotePathFor(path, currentWorkspaceRoot(), connection.remoteHome)
+        remotePathFor(path, currentWorkspaceRoot(), if (boundWorkspace != null) boundHome else connection.remoteHome)
 
     /** 把远程路径还原为 AI 视角的容器路径（回显用）。 */
     private fun toDisplayPathFromRemote(remotePath: String): String =
@@ -80,11 +105,13 @@ class RemoteSftpFileAccess @Inject constructor(
     private fun <T> withSftp(block: (SFTPClient) -> T): T = runBlocking {
         withContext(Dispatchers.IO) {
             sftpMutex.withLock {
+                requireBoundTarget()
                 val sftp = try {
                     connection.sftp()
                 } catch (e: Exception) {
                     throw IOException(friendlySshError(e), e)
                 }
+                requireBoundTarget()
                 guarded { block(sftp) }
             }
         }
@@ -95,7 +122,7 @@ class RemoteSftpFileAccess @Inject constructor(
      * 一次读取，`yield` 在锁外，调用方中途放弃迭代时不会把 [sftpMutex] 永久占住。
      */
     private fun <T> onSftp(block: () -> T): T = runBlocking {
-        withContext(Dispatchers.IO) { sftpMutex.withLock { guarded(block) } }
+        withContext(Dispatchers.IO) { sftpMutex.withLock { requireBoundTarget(); guarded(block) } }
     }
 
     /** 传输层异常时丢弃 SFTP 通道（下次调用自动重建）后原样抛出；业务错误不重建。 */
@@ -234,32 +261,50 @@ class RemoteSftpFileAccess @Inject constructor(
         withSftp { sftp ->
             if (sftp.statExistence(remote) != null && !overwrite) throw FileAlreadyExistsException(File(remote))
             ensureParent(sftp, remote)
+            var owned = false
             try {
-                sftp.open(tmp, EnumSet.of(OpenMode.WRITE, OpenMode.CREAT, OpenMode.TRUNC)).use { rf ->
+                sftp.open(tmp, EnumSet.of(OpenMode.WRITE, OpenMode.CREAT, OpenMode.EXCL)).use { rf ->
+                    owned = true
                     writeAll(rf, bytes)
                 }
-                replaceVia(sftp, tmp, remote)
+                replaceVia(sftp, tmp, remote, overwrite)
             } catch (e: Exception) {
-                runCatching { sftp.rm(tmp) }
+                if (owned) runCatching { sftp.rm(tmp) }
                 throw e
             }
         }
     }
 
     /**
-     * 用 [tmp] 原子替换 [remote]。优先直接 rename（多数 SFTP 服务器支持覆盖式 rename，这才是真正的
-     * 原子替换）；仅当服务器拒绝覆盖时才退化为「先删目标再改名」——后者存在极小的丢失窗口，但好过
-     * 所有服务器都退化。
+     * 优先使用服务器覆盖式原子改名；旧服务不支持时先把原目标移至本次专属备份。
+     * 兼容路径不是原子操作，但提交失败仍可回滚，且从不先删除用户原目标。
      */
-    private fun replaceVia(sftp: SFTPClient, tmp: String, remote: String) {
+    private fun replaceVia(sftp: SFTPClient, tmp: String, remote: String, overwrite: Boolean) {
+        if (!overwrite) {
+            if (sftp.statExistence(remote) != null) throw FileAlreadyExistsException(File(remote))
+            sftp.rename(tmp, remote)
+            return
+        }
         if (sftp.statExistence(remote) == null) {
             sftp.rename(tmp, remote)
             return
         }
-        val renamed = runCatching { sftp.rename(tmp, remote) }.isSuccess
+        val renamed = runCatching { sftp.rename(tmp, remote, EnumSet.of(RenameFlags.OVERWRITE, RenameFlags.ATOMIC)) }.isSuccess
         if (renamed) return
-        runCatching { sftp.rm(remote) }
-        sftp.rename(tmp, remote)
+        if (sftp.statExistence(remote) == null) { sftp.rename(tmp, remote); return }
+        val backup = tmpPathFor(remote) + ".backup"
+        if (sftp.statExistence(backup) != null) throw IOException("Remote replacement backup already exists: $backup")
+        sftp.rename(remote, backup)
+        try {
+            sftp.rename(tmp, remote)
+        } catch (failure: Exception) {
+            try {
+                if (sftp.statExistence(remote) == null) sftp.rename(backup, remote)
+                else throw IOException("Remote target changed during rollback; backup retained: $backup")
+            } catch (rollback: Exception) { failure.addSuppressed(rollback) }
+            throw failure
+        }
+        runCatching { sftp.rm(backup) }.onFailure { FileLogger.w("RemoteSftp", "Committed replacement backup retained: $backup") }
     }
 
     override fun writeStream(path: String, input: InputStream, overwrite: Boolean): Long {
@@ -269,8 +314,10 @@ class RemoteSftpFileAccess @Inject constructor(
         return withSftp { sftp ->
             if (sftp.statExistence(remote) != null && !overwrite) throw FileAlreadyExistsException(File(remote))
             ensureParent(sftp, remote)
+            var owned = false
             val written = try {
-                sftp.open(tmp, EnumSet.of(OpenMode.WRITE, OpenMode.CREAT, OpenMode.TRUNC)).use { rf ->
+                sftp.open(tmp, EnumSet.of(OpenMode.WRITE, OpenMode.CREAT, OpenMode.EXCL)).use { rf ->
+                    owned = true
                     val buf = ByteArray(IO_CHUNK)
                     var offset = 0L
                     while (true) {
@@ -282,12 +329,11 @@ class RemoteSftpFileAccess @Inject constructor(
                     }
                     offset
                 }
+                .also { replaceVia(sftp, tmp, remote, overwrite) }
             } catch (e: Exception) {
-                runCatching { sftp.rm(tmp) }
+                if (owned) runCatching { sftp.rm(tmp) }
                 throw e
             }
-            // 目标已存在时先尝试直接覆盖改名，失败再删目标改名（见 replaceVia）。
-            replaceVia(sftp, tmp, remote)
             written
         }
     }
@@ -462,9 +508,9 @@ class RemoteSftpFileAccess @Inject constructor(
 
     /**
      * 原子写的临时文件路径。与 [LocalFileAccess] 的 `.aicode-tmp-*` 命名区分开：远端只能在目标旁生成
-     * 名字，所以用「目标名 + 后缀」的形式，且固定后缀便于异常残留时被识别清理。
+     * 名字，所以使用「目标名 + 随机代次 + 后缀」，并通过 EXCL 确认临时项属于本次写入。
      */
-    private fun tmpPathFor(remote: String) = "$remote$TMP_FILE_SUFFIX"
+    private fun tmpPathFor(remote: String) = "$remote.${java.util.UUID.randomUUID()}$TMP_FILE_SUFFIX"
 
     private companion object {
 

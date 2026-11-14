@@ -63,8 +63,6 @@ class TerminalSessionManager @Inject constructor(
          *  长命令（构建/安装）期间持续占 CPU；现在每轮只读尾部若干行（见 [EXIT_MARKER_TAIL_ROWS]），
          *  间隔保持 1s，发现退出标记的延迟不变。 */
         const val EXIT_MARKER_POLL_MS = 1_000L
-        /** 匹配命令退出标记 `[command exited: N]` 的定位前缀（配合手工解析退出码，免全量正则扫描）。 */
-        const val EXIT_MARKER_PREFIX = "[command exited: "
         /**
          * 兜底监控每轮只读屏幕尾部这么多行（含已滚出屏幕的历史行）。
          *
@@ -208,7 +206,9 @@ class TerminalSessionManager @Inject constructor(
         //   污染成 0，而某些情况下进程不干净退出还会导致回调不触发。
         // notify=false：echo 后 `exec ${shell}` 保活，标签可复用（dev server 退出后也能继续输入）；
         //   此时进程不退出、不回调，退出码无意义，符合 dev server 场景设计。
-        val afterCommand = if (notify) "; exit \$ec" else "; exec ${containerEngine.defaultShellFor(profile)}"
+        val receiptToken = java.util.UUID.randomUUID().toString().replace("-", "")
+        val afterCommand = "; printf '\\n[aharou-exit:$receiptToken:%s]\\n' \"\$ec\"" +
+            if (notify) "; exit \$ec" else "; exec ${containerEngine.defaultShellFor(profile)}"
         // 用大括号包住命令再接退出标记：命令末行若是 heredoc 结束符、注释或 `&`，直接接分号会让标记被吞掉或报语法错误。
         val shellCommand = "cd ~/workspace 2>/dev/null; " +
             "{ $command\n}; ec=\$?; printf '\\n[command exited: %s]\\n' \"\$ec\"$afterCommand"
@@ -228,7 +228,8 @@ class TerminalSessionManager @Inject constructor(
                 sourceSessionId = sourceSessionId,
                 workspacePath = workspace,
                 client = client,
-                runState = RunState.Running
+                runState = RunState.Running,
+                exitReceiptToken = receiptToken
             )
         )
         // 后台命令不抢占当前标签焦点：仅当没有活动标签时才设为当前。
@@ -395,44 +396,27 @@ class TerminalSessionManager @Inject constructor(
     /**
      * 完成兜底监控：termux 的会话结束依赖 PTY 读到 EOF，而 proot 宿主进程在 Android 上可能
      * 概率性不退出（即使其 bash 已执行 exit，proot 仍攥着 /dev/pts 不释放），导致 onFinished
-     * 永不回调、notify=true 的任务不触发通知。bash 在真正退出前必打印 `[command exited: N]`，
-     * 以此作为命令结束的可靠信号：监控到后短缓冲（给正常回调留时间），仍 Running 则强制收尾。
+     * 永不回调、notify=true 的任务不触发通知。兜底只认当前执行的私有回执，
+     * 监控到后给正常回调留缓冲，随后在主线程认领一次完成事件。
      */
-    /** 在输出文本的末尾行中定位退出标记 `[command exited: N]` 并解析退出码；未找到返回 null。
-     *  要求退出标记必须作为独立行出现（以换行开头或位于文本起始），且从末尾向后定位，避免 PTY 命令行回显误判。 */
-    private fun extractExitCode(output: String): Int? {
-        val tail = output.takeLast(1000)
-        val idx = tail.lastIndexOf(EXIT_MARKER_PREFIX)
-        if (idx < 0) return null
-        if (idx > 0 && tail[idx - 1] != '\n' && tail[idx - 1] != '\r') return null
-        var end = idx + EXIT_MARKER_PREFIX.length
-        if (end >= tail.length || !tail[end].isDigit()) return null
-        var code = 0
-        while (end < tail.length && tail[end].isDigit()) {
-            code = code * 10 + (tail[end] - '0')
-            end++
-        }
-        return if (end < tail.length && tail[end] == ']') code else null
-    }
-
     private fun monitorBackgroundExit(tabId: String) {
-        monitorScope.launch {
-            var seenMarker = false
+        monitorScope.launch(Dispatchers.Main) {
+            var observedExitCode: Int? = null
             while (true) {
                 val tab = tab(tabId) ?: return@launch
                 if (tab.runState !is RunState.Running) return@launch
-                if (!seenMarker) {
+                if (observedExitCode == null) {
                     // 每轮只读尾部若干行找退出标记，不再整体构建 transcript：轮询间隔保持 1s，
                     // 「退出标记多久被发现」的时序与旧实现一致，省掉的是每秒十几万字符的拼串。
                     val tail = readTabTailOnMain(tabId, EXIT_MARKER_TAIL_ROWS) ?: return@launch
-                    if (extractExitCode(tail) != null) seenMarker = true
+                    observedExitCode = terminalReceiptExitCode(tail, tab.exitReceiptToken)
                 } else {
                     delay(EXIT_MARKER_GRACE_MS)
                     // 缓冲后再查：正常 onFinished 回调若已触发，状态不再 Running，此处直接退出。
                     val current = tab(tabId) ?: return@launch
                     if (current.runState is RunState.Running) {
                         val tail = readTabTailOnMain(tabId, EXIT_MARKER_TAIL_ROWS) ?: ""
-                        val exitCode = extractExitCode(tail) ?: 0
+                        val exitCode = requireNotNull(observedExitCode)
                         current.runState = RunState.Finished(exitCode)
                         bumpRevision()
                         FileLogger.i(TAG, "兜底：标签 $tabId 检测到退出标记，强制收尾 exit=$exitCode")

@@ -42,7 +42,6 @@ private const val EXIT_MARKER_GRACE_MS = 1_500L
 /** 完成兜底监控轮询屏幕缓冲的间隔（毫秒）。 */
 private const val EXIT_MARKER_POLL_MS = 1_000L
 /** 匹配命令退出标记 `[command exited: N]` 的定位前缀。 */
-private const val EXIT_MARKER_PREFIX = "[command exited: "
 
 /**
  * 远程 SSH 终端会话管理器：用 sshj shell channel 驱动 [TerminalSession]（接 [SshShellBackend]），
@@ -181,11 +180,13 @@ class RemoteTerminalSessionManager @Inject constructor(
                     "if [ \"\$(cd ~/workspace 2>/dev/null && pwd -P)\" = \"\$(pwd -P)\" ]; then cd ~/workspace; fi\n"
             )
         }
+        val receiptToken = java.util.UUID.randomUUID().toString().replace("-", "")
         if (command != null) {
             // sshj 的 Session.Shell 没有退出状态（SshShellBackend.waitForExit 恒 0），真实退出码只能靠命令
             // 回显的 `[command exited: N]` 标记解析；notify 时 `exit $ec` 让 shell 自然结束触发 onFinished，
             // 非 notify 时 `exec /bin/sh` 保活供后续复用（与本地 TerminalSessionManager 的三件套一致）。
-            val afterCommand = if (notify) "; exit \$ec" else "; exec /bin/sh"
+            val afterCommand = "; printf '\\n[aharou-exit:$receiptToken:%s]\\n' \"\$ec\"" +
+                if (notify) "; exit \$ec" else "; exec /bin/sh"
             // 大括号包住命令：末行是 heredoc 结束符、注释或 `&` 时标记不会被吞掉；shell 读完整条才执行，
             // 标记也不会被读标准输入的命令当成输入读走（单纯换行会）。
             val init = "{ $command\n}; ec=\$?; printf '\\n[command exited: %s]\\n' \"\$ec\"$afterCommand"
@@ -202,7 +203,8 @@ class RemoteTerminalSessionManager @Inject constructor(
             createdByAgent = createdByAgent,
             sourceSessionId = sourceSessionId,
             workspacePath = wsPath,
-            runState = RunState.Running
+            runState = RunState.Running,
+            exitReceiptToken = receiptToken.takeIf { command != null }
         )
         addTab(tab)
         if (_activeTabId.value == null) _activeTabId.value = id
@@ -323,28 +325,17 @@ class RemoteTerminalSessionManager @Inject constructor(
     }
 
     /** 在输出末尾定位 `[command exited: N]` 标记并解析退出码；要求标记独立成行，避免命令回显误判。 */
-    private fun extractExitCode(output: String): Int? {
-        val tail = output.takeLast(1000)
-        val idx = tail.lastIndexOf(EXIT_MARKER_PREFIX)
-        if (idx < 0) return null
-        if (idx > 0 && tail[idx - 1] != '\n' && tail[idx - 1] != '\r') return null
-        var end = idx + EXIT_MARKER_PREFIX.length
-        if (end >= tail.length || !tail[end].isDigit()) return null
-        var code = 0
-        while (end < tail.length && tail[end].isDigit()) {
-            code = code * 10 + (tail[end] - '0')
-            end++
-        }
-        return if (end < tail.length && tail[end] == ']') code else null
-    }
-
     /**
      * 命令结束的统一收尾：写 RunState、按需停保活、发完成事件（finishedNotified 保证只发一次）。
      * 已非 Running 说明另一条收尾路径已处理，直接返回，避免重复。
      */
-    private fun finalizeTab(tabId: String, exitCode: Int, tail: String? = null) {
-        val current = tab(tabId) ?: return
-        if (current.runState !is RunState.Running) return
+    private suspend fun finalizeTab(tabId: String, exitCode: Int, tail: String? = null) = withContext(Dispatchers.Main) {
+        val current = tab(tabId) ?: return@withContext
+        val finished = current.runState as? RunState.Finished
+        if (finished != null) {
+            if (finished.exitCode < 0 && exitCode >= 0) { current.runState = RunState.Finished(exitCode); bumpRevision() }
+            return@withContext
+        }
         current.runState = RunState.Finished(exitCode)
         bumpRevision()
         FileLogger.i(TAG, "远程标签 $tabId 结束 exit=$exitCode")
@@ -373,7 +364,7 @@ class RemoteTerminalSessionManager @Inject constructor(
             var waited = 0L
             while (waited <= EXIT_MARKER_GRACE_MS) {
                 val output = readTabOutputOnMain(tabId) ?: ""
-                val code = extractExitCode(output)
+                val code = terminalReceiptExitCode(output, tab(tabId)?.exitReceiptToken)
                 if (code != null) {
                     finalizeTab(tabId, code, output)
                     return@launch
@@ -398,7 +389,7 @@ class RemoteTerminalSessionManager @Inject constructor(
                 val output = readTabOutputOnMain(tabId) ?: return@launch
                 if (output.length != lastOutputLen) {
                     lastOutputLen = output.length
-                    val code = extractExitCode(output)
+                    val code = terminalReceiptExitCode(output, tab(tabId)?.exitReceiptToken)
                     if (code != null) {
                         finalizeTab(tabId, code, output)
                         return@launch

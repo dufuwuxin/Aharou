@@ -11,6 +11,8 @@ import com.aharou.feature.editor.lsp.DefinitionTarget
 import com.aharou.feature.editor.lsp.EditorLspManager
 import com.aharou.feature.editor.domain.TextMateSetup
 import com.aharou.feature.workspace.domain.FileAccessProvider
+import com.aharou.feature.workspace.domain.sha256Fingerprint
+import kotlinx.coroutines.CancellationException
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.github.rosemoe.sora.lang.Language
@@ -30,7 +32,7 @@ import javax.inject.Inject
 /** 编辑器页状态。 */
 sealed interface EditorUiState {
     data object Loading : EditorUiState
-    data class Success(val content: String, val scopeName: String?) : EditorUiState
+    data class Success(val content: String, val scopeName: String?, val baselineContent: String = content) : EditorUiState
     data class TooLarge(val sizeBytes: Long) : EditorUiState
     data object Binary : EditorUiState
     data class Error(val detail: String?) : EditorUiState
@@ -38,7 +40,7 @@ sealed interface EditorUiState {
 
 /** 保存结果，一次性事件，经 [CodeEditorViewModel.saveEvents] 下发；带 path 以便标签页分辨来源。 */
 sealed interface SaveResult {
-    data class Success(val path: String) : SaveResult
+    data class Success(val path: String, val content: String) : SaveResult
 
     /**
      * 磁盘内容在编辑器打开之后被改过（多半是 AI 会话写的），本次保存**未写入**。
@@ -133,7 +135,8 @@ class CodeEditorViewModel @Inject constructor(
     }
 
     /** 各路径「打开时磁盘内容」的指纹，用于保存前判断文件是否被 AI/其他会话改过。 */
-    private val loadedFingerprints = mutableMapOf<String, String?>()
+    private val loadedFingerprints = java.util.concurrent.ConcurrentHashMap<String, String>()
+    private val loadedAccesses = java.util.concurrent.ConcurrentHashMap<String, FileAccessProvider>()
 
     /**
      * 把当前文件挂到语言服务器上（成功返回 true）。[wrapper] 是原本的 TextMate 语言，继续负责着色；
@@ -166,14 +169,15 @@ class CodeEditorViewModel @Inject constructor(
         _uiState.value = EditorUiState.Loading
         viewModelScope.launch(Dispatchers.IO) {
             val state = runCatching {
-                if (!fileAccess.exists(path) || !fileAccess.isFile(path)) {
+                val access = loadedAccesses[path] ?: fileAccess.checked().also { loadedAccesses[path] = it }
+                if (!access.exists(path) || !access.isFile(path)) {
                     return@runCatching EditorUiState.Error(null)
                 }
-                val size = fileAccess.fileSize(path)
+                val size = access.fileSize(path)
                 if (size > MAX_EDITABLE_BYTES) {
                     return@runCatching EditorUiState.TooLarge(size)
                 }
-                val bytes = fileAccess.readBytes(path)
+                val bytes = access.readBytes(path)
                 if (looksBinary(bytes)) {
                     return@runCatching EditorUiState.Binary
                 }
@@ -186,16 +190,13 @@ class CodeEditorViewModel @Inject constructor(
                     // 跨重建复用已销毁实例会出问题——此处仅为把编译结果缓进 registry。
                     runCatching { TextMateLanguage.create(scope, false).destroy() }
                 }
-                EditorUiState.Success(
-                    content = bytes.toString(Charsets.UTF_8),
-                    scopeName = scope
-                )
+                refreshBaseline(path, bytes, access)
+                EditorUiState.Success(content = bytes.toString(Charsets.UTF_8), scopeName = scope)
             }.getOrElse { e ->
                 FileLogger.w(TAG, "打开文件失败: $path", e)
                 EditorUiState.Error(e.message)
             }
             loadedStates[path] = state
-            if (state is EditorUiState.Success) refreshBaseline(path)
             // 读盘期间用户可能已切到别的标签页，只在仍停留在这个路径时更新界面。
             if (currentPath == path) {
                 _uiState.value = state
@@ -205,10 +206,10 @@ class CodeEditorViewModel @Inject constructor(
     }
 
     /** 刷新指定路径的磁盘指纹基线，并登记给并发保护（AI 会话据此把手上版本视为过期）。 */
-    private fun refreshBaseline(path: String) {
-        val fingerprint = runCatching { fileAccess.fingerprint(path) }.getOrNull()
+    private fun refreshBaseline(path: String, bytes: ByteArray, access: FileAccessProvider) {
+        val fingerprint = sha256Fingerprint(bytes)
         loadedFingerprints[path] = fingerprint
-        fingerprint?.let { versions.recordExternal(fileAccess.toDisplayPath(path), it) }
+        versions.recordExternal(access.toDisplayPath(path), fingerprint)
     }
 
     /**
@@ -221,15 +222,17 @@ class CodeEditorViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             _saving.value = true
             try {
-                val baseline = loadedFingerprints[path]
-                val current = runCatching { fileAccess.fingerprint(path) }.getOrNull()
-                if (baseline != null && current != null && current != baseline) {
-                    FileLogger.w(TAG, "保存冲突（磁盘内容已变）: $path")
-                    val disk = runCatching { fileAccess.readFile(path) }.getOrNull().orEmpty()
-                    _saveEvents.send(SaveResult.Conflict(path, disk))
-                    return@launch
-                }
-                _saveEvents.send(writeThrough(path, content))
+                val result = try {
+                    val access = loadedAccesses[path] ?: fileAccess.checked()
+                    val baseline = loadedFingerprints[path]
+                    val current = access.fingerprint(path)
+                    if (baseline != null && current != baseline) {
+                        val disk = if (current == null) "" else access.readFile(path)
+                        SaveResult.Conflict(path, disk)
+                    } else writeThrough(path, content, access)
+                } catch (cancelled: CancellationException) { throw cancelled }
+                catch (failure: Exception) { SaveResult.Error(path, failure.message) }
+                _saveEvents.send(result)
             } finally {
                 _saving.value = false
             }
@@ -260,19 +263,18 @@ class CodeEditorViewModel @Inject constructor(
     }
 
     /** 真正写盘并刷新版本基线，避免紧接着的第二次保存被自己上一次的写入判成冲突。 */
-    private fun writeThrough(path: String, content: String): SaveResult =
-        runCatching { fileAccess.writeFile(path, content) }
-            .fold(
-                onSuccess = {
-                    refreshBaseline(path)
-                    markSaved(path, content)
-                    SaveResult.Success(path)
-                },
-                onFailure = { e ->
-                    FileLogger.w(TAG, "保存文件失败: $path", e)
-                    SaveResult.Error(path, e.message)
-                }
-            )
+    private fun writeThrough(path: String, content: String, access: FileAccessProvider? = null): SaveResult =
+        runCatching {
+            val checked = access ?: loadedAccesses[path] ?: fileAccess.checked()
+            checked.writeFile(path, content)
+            refreshBaseline(path, content.toByteArray(Charsets.UTF_8), checked)
+            markSaved(path, content)
+            SaveResult.Success(path, content)
+        }.getOrElse { failure ->
+            if (failure is CancellationException) throw failure
+            FileLogger.w(TAG, "保存文件失败: $path", failure)
+            SaveResult.Error(path, failure.message)
+        }
 
     /**
      * 保存成功后把缓存与当前 UI 状态同步成落盘内容。

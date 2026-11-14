@@ -16,12 +16,17 @@ SOURCES = [ROOT / "app/src/main/java/com/aharou/feature/terminal/domain" / filen
 MARKER = re.compile(r"(?:^|[\r\n])\[command exited: (\d+)\](?:\r?\n|$)")
 
 
-def production_script(source, command, after_command="; exit $ec"):
+def production_script(source, command, after_command=None):
     match = re.search(r'"\{ \$command\\n\}; ec=.*?\$afterCommand"', source.read_text())
     if match is None:
         raise AssertionError(f"Production command wrapper not found in {source}")
     literal = match.group().replace(r"\$", "$")
     template = json.loads(literal)
+    receipt = re.search(r'val afterCommand = ("(?:\\.|[^"\\])*") \+', source.read_text())
+    if receipt is None:
+        raise AssertionError(f"Production receipt wrapper not found in {source}")
+    prefix = json.loads(receipt.group(1).replace(r"\$", "$"))
+    after_command = prefix.replace("$receiptToken", "fixture-receipt") + (after_command or "; exit $ec")
     return template.replace("$afterCommand", after_command).replace("$command", command)
 
 
@@ -63,6 +68,14 @@ class BackgroundShellTest(unittest.TestCase):
         markers = MARKER.findall(output)
         self.assertTrue(markers, output)
         self.assertEqual(int(markers[-1]), expected, output)
+
+    def test_real_receipt_wrapper_preserves_failure_exit_code_and_token(self):
+        for source in SOURCES:
+            result = subprocess.run(["sh", "-c", production_script(source, "printf partial; (exit 7)")],
+                                    capture_output=True, text=True, timeout=5)
+            self.assertEqual(7, result.returncode)
+            self.assertIn("\n[aharou-exit:fixture-receipt:7]\n", result.stdout)
+            self.assert_result(result.returncode, result.stdout, 7)
 
     def test_no_newline_output_keeps_failure_marker_on_its_own_line(self):
         for source in SOURCES:
@@ -108,6 +121,7 @@ class BackgroundShellTest(unittest.TestCase):
             self.assertEqual(code, 11, output)
             self.assertEqual(MARKER.findall(output)[-1], "0", output)
             self.assertIn("followup-ok", output)
+            self.assertIn("[aharou-exit:fixture-receipt:0]", output)
 
     def test_stdin_consumer_does_not_consume_completion_script(self):
         for source in SOURCES:
