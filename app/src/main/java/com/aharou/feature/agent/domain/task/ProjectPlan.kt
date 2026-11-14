@@ -20,5 +20,7 @@ data class ProjectPlan(
     val overallGoal: String = "",
     val goalAcceptance: String = "",
     val goalCheckpoint: String = "",
-    val goalRevision: Long = 0
+    val goalRevision: Long = 0,
+    /** null keeps explicitly assigned legacy tasks; auto/blank selects an available real team. */
+    val executionTeam: String? = null
 )

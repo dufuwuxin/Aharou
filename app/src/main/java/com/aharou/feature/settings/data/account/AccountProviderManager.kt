@@ -276,6 +276,8 @@ class AccountProviderManager internal constructor(
 
     internal fun parseCredential(kind: AccountProviderKind, response: JsonObject, previous: AccountCredential? = null, deviceId: String? = null): AccountCredential {
         AccountProviderProtocol.check(response)
+        if (kind == AccountProviderKind.DOUBAO) return DoubaoAccountProtocol.restore(response)
+        if (kind == AccountProviderKind.DUMATE) return DumateAccountProtocol.restore(response)
         val value = response.obj("Result") ?: response.obj("result") ?: response.obj("data") ?: response
         val token = value.text("accessToken") ?: value.text("access_token") ?: value.text("Token") ?: value.text("token") ?: value.text("AccessToken")
             ?: throw AccountProviderException("invalid_credentials", "Provider response has no access token", 401)
@@ -288,6 +290,8 @@ class AccountProviderManager internal constructor(
     }
 
     internal fun headers(credential: AccountCredential): Map<String, String> = when (credential.kind) {
+        AccountProviderKind.DOUBAO -> throw AccountProviderException("invalid_gateway", "Doubao credentials require fixed native routes", 400)
+        AccountProviderKind.DUMATE -> mapOf("Authorization" to "Bearer ${credential.accessToken}", "X-Dumate-Client-Type" to "web", "X-Dumate-Account-Id" to "global")
         AccountProviderKind.LOOMY -> LoomyAccountProtocol.headers(credential.accessToken)
         AccountProviderKind.RACCOON -> mapOf("Authorization" to "Bearer ${credential.accessToken}")
         AccountProviderKind.WORKBUDDY, AccountProviderKind.WORKBUDDY_GLOBAL -> buildMap {
@@ -334,6 +338,7 @@ class AccountProviderManager internal constructor(
         }
         try {
             operation?.check()
+            if (parent?.isCanceled() == true) throw IOException("Account request cancelled")
             val response = call.execute()
             if (response.code in 300..399) {
                 response.close()
@@ -343,8 +348,10 @@ class AccountProviderManager internal constructor(
             val source = object : ForwardingSource(raw.source()) {
                 override fun read(sink: okio.Buffer, byteCount: Long): Long = try {
                     operation?.check()
+                    if (parent?.isCanceled() == true) throw IOException("Account request cancelled")
                     pinnedAccount?.let { requireAccountVersion(it.first, it.second) }
                     super.read(sink, byteCount).also {
+                        if (parent?.isCanceled() == true) throw IOException("Account request cancelled")
                         pinnedAccount?.let { pin -> requireAccountVersion(pin.first, pin.second) }
                         if (it == -1L) finish()
                     }
@@ -378,11 +385,20 @@ class AccountProviderManager internal constructor(
         val (old, expected) = synchronized(state) { credential(id, kind) to revision(scopeId(id)) }
         if (failedToken != null && old.accessToken != failedToken) return@synchronized old
         if (failedToken == null && (old.expiresAt == null || old.expiresAt > System.currentTimeMillis() + 60_000)) return@synchronized old
+        if (kind == AccountProviderKind.DUMATE) {
+            val cookie = old.webCookie ?: throw AccountProviderException("login_required", "Sign in to Dumate again", 401)
+            val next = DumateAccountProtocol.exchange(this, cookie, old.deviceId, old.userId)
+            checkRevision(id)
+            save(id, expected, next)
+            return@synchronized next
+        }
         val refreshToken = old.refreshToken ?: throw AccountProviderException("login_required", "Account token expired; sign in again", 401)
         val body = JsonObject()
         val url: String
         val refreshHeaders = headers(old).toMutableMap()
         when (kind) {
+            AccountProviderKind.DOUBAO -> throw AccountProviderException("login_required", "Sign in to Doubao again", 401)
+            AccountProviderKind.DUMATE -> throw AccountProviderException("login_required", "Sign in to Dumate again", 401)
             AccountProviderKind.LOOMY -> throw AccountProviderException("login_required", "Import a new Loomy session", 401)
             AccountProviderKind.RACCOON -> { url = endpoints.raccoon + "/api/electron/auth/v1/refresh"; body.addProperty("refresh_token", refreshToken) }
             AccountProviderKind.WORKBUDDY, AccountProviderKind.WORKBUDDY_GLOBAL -> { url = endpoints.workbuddy(kind) + "/v2/plugin/auth/token/refresh"; refreshHeaders["X-Refresh-Token"] = refreshToken }
@@ -397,6 +413,14 @@ class AccountProviderManager internal constructor(
     }
 
     internal fun authorized(id: String, kind: AccountProviderKind, url: String, method: String = "GET", body: JsonObject? = null, extraHeaders: Map<String, String> = emptyMap()): Response {
+        if (kind == AccountProviderKind.DOUBAO) {
+            checkRevision(id)
+            val current = credential(id, kind)
+            if (url !in setOf(DoubaoAccountProtocol.WEB + DoubaoAccountProtocol.CATALOG, DoubaoAccountProtocol.WEB + DoubaoAccountProtocol.CHAT)) throw AccountProviderException("invalid_gateway", "Unexpected Doubao endpoint", 400)
+            checkRevision(id)
+            return DoubaoAccountProtocol.request(this, current, url.removePrefix(DoubaoAccountProtocol.WEB), method, body)
+        }
+        if (kind == AccountProviderKind.DUMATE) DumateAccountProtocol.requireGateway(url)
         checkRevision(id)
         var credential = refresh(id, kind)
         // OkHttp headers are case-insensitive, Kotlin maps are not. Never accept auth overrides.
@@ -415,7 +439,10 @@ class AccountProviderManager internal constructor(
     }
 
     internal fun catalogForAccount(id: String, kind: AccountProviderKind): List<AccountProviderModel> {
+        if (kind == AccountProviderKind.DOUBAO) return DoubaoAccountProtocol.models(readJson(authorized(id, kind, DoubaoAccountProtocol.WEB + DoubaoAccountProtocol.CATALOG, "POST", JsonObject().apply { addProperty("language_code", "zh"); addProperty("bot_id", "7338286299411103781") })))
         val (url, method, body) = when (kind) {
+            AccountProviderKind.DOUBAO -> throw AccountProviderException("invalid_gateway", "Use Doubao native catalog", 400)
+            AccountProviderKind.DUMATE -> Triple(DumateAccountProtocol.GATEWAY + "/models", "GET", null)
             AccountProviderKind.LOOMY -> Triple(endpoints.loomy + "/api/v1/models", "GET", null)
             AccountProviderKind.RACCOON -> Triple(endpoints.raccoon + "/api/web/llm/v2/model_catalog", "GET", null)
             AccountProviderKind.WORKBUDDY, AccountProviderKind.WORKBUDDY_GLOBAL -> Triple(endpoints.workbuddy(kind) + "/v3/config", "GET", null)
@@ -448,7 +475,12 @@ class AccountProviderManager internal constructor(
 
     suspend fun snapshot(id: String, kind: AccountProviderKind): AccountSnapshot = network { withAccountRevision(id) {
         val directory = poolCatalog(id, kind)
+        if (kind.isWebSession) return@withAccountRevision AccountSnapshot(
+            directory.models, null, System.currentTimeMillis(), DumateAccountProtocol.BALANCE_UNSUPPORTED, directory.issues,
+        )
         val (url, method) = when (kind) {
+            AccountProviderKind.DOUBAO -> throw AccountProviderException("unsupported_balance", "Doubao balance is not supported")
+            AccountProviderKind.DUMATE -> throw AccountProviderException("unsupported_balance", "Dumate balance is not supported")
             AccountProviderKind.LOOMY -> endpoints.loomy + "/api/v1/points/records?pageNo=1&pageSize=20&recordType=all" to "GET"
             AccountProviderKind.RACCOON -> endpoints.raccoon + "/api/web/points/v1/balance" to "GET"
             AccountProviderKind.WORKBUDDY, AccountProviderKind.WORKBUDDY_GLOBAL -> endpoints.billing(kind) + "/v2/billing/meter/get-user-resource" to "POST"
@@ -532,6 +564,11 @@ class AccountProviderManager internal constructor(
             logins.remove(login.id, login)
             login.close()
         }
+    }
+
+    internal fun acceptWebLogin(login: AccountLogin, origin: String, loginId: String, state: String, cookie: String): Boolean = synchronized(this.state) {
+        logins[login.id] === login && revision(login.id) == login.revision &&
+            login.acceptWebCookie(origin, loginId, state, cookie, System.currentTimeMillis())
     }
 
     fun acceptCallback(login: AccountLogin, url: String): Boolean = logins[login.id] === login && login.accept(url, System.currentTimeMillis())

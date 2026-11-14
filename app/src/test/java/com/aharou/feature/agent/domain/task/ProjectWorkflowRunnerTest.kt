@@ -23,9 +23,9 @@ class ProjectWorkflowRunnerTest {
     private val rootId = "project-flow-test-" + java.util.UUID.randomUUID()
     private val stopped = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
     private fun task(id: String, deps: List<String> = emptyList()) = ProjectTask(id = id, workspace = "w", projectId = "p",
-        title = id, requirement = id, dependencyIds = deps, version = 1, order = if (id == "a") 1 else 2, createdAt = 1)
+        title = id, requirement = id, owner = "legacy", dependencyIds = deps, version = 1, order = if (id == "a") 1 else 2, createdAt = 1)
 
-    private fun fixture(accepted: Boolean, wait: Boolean = false, owner: String = "", members: List<String> = emptyList(),
+    private fun fixture(accepted: Boolean, team: Boolean = false, teamResult: ToolResult? = null, wait: Boolean = false, owner: String = "", members: List<String> = emptyList(),
         rejectAt: Int? = null, waitAt: Int? = null, capacityWait: Boolean = false, fullChecks: Int = 2, holdFirstMember: Boolean = false,
         beforeCommit: ((ProjectTaskSnapshot) -> ProjectTaskSnapshot)? = null,
         afterMemberEnds: ((ProjectTaskSnapshot) -> ProjectTaskSnapshot)? = null,
@@ -34,8 +34,8 @@ class ProjectWorkflowRunnerTest {
         val repository = mockk<ProjectTaskRepository>()
         coEvery { repository.checkpointProjectGoal(any(), any()) } returns Unit
         val guard = Any()
-        var snapshot = ProjectTaskSnapshot(version = 1, projects = listOf(ProjectPlan(id = "p", workspace = "w", title = "p", requirements = "a then b")),
-            tasks = listOf(seed(task("a").copy(owner = owner, members = members)), task("b", listOf("a"))))
+        var snapshot = ProjectTaskSnapshot(version = 1, projects = listOf(ProjectPlan(id = "p", workspace = "w", title = "p", requirements = "a then b", executionTeam = if (team) "auto" else null)),
+            tasks = listOf(seed(task("a").copy(owner = owner.ifBlank { if (members.isEmpty()) "legacy" else "" }, members = members)), task("b", listOf("a"))))
         val seeded = snapshot.tasks[0].processSessionIds.size
         coEvery { repository.load("w") } answers { synchronized(guard) { snapshot } }
         coEvery { repository.linkProjectExecution("p", "w", rootId) } returns Unit
@@ -70,9 +70,18 @@ class ProjectWorkflowRunnerTest {
             }
         }
         val sessions = mockk<SessionUseCase>(relaxed = true)
+        val tasks = mockk<TaskTool>()
+        if (team) {
+            every { tasks.selectProjectTeam(any(), any(), any()) } returns ToolResult.Success(buildJsonObject {
+                put("team", "builders"); put("signature", "hash"); put("selectionReason", "auto:first-buildable-by-name")
+            })
+            coEvery { tasks.runProjectTeam("builders", any(), any(), "hash") } coAnswers {
+                teamResult ?: ToolResult.Success(buildJsonObject { put("state", "done"); put("runId", "real-run")
+                    put("outputs", buildJsonObject { put("builder", "actual output") }) })
+            }
+        }
         val turns = mockk<AgentTurnRunner>()
         coEvery { turns.createSessionEntity("w") } returns ChatSessionEntity(rootId, "p", 1, 1, "w")
-        val tasks = mockk<TaskTool>()
         val created = mutableMapOf<String, Int>()
         var firstTaskCreates = 0
         var capacityRaces = if (capacityWait) 3 else 0
@@ -92,7 +101,7 @@ class ProjectWorkflowRunnerTest {
                 if (id == "a") {
                     val prompt = args.getValue("prompt").jsonPrimitive.content
                     val ordinal = Regex("Participant: ([0-9]+) /").find(prompt)!!.groupValues[1].toInt()
-                    val roles = (listOf(owner) + members).filter { it.isNotBlank() }.ifEmpty { listOf("") }
+                    val roles = (listOf(owner) + members).filter { it.isNotBlank() }.ifEmpty { listOf("legacy") }
                     assertEquals(roles[ordinal - 1].takeIf { it.isNotBlank() }, args["agent"]?.jsonPrimitive?.content)
                     assertEquals(ordinal > 1, prompt.contains("[${ordinal - 1}: "))
                     if (index > 1 && !holdFirstMember) {
@@ -122,12 +131,33 @@ class ProjectWorkflowRunnerTest {
         coEvery { messages.getMessagesOnce(any()) } returns emptyList()
         coEvery { messages.restoreAll(any()) } returns emptyList()
         val runner = ProjectWorkflowRunner(repository, sessions, turns, javax.inject.Provider { tasks }, events, mockk(), messages, ProjectTaskExecutionCoordinator())
+        if (team) teamTool = tasks
         return Triple(runner, { synchronized(guard) { snapshot } }, { change -> synchronized(guard) { snapshot = change(snapshot) } })
     }
 
     /** What a branch (new dependency) or a supplement (new requirement) does to the running task through Repository.save. */
     private fun ProjectTaskSnapshot.reviseA(change: (ProjectTask) -> ProjectTask): ProjectTaskSnapshot =
         copy(tasks = tasks.map { if (it.id == "a") change(it).copy(requirementsVersion = it.requirementsVersion + 1, status = ProjectTaskStatus.READY) else it })
+
+    private var teamTool: TaskTool? = null
+
+    @Test fun projectTaskActuallyCallsTeamAndOnlyEntersReviewWithRunEvidence() = runBlocking {
+        val (runner, snapshot) = fixture(false, team = true)
+        runner.run("p", "w")
+        val tool = requireNotNull(teamTool)
+        io.mockk.coVerify(exactly = 2) { tool.runProjectTeam("builders", any(), match { it.sessionId == rootId }, "hash") }
+        val task = snapshot().tasks.first { it.id == "a" }
+        assertEquals(ProjectTaskStatus.REVIEW, task.status)
+        assertTrue(task.evidenceRefs.single().contains(":v1:run:real-run"))
+    }
+
+    @Test fun projectTeamDoneWithoutRunIdBlocksInsteadOfReview() = runBlocking {
+        val (runner, snapshot) = fixture(false, team = true, teamResult = ToolResult.Success(buildJsonObject {
+            put("state", "done"); put("outputs", buildJsonObject { put("builder", "output") })
+        }))
+        try { runner.run("p", "w"); fail("missing run accepted") } catch (_: IllegalStateException) { }
+        assertEquals(ProjectTaskStatus.BLOCKED, snapshot().tasks.first { it.id == "a" }.status)
+    }
 
     @Test fun aBranchSupersedesTheRunningMemberRunsTheBranchThenReturnsToTheTask() = runBlocking {
         val (runner, snapshot, edit) = fixture(true, holdFirstMember = true)

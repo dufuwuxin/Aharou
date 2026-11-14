@@ -84,8 +84,8 @@ class SystemPromptProvider @Inject constructor(
                         append(line)
                     }
                 }
-                "TEAMS" -> if (member) "" else agentTeamRepository.listAll().joinToString("\n") {
-                    "- ${it.team.name}: ${it.team.description}"
+                "TEAMS" -> if (member) "" else agentTeamRepository.forWorkspace(ctx.projectRoot).listAll().joinToString("\n") {
+                    "- ${it.team.name}: ${it.team.description}; charter=${it.team.charter.take(240)}"
                 }
                 "RULES" -> ruleRepository.listRules().joinToString("\n") {
                     "- ${it.name}: ${it.description} [loadRule: ${it.name}]"

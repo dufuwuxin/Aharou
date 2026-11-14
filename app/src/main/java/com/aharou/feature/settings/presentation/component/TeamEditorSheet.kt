@@ -276,7 +276,7 @@ internal fun TeamEditorSheet(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            val adminCandidates = (members.map { it.name } + availableMembers).distinct()
+            val adminCandidates = (listOf(com.aharou.feature.agent.domain.subagent.MAIN_AGENT_ADMIN) + members.map { it.name } + availableMembers).distinct()
             if (adminCandidates.isNotEmpty()) {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
                     adminCandidates.forEach { memberName ->
@@ -284,10 +284,10 @@ internal fun TeamEditorSheet(
                         FilterChip(
                             selected = picked,
                             onClick = {
-                                if (members.none { it.name == memberName }) members = members + TeamMemberRef(memberName)
+                                if (memberName != com.aharou.feature.agent.domain.subagent.MAIN_AGENT_ADMIN && members.none { it.name == memberName }) members = members + TeamMemberRef(memberName)
                                 admins = listOf(memberName)
                             },
-                            label = { Text(memberName) }
+                            label = { Text(if (memberName == com.aharou.feature.agent.domain.subagent.MAIN_AGENT_ADMIN) stringResource(R.string.team_main_agent) else memberName) }
                         )
                     }
                 }
@@ -372,6 +372,7 @@ internal fun TeamEditorSheet(
                             description = description,
                             scope = if (scopeIsGlobal) AgentDefinitionScope.GLOBAL else AgentDefinitionScope.PROJECT,
                             charter = charter,
+            evidenceRequired = initial?.team?.evidenceRequired ?: false,
                             admins = admins,
                             members = members,
                             stages = stages,
@@ -442,7 +443,7 @@ private fun StageEditor(
                             interfaces = stage.interfaces.filter { edge -> next.any { it.equals(edge.from, ignoreCase = true) } }
                         ))
                     },
-                    label = { Text(memberName) }
+                    label = { Text(if (memberName == com.aharou.feature.agent.domain.subagent.MAIN_AGENT_ADMIN) stringResource(R.string.team_main_agent) else memberName) }
                 )
             }
         }

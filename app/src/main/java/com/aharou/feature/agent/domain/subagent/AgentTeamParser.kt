@@ -13,7 +13,7 @@ import com.aharou.feature.workspace.domain.FileAccessProvider
  *   - name: 需求分析师
  *     level: 1
  *   - 最小改动工程师              # 纯字符串＝一级成员
- * admins: [架构评审官, 安全评审官]  # 管理员组，可多个
+ * admins: [架构评审官]  # 唯一管理员；也可用保留值 __main_agent__，不加入 members
  * ```
  * 阶段的两种写法：
  * ```
@@ -65,7 +65,8 @@ object AgentTeamParser {
             admins = parseNames(frontmatter["admins"]),
             members = parseMemberRefs(frontmatter["members"]),
             filePath = filePath,
-            routes = parseRoutes(frontmatter["routes"])
+            routes = parseRoutes(frontmatter["routes"]),
+            evidenceRequired = frontmatter["evidence_required"] == true
         )
     }
 
@@ -80,6 +81,7 @@ object AgentTeamParser {
         appendLine("name: ${Frontmatter.quote(form.name.trim())}")
         appendLine("description: ${Frontmatter.quote(form.description.trim())}")
         appendLine("admins: [${form.admins.joinToString(", ") { Frontmatter.quote(it.trim()) }}]")
+        if (form.evidenceRequired) appendLine("evidence_required: true")
         appendLine("members:")
         form.members.forEach { member ->
             appendLine("  - name: ${Frontmatter.quote(member.name.trim())}")

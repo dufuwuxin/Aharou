@@ -67,7 +67,7 @@ class ProjectWorkflowPlanTest {
         assertEquals(listOf("reviewer", "reviewer", "builder"), ProjectWorkflowPlan.participants(
             task("a").copy(owner = " reviewer ", members = listOf("reviewer", " ", "builder"))))
         assertEquals(listOf("builder"), ProjectWorkflowPlan.participants(task("a").copy(members = listOf("builder"))))
-        assertEquals(listOf(""), ProjectWorkflowPlan.participants(task("a").copy(members = listOf(" "))))
+        assertEquals(emptyList<String>(), ProjectWorkflowPlan.participants(task("a").copy(members = listOf(" "))))
     }
 
     @Test fun changingParticipantsInvalidatesPreviousWorkflowDelivery() {

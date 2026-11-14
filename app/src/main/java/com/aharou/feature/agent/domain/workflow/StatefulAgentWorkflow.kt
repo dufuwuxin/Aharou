@@ -386,7 +386,8 @@ class StatefulAgentWorkflow @Inject constructor(
         provider.firstByteTimeoutMs = generalSettingsRepository.firstByteTimeoutMs()
         provider.streamIdleTimeoutMs = generalSettingsRepository.streamIdleTimeoutMs()
         provider.maxNetworkRetries = generalSettingsRepository.maxNetworkRetries()
-        return languageRoutingFactory?.wrap(provider) ?: provider
+        val transport = com.aharou.feature.settings.data.account.WebsiteTextProvider.wrap(provider)
+        return languageRoutingFactory?.wrap(transport) ?: transport
     }
 
     /** 中间件注入的系统提示：按供应商配置追加，取不到配置就原样返回。 */

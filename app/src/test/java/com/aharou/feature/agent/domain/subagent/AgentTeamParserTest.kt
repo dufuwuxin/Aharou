@@ -32,8 +32,8 @@ class AgentTeamParserTest {
                 "Software Architect", "Android Kotlin Engineer", "Rust Engineer",
                 "Python Backend Engineer", "Code Reviewer", "Reality Checker"
             )),
-            "research-review" to ("Explore" to listOf(
-                "Explore", "Trend Researcher", "Reality Checker", "Docs Writer"
+            "research-review" to ("通用专家" to listOf(
+                "通用专家", "Trend Researcher", "Reality Checker", "Docs Writer"
             )),
             "ui-delivery" to ("UX Architect" to listOf(
                 "UI Designer", "UX Architect", "Android Kotlin Engineer",
@@ -169,7 +169,7 @@ class AgentTeamParserTest {
             """
             ---
             stages:
-              - agent: Explore
+              - agent: 通用专家
                 prompt: 查现状
             ---
             """.trimIndent()

@@ -9,7 +9,7 @@ data class AccountCheckInResult(val status: AccountCheckInStatus, val awardedPoi
 internal object AccountCheckIn {
     fun perform(manager: AccountProviderManager, id: String, kind: AccountProviderKind): AccountCheckInResult {
         val credential = manager.credential(id, kind)
-        if (kind == AccountProviderKind.WORKBUDDY_GLOBAL || kind == AccountProviderKind.TRAE_GLOBAL || kind == AccountProviderKind.LOOMY ||
+        if (kind.isWebSession || kind == AccountProviderKind.WORKBUDDY_GLOBAL || kind == AccountProviderKind.TRAE_GLOBAL || kind == AccountProviderKind.LOOMY ||
             !credential.enterpriseId.isNullOrBlank()) return AccountCheckInResult(AccountCheckInStatus.UNSUPPORTED)
         return when (kind) {
             AccountProviderKind.WORKBUDDY -> {

@@ -69,7 +69,8 @@ class TeamStageExecutor @Inject constructor(private val registry: TeamRunRegistr
             val pipeline = JsonArray(members.map { task -> JsonObject(task.toMutableMap().apply {
                 val deps = (task["dependsOn"] as? JsonArray).orEmpty().filter { it.jsonPrimitive.content in ids }
                 put("dependsOn", JsonArray(deps))
-                put("prompt", JsonPrimitive(handoff + "\n" + task.getValue("prompt").jsonPrimitive.content))
+                put("prompt", JsonPrimitive(handoff + "\n" + task.getValue("prompt").jsonPrimitive.content +
+                    if (team.evidenceRequired) TeamEvidence.instruction(run, team.name + ":" + task.getValue("id").jsonPrimitive.content) else ""))
                 put("_teamRunId", JsonPrimitive(run))
             }) })
             val result = exec(pipeline)
@@ -83,6 +84,9 @@ class TeamStageExecutor @Inject constructor(private val registry: TeamRunRegistr
             produced?.forEach { (id, value) -> outputs[id] = value.jsonPrimitive.content }
             if (data?.get("state")?.jsonPrimitive?.content != "done" || ids.any { outputs[it].isNullOrBlank() }) {
                 return finish("blocked", "阶段「${stage.title}」存在失败、超时、未接受或缺失交付")
+            }
+            if (team.evidenceRequired) ids.forEach { id ->
+                TeamEvidence.error(outputs.getValue(id), run, team.name + ":" + id)?.let { return finish("blocked", it) }
             }
             if (stage.isReview) {
                 val decisions = ids.map { review(outputs.getValue(it)) }
@@ -154,7 +158,8 @@ class TeamStageExecutor @Inject constructor(private val registry: TeamRunRegistr
                 }
                 JsonObject(original.toMutableMap().apply {
                     put("dependsOn", JsonArray(emptyList())) // Required predecessors already completed in this run.
-                    put("prompt", JsonPrimitive(handoff + original.getValue("prompt").jsonPrimitive.content))
+                    put("prompt", JsonPrimitive(handoff + original.getValue("prompt").jsonPrimitive.content +
+                        if (team.evidenceRequired) TeamEvidence.instruction(run, team.name + ":" + id(node)) else ""))
                     put("_teamRunId", JsonPrimitive(run))
                 })
             })
@@ -169,6 +174,9 @@ class TeamStageExecutor @Inject constructor(private val registry: TeamRunRegistr
                 return finish("blocked", "Route target failed, timed out, or has no accepted delivery")
             }
             ready.forEach { outputs[it] = produced!!.getValue(id(it)).jsonPrimitive.content }
+            if (team.evidenceRequired) ready.forEach { node ->
+                TeamEvidence.error(outputs.getValue(node), run, team.name + ":" + id(node))?.let { return finish("blocked", it) }
+            }
             val reviewers = ready.filter { TeamFlowGraph.isReview(team, it) }
             if (reviewers.any { review(outputs.getValue(it)) == Review.INVALID }) return finish("blocked", "Review verdict is missing or invalid")
             val rejecting = reviewers.filter { review(outputs.getValue(it)) == Review.REJECT }

@@ -407,11 +407,11 @@ class ProjectTaskViewModel @Inject constructor(
         if (mutable.value.workspace == saved.workspace) mutable.update { it.copy(selectedId = saved.id) }
     }
 
-    fun saveProjectGoal(project: ProjectPlan, horizon: String, goal: String, acceptance: String) = operation { workspace ->
+    fun saveProjectGoal(project: ProjectPlan, horizon: String, goal: String, acceptance: String, executionTeam: String? = project.executionTeam) = operation { workspace ->
         check(project.workspace == workspace) { "CROSS_WORKSPACE" }
         // Close races with a queued run as well as a currently visible active run.
         flows.withProjectStopped(project.id, workspace) {
-            repository.saveProjectGoal(project, horizon, goal, acceptance)
+            repository.saveProjectGoal(project, horizon, goal, acceptance, executionTeam)
         }
     }
 

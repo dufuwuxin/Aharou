@@ -48,6 +48,7 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
     val project = state.projects.firstOrNull { it.id == projectId }
     val tasks = state.tasks.filter { it.projectId == projectId }
     val executableTasks = tasks.filterNot { it.isRequirementBranch }
+    var executionTeam by remember(projectId, project?.executionTeam) { mutableStateOf(project?.executionTeam.orEmpty()) }
     var goal by remember(projectId, project?.overallGoal) { mutableStateOf(project?.overallGoal.orEmpty()) }
     var acceptance by remember(projectId, project?.goalAcceptance) { mutableStateOf(project?.goalAcceptance.orEmpty()) }
     var horizon by remember(projectId, project?.horizon) { mutableStateOf(project?.horizon ?: "short") }
@@ -312,12 +313,14 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
                             FilterChip(selected = horizon == value, onClick = { horizon = value }, label = { Text(label) })
                         }
                     }
+                    com.aharou.core.ui.AppTextField(executionTeam, { executionTeam = it }, label = stringResource(R.string.project_execution_team))
+                    Text(stringResource(R.string.project_execution_team_hint), style = MaterialTheme.typography.bodySmall)
                     com.aharou.core.ui.AppTextField(goal, { goal = it }, label = stringResource(R.string.project_overall_goal), minLines = 2, singleLine = false)
                     com.aharou.core.ui.AppTextField(acceptance, { acceptance = it }, label = stringResource(R.string.project_goal_acceptance), minLines = 2, singleLine = false)
                     if (project.goalCheckpoint.isNotBlank()) Text(
                         com.aharou.feature.agent.domain.task.ProjectGoalPlan.label(project.goalCheckpoint))
                     TextButton(enabled = !state.busy && !planning && projectId !in state.activeProjectIds,
-                        onClick = { viewModel.saveProjectGoal(project, horizon, goal, acceptance) }) { Text(stringResource(R.string.project_goal_save)) }
+                        onClick = { viewModel.saveProjectGoal(project, horizon, goal, acceptance, executionTeam.ifBlank { if (project.executionTeam == null) null else "auto" }) }) { Text(stringResource(R.string.project_goal_save)) }
                 if (project.purpose.isNotBlank()) {
                     Text(stringResource(R.string.project_purpose), style = MaterialTheme.typography.labelLarge)
                     Text(project.purpose)

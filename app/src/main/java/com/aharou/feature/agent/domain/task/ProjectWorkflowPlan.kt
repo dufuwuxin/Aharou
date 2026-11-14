@@ -4,10 +4,11 @@ object ProjectWorkflowPlan {
     const val PROJECT_TASKS_TOOL = "project_tasks"
 
     fun participants(task: ProjectTask): List<String> =
-        (listOf(task.owner) + task.members).map(String::trim).filter(String::isNotBlank).ifEmpty { listOf("") }
+        (listOf(task.owner) + task.members).map(String::trim).filter(String::isNotBlank)
 
     fun delivered(task: ProjectTask): Boolean =
-        !task.isRequirementBranch && (task.processParticipants == null || task.processParticipants == participants(task)) &&
+        !task.isRequirementBranch && (task.processParticipants == null || task.processParticipants == participants(task) ||
+            (task.processParticipants.singleOrNull()?.startsWith("team:") == true && task.evidenceRefs.any { it.startsWith("project-team:") })) &&
         ((task.status == ProjectTaskStatus.REVIEW && task.processRequirementsVersion == task.requirementsVersion) ||
         (task.status == ProjectTaskStatus.DONE && task.acceptedRequirementsVersion == task.requirementsVersion &&
             task.acceptance.isNotBlank() && task.evidenceRefs.isNotEmpty()))

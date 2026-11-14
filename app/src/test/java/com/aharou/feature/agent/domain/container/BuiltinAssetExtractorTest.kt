@@ -84,9 +84,9 @@ class BuiltinAssetExtractorTest {
         File(root, "prompts.custom").mkdirs()
         val custom = File(root, "prompts.custom/a.md").apply { writeText("custom") }
         File(root, "agents").mkdirs()
-        val agent = File(root, "agents/explore.md").apply { writeText("edited") }
+        val agent = File(root, "agents/general-specialist.md").apply { writeText("edited") }
         val orphan = File(root, "agents/user.md").apply { writeText("mine") }
-        val source = assets(mapOf("prompts/a.md" to "builtin", "agents/explore.md" to "default", "agents/new.md" to "new"))
+        val source = assets(mapOf("prompts/a.md" to "builtin", "agents/general-specialist.md" to "default", "agents/new.md" to "new"))
         val extractor = BuiltinAssetExtractor()
         assertEquals(1, extractor.extract(source, root, "prompts"))
         assertEquals(0, extractor.extract(source, root, "prompts"))

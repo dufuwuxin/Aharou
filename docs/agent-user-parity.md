@@ -373,3 +373,9 @@ The unified tool browser and six-action creation sheet reuse existing execution 
 - Local model rows can import catalog-matching GGUF documents through SAF. Imports and JNI loading verify size, format and SHA-256; invalid/cancelled imports preserve the old file. This is not support for arbitrary model backends.
 - Plugin upgrades stage and recover managed files/records on failure without deleting top-level persistent data; uninstall checks stop and script outcomes. External script side effects and power-loss recovery are not guaranteed.
 - Persona/core compatibility settings edit native memory only; ordinary-memory switch, explicit OFF and deletion receipts remain distinct.
+
+### Account and team execution update
+
+- User-initiated Dumate and Doubao website sign-in uses the existing isolated login and ordered encrypted account pool. Real-user account availability remains unverified; Doubao is explicitly text-only.
+- Main-agent administrators can query their team details and reassign an existing task to a roster member through `task team_assign`; other teams expose only basic identity and charter.
+- Projects invoke the existing team executor and require a run-bound delivery before review. Opt-in built-in evidence gates reject missing or inconsistent completion receipts, without claiming to certify external facts.

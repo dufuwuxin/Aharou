@@ -5,6 +5,7 @@ import com.aharou.feature.agent.domain.subagent.AgentDefinitionScope
 import com.aharou.feature.agent.domain.subagent.AgentTeam
 import com.aharou.feature.agent.domain.subagent.AgentTeamEntry
 import com.aharou.feature.agent.domain.subagent.SubAgentProfileMatcher
+import com.aharou.feature.agent.domain.subagent.TeamFlowGraph
 import com.aharou.feature.agent.domain.subagent.TeamStage
 import com.aharou.feature.agent.domain.subagent.TeamTask
 import com.aharou.feature.agent.domain.teamworkflow.TeamWorkflow
@@ -319,7 +320,7 @@ object TeamRunner {
             stage.rejectTo?.let { append("；不通过则驳回→").append(it) }
             append("\n")
         }
-        // 团队公约不在主代理可见层：它属于子代理指令的一部分，只在 team_run 展开时随 task prompt 注入。
+        if (team.mainAgentAdmin) append("\n团队公约：\n").append(team.charter).append("\n")
         append("文件：").append(team.filePath ?: "-").append("\n")
         append("执行：task(action=\"team_run\", team=\"").append(team.name).append("\", goal=\"<本次目标>\")")
     }

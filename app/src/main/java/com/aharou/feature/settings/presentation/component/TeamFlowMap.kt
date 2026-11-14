@@ -31,6 +31,7 @@ internal fun TeamFlowMap(admins: List<String>, stages: List<AgentTeamStageForm>,
     val reviewColor = MaterialTheme.colorScheme.tertiary
     val rejectColor = MaterialTheme.colorScheme.error
     val organizationColor = MaterialTheme.colorScheme.outlineVariant
+    val mainLabel = stringResource(R.string.team_main_agent)
     Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
         if (admins.size != 1) Text(stringResource(R.string.team_flow_admin_required), color = rejectColor)
         Text(stringResource(if (routes.isEmpty()) R.string.team_flow_legacy else R.string.team_flow_routed), style = MaterialTheme.typography.bodySmall)

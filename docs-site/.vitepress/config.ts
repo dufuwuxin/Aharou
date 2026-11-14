@@ -160,6 +160,8 @@ export default defineConfig({
             { text: 'AI 供应商与模型', link: '/guide/providers' },
             { text: '离线双向翻译', link: '/guide/translation' },
             { text: '项目长期目标与过程树', link: '/guide/projects' },
+            { text: '团队管理员与成员分配', link: '/guide/teams' },
+            { text: '团队证据与失败处理', link: '/guide/team-evidence' },
             { text: '特殊权限', link: '/guide/special-permissions' },
             { text: '默认与专用模型', link: '/guide/default-models' },
             { text: '端侧本地模型', link: '/guide/local-models' },

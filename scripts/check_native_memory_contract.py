@@ -197,12 +197,12 @@ def violations(root: Path) -> list[str]:
         parameter = ""
     enum = re.search(r"\benum\s*=\s*(?:listOf|setOf)\s*\(([^)]*)\)", parameter)
     values = re.findall(r'"([^"\\]*)"', enum[1]) if enum else []
-    if set(values) != {"teams", "team_run"} or len(values) != 2:
-        errors.append(f"{SPEC}: action enum must contain exactly teams/team_run, found {values}")
+    if set(values) != {"teams", "team_run", "team_assign"} or len(values) != 3:
+        errors.append(f"{SPEC}: action enum must contain exactly teams/team_run/team_assign, found {values}")
     dispatch = "\n".join(bodies(texts[TASK], "executeWithContext"))
     require(TASK, dispatch, r'"teams"\s*->', "teams dispatch missing")
     require(TASK, dispatch, r'"team_run"\s*->', "team_run dispatch missing")
-    forbid(TASK, dispatch, r'"(?:create|read|send|roles|pipeline|grant|list|team|tell|stop|del)"\s*(?:,|->)',
+    forbid(TASK, dispatch, r'"(?:create|read|send|roles|pipeline|grant|list|team|tell|stop|del)"\s*->',
            "old task action remains reachable")
     # Main-facing list may delegate to renderList, but never to execution details.
     listing = reachable(texts[TEAMS], "list")

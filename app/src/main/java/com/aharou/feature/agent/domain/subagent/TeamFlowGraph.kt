@@ -45,7 +45,11 @@ object TeamFlowGraph {
 
     fun validate(team: AgentTeam): String? {
         if (team.admins.size != 1 || team.admins.single().isBlank()) return "ONE_ADMIN_REQUIRED"
-        if (team.members.none { it.name == team.admins.single() }) return "ADMIN_NOT_MEMBER"
+        if (team.members.any { it.name.trim().equals(MAIN_AGENT_ADMIN, ignoreCase = true) } ||
+            team.stages.any { stage -> stage.tasks.any { it.agent?.trim()?.equals(MAIN_AGENT_ADMIN, ignoreCase = true) == true } }) return "RESERVED_MEMBER"
+        if (!team.mainAgentAdmin && team.members.none { it.name.equals(team.admins.single().trim(), ignoreCase = true) }) return "ADMIN_NOT_MEMBER"
+        val roster = team.members.map { it.name.trim().lowercase() }.toSet()
+        if (team.stages.any { stage -> stage.tasks.any { !it.agent.isNullOrBlank() && it.agent.trim().lowercase() !in roster } }) return "UNKNOWN_MEMBER"
         if (team.routes.isEmpty()) return null // Explicit legacy serial execution, not a graph.
         val nodes = nodes(team)
         if (team.stages.map { it.id }.distinct().size != team.stages.size || nodes.distinct().size != nodes.size ||

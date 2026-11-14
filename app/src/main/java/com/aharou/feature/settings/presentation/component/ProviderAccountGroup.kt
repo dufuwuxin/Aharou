@@ -60,6 +60,8 @@ internal fun accountProviderName(kind: AccountProviderKind): String = stringReso
         AccountProviderKind.TRAE -> R.string.provider_account_trae
         AccountProviderKind.TRAE_GLOBAL -> R.string.provider_account_trae_global
         AccountProviderKind.WORKBUDDY_GLOBAL -> R.string.provider_account_workbuddy_global
+        AccountProviderKind.DOUBAO -> R.string.provider_account_doubao
+        AccountProviderKind.DUMATE -> R.string.provider_account_dumate
         AccountProviderKind.LOOMY -> R.string.provider_account_loomy
         AccountProviderKind.WORKBUDDY -> R.string.provider_account_workbuddy
         AccountProviderKind.RACCOON -> R.string.provider_account_raccoon
@@ -165,6 +167,9 @@ internal fun ProviderAccountGroup(
                             refresh()
                             return@launchOperation
                         }
+                        if (kind.isWebSession && android.os.Build.VERSION.SDK_INT < 28) {
+                            throw com.aharou.feature.settings.data.account.AccountProviderException("isolated_login_requires_api28", "Dumate requires isolated website login", 400)
+                        }
                         val attempt = manager.beginLogin(providerId, kind)
                         login = attempt
                         try {
@@ -184,7 +189,9 @@ internal fun ProviderAccountGroup(
         SettingsDivider()
         SettingsRow(
             title = stringResource(R.string.provider_account_points),
-            subtitle = if (snapshot?.balanceError != null) stringResource(R.string.provider_account_balance_failed)
+            subtitle = if (kind == AccountProviderKind.DOUBAO) stringResource(R.string.provider_account_doubao_text_only)
+                else if (kind == AccountProviderKind.DUMATE) stringResource(R.string.provider_account_dumate_balance_unsupported)
+                else if (snapshot?.balanceError != null) stringResource(R.string.provider_account_balance_failed)
                 else snapshot?.balance ?: stringResource(R.string.provider_account_unknown),
             trailing = {
                 TextButton(enabled = loggedIn && !busy, onClick = { launchOperation { refresh() } }) {
@@ -192,7 +199,7 @@ internal fun ProviderAccountGroup(
                 }
             },
         )
-        SettingsRow(
+        if (!kind.isWebSession) SettingsRow(
             title = stringResource(R.string.provider_account_check_in),
             subtitle = stringResource(when (checkInStatus) {
                 com.aharou.feature.settings.data.account.AccountCheckInStatus.CLAIMED -> R.string.provider_account_check_in_claimed
@@ -218,7 +225,7 @@ internal fun ProviderAccountGroup(
                 title = stringResource(R.string.account_provider_slot, slot.position),
                 trailing = {
                     Row {
-                        TextButton(enabled = !busy, onClick = {
+                        if (!kind.isWebSession) TextButton(enabled = !busy, onClick = {
                             launchOperation { checkInStatus = manager.checkInAccount(providerId, kind, slot.accountId).status }
                         }) { Text(stringResource(R.string.provider_account_check_in)) }
                         TextButton(enabled = !busy, onClick = {
@@ -333,6 +340,23 @@ private fun AccountLoginDialog(login: AccountLogin, manager: AccountProviderMana
                         remote = resultData?.getParcelable(AccountLoginActivity.RECEIVER)
                         if (disposed) remote?.send(0, android.os.Bundle.EMPTY)
                     }
+                    AccountLoginActivity.WEB_SESSION -> {
+                        val data = resultData ?: return
+                        if (disposed || data.getString(AccountLoginActivity.LOGIN_KIND)?.let { it != login.kind.wireId } == true ||
+                            (login.kind == AccountProviderKind.DOUBAO && data.getString(AccountLoginActivity.LOGIN_KIND) != login.kind.wireId)) {
+                            data.remove(AccountLoginActivity.WEB_COOKIE)
+                            if (!disposed) onDismiss()
+                            return
+                        }
+                        val accepted = manager.acceptWebLogin(
+                            login, data.getString(AccountLoginActivity.ORIGIN).orEmpty(),
+                            data.getString(AccountLoginActivity.LOGIN_ID).orEmpty(),
+                            data.getString(AccountLoginActivity.LOGIN_STATE).orEmpty(),
+                            data.getString(AccountLoginActivity.WEB_COOKIE).orEmpty(),
+                        )
+                        data.remove(AccountLoginActivity.WEB_COOKIE)
+                        if (!accepted) onDismiss()
+                    }
                     AccountLoginActivity.CALLBACK -> {
                         val url = resultData?.getString(AccountLoginActivity.URL) ?: return
                         if (!disposed && !manager.acceptCallback(login, url)) onDismiss()
@@ -343,6 +367,10 @@ private fun AccountLoginDialog(login: AccountLogin, manager: AccountProviderMana
         }
         context.startActivity(android.content.Intent(context, AccountLoginActivity::class.java).apply {
             putExtra(AccountLoginActivity.URL, login.url)
+            putExtra(AccountLoginActivity.WEB_COOKIE_LOGIN, login.kind.isWebSession)
+            putExtra(AccountLoginActivity.LOGIN_KIND, login.kind.wireId)
+            putExtra(AccountLoginActivity.LOGIN_ID, login.id)
+            putExtra(AccountLoginActivity.LOGIN_STATE, login.state)
             putExtra(AccountLoginActivity.CALLBACK_PREFIX, login.callbackPrefix)
             putExtra(AccountLoginActivity.RECEIVER, receiver.forAccountLoginIpc())
         })

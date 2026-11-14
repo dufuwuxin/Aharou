@@ -57,9 +57,10 @@ class AgentTeamRepository @Inject constructor(
 
         // 名单是唯一真源：阶段点名的成员必须在名单里，否则主代理看到的名单和实际调用会对不上。
         val roster = form.members.map { it.name.trim() }.filter { it.isNotEmpty() }
+        if (roster.any { it.equals(MAIN_AGENT_ADMIN, ignoreCase = true) }) return AgentTeamSaveError.UNKNOWN_MEMBER
         val rosterLower = roster.map { it.lowercase() }.toSet()
         form.admins.map { it.trim() }.filter { it.isNotEmpty() }.forEach { admin ->
-            if (admin.lowercase() !in rosterLower) return AgentTeamSaveError.ADMIN_NOT_MEMBER
+            if (admin != MAIN_AGENT_ADMIN && admin.lowercase() !in rosterLower) return AgentTeamSaveError.ADMIN_NOT_MEMBER
         }
         form.stages.forEach { stage ->
             stage.members.map { it.trim() }.filter { it.isNotEmpty() }.forEach { member ->

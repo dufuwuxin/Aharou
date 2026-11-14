@@ -178,3 +178,23 @@ Loomy 使用**用户主动导入自己的会话**，不是 OAuth。先在 <https
 回复的中文译文仅用于现有正文显示层，原始模型回复与工具、思考签名继续保存并回传，不以译文覆盖原文。译文仅供参考，长代码与结构化内容不会逐字推理。
 
 添加供应商的预设选择器现在使用居中对话框，可滚动选择，不支持下滑关闭；通过「关闭」或系统返回键退出，编辑表单保持原有页面布局。
+
+
+### Dumate website account (pending owner validation)
+
+Dumate (`dumate`) uses the user's normal login at <https://www.dumate.cn/> in the existing isolated account-login process (Android 9+). It is not OAuth and does not scan other apps. After logging in, explicitly press “我已完成网页登录”. Only that action sends the website cookie through the private Binder result receiver to the pending login in the main process. Origin, login identity, nonce, revision and expiry are checked before exchanging the cookie for a short-lived gateway ticket. The account is appended to the existing encrypted ordered account pool only after a nonempty gateway model catalog is validated.
+
+The website cookie is sent only to the fixed official website token and user-info routes. Gateway Bearer tickets are sent only to the fixed `dumate-svc.baidu.com` model/chat routes. Models come from the gateway directory, not a preset list. Expired tickets refresh using the website cookie; an expired cookie requires the user to log in again, never automatic login replay. The gateway retains native OpenAI JSON/SSE and tools. Stable account identity comes from `user/info` (`uid` or `userId`), never an inferred name.
+
+Balance is unsupported (`null`, with an explicit UI explanation); this integration does not request check-in, tasks or rewards. It does not use a new server or external proxy. Credentials are stored only in the existing encrypted account vault, not in API-key settings or URLs. The account service is selectable through the existing `providers.<id>.account_service` configuration route; login still requires the explicit website UI action. No owner account has been used for upstream validation: the UI intentionally says “网页登录待本人验证”.
+
+
+### Doubao website session (text only; owner verification pending)
+
+Doubao (`doubao`) opens <https://www.doubao.com/chat/> in the existing isolated Android 9+ login process. Complete the normal official login and press “我已完成网页登录”. The private ResultReceiver Bundle carries the session only to its matching pending provider kind, origin, nonce, login ID, revision and expiry. The cookie is not placed in a URL, API key, log or app-created plaintext file. The existing encrypted Vault and ordered account pool are reused. A nonvisitor `/passport/account/info/v2/` identity (`data.user_id_str` or `data.user_id`) and a nonempty live chat-model directory must both validate before appending the account.
+
+Models are discovered from `/alice/slot/action_bar_v3/brief_list` (`coco_deep_thinking.active_switch_conf`); only enabled chat-mode entries without upgrade requirements are exposed. No production model IDs or entitlements are invented. Native `/chat/completion` uses `agent_mode=2`, never the cloud/local work-task harness. The bridge supports plain text and thinking text. Ordered system/developer/user/assistant text history is sent as an explicitly labeled, size-limited JSON transcript in one native text message; this is **not native role/session continuity**. Each request creates a website conversation, which is **not automatically deleted**. This can leave conversations in the user's official website account.
+
+Tools, tool results, structured tool history, images, custom temperature/token limits and unverified generation overrides fail explicitly; do not select this provider for tool-driven agent/project execution. No tool calls or usage/token counts are fabricated. Native SSE_ACK, STREAM_CHUNK text/thinking patches and SSE_REPLY_END with end_type=3 drive both OpenAI-compatible JSON and SSE output. Truncation, stream errors, unsupported task handoffs and cancellation cannot produce a successful finish. Cookie-bearing requests are fixed to the official `www.doubao.com` identity/catalog/chat routes; redirects and 401/403 challenges require normal website login again without automated bypass or login replay. Locally generated numeric device metadata persists with the encrypted account credential, rather than copying another user's device ID. Balance, check-in and rewards are unsupported.
+
+This integration follows the frozen public Fullstop000/doubao-cli reference at `62dd0ac1` for HTTP, catalog, native request and SSE fields, not an assumed OpenAI endpoint. Real-account login/chat and Android device acceptance remain pending owner verification. HTTP fixtures are included; their presence alone does not establish runtime success.

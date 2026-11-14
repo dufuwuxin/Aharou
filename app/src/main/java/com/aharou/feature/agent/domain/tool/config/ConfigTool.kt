@@ -48,6 +48,7 @@ import javax.inject.Inject
 class ConfigTool @Inject constructor(
     @param:ApplicationContext private val context: Context,
     private val teamFields: com.aharou.feature.agent.data.ConfigTeamControlFields,
+    private val sessions: com.aharou.feature.agent.domain.session.SessionUseCase,
 ) : AgentTool() {
 
     private companion object {
@@ -103,24 +104,32 @@ class ConfigTool @Inject constructor(
             args,
             // ALLOW（完全放行）同样视作自动批准：配置类写入也不再弹确认。
             autoMode = context.mode == AgentMode.AUTO || context.mode == AgentMode.ALLOW,
-            workspace = context.projectRoot
+            workspace = context.projectRoot,
+            mainAgent = context.agentDefinition == null && context.sessionId?.let { id -> sessions.getSessionById(id)?.let { it.parentId == null } } == true
         )
 
     /** 无上下文的兜底路径（正常不会走到）：拿不到会话模式，一律按「必须人工确认」处理。 */
     override suspend fun execute(args: Map<String, JsonElement>): ToolResult =
         executeInternal(args, autoMode = false)
 
-    private suspend fun executeInternal(args: Map<String, JsonElement>, autoMode: Boolean, workspace: String? = null): ToolResult {
+    private suspend fun executeInternal(args: Map<String, JsonElement>, autoMode: Boolean, workspace: String? = null, mainAgent: Boolean = false): ToolResult {
         val action = (args["action"] as? JsonPrimitive)?.contentOrNull?.trim()?.lowercase()
             ?: return ToolResult.Error("缺少 action（list / get / set）", "MISSING_ACTION")
         val path = (args["path"] as? JsonPrimitive)?.contentOrNull?.trim().orEmpty()
         if (path.startsWith(com.aharou.core.config.TeamEditCapability.PREFIX)) {
             return teamCapabilityRequest(context, action, path, (args["value"] as? JsonPrimitive)?.contentOrNull, workspace, teamFields)
         }
+        if ((path == "teams" || path == "team.stages" || path.startsWith("teams.") || path.startsWith("team.stages.") || path == "workflows" || path.startsWith("workflows."))) {
+            if (!mainAgent || workspace.isNullOrBlank() || !teamFields.forWorkspace(workspace).mainAgentMayRead(path)) {
+                return ToolResult.Error("此团队由成员管理员管理；主代理仅可通过 task teams 查看名称、介绍和公约", "TEAM_DETAILS_RESTRICTED")
+            }
+        }
         return try {
-            val registry = ConfigRegistry.get()
+            val registry = if (path.startsWith("teams.") || path.startsWith("team.stages."))
+                ConfigRegistry.isolated().also { teamFields.forWorkspace(requireNotNull(workspace)).registerInto(it) }
+                else ConfigRegistry.get()
             when (action) {
-                "list" -> listFields(registry)
+                "list" -> listFields(registry, mainAgent)
                 "get" -> getField(registry, path)
                 "reveal" -> revealField(registry, path)
                 "set" -> {
@@ -176,9 +185,10 @@ class ConfigTool @Inject constructor(
         return ToolResult.Success(buildJsonObject { put("result", "$header\n\n${read.text}") })
     }
 
-    private fun listFields(registry: ConfigRegistry): ToolResult {
+    private fun listFields(registry: ConfigRegistry, mainAgent: Boolean = false): ToolResult {
         val sb = StringBuilder("可用配置字段：\n")
         for (topic in registry.topics()) {
+            if (topic in setOf("teams", "team.stages", "workflows")) continue
             val fields = registry.fields(topic).filter { it.access != ConfigAccess.HIDDEN }
             if (fields.isEmpty()) {
                 // 空集合仍要列出来，否则使用者会以为这类配置不存在。

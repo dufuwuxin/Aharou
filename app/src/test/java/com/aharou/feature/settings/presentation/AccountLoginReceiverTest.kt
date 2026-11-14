@@ -63,4 +63,30 @@ class AccountLoginReceiverTest {
         assertEquals(listOf(2 to "app://callback?code=test", 3 to null), events)
         assertFalse(remote === local)
     }
+    @Test fun explicitWebsiteCookieUsesPrivateBundleAndKeepsOriginLoginIdentityAndState() {
+        val events = mutableListOf<Bundle>()
+        val local = object : ResultReceiver(Handler(Looper.getMainLooper())) {
+            override fun onReceiveResult(resultCode: Int, resultData: Bundle?) {
+                assertEquals(com.aharou.feature.settings.presentation.component.AccountLoginActivity.WEB_SESSION, resultCode)
+                events += requireNotNull(resultData)
+            }
+        }
+        val remote = transfer(local)
+        val activity = com.aharou.feature.settings.presentation.component.AccountLoginActivity
+        send(remote, activity.WEB_SESSION, Bundle().apply {
+            putString(activity.ORIGIN, "https://www.dumate.cn")
+            putString(activity.LOGIN_ID, "fixture-provider")
+            putString(activity.LOGIN_STATE, "fixture-state")
+            putString(activity.WEB_COOKIE, "normalcookie=fixture-session")
+        })
+        shadowOf(Looper.getMainLooper()).idle()
+        assertEquals(1, events.size)
+        assertEquals("https://www.dumate.cn", events.single().getString(activity.ORIGIN))
+        assertEquals("fixture-provider", events.single().getString(activity.LOGIN_ID))
+        assertEquals("fixture-state", events.single().getString(activity.LOGIN_STATE))
+        assertEquals("normalcookie=fixture-session", events.single().getString(activity.WEB_COOKIE))
+        assertFalse(events.single().containsKey(activity.URL))
+        assertEquals(ResultReceiver::class.java, remote.javaClass)
+    }
+
 }

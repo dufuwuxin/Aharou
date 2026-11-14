@@ -49,7 +49,7 @@ FIXTURES = {
     }''',
     SPEC: '''object TaskToolSpec {
         val parameters = mapOf("action" to ToolParameter(name = "action",
-            enum = listOf("teams", "team_run")))
+            enum = listOf("teams", "team_run", "team_assign")))
     }''',
     TASK: '''class TaskTool {
         fun executeWithContext(args: Args, context: AgentContext): ToolResult {
@@ -278,7 +278,7 @@ class NativeMemoryContractTest(unittest.TestCase):
                     'persist entries through MemoryRepository')
 
     def test_action_schema_exact(self) -> None:
-        self.mutate(SPEC, 'listOf("teams", "team_run")', 'listOf("teams", "team_run", "create")',
+        self.mutate(SPEC, 'listOf("teams", "team_run", "team_assign")', 'listOf("teams", "team_run", "team_assign", "create")',
                     'action enum must contain exactly')
 
     def test_each_old_dispatch_is_rejected(self) -> None:

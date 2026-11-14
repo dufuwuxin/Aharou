@@ -1,5 +1,6 @@
 package com.aharou.feature.agent.domain.tool.subagent
 
+import com.aharou.feature.agent.domain.model.AgentContext
 import com.aharou.core.util.FileLogger
 import com.aharou.feature.agent.domain.subagent.AgentDefinition
 import com.aharou.feature.agent.domain.subagent.AgentDefinitionRepository
@@ -31,18 +32,13 @@ class TeamTasks @Inject constructor(
     private val stageExecutor: TeamStageExecutor
 ) {
 
-    fun list(args: Map<String, JsonElement>): ToolResult {
-        val entries = loadEntries() ?: return ToolResult.Error("读取团队预设失败", "TEAM_LIST_FAILED")
+    fun list(args: Map<String, JsonElement>, context: AgentContext, mainSession: Boolean = false): ToolResult {
+        val entries = loadEntries(context.projectRoot) ?: return ToolResult.Error("读取团队预设失败", "TEAM_LIST_FAILED")
         val target = (args["team"] as? JsonPrimitive)?.contentOrNull?.trim().orEmpty()
         if (target.isNotEmpty()) {
             val entry = entries.firstOrNull { it.team.name.equals(target, ignoreCase = true) }
                 ?: return ToolResult.Error(notFoundMessage(entries, target), "TEAM_NOT_FOUND")
-            return ToolResult.Success(
-                buildJsonObject {
-                    put("name", entry.team.name)
-                    put("description", entry.team.description)
-                }
-            )
+            return ToolResult.Success(TeamAdministration.detail(entry.team, mainSession))
         }
         if (entries.isEmpty()) {
             return ToolResult.Error(
@@ -56,6 +52,7 @@ class TeamTasks @Inject constructor(
                     entries.forEach { entry -> add(buildJsonObject {
                         put("name", entry.team.name)
                         put("description", entry.team.description)
+                        put("charter", entry.team.charter)
                     }) }
                 })
                 put("count", entries.size)
@@ -69,6 +66,8 @@ class TeamTasks @Inject constructor(
     suspend fun run(
         args: Map<String, JsonElement>,
         parentSessionId: String,
+        workspace: String,
+        expectedSignature: String? = null,
         exec: suspend (JsonArray) -> ToolResult
     ): ToolResult {
         val teamName = (args["team"] as? JsonPrimitive)?.contentOrNull?.trim().orEmpty()
@@ -80,7 +79,7 @@ class TeamTasks @Inject constructor(
             return ToolResult.Error("team_run 需要 goal（本次团队要达成的目标）", "MISSING_GOAL")
         }
 
-        val entries = loadEntries() ?: return ToolResult.Error("读取团队预设失败", "TEAM_LIST_FAILED")
+        val entries = loadEntries(workspace) ?: return ToolResult.Error("读取团队预设失败", "TEAM_LIST_FAILED")
         val team = entries.firstOrNull { it.team.name.equals(teamName, ignoreCase = true) }?.team
             ?: return ToolResult.Error(notFoundMessage(entries, teamName), "TEAM_NOT_FOUND")
 
@@ -91,6 +90,8 @@ class TeamTasks @Inject constructor(
             return ToolResult.Error("读取子代理定义失败：${e.message ?: "未知错误"}", "AGENT_LIST_FAILED")
         }
 
+        if (expectedSignature != null && expectedSignature != signature(team, enabled))
+            return ToolResult.Error("团队配置已变化，请重新执行", "TEAM_CONFIG_CHANGED")
         return when (val plan = TeamRunner.build(team, goal, enabled, maxRunningSource.maxRunning())) {
             is TeamRunner.Plan.Rejected -> ToolResult.Error(plan.message, plan.code)
             is TeamRunner.Plan.Ready -> {
@@ -103,8 +104,47 @@ class TeamTasks @Inject constructor(
         }
     }
 
-    private fun loadEntries(): List<AgentTeamEntry>? = try {
-        teamRepository.listAll()
+    fun assign(args: Map<String, JsonElement>, context: AgentContext, mainSession: Boolean): ToolResult {
+        if (!mainSession) return ToolResult.Error("仅主会话可管理团队", "TEAM_ADMIN_DENIED")
+        fun text(key: String) = (args[key] as? JsonPrimitive)?.contentOrNull?.trim().orEmpty()
+        val repo = teamRepository.forWorkspace(context.projectRoot)
+        val entry = repo.listAll().firstOrNull { it.team.name.equals(text("team"), ignoreCase = true) }
+            ?: return ToolResult.Error("团队不存在", "TEAM_NOT_FOUND")
+        if (!entry.team.mainAgentAdmin) return ToolResult.Error("该团队不由主代理管理", "TEAM_ADMIN_DENIED")
+        val form = TeamAdministration.assign(entry, text("stageId"), text("taskId"), text("member"))
+            ?: return ToolResult.Error("仅可将现有任务分配给该团队名单内成员，且不能合并任务", "INVALID_TEAM_ASSIGNMENT")
+        val error = repo.save(form, entry.team.name)
+        if (error != null) return ToolResult.Error("团队分配未保存：$error", "TEAM_ASSIGN_FAILED")
+        return ToolResult.Success(buildJsonObject {
+            put("team", entry.team.name); put("state", "assigned"); put("appliesTo", "next_run")
+        })
+    }
+
+    internal fun selectProjectTeam(teamName: String?, goal: String, workspace: String): ToolResult {
+        val entries = loadEntries(workspace) ?: return ToolResult.Error("读取团队预设失败", "TEAM_LIST_FAILED")
+        val enabled = try { agentDefinitionRepository.listEnabled().map { it.definition } }
+        catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+        catch (_: Exception) { return ToolResult.Error("读取成员定义失败", "AGENT_LIST_FAILED") }
+        val requested = teamName?.trim().orEmpty().takeUnless { it.equals("auto", true) }.orEmpty()
+        val candidates = if (requested.isBlank()) entries.sortedBy { it.team.name } else
+            entries.filter { it.team.name.equals(requested, true) }
+        val selected = candidates.firstOrNull {
+            com.aharou.feature.agent.domain.subagent.TeamFlowGraph.validate(it.team) == null &&
+                (TeamRunner.build(it.team, goal, enabled, maxRunningSource.maxRunning()) as? TeamRunner.Plan.Ready)?.taskCount?.let { count -> count > 0 } == true
+        } ?: return ToolResult.Error(if (requested.isBlank()) "没有可运行团队，请先配置团队" else "指定团队不存在或不可运行：$requested", "PROJECT_TEAM_UNAVAILABLE")
+        return ToolResult.Success(buildJsonObject {
+            put("team", selected.team.name)
+            put("signature", signature(selected.team, enabled))
+            put("selectionReason", if (requested.isBlank()) "auto:first-buildable-by-name" else "explicit:exact-name")
+        })
+    }
+
+    private fun signature(team: com.aharou.feature.agent.domain.subagent.AgentTeam, enabled: List<AgentDefinition>): String =
+        java.security.MessageDigest.getInstance("SHA-256").digest((team.toString() + enabled.toString() + maxRunningSource.maxRunning()).toByteArray())
+            .joinToString("") { "%02x".format(it) }
+
+    private fun loadEntries(workspace: String): List<AgentTeamEntry>? = try {
+        teamRepository.forWorkspace(workspace).listAll()
     } catch (e: Exception) {
         FileLogger.e(TAG, "读取团队预设失败", e)
         null

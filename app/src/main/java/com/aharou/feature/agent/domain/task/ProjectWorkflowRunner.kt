@@ -70,6 +70,22 @@ class ProjectWorkflowRunner @Inject constructor(
                     checkpoint(ProjectGoalPlan.checkpoint(goal, acceptance, projectTasks, budgetReached = true))
                     break
                 }
+                val teamTasks = projectTasks.filter { !it.isRequirementBranch && ProjectTeamExecution.usesTeam(currentProject, it) }
+                val selection = if (teamTasks.isEmpty()) null else {
+                    try { ProjectTeamExecution.selection(tasks.selectProjectTeam(currentProject.executionTeam, goal, context)) }
+                    catch (cancelled: CancellationException) { throw cancelled }
+                    catch (failure: Exception) {
+                        repository.invalidateTeamTasks(workspace, snapshot.version, teamTasks.map { it.id }.toSet(), true, "PROJECT_TEAM_UNAVAILABLE")
+                        throw failure
+                    }
+                }
+                if (selection != null && teamTasks.any { (ProjectWorkflowPlan.delivered(it) || it.processParticipants != null || it.processMembers.isNotEmpty()) && it.processParticipants != listOf(selection.participant) }) {
+                    repository.invalidateTeamTasks(workspace, snapshot.version, teamTasks.filter {
+                        (ProjectWorkflowPlan.delivered(it) || it.processParticipants != null || it.processMembers.isNotEmpty()) &&
+                            it.processParticipants != listOf(selection.participant)
+                    }.map { it.id }.toSet(), false, "TEAM_CONFIG_CHANGED")
+                    continue
+                }
                 // A single-task run first runs the member branches its task now waits on, then the task itself.
                 val next = if (onlyTaskId == null) ProjectWorkflowPlan.next(projectTasks)
                     else ProjectWorkflowPlan.nextWithin(projectTasks, onlyTaskId)
@@ -83,17 +99,32 @@ class ProjectWorkflowRunner @Inject constructor(
                     break
                 }
                 attempts++
-                val participants = ProjectWorkflowPlan.participants(next)
+                val selectedTeam = selection?.takeIf { ProjectTeamExecution.usesTeam(currentProject, next) }
+                val participants = selectedTeam?.let { listOf(it.participant) } ?: ProjectWorkflowPlan.participants(next)
                 val reused = ProjectWorkflowPlan.reusableRuns(next)
                 // Marked under the store lock; a supplement or branch committed since the pick sends the loop back to pick again.
                 active = repository.transact(workspace) { store ->
                     val latest = store.tasks.first { it.id == next.id }
-                    if (latest.requirementsVersion != next.requirementsVersion || ProjectWorkflowPlan.participants(latest) != participants) emptyList()
+                    if (latest.requirementsVersion != next.requirementsVersion || ProjectWorkflowPlan.participants(latest) != ProjectWorkflowPlan.participants(next)) emptyList()
                     else listOf(ProjectTaskChange(latest.copy(status = ProjectTaskStatus.RUNNING, executionReason = "",
                         processRequirementsVersion = null, processParticipants = participants)))
                 }.singleOrNull() ?: continue
                 val outputs = mutableListOf<String>()
+                var teamEvidence: String? = null
                 try {
+                    if (selectedTeam != null) {
+                        val remaining = (ProjectGoalPlan.timeBudgetMs(horizon) - (android.os.SystemClock.elapsedRealtime() - startedAt)).coerceAtLeast(1L)
+                        val result = ProjectTeamExecution.execute(minOf(memberTimeoutMs, remaining),
+                            current = { requireCurrent(workspace, next, participants) },
+                            invoke = { tasks.runProjectTeam(selectedTeam.name,
+                                ProjectWorkflowPlan.prompt(next, projectTasks, currentProject.requirements + "\n" + ProjectGoalPlan.context(goal, acceptance, horizon)),
+                                context, selectedTeam.signature) })
+                        val fresh = ProjectTeamExecution.selection(tasks.selectProjectTeam(currentProject.executionTeam, goal, context))
+                        if (fresh.participant != selectedTeam.participant) throw ProjectTaskSuperseded()
+                        val (evidence, output) = ProjectTeamExecution.receipt(result, selectedTeam, next.requirementsVersion)
+                        teamEvidence = evidence
+                        outputs += output
+                    } else {
                     // Serial execution shares the existing global capacity and never drops duplicate roles.
                     for ((index, member) in participants.withIndex()) {
                         requireCurrent(workspace, next, participants)
@@ -146,6 +177,7 @@ class ProjectWorkflowRunner @Inject constructor(
                         check(passed) { if (outcome == "STOPPED") "PROJECT_MEMBER_STOPPED" else "PROJECT_MEMBER_FAILED" }
                         outputs += memberOutput(index, member, id)
                     }
+                    }
                     requireCurrent(workspace, next, participants)
                 } catch (_: ProjectTaskSuperseded) {
                     withContext(NonCancellable) { supersede(workspace, next.id, child, context) }
@@ -156,10 +188,11 @@ class ProjectWorkflowRunner @Inject constructor(
                 var superseded = false
                 repository.transact(workspace) { store ->
                     val latest = store.tasks.first { it.id == next.id }
-                    superseded = latest.requirementsVersion != next.requirementsVersion || ProjectWorkflowPlan.participants(latest) != participants
+                    superseded = latest.requirementsVersion != next.requirementsVersion || !participantsCurrent(latest, participants)
                     listOf(ProjectTaskChange(if (superseded) latest.copy(status = ProjectTaskStatus.READY, processRequirementsVersion = null,
                         executionReason = "UPSTREAM_CHANGED") else latest.copy(status = ProjectTaskStatus.REVIEW,
-                        processRequirementsVersion = next.requirementsVersion, brief = outputs.joinToString("\n\n"), executionReason = "SUCCEEDED")))
+                        processRequirementsVersion = next.requirementsVersion, brief = outputs.joinToString("\n\n"),
+                        evidenceRefs = latest.evidenceRefs + listOfNotNull(teamEvidence), executionReason = "SUCCEEDED")))
                 }
                 active = null
                 if (superseded) continue
@@ -199,10 +232,14 @@ class ProjectWorkflowRunner @Inject constructor(
 
     /** Requirements or participants changed since this attempt started: the attempt is superseded, not failed. */
     private suspend fun requireCurrent(workspace: String, started: ProjectTask, participants: List<String>) {
-        val latest = repository.load(workspace).tasks.firstOrNull { it.id == started.id } ?: return
-        if (latest.requirementsVersion != started.requirementsVersion || ProjectWorkflowPlan.participants(latest) != participants)
+        val latest = repository.load(workspace).tasks.firstOrNull { it.id == started.id } ?: throw ProjectTaskSuperseded()
+        if (latest.requirementsVersion != started.requirementsVersion || !participantsCurrent(latest, participants))
             throw ProjectTaskSuperseded()
     }
+
+    private fun participantsCurrent(task: ProjectTask, expected: List<String>): Boolean =
+        if (expected.singleOrNull()?.startsWith("team:") == true) task.processParticipants == expected
+        else ProjectWorkflowPlan.participants(task) == expected
 
     /** The member prompt mentions project_tasks only when the role's tool filter keeps it; the default member keeps every tool. */
     internal suspend fun projectToolsFor(member: String): Boolean {

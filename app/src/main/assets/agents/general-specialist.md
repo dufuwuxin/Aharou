@@ -1,5 +1,5 @@
 ---
-name: Explore
+name: 通用专家
 description: 只读代码库探索：搞清某个功能/模块/调用链怎么实现的、某处逻辑在哪、某个改动要碰哪些文件。不改任何文件，只回报结论。派它前务必在 prompt 里写清要查什么、已知线索与期望产出。
 tools: [readFile, list, search, websearch, webfetch, loadSkill, messageParent]
 inject: [base, projectRules]

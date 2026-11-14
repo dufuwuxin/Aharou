@@ -36,6 +36,18 @@ class AccountLogin internal constructor(
         schedule(object : java.util.TimerTask() { override fun run() { close() } }, (expiresAt - System.currentTimeMillis()).coerceAtLeast(1L))
     } else null
     @Volatile internal var code: String? = null
+    private var webCookie: String? = null
+
+    @Synchronized internal fun acceptWebCookie(origin: String, loginId: String, loginState: String, cookie: String, now: Long): Boolean {
+        if (!kind.isWebSession || closed.get() || now >= expiresAt || loginId != id || loginState != state ||
+            !(if (kind == AccountProviderKind.DOUBAO) DoubaoAccountProtocol.isWebOrigin(origin) else DumateAccountProtocol.isWebOrigin(origin))) return false
+        try { if (kind == AccountProviderKind.DOUBAO) DoubaoAccountProtocol.requireCookie(cookie) else DumateAccountProtocol.requireCookie(cookie) } catch (_: AccountProviderException) { return false }
+        if (!consumed.compareAndSet(false, true)) return false
+        webCookie = cookie
+        return true
+    }
+
+    @Synchronized internal fun takeWebCookie(): String? = webCookie.also { webCookie = null }
 
     internal fun accept(value: String, now: Long): Boolean {
         if (closed.get() || consumed.get() || now >= expiresAt || value.length > 16384) return false
@@ -59,8 +71,9 @@ class AccountLogin internal constructor(
         } catch (_: Exception) { false }
     }
 
-    internal fun close() {
+    @Synchronized internal fun close() {
         closed.set(true)
+        webCookie = null
         expiryTimer?.cancel()
         cookies.clear()
         try { server?.close() } catch (_: java.io.IOException) { }
@@ -94,6 +107,12 @@ internal object AccountProviderLogin {
         val verifier = nonce()
         val deviceId = UUID.randomUUID().toString()
         val expiresAt = System.currentTimeMillis() + 10 * 60_000
+        if (kind == AccountProviderKind.DOUBAO) {
+            return AccountLogin(id, kind, DoubaoAccountProtocol.LOGIN, null, state, revision, expiresAt, verifier, DoubaoAccountProtocol.newDeviceId())
+        }
+        if (kind == AccountProviderKind.DUMATE) {
+            return AccountLogin(id, kind, DumateAccountProtocol.WEB + "/", null, state, revision, expiresAt, verifier, deviceId)
+        }
         if (kind.isWorkBuddy) {
             val cookies = LoginCookies()
             val data = manager.network {
@@ -134,7 +153,16 @@ internal object AccountProviderLogin {
     suspend fun await(manager: AccountProviderManager, login: AccountLogin): AccountCredential {
         while (System.currentTimeMillis() < login.expiresAt && !login.closed.get()) {
             coroutineContext.ensureActive()
-            if (login.kind.isWorkBuddy) {
+            if (login.kind.isWebSession) {
+                val cookie = login.takeWebCookie()
+                if (cookie != null) return manager.network {
+                    manager.requireAccountVersion(login.id, login.revision)
+                    val credential = if (login.kind == AccountProviderKind.DOUBAO) DoubaoAccountProtocol.exchange(manager, cookie, login.deviceId)
+                        else DumateAccountProtocol.exchange(manager, cookie, login.deviceId).also { DumateAccountProtocol.validateDirectory(manager, it) }
+                    manager.requireAccountVersion(login.id, login.revision)
+                    credential
+                }
+            } else if (login.kind.isWorkBuddy) {
                 val response = manager.network {
                     val url = (manager.endpoints.workbuddy(login.kind) + "/v2/plugin/auth/token").toHttpUrl().newBuilder().addQueryParameter("state", login.state).build()
                     val response = manager.request(url.toString(), headers = workbuddyLoginHeaders(login.kind) + login.cookies.headers(url.toString()))

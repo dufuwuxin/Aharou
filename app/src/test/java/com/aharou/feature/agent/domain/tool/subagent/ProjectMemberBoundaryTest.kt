@@ -74,7 +74,7 @@ class ProjectMemberBoundaryTest {
             assertEquals("INVALID_ARGS", (tool.executeWithContext(args, context) as ToolResult.Error).code)
         }
         assertTrue(child.id in bus.activeSubSessionIds.value)
-        assertEquals(setOf("action", "team", "goal"), tool.parameters.keys)
+        assertEquals(setOf("action", "team", "goal", "stageId", "taskId", "member"), tool.parameters.keys)
         assertEquals("NO_SESSION", (tool.stopProjectMember(child.id, context.copy(sessionId = null)) as ToolResult.Error).code)
     }
     @Test fun cancellationUsesTheRealOwnedStopBoundary() = runBlocking {

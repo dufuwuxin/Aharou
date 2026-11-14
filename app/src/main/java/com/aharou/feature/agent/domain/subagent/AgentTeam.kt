@@ -9,6 +9,8 @@ package com.aharou.feature.agent.domain.subagent
  * @param level 成员层级：1=一级成员组（靠上游，做拆解与设计），2=二级，依次类推。层级决定
  *   一个成员在团队流程里默认被排在哪个高度，而不是硬限制——同一个成员可以被不同阶段引用。
  */
+const val MAIN_AGENT_ADMIN = "__main_agent__"
+
 data class TeamMemberRef(
     val name: String,
     val level: Int = 1,
@@ -109,7 +111,7 @@ data class TeamStage(
  * 团队，来自 `teams/<name>.md`：frontmatter 是名单（成员 / 管理员）+ 流程，正文是团队公约。
  *
  * [charter] 既是团队的用途介绍，也是拼在每条成员指令前的共同约束——写一次，全队生效。
- * [admins] 保留历史文件格式，但保存和运行均要求名单内恰好一个管理员。
+ * [admins] 保留历史文件格式；唯一管理员为名单成员或保留值 [MAIN_AGENT_ADMIN]。
  */
 data class AgentTeam(
     val name: String,
@@ -119,15 +121,18 @@ data class AgentTeam(
     val admins: List<String> = emptyList(),
     val members: List<TeamMemberRef> = emptyList(),
     val filePath: String? = null,
-    val routes: List<TeamRoute> = emptyList()
+    val routes: List<TeamRoute> = emptyList(),
+    val evidenceRequired: Boolean = false
 ) {
+    val mainAgentAdmin: Boolean get() = admins == listOf(MAIN_AGENT_ADMIN)
+
     val taskCount: Int get() = stages.sumOf { it.tasks.size }
 
     /** 团队实际引用到的全部成员名（名单 + 管理员 + 阶段里点名的成员）。 */
     val referencedMembers: List<String>
         get() = buildList {
             addAll(members.map { it.name })
-            addAll(admins)
+            addAll(admins.filterNot { it == MAIN_AGENT_ADMIN })
             stages.forEach { stage -> stage.tasks.forEach { task -> task.agent?.let(::add) } }
         }.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
 
@@ -189,7 +194,8 @@ data class AgentTeamForm(
     val admins: List<String> = emptyList(),
     val members: List<TeamMemberRef> = emptyList(),
     val stages: List<AgentTeamStageForm> = listOf(AgentTeamStageForm()),
-    val routes: List<TeamRoute> = emptyList()
+    val routes: List<TeamRoute> = emptyList(),
+    val evidenceRequired: Boolean = false
 )
 
 /** 保存失败的原因；界面按枚举映射成对应文案。 */
@@ -233,6 +239,7 @@ fun AgentTeam.toForm(scope: AgentDefinitionScope): AgentTeamForm = AgentTeamForm
     admins = admins,
     members = members,
     routes = routes,
+    evidenceRequired = evidenceRequired,
     stages = stages.map { stage ->
         AgentTeamStageForm(
             title = stage.title,

@@ -22,6 +22,8 @@ class AccountLoginActivity : Activity() {
     private var closingFromOwner = false
     private var fresh = false
     private var windowToken = 0L
+    private var webCookieLogin = false
+    private var webKind: com.aharou.feature.settings.data.account.AccountProviderKind? = null
 
     @Suppress("DEPRECATION")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -35,6 +37,17 @@ class AccountLoginActivity : Activity() {
         }
         val uri = android.net.Uri.parse(url)
         if (uri.scheme != "https" || uri.host.isNullOrBlank()) { finish(); return }
+        webCookieLogin = intent.getBooleanExtra(WEB_COOKIE_LOGIN, false)
+        webKind = com.aharou.feature.settings.data.account.AccountProviderKind.fromWireId(intent.getStringExtra(LOGIN_KIND).orEmpty())
+            ?: if (webCookieLogin) com.aharou.feature.settings.data.account.AccountProviderKind.DUMATE else null
+        if (webCookieLogin) {
+            val expected = when (webKind) {
+                com.aharou.feature.settings.data.account.AccountProviderKind.DUMATE -> com.aharou.feature.settings.data.account.DumateAccountProtocol.WEB + "/"
+                com.aharou.feature.settings.data.account.AccountProviderKind.DOUBAO -> com.aharou.feature.settings.data.account.DoubaoAccountProtocol.LOGIN
+                else -> null
+            }
+            if (expected == null || url != expected) { finish(); return }
+        }
         window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
         windowToken = windows.begin {
             closingFromOwner = true
@@ -69,6 +82,30 @@ class AccountLoginActivity : Activity() {
         layout.addView(Button(this).apply {
             setText(R.string.common_close)
             setOnClickListener { finish() }
+        }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+        if (webCookieLogin) layout.addView(Button(this).apply {
+            setText(R.string.provider_account_dumate_complete)
+            setOnClickListener {
+                if (!windows.isCurrent(this@AccountLoginActivity.windowToken) || callbackSent) return@setOnClickListener
+                val current = browser?.url ?: return@setOnClickListener
+                val doubao = webKind == com.aharou.feature.settings.data.account.AccountProviderKind.DOUBAO
+                val origin = if (doubao) com.aharou.feature.settings.data.account.DoubaoAccountProtocol.LOGIN else com.aharou.feature.settings.data.account.DumateAccountProtocol.WEB
+                val valid = if (doubao) com.aharou.feature.settings.data.account.DoubaoAccountProtocol.isWebOrigin(current)
+                    else com.aharou.feature.settings.data.account.DumateAccountProtocol.isWebOrigin(current)
+                if (!valid) return@setOnClickListener
+                val cookie = CookieManager.getInstance().getCookie(origin) ?: return@setOnClickListener
+                val loginId = intent.getStringExtra(LOGIN_ID) ?: return@setOnClickListener
+                val state = intent.getStringExtra(LOGIN_STATE) ?: return@setOnClickListener
+                receiver?.send(WEB_SESSION, Bundle().apply {
+                    putString(ORIGIN, origin)
+                    putString(LOGIN_KIND, webKind?.wireId)
+                    putString(LOGIN_ID, loginId)
+                    putString(LOGIN_STATE, state)
+                    putString(WEB_COOKIE, cookie)
+                })
+                callbackSent = true
+                finish()
+            }
         }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
         val callback = intent.getStringExtra(CALLBACK_PREFIX)
         browser = WebView(this).apply {
@@ -122,5 +159,12 @@ class AccountLoginActivity : Activity() {
         internal const val READY = 1
         internal const val CALLBACK = 2
         internal const val CANCELLED = 3
+        internal const val WEB_SESSION = 4
+        internal const val WEB_COOKIE_LOGIN = "account_web_cookie_login"
+        internal const val WEB_COOKIE = "account_web_cookie"
+        internal const val ORIGIN = "account_web_origin"
+        internal const val LOGIN_KIND = "account_login_kind"
+        internal const val LOGIN_ID = "account_login_id"
+        internal const val LOGIN_STATE = "account_login_state"
     }
 }

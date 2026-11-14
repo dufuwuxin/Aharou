@@ -80,7 +80,7 @@ class TaskTool @Inject constructor(
         }
     }
 
-    override val description: String = "查看团队名称与介绍，并根据介绍向团队分配任务。主代理不查询或直调成员，不读取成员消息；成员分工与内部交接由团队执行。"
+    override val description: String = "查看团队名称与介绍，并根据介绍向团队分配任务。普通团队只提供介绍和公约；唯一管理员为主代理的团队可查完整流程并用 team_assign 改派现有任务，team_run 仍沿原流程执行。"
 
     override val parameters: Map<String, ToolParameter> = TaskToolSpec.parameters
 
@@ -90,10 +90,40 @@ class TaskTool @Inject constructor(
             return ToolResult.Error("只接受团队动作、团队名称和任务目标", "INVALID_ARGS")
         }
         val action = (taskArgs["action"] as? JsonPrimitive)?.contentOrNull?.trim()?.lowercase()
+        val allowed = when (action) {
+            "teams" -> setOf("action", "team")
+            "team_run" -> setOf("action", "team", "goal")
+            "team_assign" -> setOf("action", "team", "stageId", "taskId", "member")
+            else -> emptySet()
+        }
+        if (taskArgs.keys.any { it !in allowed }) return ToolResult.Error("参数不适用于该动作", "INVALID_ARGS")
+        val mainSession = if (action == "teams" || action == "team_assign") {
+            context.agentDefinition == null && context.sessionId?.let { id ->
+                sessionUseCase.getSessionById(id)?.let { it.parentId == null }
+            } == true
+        } else false
         return when (action) {
-            "teams" -> teamTasks.list(taskArgs)
+            "teams" -> teamTasks.list(taskArgs, context, mainSession)
+            "team_assign" -> teamTasks.assign(taskArgs, context, mainSession)
             "team_run" -> publicTeamResult(runTeam(taskArgs, context), taskArgs)
-            else -> ToolResult.Error("仅支持 teams / team_run", "INVALID_ARGS")
+            else -> ToolResult.Error("仅支持 teams / team_run / team_assign", "INVALID_ARGS")
+        }
+    }
+
+    internal fun selectProjectTeam(teamName: String?, goal: String, context: AgentContext): ToolResult =
+        teamTasks.selectProjectTeam(teamName, goal, requireNotNull(context.projectRoot))
+
+    internal suspend fun runProjectTeam(teamName: String, goal: String, context: AgentContext, signature: String): ToolResult {
+        val spawned = mutableSetOf<String>()
+        try {
+            return teamTasks.run(buildJsonObject { put("team", teamName); put("goal", goal) },
+                context.sessionId.orEmpty(), workspace = context.projectRoot, expectedSignature = signature) { pipeline ->
+                runPipeline(buildJsonObject { put("pipeline", pipeline) }, context) { spawned += it }
+            }
+        } finally {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                spawned.filter { eventBus.terminalEvent(it) == null }.forEach { id -> stopProjectMember(id, context) }
+            }
         }
     }
 
@@ -120,8 +150,15 @@ class TaskTool @Inject constructor(
         return ToolResult.Error(WriteLease.conflictMessage(conflictId, title, mine, theirs, next, root), "WRITE_CONFLICT")
     }
 
-    private suspend fun runPipeline(args: Map<String, JsonElement>, context: AgentContext): ToolResult =
-        stageExecutor.pipeline(args, context, eventBus, { createSubagent(it, context) }, { readSubagentOutput(it, context) })
+    private suspend fun runPipeline(args: Map<String, JsonElement>, context: AgentContext, onCreated: ((String) -> Unit)? = null): ToolResult =
+        stageExecutor.pipeline(args, context, eventBus, { argsToCreate ->
+            if (onCreated == null) createSubagent(argsToCreate, context) else
+                kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                    createSubagent(argsToCreate, context).also { result ->
+                        ((result as? ToolResult.Success)?.data as? JsonObject)?.get("id")?.jsonPrimitive?.contentOrNull?.let(onCreated)
+                    }
+                }
+        }, { readSubagentOutput(it, context) })
 
     private suspend fun readSubagentOutput(subSessionId: String, context: AgentContext): String {
         val readArgs = buildJsonObject {
@@ -368,7 +405,7 @@ class TaskTool @Inject constructor(
     }
 
     private suspend fun runTeam(args: Map<String, JsonElement>, context: AgentContext): ToolResult =
-        teamTasks.run(args, context.sessionId.orEmpty()) { pipeline ->
+        teamTasks.run(args, context.sessionId.orEmpty(), context.projectRoot) { pipeline ->
             runPipeline(buildJsonObject { put("pipeline", pipeline) }, context)
         }
 

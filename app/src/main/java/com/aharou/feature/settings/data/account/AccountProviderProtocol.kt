@@ -9,7 +9,9 @@ import java.util.Base64
 
 enum class AccountProviderKind(val wireId: String) {
     TRAE("trae"), WORKBUDDY("workbuddy"), RACCOON("raccoon"),
-    TRAE_GLOBAL("trae-global"), WORKBUDDY_GLOBAL("workbuddy-global"), LOOMY("loomy");
+    TRAE_GLOBAL("trae-global"), WORKBUDDY_GLOBAL("workbuddy-global"), LOOMY("loomy"), DUMATE("dumate"), DOUBAO("doubao");
+
+    val isWebSession: Boolean get() = this == DUMATE || this == DOUBAO
 
     val isTrae: Boolean get() = this == TRAE || this == TRAE_GLOBAL
     val isWorkBuddy: Boolean get() = this == WORKBUDDY || this == WORKBUDDY_GLOBAL
@@ -89,6 +91,8 @@ internal object AccountProviderProtocol {
         check(payload)
         if (kind.isTrae) return TraeAccountProtocol.models(payload)
         if (kind == AccountProviderKind.LOOMY) return LoomyAccountProtocol.models(payload)
+        if (kind == AccountProviderKind.DOUBAO) return DoubaoAccountProtocol.models(payload)
+        if (kind == AccountProviderKind.DUMATE) return DumateAccountProtocol.models(payload)
         val data = payload.obj("data") ?: payload
         val rows = when (kind) {
             AccountProviderKind.RACCOON -> data.array("categories").flatMap { category ->
@@ -121,6 +125,7 @@ internal object AccountProviderProtocol {
         val data = payload.obj("data") ?: payload
         return when (kind) {
             AccountProviderKind.RACCOON -> (number(data.get("total_chargeable_points")) ?: number(data.get("available_points")))?.let { "$it points" }
+            AccountProviderKind.DUMATE, AccountProviderKind.DOUBAO -> null
             AccountProviderKind.LOOMY -> LoomyAccountProtocol.balance(payload)
             AccountProviderKind.TRAE, AccountProviderKind.TRAE_GLOBAL -> {
                 TraeAccountProtocol.balance(payload)?.let { return it }
@@ -163,6 +168,7 @@ internal class AccountCredential(
     val userId: String?,
     val domain: String? = null,
     val enterpriseId: String? = null,
+    internal val webCookie: String? = null,
 ) {
     fun json(): JsonObject = JsonObject().apply {
         addProperty("kind", kind.wireId)
@@ -173,6 +179,7 @@ internal class AccountCredential(
         addProperty("userId", userId)
         addProperty("domain", domain)
         addProperty("enterpriseId", enterpriseId)
+        if (kind.isWebSession) addProperty("webCookie", webCookie)
     }
 
     override fun toString(): String = "AccountCredential(${kind.wireId}, redacted)"

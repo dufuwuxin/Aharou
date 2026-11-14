@@ -187,6 +187,9 @@ jobs:
           ./gradlew :core-agent:test :app:testArmsoloDebugUnitTest \
             --console=plain 2>&1 | tee /tmp/unit.log
 
+      - name: Verify built-in team evidence fixtures
+        run: python3 scripts/test_builtin_team_evidence.py
+
       - name: Verify minified YAML package reflection
         run: python3 scripts/test_release_yaml.py
 

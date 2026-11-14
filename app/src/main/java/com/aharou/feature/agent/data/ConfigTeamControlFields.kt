@@ -34,6 +34,19 @@ class ConfigTeamControlFields @Inject constructor(
     fun forWorkspace(workspace: String): ConfigTeamControlFields =
         ConfigTeamControlFields(teams.forWorkspace(workspace), workflows.forWorkspace(workspace))
 
+    fun mainAgentMayRead(path: String): Boolean {
+        val rest = when {
+            path.startsWith("teams.") -> path.removePrefix("teams.").substringBefore('.')
+            path.startsWith("team.stages.") -> path.removePrefix("team.stages.").substringBefore('.').substringBeforeLast(':')
+            else -> return false
+        }
+        val scope = rest.substringBefore(':')
+        val hex = rest.substringAfter(':', "")
+        if (hex.length % 2 != 0 || !hex.matches(Regex("[0-9a-f]+"))) return false
+        val name = runCatching { hex.chunked(2).map { it.toInt(16).toByte() }.toByteArray().toString(Charsets.UTF_8) }.getOrNull() ?: return false
+        return teams.listAll().any { it.scope.name.equals(scope, true) && it.team.name == name && it.team.mainAgentAdmin }
+    }
+
     fun registerInto(registry: ConfigRegistry) {
         registry.register(Stages()); registry.register(Teams()); registry.register(Workflows())
     }
@@ -64,7 +77,7 @@ class ConfigTeamControlFields @Inject constructor(
     private inner class Teams : ConfigCollection {
         override val basePath = "teams"
         override val displayName = "Team workflow"
-        override val description = "Stable scope:hex-name ids; routes use concrete stage/task ids."
+        override val description = "Stable scope:hex-name ids; routes use concrete stage/task ids. Main-agent admins may reassign existing tasks through task team_assign; changes apply to the next run."
         override val addable = false
         override val removable = false
         private fun all() = entries().mapKeys { (id, _) -> id.substringBeforeLast(':') }

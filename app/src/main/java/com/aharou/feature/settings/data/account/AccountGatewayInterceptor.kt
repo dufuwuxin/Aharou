@@ -84,12 +84,16 @@ class AccountGatewayInterceptor internal constructor(private val manager: Accoun
     private fun complete(request: Request, id: String, kind: AccountProviderKind, body: JsonObject, model: AccountProviderModel, streaming: Boolean): Response {
         val modelId = model.id
         val upstreamBody = when (kind) {
+            AccountProviderKind.DOUBAO -> DoubaoAccountProtocol.completion(body, model)
+            AccountProviderKind.DUMATE -> body.deepCopy()
             AccountProviderKind.LOOMY -> LoomyAccountProtocol.request(body)
             AccountProviderKind.TRAE, AccountProviderKind.TRAE_GLOBAL -> TraeAccountProtocol.request(body, model)
             AccountProviderKind.WORKBUDDY, AccountProviderKind.WORKBUDDY_GLOBAL -> body.deepCopy().apply { addProperty("stream", true); remove("stream_options") }
             else -> body.deepCopy().apply { remove("reasoning_effort") }
         }
         val upstreamUrl = when (kind) {
+            AccountProviderKind.DOUBAO -> DoubaoAccountProtocol.WEB + DoubaoAccountProtocol.CHAT
+            AccountProviderKind.DUMATE -> DumateAccountProtocol.GATEWAY + "/chat/completions"
             AccountProviderKind.LOOMY -> manager.endpoints.loomy + "/api/v1/chat/completions"
             AccountProviderKind.RACCOON -> manager.endpoints.raccoon + "/api/web/llm/v2/chat/completions"
             AccountProviderKind.WORKBUDDY, AccountProviderKind.WORKBUDDY_GLOBAL -> manager.endpoints.workbuddy(kind) + "/v2/chat/completions"
@@ -103,6 +107,7 @@ class AccountGatewayInterceptor internal constructor(private val manager: Accoun
         }
         val rawBody = upstream.body ?: run { upstream.close(); throw AccountProviderException("empty_response", "Account provider returned no body") }
         try {
+            if (kind == AccountProviderKind.DOUBAO) return response(request, DoubaoAccountProtocol.responseBody(rawBody, modelId, streaming))
             if (kind.isTrae) {
                 if (rawBody.contentType()?.subtype?.contains("json") == true) {
                     manager.readJson(upstream)

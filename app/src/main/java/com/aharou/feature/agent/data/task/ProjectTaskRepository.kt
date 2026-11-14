@@ -162,7 +162,7 @@ class ProjectTaskRepository @Inject constructor(@ApplicationContext context: Con
         require(name.isNotBlank() && purpose.isNotBlank() && sourceWorkspace.isNotBlank()) { "REQUIRED_FIELDS" }
         val workspace = workspaces.get().allocateProjectWorkspace(projectId, sourceWorkspace)
         val project = ProjectPlan(id = projectId, workspace = workspace.path, title = name.trim(),
-            purpose = purpose.trim(), workspaceOwnership = "owned")
+            purpose = purpose.trim(), workspaceOwnership = "owned", executionTeam = "auto")
         return withContext(Dispatchers.IO) {
             createProjectLocked(project, emptyList())
             ProjectPlanOutcome(project, ruleFallback = false)
@@ -180,13 +180,13 @@ class ProjectTaskRepository @Inject constructor(@ApplicationContext context: Con
         val workspace = workspaces.get().allocateProjectWorkspace(projectId, sourceWorkspace)
         return planProject(ProjectPlan(id = projectId, workspace = workspace.path, title = original.title,
             requirements = original.requirements, workspaceOwnership = "owned", continuationSourceProjectId = original.id, purpose = original.purpose,
-            horizon = original.horizon, overallGoal = original.overallGoal, goalAcceptance = original.goalAcceptance))
+            horizon = original.horizon, overallGoal = original.overallGoal, goalAcceptance = original.goalAcceptance, executionTeam = original.executionTeam))
     }
 
     suspend fun createProject(name: String, requirements: String, workspace: String,
         projectId: String = java.util.UUID.randomUUID().toString()): ProjectPlanOutcome {
         require(!File(workspace, ".aharou-project-owner").exists()) { "PROJECT_WORKSPACE_OWNED" }
-        return planProject(ProjectPlan(id = projectId, workspace = workspace, title = name.trim(), requirements = requirements))
+        return planProject(ProjectPlan(id = projectId, workspace = workspace, title = name.trim(), requirements = requirements, executionTeam = "auto"))
     }
 
     private suspend fun planProject(project: ProjectPlan): ProjectPlanOutcome = withContext(Dispatchers.IO) {
@@ -355,19 +355,19 @@ class ProjectTaskRepository @Inject constructor(@ApplicationContext context: Con
         maxOf(System.currentTimeMillis(), (snapshot.tasks.maxOfOrNull { it.order } ?: 0L) + 1)
 
     /** Goal writes share the existing store lock and AtomicFile transaction, including for empty projects. */
-    suspend fun saveProjectGoal(project: ProjectPlan, horizon: String, goal: String, acceptance: String) =
-        withContext(Dispatchers.IO) { saveProjectGoalLocked(project, horizon, goal, acceptance) }
+    suspend fun saveProjectGoal(project: ProjectPlan, horizon: String, goal: String, acceptance: String, executionTeam: String? = project.executionTeam) =
+        withContext(Dispatchers.IO) { saveProjectGoalLocked(project, horizon, goal, acceptance, executionTeam) }
 
     @Synchronized
-    private fun saveProjectGoalLocked(expected: ProjectPlan, horizon: String, goal: String, acceptance: String) {
+    private fun saveProjectGoalLocked(expected: ProjectPlan, horizon: String, goal: String, acceptance: String, executionTeam: String?) {
         require(horizon in com.aharou.feature.agent.domain.task.ProjectGoalPlan.horizons) { "INVALID_HORIZON" }
         val current = snapshot(expected.workspace)
         val project = current.projects.single { it.id == expected.id }
         check(project.goalRevision == expected.goalRevision) { "PROJECT_GOAL_CHANGED" }
         check(current.tasks.none { it.projectId == project.id && it.status == ProjectTaskStatus.RUNNING }) { "PROJECT_BUSY" }
         val updated = project.copy(horizon = horizon, overallGoal = goal.trim(), goalAcceptance = acceptance.trim(),
-            goalCheckpoint = "", goalRevision = project.goalRevision + 1)
-        val semanticChange = project.overallGoal != updated.overallGoal || project.goalAcceptance != updated.goalAcceptance
+            goalCheckpoint = "", goalRevision = project.goalRevision + 1, executionTeam = executionTeam?.trim())
+        val semanticChange = project.overallGoal != updated.overallGoal || project.goalAcceptance != updated.goalAcceptance || project.executionTeam != updated.executionTeam
         val revisedTasks = if (!semanticChange) current.tasks else current.tasks.map { task ->
             if (task.projectId != project.id || task.isRequirementBranch) task else task.copy(
                 status = ProjectTaskStatus.DRAFT, requirementsVersion = task.requirementsVersion + 1,
@@ -425,6 +425,29 @@ class ProjectTaskRepository @Inject constructor(@ApplicationContext context: Con
             projects = current.projects.map { if (it.id == project.id) it.copy(goalCheckpoint = reason) else it })
         persist(expected.workspace, next)
         mutable.value = mutable.value + (expected.workspace to next)
+    }
+
+    suspend fun invalidateTeamTasks(workspace: String, expectedVersion: Long, ids: Set<String>, blocked: Boolean, reason: String) =
+        withContext(Dispatchers.IO) { invalidateTeamTasksLocked(workspace, expectedVersion, ids, blocked, reason) }
+
+    @Synchronized private fun invalidateTeamTasksLocked(workspace: String, expectedVersion: Long, ids: Set<String>, blocked: Boolean, reason: String): Boolean {
+        val current = snapshot(workspace)
+        if (current.version != expectedVersion) return false
+        val affected = ids.toMutableSet()
+        var changed: Boolean
+        do { changed = false; current.tasks.forEach { task ->
+            if (task.dependencyIds.any { it in affected } && affected.add(task.id)) changed = true
+        } } while (changed)
+        var version = current.version
+        val tasks = current.tasks.map { task -> if (task.id !in affected || task.isRequirementBranch) task else task.copy(
+            version = ++version, requirementsVersion = task.requirementsVersion + 1,
+            status = if (blocked && task.id in ids) ProjectTaskStatus.BLOCKED else ProjectTaskStatus.READY,
+            acceptedRequirementsVersion = null, processRequirementsVersion = null, processParticipants = null,
+            processMembers = emptyMap(), evidenceRefs = emptyList(), brief = "", executionReason = reason) }
+        require(ProjectTaskGraph.validate(tasks) == null) { "INVALID_TASK_GRAPH" }
+        val next = current.copy(version = version, tasks = tasks)
+        persist(workspace, next); mutable.value = mutable.value + (workspace to next)
+        return true
     }
 
     suspend fun linkProjectExecution(projectId: String, workspace: String, sessionId: String) = withContext(Dispatchers.IO) {
