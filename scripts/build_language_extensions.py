@@ -81,7 +81,8 @@ def assemble(name: str, release: Path, payload: Path, bundle: Path) -> None:
     source = release / "source"
     if name in NODE:
         module = package_node(source / PACKAGE_ROOT[name], payload,
-                              ("typescript",) if name in {"typescript", "vue"} else ())
+                              ("typescript",) if name in {"typescript", "vue"} else
+                              ("vscode-languageserver-protocol",) if name == "yaml" else ())
         entry = (module / ENTRY[name]).relative_to(payload).as_posix()
         command = f'exec node "$here/{entry}" "$@"'
     elif name == "python":
@@ -183,7 +184,7 @@ def probe_lsp(command: list[str], timeout: float = 90, shutdown_result: bool | N
             process.stdin.close()
             if process.wait(timeout=timeout) != 0:
                 raise ValueError("LSP did not exit successfully")
-        except (ValueError, KeyError, OSError, queue.Empty) as exc:
+        except (ValueError, KeyError, OSError, queue.Empty, subprocess.TimeoutExpired) as exc:
             errors.seek(0)
             detail = errors.read(4096).decode("utf-8", errors="replace")
             raise ValueError(f"{exc}; server stderr: {detail}") from exc

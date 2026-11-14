@@ -78,6 +78,23 @@ class BuildTests(unittest.TestCase):
             self.assertEqual("module.exports=1", (link / "index.js").read_text())
             self.assertEqual([], build.audit_payload(moved))
 
+    def test_direct_transitive_import_is_linked_into_relocated_root(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            source = root / "source"
+            dep = source / "node_modules/vscode-languageserver-protocol"
+            dep.mkdir(parents=True)
+            (source / "package.json").write_text(json.dumps({"name": "yaml-language-server"}))
+            (dep / "package.json").write_text(json.dumps({"name": "vscode-languageserver-protocol", "main": "index.js"}))
+            (dep / "index.js").write_text("exports.protocol = true")
+            payload = root / "payload"
+            payload.mkdir()
+            module = build.package_node(source, payload, ("vscode-languageserver-protocol",))
+            link = module / "node_modules/vscode-languageserver-protocol"
+            self.assertTrue(link.is_symlink())
+            self.assertFalse(os.path.isabs(os.readlink(link)))
+            self.assertEqual("exports.protocol = true", (link / "index.js").read_text())
+
     def test_python_runtime_has_relative_launch_not_venv(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
