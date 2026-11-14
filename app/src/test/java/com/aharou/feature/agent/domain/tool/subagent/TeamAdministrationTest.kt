@@ -24,6 +24,34 @@ class TeamAdministrationTest {
         }
     }
 
+    @Test fun assignmentPersistsThroughTheRealWorkspaceRepositoryAndReadsBackUnchangedAuthority() {
+        val root = "~/workspace/.aharou/teams"
+        val files = mutableMapOf("$root/team.md" to AgentTeamParser.serialize(team().toForm(AgentDefinitionScope.PROJECT)))
+        val access = io.mockk.mockk<com.aharou.feature.workspace.domain.FileAccessProvider>(relaxed = true)
+        io.mockk.every { access.forWorkspace("/fixture") } returns access
+        io.mockk.every { access.checked() } returns access
+        io.mockk.every { access.isDirectory(any()) } answers { firstArg<String>() == root }
+        io.mockk.every { access.isFile(any()) } answers { files.containsKey(firstArg<String>()) }
+        io.mockk.every { access.listFiles(root) } returns listOf(com.aharou.feature.workspace.domain.FileEntry("team.md", false, 1, 0, null, "rw"))
+        io.mockk.every { access.readFile(any()) } answers { files.getValue(firstArg()) }
+        io.mockk.every { access.writeFile(any(), any(), any(), any()) } answers { files[firstArg()] = secondArg() }
+        val repository = AgentTeamRepository(access)
+        val before = repository.listAll().single().team
+        val tasks = TeamTasks(repository, io.mockk.mockk(), io.mockk.mockk(), io.mockk.mockk())
+        val result = tasks.assign(mapOf("team" to kotlinx.serialization.json.JsonPrimitive("team"),
+            "stageId" to kotlinx.serialization.json.JsonPrimitive("stage"), "taskId" to kotlinx.serialization.json.JsonPrimitive("task"),
+            "member" to kotlinx.serialization.json.JsonPrimitive("reviewer")),
+            com.aharou.feature.agent.domain.model.AgentContext(null, null, "/fixture", null), true)
+        assertTrue(result is com.aharou.feature.agent.domain.tool.ToolResult.Success)
+        val after = repository.listAll().single().team
+        assertEquals("reviewer", after.stages.single().tasks.single().agent)
+        assertEquals(before.stages.single().tasks.single().writePaths, after.stages.single().tasks.single().writePaths)
+        assertEquals(before.stages.single().tasks.single().prompt, after.stages.single().tasks.single().prompt)
+        assertEquals(before.routes, after.routes)
+        assertEquals(before.admins, after.admins)
+        assertEquals(before.members, after.members)
+    }
+
     @Test fun assignmentRebindsOnlyAnExistingTaskAndPreservesAuthority() {
         val source = team()
         val entry = AgentTeamEntry(source, AgentDefinitionScope.PROJECT)
