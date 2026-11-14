@@ -26,7 +26,10 @@ class TeamAdministrationTest {
 
     @Test fun assignmentPersistsThroughTheRealWorkspaceRepositoryAndReadsBackUnchangedAuthority() {
         val root = "~/workspace/.aharou/teams"
-        val files = mutableMapOf("$root/team.md" to AgentTeamParser.serialize(team().toForm(AgentDefinitionScope.PROJECT)))
+        val routed = team().let { source -> source.copy(
+            stages = source.stages + TeamStage("finish", listOf(TeamTask(agent = "builder", prompt = "finish", id = "final")), id = "finish"),
+            routes = listOf(TeamRoute(TeamFlowNode("stage", "task"), TeamFlowNode("finish", "final"), TeamRouteAction.EXECUTE))) }
+        val files = mutableMapOf("$root/team.md" to AgentTeamParser.serialize(routed.toForm(AgentDefinitionScope.PROJECT)))
         val access = io.mockk.mockk<com.aharou.feature.workspace.domain.FileAccessProvider>(relaxed = true)
         io.mockk.every { access.forWorkspace("/fixture") } returns access
         io.mockk.every { access.checked() } returns access
@@ -44,9 +47,10 @@ class TeamAdministrationTest {
             com.aharou.feature.agent.domain.model.AgentContext(null, null, "/fixture", null), true)
         assertTrue(result is com.aharou.feature.agent.domain.tool.ToolResult.Success)
         val after = repository.listAll().single().team
-        assertEquals("reviewer", after.stages.single().tasks.single().agent)
-        assertEquals(before.stages.single().tasks.single().writePaths, after.stages.single().tasks.single().writePaths)
-        assertEquals(before.stages.single().tasks.single().prompt, after.stages.single().tasks.single().prompt)
+        assertEquals("reviewer", after.stages.first().tasks.single().agent)
+        assertEquals(before.stages.first().tasks.single().writePaths, after.stages.first().tasks.single().writePaths)
+        assertEquals(before.stages.first().tasks.single().prompt, after.stages.first().tasks.single().prompt)
+        assertEquals(1, before.routes.size)
         assertEquals(before.routes, after.routes)
         assertEquals(before.admins, after.admins)
         assertEquals(before.members, after.members)

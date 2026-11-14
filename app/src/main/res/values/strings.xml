@@ -4130,7 +4130,7 @@
 <string name="project_execution_team_hint">填写已有团队名称；auto 或留空自动选择可运行团队。旧任务已指定成员时保留直接成员兼容。无可用团队会明确阻塞。</string>
 <string name="provider_account_doubao">豆包（文本聊天，网页登录待本人验证）</string>
 <string name="provider_account_doubao_text_only">仅文本聊天；历史作为角色文本，非原生多轮；不支持工具、图片、云端任务、签到或余额。网页登录待本人验证。</string>
-<string name="provider_account_dumate">度麦（网页登录待本人验证）</string>
+<string name="provider_account_dumate">百度搭子（网页登录待本人验证）</string>
 <string name="provider_account_dumate_pending">网页登录待本人验证</string>
 <string name="provider_account_dumate_complete">我已完成网页登录</string>
 <string name="provider_account_dumate_balance_unsupported">余额暂不支持；不会请求签到、任务或奖励</string>
