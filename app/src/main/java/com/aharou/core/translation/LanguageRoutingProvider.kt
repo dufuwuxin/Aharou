@@ -37,7 +37,12 @@ class LanguageRoutingProvider(
     ): AIResponse {
         val selected = policy()
         if (selected == ProviderLanguagePolicy.NATIVE) return delegate.complete(systemPrompt, messages, tools, reasoningEffort)
-        return delegate.complete(prose(systemPrompt, selected.wireValue), messages(messages, selected.wireValue), tools, reasoningEffort)
+        return delegate.complete(
+            prose(systemPrompt, selected.wireValue),
+            messages(messages, selected.wireValue),
+            projectLanguageTools(tools, selected.wireValue, ::prose),
+            reasoningEffort,
+        )
     }
 
     override fun completeStream(
@@ -50,7 +55,12 @@ class LanguageRoutingProvider(
         if (selected == ProviderLanguagePolicy.NATIVE) {
             emitAll(delegate.completeStream(systemPrompt, messages, tools, reasoningEffort))
         } else {
-            emitAll(delegate.completeStream(prose(systemPrompt, selected.wireValue), messages(messages, selected.wireValue), tools, reasoningEffort))
+            emitAll(delegate.completeStream(
+                prose(systemPrompt, selected.wireValue),
+                messages(messages, selected.wireValue),
+                projectLanguageTools(tools, selected.wireValue, ::prose),
+                reasoningEffort,
+            ))
         }
     }
 

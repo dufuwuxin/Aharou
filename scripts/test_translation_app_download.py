@@ -54,7 +54,7 @@ class TranslationDeliveryTest(unittest.TestCase):
         script = re.search(r'<script type="module">(.*?)</script>', html, re.S).group(1)
         digest = base64.b64encode(hashlib.sha256(script.encode()).digest()).decode()
         self.assertIn("sha256-" + digest, engine)
-        for setting in ["allowRemoteModels = false", "allowLocalModels = true", "useBrowserCache = false", "numThreads = 1", "local_files_only: true"]:
+        for setting in ["allowRemoteModels = false", "allowLocalModels = true", "useBrowserCache = false", "numThreads = 1", "local_files_only: true", "num_beams: 1", "max_new_tokens: 256", "do_sample: false"]:
             self.assertIn(setting, html)
         for setting in ["allowFileAccess = false", "allowContentAccess = false", "blockNetworkLoads = true", "JSONObject.quote(text)", "uri.encodedPath", "return blocked()"]:
             self.assertIn(setting, engine)

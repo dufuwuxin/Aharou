@@ -105,7 +105,8 @@ const pipeline = async (task, model, options) => {
   assert.equal(options.quantized, true);
   active++; maximum = Math.max(maximum, active); calls.push(model);
   const translator = async (text, options) => {
-    assert.equal(options.num_beams, 3);
+    assert.equal(options.num_beams, 1);
+    assert.equal(options.max_new_tokens, 256);
     assert.equal(options.do_sample, false);
     if (text === 'throw') throw Error('controlled failure');
     if (text === 'empty') return [];
@@ -154,7 +155,7 @@ for (const target of ['zh', 'en']) {
   try {
     for (const fixture of fixtures.filter(item => item.target === target)) {
       const baseline = await translator(fixture.text, {num_beams: 1, max_new_tokens: 256, do_sample: false});
-      const output = await translator(fixture.text, {num_beams: 3, max_new_tokens: 256, do_sample: false});
+      const output = await translator(fixture.text, {num_beams: 1, max_new_tokens: 256, do_sample: false});
       results.push({...fixture, baseline: baseline?.[0]?.translation_text, output: output?.[0]?.translation_text});
     }
   } finally { await translator.dispose(); }
@@ -183,10 +184,10 @@ console.log('AHAROU_RESULTS=' + JSON.stringify(results));
         result["baseline_passed"] = isinstance(baseline, str) and bool(baseline.strip()) and all(
             any(term in baseline.lower() for term in alternatives) for alternatives in expected["concepts"]
         )
-        passed = passed and result["passed"]
+        passed = passed and result["passed"] and result["baseline_passed"]
     # Write real outputs even when a concept gate fails; never turn failures into reference output.
     report.parent.mkdir(parents=True, exist_ok=True)
-    report.write_text(json.dumps({"runtime": "transformers.js 2.17.2 Node (not Android WebView)", "baseline_num_beams": 1, "candidate_num_beams": 3, "sample_size": len(results), "metric": "fixed concept checks, not BLEU or general translation quality", "results": results, "passed": passed}, ensure_ascii=False, indent=2) + "\n")
+    report.write_text(json.dumps({"runtime": "transformers.js 2.17.2 Node (not Android WebView)", "baseline_num_beams": 1, "candidate_num_beams": 1, "decision": "beam3 failed previous pinned regression; retained greedy", "sample_size": len(results), "metric": "fixed concept checks, not BLEU or general translation quality", "results": results, "passed": passed}, ensure_ascii=False, indent=2) + "\n")
     if not passed:
         raise AssertionError("Real model concept checks failed; inspect " + str(report))
     print("PASS real model concept fixtures:", len(results))

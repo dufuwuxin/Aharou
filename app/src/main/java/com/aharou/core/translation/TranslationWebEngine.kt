@@ -125,7 +125,7 @@ class TranslationWebEngine @Inject constructor(
         val headers = mapOf(
             "Cache-Control" to "no-store",
             "X-Content-Type-Options" to "nosniff",
-            "Content-Security-Policy" to "default-src 'none'; script-src 'self' 'unsafe-eval' 'sha256-36xGPsQzVE5kRkAGmV5tO58FxFeJp1kIrGTn+1Uhpvg='; connect-src 'self'; worker-src 'none'; base-uri 'none'; form-action 'none'",
+            "Content-Security-Policy" to "default-src 'none'; script-src 'self' 'unsafe-eval' 'sha256-GzRyERhsyjFFppGTllER8zFGGBQgfGNax59cdYyPpLI='; connect-src 'self'; worker-src 'none'; base-uri 'none'; form-action 'none'",
         )
         return WebResourceResponse(mime, "UTF-8", 200, "OK", headers, stream)
     }

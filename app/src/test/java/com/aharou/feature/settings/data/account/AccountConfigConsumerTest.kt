@@ -34,7 +34,9 @@ class AccountConfigConsumerTest {
             coEvery { repository.saveProvider(any()) } answers { provider = firstArg() }
             every { repository.getAllProviders() } answers { flowOf(listOf(provider)) }
             val registry = ConfigRegistry::class.java.getDeclaredConstructor().apply { isAccessible = true }.newInstance()
-            ConfigProviderFields(mockk(), mockk(), repository, manager).registerInto(registry)
+            val context = mockk<android.content.Context>()
+            every { context.getString(any()) } returns "fixture language setting"
+            ConfigProviderFields(context, mockk(), repository, manager).registerInto(registry)
             val catalog = """{"code":"000000","data":[{"id":"model-a"},{"id":"model-b"},{"id":"model-a"}]}"""
             server.enqueue(MockResponse().setBody(catalog))
             server.enqueue(MockResponse().setBody(catalog))

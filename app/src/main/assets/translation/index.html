@@ -44,7 +44,7 @@ window.prepareLocal = (id, targetLanguage = defaultTarget) => submit(id, async (
 window.translateLocal = (id, text, targetLanguage = defaultTarget) => submit(id, async () => {
   if (typeof text !== 'string' || !text.trim()) throw new Error('Empty input');
   await prepare(targetLanguage);
-  const output = await translator(text, { max_new_tokens: 256, num_beams: 3, do_sample: false });
+  const output = await translator(text, { max_new_tokens: 256, num_beams: 1, do_sample: false });
   const value = output?.[0]?.translation_text;
   if (typeof value !== 'string' || !value.trim()) throw new Error('Empty translation');
   return value;
