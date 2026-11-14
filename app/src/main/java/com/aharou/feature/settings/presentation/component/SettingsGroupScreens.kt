@@ -228,12 +228,6 @@ internal fun SettingsPermissionsRows(onOpen: (SettingsSection) -> Unit) {
     ) {
         SettingsGroup {
             SettingsRow(
-                icon = FeatherIcons.Shield,
-                title = stringResource(SettingsSection.AppPermissions.titleRes),
-                onClick = { onOpen(SettingsSection.AppPermissions) }
-            )
-            SettingsDivider()
-            SettingsRow(
                 icon = FeatherIcons.Eye,
                 title = stringResource(SettingsSection.Accessibility.titleRes),
                 onClick = { onOpen(SettingsSection.Accessibility) }

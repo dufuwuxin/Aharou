@@ -18,6 +18,29 @@ class AgentTeamRepository @Inject constructor(
 ) {
     fun forWorkspace(workspace: String): AgentTeamRepository = AgentTeamRepository(fileAccess.forWorkspace(workspace).checked())
 
+    fun projectFiles(): Set<String>? = try {
+        val provider = fileAccess.checked()
+        if (!provider.isDirectory(WorkspacePathMapper.CONTAINER_ROOT)) null
+        else {
+            val found = linkedSetOf<String>()
+            val excluded = setOf(".git", ".aharou", ".venv", "venv", "node_modules", "target", "build")
+            var visited = 0
+            fun scan(path: String, depth: Int) {
+                check(depth <= 32) { "TEAM_SCAN_INCOMPLETE" }
+                for (entry in provider.listFiles(path)) {
+                    check(++visited <= 20000) { "TEAM_SCAN_INCOMPLETE" }
+                    check(entry.name.isNotBlank() && '/' !in entry.name && entry.name !in setOf(".", ".."))
+                    if (entry.name in excluded) continue
+                    val next = "$path/${entry.name}"
+                    if (entry.isDirectory) scan(next, depth + 1) else found += next
+                }
+            }
+            scan(WorkspacePathMapper.CONTAINER_ROOT, 0)
+            found
+        }
+    } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+    catch (_: Exception) { null }
+
     val globalRoot: String = "~/.aharou/teams"
     val projectRoot: String = "${WorkspacePathMapper.CONTAINER_ROOT}/.aharou/teams"
 
@@ -123,7 +146,7 @@ class AgentTeamRepository @Inject constructor(
 
         val flowTeam = AgentTeam(name, normalized.description, normalized.stages.map { stage ->
             TeamStage(stage.title, stage.tasks.map { task -> TeamTask(agent = task.agent, prompt = task.prompt, id = task.id) },
-                isReview = stage.isReview, id = stage.id)
+                isReview = stage.isReview, id = stage.id, condition = stage.condition)
         }, normalized.charter, normalized.admins, normalized.members, routes = normalized.routes)
         if (TeamFlowGraph.validate(flowTeam) != null) return AgentTeamSaveError.INVALID_FLOW
 

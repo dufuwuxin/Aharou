@@ -106,6 +106,7 @@ object AgentTeamParser {
             if (stageMembers.isNotEmpty()) {
                 appendLine("    members: [${stageMembers.joinToString(", ") { Frontmatter.quote(it) }}]")
             }
+            appendLine("    condition: ${Frontmatter.quote(stage.condition)}")
             appendLine("    communication: ${stage.communication.token}")
             appendLine("    messageLimit: ${stage.messageLimit.coerceIn(1, 100)}")
             if (stage.communicationGuide.isNotBlank()) appendLine("    communicationGuide: ${Frontmatter.quote(stage.communicationGuide.trim())}")
@@ -223,7 +224,8 @@ object AgentTeamParser {
                 TeamCommunication.fromToken(map["communication"]?.toString()) ?: TeamCommunication.PARENT_ONLY
             } else TeamCommunication.RUN,
             messageLimit = map["messageLimit"]?.toString()?.toIntOrNull()?.coerceIn(1, 100) ?: 8,
-            communicationGuide = map["communicationGuide"]?.toString()?.trim().orEmpty()
+            communicationGuide = map["communicationGuide"]?.toString()?.trim().orEmpty(),
+            condition = map["condition"]?.toString()?.trim() ?: "always"
         )
     }
 

@@ -12,6 +12,10 @@ import javax.inject.Inject
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -72,6 +76,7 @@ class LocalModelDownloader @Inject constructor(
                 // 取消要原样抛：半成品留着，下次从断点续
                 throw e
             } catch (e: IOException) {
+                currentCoroutineContext().ensureActive()
                 FileLogger.w(TAG, "模型下载源失败，换下一个：$url", e)
                 lastError = e
             }
@@ -104,20 +109,7 @@ class LocalModelDownloader @Inject constructor(
             .apply { if (offset > 0L) header("Range", "bytes=$offset-") }
             .build()
         val call = client.newCall(request)
-        val response = suspendCancellableCoroutine<Response> { cont ->
-            // 取消时同步 cancel 底层 call，别让连接继续读几百 MB
-            cont.invokeOnCancellation { call.cancel() }
-            call.enqueue(object : Callback {
-                override fun onFailure(call: Call, e: IOException) {
-                    if (!cont.isCancelled) cont.resumeWithException(e)
-                }
-
-                override fun onResponse(call: Call, response: Response) {
-                    cont.resume(response) { _, unusedResponse, _ -> unusedResponse.close() }
-                }
-            })
-        }
-        response.use { res ->
+        withDownloadCall(call) { res ->
             when (res.code) {
                 HTTP_PARTIAL_CONTENT -> Unit
                 HTTP_OK -> {
@@ -128,7 +120,7 @@ class LocalModelDownloader @Inject constructor(
                     // 服务端认为已经下完了，交给上层按字节数核对
                     FileLogger.i(TAG, "续传区间已满足，按已下完处理：${spec.id}")
                     onProgress(partFile.length(), spec.sizeBytes)
-                    return
+                    return@withDownloadCall
                 }
                 else -> if (!res.isSuccessful) {
                     throw IOException("HTTP ${res.code}")
@@ -187,5 +179,28 @@ class LocalModelDownloader @Inject constructor(
 
         /** 算 sha256 的读缓冲。 */
         const val HASH_BUFFER_SIZE = 8 * 1024
+    }
+}
+
+/** Keep cancellation connected to the Call until the body consumer has exited. */
+internal suspend fun withDownloadCall(call: Call, consume: suspend (Response) -> Unit) = coroutineScope {
+    val cancellation = launch(Dispatchers.Default, start = CoroutineStart.UNDISPATCHED) {
+        try { awaitCancellation() } finally { call.cancel() }
+    }
+    try {
+        val response = suspendCancellableCoroutine<Response> { cont ->
+            cont.invokeOnCancellation { call.cancel() }
+            call.enqueue(object : Callback {
+                override fun onFailure(call: Call, e: IOException) {
+                    if (!cont.isCancelled) cont.resumeWithException(e)
+                }
+                override fun onResponse(call: Call, response: Response) {
+                    cont.resume(response) { _, unused, _ -> unused.close() }
+                }
+            })
+        }
+        response.use { consume(it) }
+    } finally {
+        cancellation.cancel()
     }
 }

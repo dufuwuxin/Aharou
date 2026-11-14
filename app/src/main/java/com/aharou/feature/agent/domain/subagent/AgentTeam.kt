@@ -104,6 +104,7 @@ data class TeamStage(
     val communication: TeamCommunication = TeamCommunication.RUN,
     val messageLimit: Int = 8,
     val communicationGuide: String = "",
+    val condition: String = "always",
     val id: String = java.util.UUID.randomUUID().toString()
 )
 
@@ -182,6 +183,7 @@ data class AgentTeamStageForm(
     val communication: TeamCommunication = TeamCommunication.SAME_STAGE,
     val messageLimit: Int = 8,
     val communicationGuide: String = "",
+    val condition: String = "always",
     val id: String = java.util.UUID.randomUUID().toString()
 )
 
@@ -252,6 +254,7 @@ fun AgentTeam.toForm(scope: AgentDefinitionScope): AgentTeamForm = AgentTeamForm
             communication = stage.communication,
             messageLimit = stage.messageLimit,
             communicationGuide = stage.communicationGuide,
+            condition = stage.condition,
             // 只还原点名成员任务的边；department/agentQuery 选角任务的 interfaces 不进表单，
             // 保存时这类任务随归一化重建，手写在上面的边会丢——要保留选角任务的边请直接改 .md 文件。
             interfaces = stage.tasks.flatMap { task ->

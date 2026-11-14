@@ -86,6 +86,7 @@ class LanguageServerInstaller @Inject constructor(
 
     suspend fun install(extension: LanguageExtension): InstallResult = withContext(Dispatchers.IO) {
         val result = try {
+            commandEngine.ensureInstalled()
             vendored.install(extension)
         } catch (cancelled: CancellationException) {
             throw cancelled

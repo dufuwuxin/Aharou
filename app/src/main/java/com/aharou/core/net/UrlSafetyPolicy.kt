@@ -35,6 +35,8 @@ object UrlSafetyPolicy {
         }
 
         val bytes = addr.address
+        // IPv6 ULA fc00::/7 不属于 Java 的 site-local（fec0::/10）。
+        if (bytes.size == 16 && (bytes[0].toInt() and 0xFE) == 0xFC) return true
         // IPv4-mapped IPv6（::ffff:127.0.0.1）不命中上面几个判定，取出后 4 字节按 IPv4 再判一次
         val v4 = when {
             bytes.size == 4 -> bytes

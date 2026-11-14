@@ -18,6 +18,9 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import io.github.rosemoe.sora.lang.Language
 import io.github.rosemoe.sora.langs.textmate.TextMateLanguage
 import io.github.rosemoe.sora.widget.CodeEditor
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -83,6 +86,8 @@ class CodeEditorViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), EditorSettings())
 
     private var currentPath: String? = null
+    private var loadGeneration = 0L
+    private var loadJob: Job? = null
 
     /**
      * 每个路径只读一次盘，结果缓存下来供标签页来回切换复用；按「条数 + 总字符数」淘汰，
@@ -161,14 +166,17 @@ class CodeEditorViewModel @Inject constructor(
     fun load(path: String) {
         if (currentPath == path) return
         currentPath = path
+        val generation = ++loadGeneration
+        loadJob?.cancel()
         loadedStates[path]?.let { cached ->
             _uiState.value = cached
             _documentVersion.value++
             return
         }
         _uiState.value = EditorUiState.Loading
-        viewModelScope.launch(Dispatchers.IO) {
-            val state = runCatching {
+        loadJob = viewModelScope.launch {
+            var baseline: Pair<ByteArray, FileAccessProvider>? = null
+            val state = withContext(Dispatchers.IO) { runCatching {
                 val access = loadedAccesses[path] ?: fileAccess.checked().also { loadedAccesses[path] = it }
                 if (!access.exists(path) || !access.isFile(path)) {
                     return@runCatching EditorUiState.Error(null)
@@ -190,14 +198,19 @@ class CodeEditorViewModel @Inject constructor(
                     // 跨重建复用已销毁实例会出问题——此处仅为把编译结果缓进 registry。
                     runCatching { TextMateLanguage.create(scope, false).destroy() }
                 }
-                refreshBaseline(path, bytes, access)
+                baseline = bytes to access
                 EditorUiState.Success(content = bytes.toString(Charsets.UTF_8), scopeName = scope)
             }.getOrElse { e ->
+                if (e is CancellationException) throw e
                 FileLogger.w(TAG, "打开文件失败: $path", e)
                 EditorUiState.Error(e.message)
             }
+            }
+            coroutineContext.ensureActive()
+            if (generation != loadGeneration) return@launch
+            baseline?.let { (bytes, access) -> refreshBaseline(path, bytes, access) }
             loadedStates[path] = state
-            // 读盘期间用户可能已切到别的标签页，只在仍停留在这个路径时更新界面。
+            // Generation covers A→B→A, including cache and file-version publication.
             if (currentPath == path) {
                 _uiState.value = state
                 _documentVersion.value++

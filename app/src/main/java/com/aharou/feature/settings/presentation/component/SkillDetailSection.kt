@@ -36,6 +36,7 @@ import com.aharou.core.theme.semanticColors
 import com.aharou.feature.agent.domain.skill.SkillScope
 import com.aharou.feature.agent.presentation.component.MarkdownContent
 import com.aharou.feature.agent.presentation.component.MarkdownRenderCache
+import androidx.compose.runtime.collectAsState
 import com.aharou.feature.settings.presentation.SkillUiEntry
 import com.aharou.feature.settings.presentation.SkillBindingSaveState
 import com.aharou.feature.settings.presentation.SubAgentUiEntry
@@ -62,6 +63,16 @@ internal fun SkillDetailSection(
     onOpenMember: (SubAgentUiEntry) -> Unit,
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
+    val builtinEditing by com.aharou.core.config.BuiltinSkillEditCapability.enabled.collectAsState()
+    val editorState by viewModel.skillSaveState.collectAsState()
+    var editingBuiltin by remember(entry.name) { mutableStateOf(false) }
+    if (editingBuiltin && builtinEditing) {
+        SkillEditorScreen(initial = entry, saveState = editorState,
+            onSave = { form, _ -> viewModel.saveSkill(form.copy(name = entry.name), SkillScope.BUILTIN, entry.name) },
+            onSaved = { editingBuiltin = false; viewModel.clearSkillSaveState() },
+            onNavigateBack = { editingBuiltin = false; viewModel.clearSkillSaveState() })
+        return
+    }
     var membersExpanded by remember(entry.name) { mutableStateOf(false) }
     var keywordEnabled by remember(entry.name, entry.keywordEnabled) { mutableStateOf(entry.keywordEnabled) }
     var keywords by remember(entry.name, entry.keywords) { mutableStateOf(entry.keywords) }
@@ -128,6 +139,11 @@ internal fun SkillDetailSection(
             .padding(bottom = Spacing.xl),
         verticalArrangement = Arrangement.spacedBy(Spacing.sm)
     ) {
+        if (entry.builtin && builtinEditing) {
+            TextButton(onClick = { viewModel.clearSkillSaveState(); editingBuiltin = true }) {
+                Text(stringResource(R.string.skills_edit))
+            }
+        }
         // 卡片 1：是否启用（开关行）；内置技能随 App 打包，不可停用，不显示开关
         if (!entry.builtin) {
             SettingsGroup {

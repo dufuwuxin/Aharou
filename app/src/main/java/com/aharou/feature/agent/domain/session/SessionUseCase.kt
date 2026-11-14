@@ -20,6 +20,34 @@ class SessionUseCase @Inject constructor(
     /** 智能托管按会话存开关：删会话时要把它的键清掉，不留垃圾。 */
     private val stewardSettings: StewardSettingsStore
 ) {
+    @Inject lateinit var projectTasks: javax.inject.Provider<com.aharou.feature.agent.data.task.ProjectTaskRepository>
+
+    private val workspaceBindings = java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.CompletableDeferred<Unit>>()
+
+    suspend fun awaitWorkspaceBinding(sessionId: String) {
+        while (true) (workspaceBindings[sessionId] ?: return).await()
+    }
+
+    suspend fun bindWorkspace(sessionId: String, path: String, canBind: () -> Boolean) {
+        check(canBind()) { "SESSION_BUSY" }
+        val pending = kotlinx.coroutines.CompletableDeferred<Unit>()
+        check(workspaceBindings.putIfAbsent(sessionId, pending) == null) { "SESSION_BUSY" }
+        try {
+            require(path.isNotBlank()) { "WORKSPACE_REQUIRED" }
+            val session = chatSessionDao.getById(sessionId) ?: error("SESSION_NOT_FOUND")
+            check(session.parentId == null) { "SESSION_WORKSPACE_FIXED" }
+            val store = if (session.workspacePath.isBlank()) com.aharou.feature.agent.data.task.ProjectTaskSnapshot()
+                else projectTasks.get().load(session.workspacePath)
+            check(store.projects.none { sessionId in it.flowSessionIds } &&
+                store.tasks.none { sessionId in it.sessionIds || sessionId in it.processSessionIds }) { "SESSION_WORKSPACE_FIXED" }
+            check(canBind()) { "SESSION_BUSY" }
+            check(chatSessionDao.bindWorkspacePath(sessionId, session.workspacePath, path) == 1) { "SESSION_CHANGED" }
+        } finally {
+            workspaceBindings.remove(sessionId, pending)
+            pending.complete(Unit)
+        }
+    }
+
     companion object {
         private const val TAG = "SessionUseCase"
         const val TITLE_MAX = 20

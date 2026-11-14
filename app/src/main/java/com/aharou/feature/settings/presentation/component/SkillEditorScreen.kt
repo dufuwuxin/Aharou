@@ -82,7 +82,7 @@ internal fun SkillEditorScreen(
 
     BackHandler { onNavigateBack() }
 
-    val scope = if (scopeIsGlobal) SkillScope.GLOBAL else SkillScope.PROJECT
+    val scope = if (initial?.builtin == true || scopeIsGlobal) SkillScope.GLOBAL else SkillScope.PROJECT
     val canSave = name.isNotBlank() && instructions.isNotBlank() && (!keywordEnabled || keywords.isNotEmpty())
 
     Scaffold(

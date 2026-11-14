@@ -24,6 +24,9 @@ import javax.inject.Inject
 @HiltViewModel
 class SpecialPermissionsViewModel @Inject constructor(private val workspaces: WorkspaceRepository) : ViewModel() {
     val address = TeamEditCapability.address
+    fun toggleBuiltin(enabled: Boolean) = viewModelScope.launch(Dispatchers.IO) {
+        com.aharou.core.config.BuiltinSkillEditCapability.setEnabled(enabled)
+    }
     fun toggle(enabled: Boolean) = viewModelScope.launch(Dispatchers.IO) {
         if (enabled) TeamEditCapability.issue(workspaces.currentPath()) else TeamEditCapability.revoke()
     }
@@ -32,6 +35,7 @@ class SpecialPermissionsViewModel @Inject constructor(private val workspaces: Wo
 @Composable
 internal fun SpecialPermissionsSection(onOpen: (SettingsSection) -> Unit, viewModel: SpecialPermissionsViewModel = hiltViewModel()) {
     val address by viewModel.address.collectAsStateWithLifecycle()
+    val builtinEditing by com.aharou.core.config.BuiltinSkillEditCapability.enabled.collectAsStateWithLifecycle()
     val clipboard = LocalClipboardManager.current
     Column(Modifier.fillMaxWidth().padding(Spacing.md), verticalArrangement = Arrangement.spacedBy(Spacing.lg)) {
         SettingsGroup {
@@ -40,6 +44,10 @@ internal fun SpecialPermissionsSection(onOpen: (SettingsSection) -> Unit, viewMo
             SettingsRow(title = stringResource(R.string.config_audit_title), onClick = { onOpen(SettingsSection.ConfigAudit) })
             SettingsDivider()
             SettingsRow(title = stringResource(R.string.settings_app_permissions), onClick = { onOpen(SettingsSection.AppPermissions) })
+        }
+        SettingsGroup {
+            SettingsRow(title = stringResource(R.string.builtin_skill_edit_title), subtitle = stringResource(R.string.builtin_skill_edit_scope),
+                trailing = { AppSwitch(checked = builtinEditing, onCheckedChange = { viewModel.toggleBuiltin(it) }) })
         }
         SettingsGroup {
             SettingsRow(title = stringResource(R.string.team_capability_title), subtitle = stringResource(R.string.team_capability_scope),

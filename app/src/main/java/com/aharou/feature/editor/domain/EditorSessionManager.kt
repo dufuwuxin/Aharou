@@ -18,7 +18,7 @@ object EditorSessionManager {
 
     /** 单个标签页的编辑快照。 */
     data class Snapshot(
-        val content: String,
+        val content: String?,
         val dirty: Boolean,
         val cursorLine: Int,
         val cursorColumn: Int,
@@ -63,12 +63,13 @@ object EditorSessionManager {
     fun snapshot(path: String): Snapshot? = _snapshots.value[path]
 
     fun saveSnapshot(path: String, snapshot: Snapshot) {
-        _snapshots.value = _snapshots.value + (path to snapshot)
+        val retained = if (snapshot.dirty) snapshot else snapshot.copy(content = null, baselineContent = null)
+        _snapshots.value = _snapshots.value + (path to retained)
     }
 
     fun markSaved(path: String, content: String) {
         val current = _snapshots.value[path] ?: return
-        if (current.content == content) forget(path)
+        if (!current.dirty || current.content == content) forget(path)
         else _snapshots.value = _snapshots.value + (path to current.copy(dirty = true, baselineContent = content))
     }
 

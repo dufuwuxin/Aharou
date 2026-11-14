@@ -29,12 +29,17 @@ class ConfigSkillFields @Inject constructor(
 ) {
 
     fun registerInto(registry: ConfigRegistry) {
+        registry.register(com.aharou.core.config.fields.ReadOnlyField(
+            path = "skill.builtin_edit_enabled", displayName = "Builtin skill editing permission",
+            description = "User-only permission in Special Permissions; config cannot enable it.",
+            valueSchema = ConfigSchema.Bool, risk = com.aharou.core.config.ConfigRisk.SENSITIVE,
+            reader = { ConfigValue.Bool(com.aharou.core.config.BuiltinSkillEditCapability.enabled.value) }))
         registry.register(SkillCollection())
     }
 
     private fun skillNames(): List<String> =
         skillRepository.listAllSkills()
-            .filter { it.scope != SkillScope.BUILTIN }
+            .filter { it.scope != SkillScope.BUILTIN || com.aharou.core.config.BuiltinSkillEditCapability.enabled.value }
             .map { it.skill.name }
 
     private fun skill(name: String) = skillRepository.listAllSkills().firstOrNull { it.skill.name == name }
@@ -44,7 +49,7 @@ class ConfigSkillFields @Inject constructor(
         override val basePath = "skill.skills"
         override val displayName = "技能"
         override val description =
-            "已安装的技能（全局 + 项目）。子字段：disabled；技能名即集合 id。内置技能随 App 打包，不在此列。"
+            "Installed skills including builtin instructions; builtin writes require the user-only permission. User skill fields also include disabled and keywords."
         override val addable = false
         override val removable = false
 
@@ -52,7 +57,20 @@ class ConfigSkillFields @Inject constructor(
 
         override fun fields(forId: String): List<ConfigField> {
             if (forId !in skillNames()) return emptyList()
-            return listOf(
+            val content = ClosureField(
+                path = "$basePath.$forId.instructions", displayName = "Skill instructions",
+                description = "Builtin edits require user permission and save a global override.",
+                valueSchema = ConfigSchema.Str(), risk = com.aharou.core.config.ConfigRisk.SENSITIVE,
+                reader = { ConfigValue.Str(skill(forId).skill.instructions) }, writer = { value ->
+                    val entry = skill(forId); val s = entry.skill
+                    val text = (value as? ConfigValue.Str)?.value ?: throw ConfigError.TypeMismatch("string")
+                    skillRepository.save(com.aharou.feature.agent.domain.skill.SkillForm(s.name, s.description, text, s.requiredTools, s.keywordEnabled, s.keywords),
+                        entry.scope, s.name)?.let { throw ConfigError.PermissionDenied("Skill update rejected: $it") }
+                })
+            if (skill(forId).scope == SkillScope.BUILTIN) return listOf(content)
+            val editableContent = if (skillRepository.isBuiltinName(forId) && !com.aharou.core.config.BuiltinSkillEditCapability.enabled.value)
+                emptyList() else listOf(content)
+            return editableContent + listOf(
                 ClosureField(
                     path = "$basePath.$forId.keyword_enabled",
                     displayName = "关键词公共模式",

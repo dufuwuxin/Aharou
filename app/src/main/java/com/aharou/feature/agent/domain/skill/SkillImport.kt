@@ -71,10 +71,12 @@ internal object SkillImporter {
         existingNames: Set<String>,
         text: String,
         fallbackName: String,
-        overwrite: Boolean = false
+        overwrite: Boolean = false,
+        canWrite: (String) -> Boolean = { true }
     ): SkillImportReport {
         val parsed = SkillParser.parseText(text, fallbackName)
         val name = parsed.name.trim()
+        if (!canWrite(name)) return SkillImportReport(emptyList(), fatal = SkillImportError.NAME_CONFLICT)
         validate(name, existingNames, overwrite)?.let { return SkillImportReport(emptyList(), fatal = it) }
         if (parsed.instructions.isBlank()) {
             return SkillImportReport(emptyList(), fatal = SkillImportError.EMPTY_CONTENT)
@@ -96,7 +98,8 @@ internal object SkillImporter {
         existingNames: Set<String>,
         input: InputStream,
         fallbackName: String,
-        overwrite: Boolean = false
+        overwrite: Boolean = false,
+        canWrite: (String) -> Boolean = { true }
     ): SkillImportReport {
         val skills = when (val read = readArchive(input, fallbackName)) {
             is ArchiveRead.Failed -> return SkillImportReport(emptyList(), fatal = read.error)
@@ -111,6 +114,10 @@ internal object SkillImporter {
         for (skill in skills) {
             val name = skill.name.trim()
             val error = when {
+                !canWrite(name) || skill.files.any { (path, bytes) ->
+                    path.substringAfterLast('/') in setOf(SKILL_FILE, CLAUDE_FILE) &&
+                        !canWrite(SkillParser.parseText(bytes.toString(Charsets.UTF_8), name).name)
+                } -> SkillImportError.NAME_CONFLICT
                 !SkillRepository.isValidName(name) -> SkillImportError.INVALID_NAME
                 name.lowercase() in used -> SkillImportError.NAME_CONFLICT
                 !overwrite && name.lowercase() in existingNames -> SkillImportError.NAME_CONFLICT

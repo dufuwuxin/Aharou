@@ -54,7 +54,10 @@ import com.aharou.feature.workspace.domain.model.Workspace
 import com.aharou.feature.workspace.domain.model.WorkspaceType
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.util.UUID
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.KSerializer
@@ -143,7 +146,11 @@ class BackupManagerImpl @Inject constructor(
     }
 
     override suspend fun prepareImport(input: InputStream, password: CharArray?): File =
-        withContext(Dispatchers.IO) { importStaging.prepare(input, password) }
+        withContext(Dispatchers.IO) {
+            val coroutineContext = currentCoroutineContext()
+            coroutineContext.ensureActive()
+            importStaging.prepare(cancellationCheckedInput(input, coroutineContext), password)
+        }
 
     override suspend fun cleanupStaleStagingFiles() =
         withContext(Dispatchers.IO) { importStaging.cleanupStale() }
@@ -209,13 +216,19 @@ class BackupManagerImpl @Inject constructor(
             FileLogger.i(TAG, "导入备份开始（${if (pw != null) "加密" else "明文"}${if (selectedWorkspaces != null) "，勾选工作区=${selectedWorkspaces.size}个" else "，全量"}，供应商冲突处置=$providerConflict）")
             runCatching {
                 unreadableSecrets.set(0)
-                openTar(input, pw).use { source ->
-                    restoreFromTar(source.tar, selectedWorkspaces, providerConflict)
+                BackupRestorePreflight.withValidated(prepareImport(input, pw), json, ::checkVersion) { staged, _ ->
+                    currentCoroutineContext().ensureActive()
+                    openTar(staged.inputStream(), null).use { source ->
+                        restoreFromTar(source.tar, selectedWorkspaces, providerConflict)
+                    }
                 }
             }
             .map { it.copy(secretsUnavailable = unreadableSecrets.getAndSet(0)) }
             .onSuccess { FileLogger.i(TAG, "导入备份完成：$it") }
-            .onFailure { FileLogger.e(TAG, "导入备份失败", it) }
+            .onFailure {
+                if (it is CancellationException) throw it
+                FileLogger.e(TAG, "导入备份失败", it)
+            }
             .recoverCatching { e -> mapImportError(e, pw, sourceAlreadyDecrypted) }
         }
     }
@@ -225,32 +238,17 @@ class BackupManagerImpl @Inject constructor(
         return withContext(Dispatchers.IO) {
             FileLogger.i(TAG, "导入预览开始（${if (pw != null) "加密" else "明文"}）")
             runCatching {
-                openTar(input, pw).use { source ->
-                    val tar = source.tar
-                    var workspaces: List<WorkspaceBackupMeta> = emptyList()
-                    var providers: List<ProviderDto> = emptyList()
-                    var entry = tar.nextEntry
-                    while (entry != null) {
-                        if (entry.name == FILE_METADATA) {
-                            val plain = tar.readBytes()
-                            val metadata = json.decodeFromString(BackupMetadata.serializer(), String(plain, Charsets.UTF_8))
-                            checkVersion(metadata.schemaVersion)
-                            workspaces = metadata.workspaces
-                            providers = metadata.providers
-                            // 导出时 metadata.json 为首个条目，读到即可停，避免遍历大段 jsonl
-                            break
-                        }
-                        entry = tar.nextEntry
-                    }
+                BackupRestorePreflight.withValidated(prepareImport(input, pw), json, ::checkVersion) { _, metadata ->
                     val existingIds = aiProviderDao.getAllProvidersOnce().map { it.id }.toSet()
-                    val conflicts = providers
-                        .filter { it.id in existingIds }
-                        .map { ProviderConflict(it.id, it.name) }
-                    ImportPreview(workspaces, conflicts)
+                    ImportPreview(metadata.workspaces, metadata.providers.filter { it.id in existingIds }
+                        .map { ProviderConflict(it.id, it.name) })
                 }
             }
             .onSuccess { FileLogger.i(TAG, "导入预览完成：${it.workspaces.size} 个工作区，${it.providerConflicts.size} 个供应商冲突") }
-            .onFailure { FileLogger.e(TAG, "导入预览失败", it) }
+            .onFailure {
+                if (it is CancellationException) throw it
+                FileLogger.e(TAG, "导入预览失败", it)
+            }
             .recoverCatching { e -> mapImportError(e, pw, sourceAlreadyDecrypted) }
         }
     }
@@ -258,6 +256,7 @@ class BackupManagerImpl @Inject constructor(
     /** 把导入异常映射为用户可读的 IllegalArgumentException（解密异常原样抛出）。 */
     private fun mapImportError(e: Throwable, pw: CharArray?, sourceAlreadyDecrypted: Boolean): Nothing {
         when (e) {
+            is CancellationException -> throw e
             is BackupDecryptionException -> throw e
             is IllegalStateException -> throw e
             else -> throw IllegalArgumentException(
@@ -503,6 +502,7 @@ class BackupManagerImpl @Inject constructor(
         var stats = RestoreStats()
         var entry = tar.nextEntry
         while (entry != null) {
+            currentCoroutineContext().ensureActive()
             when (entry.name) {
                 FILE_LEGACY_SNAPSHOT -> {
                     val plain = tar.readBytes()

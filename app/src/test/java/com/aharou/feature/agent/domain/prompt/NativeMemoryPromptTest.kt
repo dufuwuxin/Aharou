@@ -163,15 +163,16 @@ class NativeMemoryPromptTest {
         assertFalse(rendered.contains("private main"))
     }
 
-    @Test fun teamTemplateExposesOnlyNameAndDescriptionAndDoesNotReexpandMetadata() {
+    @Test fun teamTemplateExposesBasicCharterButNoMembersAndDoesNotReexpandMetadata() {
         add("main", "{{AICODE_TEAMS}}", ContextCategory.MAIN_INJECTED)
         val entry = mockk<AgentTeamEntry>()
         every { entry.team } returns AgentTeam("public team", "public description {{AICODE_DATE}}", emptyList(),
             "hidden charter", members = listOf(TeamMemberRef("hidden member")))
+        every { teams.forWorkspace(context.projectRoot) } returns teams
         every { teams.listAll() } returns listOf(entry)
         val rendered = provider.build(context)
         assertTrue(rendered.contains("public team: public description {{AICODE_DATE}}"))
-        assertFalse(rendered.contains("hidden charter"))
+        assertTrue(rendered.contains("charter=hidden charter"))
         assertFalse(rendered.contains("hidden member"))
     }
 
@@ -179,6 +180,7 @@ class NativeMemoryPromptTest {
         add("main", "{{AICODE_TEAMS}}", ContextCategory.MAIN_INJECTED)
         val entry = mockk<AgentTeamEntry>()
         every { entry.team } returns AgentTeam("public team", "LARGE_DIRECTORY_ENTRY".repeat(150), emptyList(), "")
+        every { teams.forWorkspace(context.projectRoot) } returns teams
         every { teams.listAll() } returns listOf(entry)
         val rendered = provider.build(context)
         assertFalse(rendered.contains("LARGE_DIRECTORY_ENTRY"))

@@ -21,17 +21,21 @@ stages:
     agent: Software Architect
     prompt: |-
       把本次目标拆成可执行的改动清单，按语言栈分到 Android Kotlin、Rust、Python 三侧，逐文件标明要改什么与验收点；写清跨栈契约（JNI 函数签名、数据字段与格式、接口参数）由哪一侧定义、哪一侧跟随。某一侧没有改动就明确写「无」。若涉及认证、文件包含、命令注入或隐私，标明信任边界与审计验收点，术语细则引用 security-audit 清单而非复制全文。只拆不改代码。
-  - title: 并行实现
-    tasks:
-      - agent: Android Kotlin Engineer
-        prompt: |-
-          实现拆解中分给 Android Kotlin 侧的改动，只改清单列出的文件，不扩大范围。本侧没有要改的，直接回报「无改动」。
-      - agent: Rust Engineer
-        prompt: |-
-          实现拆解中分给 Rust 侧的改动，只改清单列出的文件，不扩大范围；JNI 签名按拆解里的契约写。本侧没有要改的，直接回报「无改动」。
-      - agent: Python Backend Engineer
-        prompt: |-
-          实现拆解中分给 Python 侧的改动，只改清单列出的文件，不扩大范围；输出字段按拆解里的契约写。本侧没有要改的，直接回报「无改动」。
+  - title: Kotlin实现
+    condition: always
+    agent: Android Kotlin Engineer
+    prompt: |-
+      实现拆解中分给 Android Kotlin 侧的改动，只改清单列出的文件，不扩大范围。本侧没有要改的，直接回报「无改动」。
+  - title: Rust实现
+    condition: rust
+    agent: Rust Engineer
+    prompt: |-
+      实现拆解中分给 Rust 侧的改动，只改清单列出的文件，不扩大范围；JNI 签名按拆解里的契约写。本侧没有要改的，直接回报「无改动」。
+  - title: Python实现
+    condition: python
+    agent: Python Backend Engineer
+    prompt: |-
+      实现拆解中分给 Python 侧的改动，只改清单列出的文件，不扩大范围；输出字段按拆解里的契约写。本侧没有要改的，直接回报「无改动」。
   - title: 代码审查
     agent: Code Reviewer
     review: true

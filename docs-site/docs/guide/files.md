@@ -176,3 +176,7 @@ Windows 上编辑过的文件常用 CRLF（`\r\n`）换行，Linux / macOS 风�
 **直接让 AI 做**：AI 就跑在容器里，你可以说“把 `~/.aharou/mcp.json` 打印出来看看”或者“在 `~/.aharou/skills/` 下写一个新技能”。
 
 **Root 设备**：直接进 `/data/data/com.aharou.agent/files/`（部分系统等价路径是 `/data/user/0/com.aharou.agent/files/`）。其中 `projects/` 是工作区根，`aharou/` 对应 `~/.aharou`，`aharou-global/shared/` 对应 `~/shared`，`rootfs/` 是容器系统。注意 debug 构建的包名是 `com.aharou.agent.debug`，两者私有目录完全隔离。
+
+### 扩展安装与编辑状态
+
+点击语言扩展“安装”会先初始化当前默认容器或连接 SSH，再下载并校验扩展包；页面只读检查不下载容器。失败显示具体原因并可重试，取消会释放安装状态。预编译语言扩展需要 ARM64 Ubuntu 24.04 后端。未修改文件的编辑快照只保留光标和滚动位置；未保存的草稿继续保留完整正文。

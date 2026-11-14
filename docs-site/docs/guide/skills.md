@@ -214,3 +214,9 @@
 关键词只检查**本轮用户输入或派发任务**，任一词命中即列出名称和简介，正文仍需按需加载；历史消息和工具输出不参与匹配。下一轮任务改变后会重新匹配。没有配置关键词也没有成员绑定的旧技能保持公共默认可见。
 
 AI 也可以通过配置通道读取与修改单个技能的 `keywords` 和 `keyword_enabled`。先填写关键词，再开启模式；已有成员绑定时配置通道拒绝开启，请先在详情页明确确认解除绑定，或逐一解除后再开启。
+
+### Editing built-in skills
+
+Enable built-in skill editing in Special Permissions before editing. Changes are stored as global overrides with the same name; APK assets remain unchanged. Disabling the switch or restarting prevents further changes but preserves saved content. Ordinary user skills remain editable. The config channel exposes the permission read-only and cannot grant itself permission.
+
+Disabling this permission does not disable ordinary skill enable/disable controls. Revocation and protected writes share a lock: once revocation returns, an earlier authorized write cannot commit afterward. Closed permission fields and built-in editing fields are omitted from normal Config listings.

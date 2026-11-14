@@ -96,14 +96,17 @@ class ProjectTaskRepository @Inject constructor(@ApplicationContext context: Con
 
     /** Removes only the branch tree. Conversations and workspace files remain historical records. */
     suspend fun deleteRequirementBranch(projectId: String, branchId: String, workspace: String): Boolean =
-        withContext(Dispatchers.IO) { deleteRequirementBranchLocked(projectId, branchId, workspace) }
+        withContext(Dispatchers.IO) { deleteTaskLocked(projectId, branchId, workspace, requireBranch = true) }
+
+    suspend fun deleteTask(projectId: String, taskId: String, workspace: String): Boolean =
+        withContext(Dispatchers.IO) { deleteTaskLocked(projectId, taskId, workspace, requireBranch = false) }
 
     @Synchronized
-    private fun deleteRequirementBranchLocked(projectId: String, branchId: String, workspace: String): Boolean {
+    private fun deleteTaskLocked(projectId: String, branchId: String, workspace: String, requireBranch: Boolean): Boolean {
         val current = snapshot(workspace)
         require(current.projects.any { it.id == projectId && it.workspace == workspace }) { "PROJECT_NOT_FOUND" }
         val branch = current.tasks.singleOrNull { it.id == branchId } ?: return false
-        require(branch.projectId == projectId && branch.workspace == workspace && branch.isRequirementBranch) { "BRANCH_NOT_FOUND" }
+        require(branch.projectId == projectId && branch.workspace == workspace && (!requireBranch || branch.isRequirementBranch)) { "BRANCH_NOT_FOUND" }
         val subtree = ProjectTaskGraph.subtree(branchId, current.tasks)
         require(subtree.all { it.projectId == projectId && it.workspace == workspace }) { "CROSS_PROJECT" }
         val removed = subtree.map { it.id }.toSet()
@@ -145,9 +148,10 @@ class ProjectTaskRepository @Inject constructor(@ApplicationContext context: Con
 
     private fun stage(current: ProjectTaskSnapshot, change: ProjectTaskChange): Pair<ProjectTaskSnapshot, ProjectTask> {
         val proposed = change.task
-        val old = current.tasks.firstOrNull { it.id == proposed.id }
-        check(old == null || old.version == proposed.version) { "STALE_TASK_VERSION" }
         require(proposed.projectId == null || current.projects.any { it.id == proposed.projectId }) { "PROJECT_NOT_FOUND" }
+        val old = current.tasks.firstOrNull { it.id == proposed.id }
+        check(old != null || proposed.version == 0L) { "TASK_DELETED" }
+        check(old == null || old.version == proposed.version) { "STALE_TASK_VERSION" }
         val updated = ProjectTaskGraph.revise(old, proposed, current.version + 1, change.force)
         val proposedTasks = current.tasks.filterNot { it.id == updated.id } + updated
         val invalidates = old != null && (old.requirementsVersion != updated.requirementsVersion ||

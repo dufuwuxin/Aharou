@@ -253,12 +253,12 @@ fun CodeEditorScreen(
         EditorSessionManager.saveSnapshot(
             activePath,
             EditorSessionManager.Snapshot(
-                content = editor.text.toString(),
+                content = if (dirty) editor.text.toString() else null,
                 dirty = dirty,
                 cursorLine = cursorLine,
                 cursorColumn = cursorColumn,
                 scrollY = editor.scrollY,
-                baselineContent = baselineText.value
+                baselineContent = baselineText.value.takeIf { dirty }
             )
         )
     }
@@ -449,7 +449,7 @@ fun CodeEditorScreen(
             is EditorUiState.Success -> Box(modifier = content) {
                 // 有未保存快照时用快照文本而不是磁盘内容——切走再切回来，改动不能消失。
                 val surfaceState = remember(activePath, s.content) {
-                    snapshots[activePath]?.let { s.copy(content = it.content, baselineContent = it.baselineContent ?: s.baselineContent) } ?: s
+                    snapshots[activePath]?.let { s.copy(content = it.content ?: s.content, baselineContent = it.baselineContent ?: s.baselineContent) } ?: s
                 }
                 // 按「文档」重建编辑器：大屏右栏常驻在聊天页里，切文件时这个组合位置不变，
                 // AndroidView 的 factory 不会重跑，而内容与语法语言只在 factory 里设，

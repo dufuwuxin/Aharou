@@ -181,10 +181,6 @@ private fun SettingSwitchRow(
     }
 }
 
-/**
- * 一条语言扩展：名称 + 容器内的安装状态；未装且容器可用时给出安装按钮，安装中显示转圈。
- * 容器未就绪时不给按钮——装不了，先让用户去终端里把容器初始化好。
- */
 @Composable
 private fun ExtensionRow(
     title: String,
@@ -201,7 +197,7 @@ private fun ExtensionRow(
             stringResource(R.string.editor_extension_installed, status.version)
         }
         is ExtensionStatus.NotInstalled -> stringResource(R.string.editor_extension_not_installed)
-        is ExtensionStatus.Unavailable -> stringResource(R.string.editor_extension_unavailable)
+        is ExtensionStatus.Unavailable -> status.reason.ifBlank { stringResource(R.string.editor_extension_unavailable) }
         is ExtensionStatus.Unknown, null -> stringResource(R.string.editor_extension_unknown)
     }
     Row(
@@ -228,7 +224,6 @@ private fun ExtensionRow(
                 strokeWidth = 2.dp
             )
             status is ExtensionStatus.Installed -> Unit
-            status is ExtensionStatus.Unavailable -> Unit
             else -> TextButton(onClick = onInstall) {
                 Text(stringResource(R.string.editor_extension_install))
             }

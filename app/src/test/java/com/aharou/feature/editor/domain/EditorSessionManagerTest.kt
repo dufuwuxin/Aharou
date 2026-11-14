@@ -48,6 +48,22 @@ class EditorSessionManagerTest {
         assertEquals("saved disk", restored.baselineContent)
     }
 
+    @Test fun cleanSnapshotsRetainPositionWithoutAnyDocumentText() {
+        val large = "x".repeat(1024 * 1024)
+        EditorSessionManager.saveSnapshot("/a", snapshot(large).copy(baselineContent = large, cursorLine = 42))
+        val saved = requireNotNull(EditorSessionManager.snapshot("/a"))
+        assertNull(saved.content)
+        assertNull(saved.baselineContent)
+        assertEquals(42, saved.cursorLine)
+    }
+
+    @Test fun dirtySnapshotsKeepAllTextRegardlessOfSize() {
+        val large = "x".repeat(3 * 1024 * 1024)
+        EditorSessionManager.saveSnapshot("/a", snapshot(large).copy(dirty = true, baselineContent = "base"))
+        assertEquals(large, EditorSessionManager.snapshot("/a")?.content)
+        assertEquals("base", EditorSessionManager.snapshot("/a")?.baselineContent)
+    }
+
     // ---------- open ----------
 
     @Test
@@ -140,7 +156,7 @@ class EditorSessionManagerTest {
 
     @Test
     fun snapshot_saveThenRead_roundTrips() {
-        EditorSessionManager.saveSnapshot("/a", snapshot("draft"))
+        EditorSessionManager.saveSnapshot("/a", snapshot("draft").copy(dirty = true))
         assertEquals("draft", EditorSessionManager.snapshot("/a")?.content)
     }
 

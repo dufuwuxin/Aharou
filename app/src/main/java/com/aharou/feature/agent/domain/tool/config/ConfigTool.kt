@@ -89,7 +89,7 @@ class ConfigTool @Inject constructor(
     override val parameters: Map<String, ToolParameter> = mapOf(
         "action" to ToolParameter(
             "action", ParameterType.STRING, "操作类型：list / get / reveal / set / add / remove / logs", true,
-            enum = listOf("list", "get", "reveal", "set", "add", "remove", "logs"),
+            enum = listOf("list", "get", "schema", "reveal", "set", "add", "remove", "logs"),
         ),
         "path" to ToolParameter("path", ParameterType.STRING, "字段路径，如 soul.name；add/remove 时为集合名，如 providers", false),
         "value" to ToolParameter("value", ParameterType.STRING, "set 的目标值 / add 的新项（JSON 编码）", false),
@@ -130,7 +130,7 @@ class ConfigTool @Inject constructor(
                 else ConfigRegistry.get()
             when (action) {
                 "list" -> listFields(registry, mainAgent)
-                "get" -> getField(registry, path)
+                "get", "schema" -> getField(registry, path)
                 "reveal" -> revealField(registry, path)
                 "set" -> {
                     val raw = (args["value"] as? JsonPrimitive)?.contentOrNull
@@ -189,7 +189,10 @@ class ConfigTool @Inject constructor(
         val sb = StringBuilder("可用配置字段：\n")
         for (topic in registry.topics()) {
             if (topic in setOf("teams", "team.stages", "workflows")) continue
-            val fields = registry.fields(topic).filter { it.access != ConfigAccess.HIDDEN }
+            val fields = registry.fields(topic).filter {
+                it.access != ConfigAccess.HIDDEN &&
+                    !(it.path == "skill.builtin_edit_enabled" && !com.aharou.core.config.BuiltinSkillEditCapability.enabled.value)
+            }
             if (fields.isEmpty()) {
                 // 空集合仍要列出来，否则使用者会以为这类配置不存在。
                 if (registry.collection(topic) != null) {

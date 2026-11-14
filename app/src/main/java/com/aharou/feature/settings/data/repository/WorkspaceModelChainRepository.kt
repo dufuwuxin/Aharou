@@ -30,6 +30,20 @@ class WorkspaceModelChainRepository @Inject constructor(
         return parseFallbackChain(context.workspaceModelChains.data.first()[stringPreferencesKey(workspace)].orEmpty())
     }
 
+    suspend fun move(oldPath: String, newPath: String) {
+        if (oldPath == newPath) return
+        require(oldPath.isNotBlank() && newPath.isNotBlank())
+        context.workspaceModelChains.edit { preferences ->
+            val oldKey = stringPreferencesKey(oldPath)
+            val newKey = stringPreferencesKey(newPath)
+            val value = preferences[oldKey]
+            if (value == null) preferences.remove(newKey) else preferences[newKey] = value
+            preferences.remove(oldKey)
+        }
+        revisions.getOrPut(oldPath) { java.util.concurrent.atomic.AtomicLong() }.incrementAndGet()
+        revisions.getOrPut(newPath) { java.util.concurrent.atomic.AtomicLong() }.incrementAndGet()
+    }
+
     suspend fun set(workspace: String, chain: List<FallbackTarget>) {
         require(workspace.isNotBlank())
         val normalized = chain.map { FallbackTarget(it.providerId.trim(), it.model.trim()) }.distinct()

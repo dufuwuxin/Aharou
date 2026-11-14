@@ -13,7 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 ASSETS = ROOT / "app/src/main/assets"
 KEYS = {"schema_version", "status", "acceptance_id", "baseline", "evidence_refs", "failures", "unverified"}
-TEAMS = {"feature-delivery": (4, 6, 2), "research-review": (3, 4, 1)}
+TEAMS = {"feature-delivery": (6, 6, 2), "research-review": (3, 4, 1)}
 
 
 def nonblank(value: object) -> bool:
@@ -123,7 +123,7 @@ fun main(args: Array<String>) {
  val provider = object: FileAccessProvider {
   override fun readFile(path: String) = java.io.File(path).readText()
  }
- val expected = listOf(Triple("feature-delivery", 4, 6), Triple("research-review", 3, 4))
+ val expected = listOf(Triple("feature-delivery", 6, 6), Triple("research-review", 3, 4))
  expected.forEach { (name, stages, tasks) ->
   val team = checkNotNull(AgentTeamParser.parse(provider, args[0] + "/teams/" + name + ".md"))
   check(team.stages.size == stages && team.taskCount == tasks)

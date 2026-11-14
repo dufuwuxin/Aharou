@@ -197,27 +197,34 @@ class ProjectTaskViewModel @Inject constructor(
         }
     }
 
-    fun deleteRequirementBranch(projectId: String, branchId: String, onDeleted: () -> Unit = {}) {
+    fun deleteRequirementBranch(projectId: String, branchId: String, onDeleted: () -> Unit = {}) =
+        deleteTask(projectId, branchId, onDeleted)
+
+    fun deleteTask(projectId: String, branchId: String, onDeleted: () -> Unit = {}) {
         val current = mutable.value
         val key = current.workspace to projectId
         if (current.busy || current.loading || projectId in current.planningProjectIds || key in branchSessionProjects) return
         val branch = current.tasks.singleOrNull { it.id == branchId && it.projectId == projectId &&
-            it.workspace == current.workspace && it.isRequirementBranch } ?: return
+            it.workspace == current.workspace } ?: return
         operation(onSuccess = { workspace -> if (mutable.value.workspace == workspace) onDeleted() }) { workspace ->
             check(deletingProjects.add(key)) { "PROJECT_BUSY" }
             try {
-                val taskIds = current.tasks.filter { it.projectId == projectId }.map { it.id }.toSet()
-                val jobs = executionJobs.filterKeys { it.first == workspace && it.second in taskIds }.values.toList()
-                jobs.forEach { it.cancel() }
-                flows.withProjectStopped(projectId, workspace) {
-                    jobs.joinAll()
-                    sessionMutex.withLock {
-                        val ids = com.aharou.feature.agent.domain.task.ProjectTaskGraph.subtree(branch.id, repository.load(workspace).tasks).map { it.id }.toSet()
-                        check(repository.deleteRequirementBranch(projectId, branchId, workspace)) { "BRANCH_NOT_FOUND" }
-                        ids.forEach { pendingBranchSessions.remove(workspace to it) }
-                        mutable.update { state -> if (state.workspace == workspace) state.copy(selectedId = state.selectedId.takeUnless { it in ids }) else state }
-                    }
+                // Commit validation before stopping anything: rejected deletions leave live execution intact.
+                val ids = sessionMutex.withLock {
+                    val removed = com.aharou.feature.agent.domain.task.ProjectTaskGraph.subtree(branch.id, repository.load(workspace).tasks).map { it.id }.toSet()
+                    val deleted = if (branch.isRequirementBranch) repository.deleteRequirementBranch(projectId, branchId, workspace)
+                        else repository.deleteTask(projectId, branchId, workspace)
+                    check(deleted) { "BRANCH_NOT_FOUND" }
+                    removed.forEach { pendingBranchSessions.remove(workspace to it) }
+                    removed
                 }
+                withContext(kotlinx.coroutines.NonCancellable) {
+                    val taskIds = current.tasks.filter { it.projectId == projectId }.map { it.id }.toSet()
+                    val jobs = executionJobs.filterKeys { it.first == workspace && it.second in taskIds }.values.toList()
+                    jobs.forEach { it.cancel() }
+                    flows.withProjectStopped(projectId, workspace) { jobs.joinAll() }
+                }
+                mutable.update { state -> if (state.workspace == workspace) state.copy(selectedId = state.selectedId.takeUnless { it in ids }) else state }
             } finally { deletingProjects -= key }
         }
     }
@@ -322,7 +329,7 @@ class ProjectTaskViewModel @Inject constructor(
                     mutable.update { it.copy(ruleFallbackProjectIds = if (outcome.ruleFallback) it.ruleFallbackProjectIds + project.id else it.ruleFallbackProjectIds - project.id) }
                     flows.continueProject(project.id, target, 0L)
                 }
-                if (selectionEpoch == epoch && mutable.value.workspace == source) {
+                if (original != null && selectionEpoch == epoch && mutable.value.workspace == source) {
                     anticipatedWorkspace = target
                     val activated = try { workspaces.get().activateProjectWorkspace(target, source) { selectionEpoch == epoch } }
                         finally { anticipatedWorkspace = null }

@@ -90,16 +90,18 @@ class TeamTasks @Inject constructor(
             return ToolResult.Error("读取子代理定义失败：${e.message ?: "未知错误"}", "AGENT_LIST_FAILED")
         }
 
-        if (expectedSignature != null && expectedSignature != signature(team, enabled))
+        val projectFiles = if (team.stages.any { it.condition !in setOf("always", "never") })
+            teamRepository.forWorkspace(workspace).projectFiles() else emptySet()
+        if (expectedSignature != null && expectedSignature != signature(team, enabled, projectFiles))
             return ToolResult.Error("团队配置已变化，请重新执行", "TEAM_CONFIG_CHANGED")
-        return when (val plan = TeamRunner.build(team, goal, enabled, maxRunningSource.maxRunning())) {
+        return when (val plan = TeamRunner.build(team, goal, enabled, maxRunningSource.maxRunning(), projectFiles)) {
             is TeamRunner.Plan.Rejected -> ToolResult.Error(plan.message, plan.code)
             is TeamRunner.Plan.Ready -> {
                 FileLogger.i(
                     TAG,
                     "团队「${team.name}」开始执行：${team.stages.size} 阶段 → ${plan.layers} 层 / ${plan.taskCount} 任务"
                 )
-                stageExecutor.run(team, goal, enabled, maxRunningSource.maxRunning(), parentSessionId, exec)
+                stageExecutor.run(team, goal, enabled, maxRunningSource.maxRunning(), parentSessionId, projectFiles, exec)
             }
         }
     }
@@ -128,19 +130,21 @@ class TeamTasks @Inject constructor(
         val requested = teamName?.trim().orEmpty().takeUnless { it.equals("auto", true) }.orEmpty()
         val candidates = if (requested.isBlank()) entries.sortedBy { it.team.name } else
             entries.filter { it.team.name.equals(requested, true) }
+        val projectFiles = if (candidates.any { entry -> entry.team.stages.any { it.condition !in setOf("always", "never") } })
+            teamRepository.forWorkspace(workspace).projectFiles() else emptySet()
         val selected = candidates.firstOrNull {
             com.aharou.feature.agent.domain.subagent.TeamFlowGraph.validate(it.team) == null &&
-                (TeamRunner.build(it.team, goal, enabled, maxRunningSource.maxRunning()) as? TeamRunner.Plan.Ready)?.taskCount?.let { count -> count > 0 } == true
+                (TeamRunner.build(it.team, goal, enabled, maxRunningSource.maxRunning(), projectFiles) as? TeamRunner.Plan.Ready)?.taskCount?.let { count -> count > 0 } == true
         } ?: return ToolResult.Error(if (requested.isBlank()) "没有可运行团队，请先配置团队" else "指定团队不存在或不可运行：$requested", "PROJECT_TEAM_UNAVAILABLE")
         return ToolResult.Success(buildJsonObject {
             put("team", selected.team.name)
-            put("signature", signature(selected.team, enabled))
+            put("signature", signature(selected.team, enabled, projectFiles))
             put("selectionReason", if (requested.isBlank()) "auto:first-buildable-by-name" else "explicit:exact-name")
         })
     }
 
-    private fun signature(team: com.aharou.feature.agent.domain.subagent.AgentTeam, enabled: List<AgentDefinition>): String =
-        java.security.MessageDigest.getInstance("SHA-256").digest((team.toString() + enabled.toString() + maxRunningSource.maxRunning()).toByteArray())
+    private fun signature(team: com.aharou.feature.agent.domain.subagent.AgentTeam, enabled: List<AgentDefinition>, projectFiles: Set<String>?): String =
+        java.security.MessageDigest.getInstance("SHA-256").digest((team.toString() + enabled.toString() + maxRunningSource.maxRunning() + team.stages.map { TeamStageCondition.evaluate(it.condition, projectFiles) }).toByteArray())
             .joinToString("") { "%02x".format(it) }
 
     private fun loadEntries(workspace: String): List<AgentTeamEntry>? = try {

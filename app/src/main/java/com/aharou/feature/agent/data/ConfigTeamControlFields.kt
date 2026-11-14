@@ -89,6 +89,7 @@ class ConfigTeamControlFields @Inject constructor(
             return listOf(
                 ClosureField(path = "$basePath.$forId.nodes", displayName = "Workflow endpoints",
                     description = "Read-only stable stage/task ids and member labels.", valueSchema = ConfigSchema.Json,
+                    access = com.aharou.core.config.ConfigAccess.READONLY,
                     reader = { ConfigValue.Arr(entry().team.stages.flatMap { stage -> stage.tasks.map { task ->
                         ConfigValue.Obj(mapOf("stageId" to ConfigValue.Str(stage.id), "stage" to ConfigValue.Str(stage.title),
                             "taskId" to ConfigValue.Str(task.id), "member" to ConfigValue.Str(task.agent.orEmpty())))
@@ -220,6 +221,13 @@ class ConfigTeamControlFields @Inject constructor(
         override fun fields(forId: String): List<ConfigField> {
             if (forId !in entries()) return emptyList()
             return listOf(
+                ClosureField(path = "$basePath.$forId.condition", displayName = "Stage condition",
+                    description = "always, never, rust, python or kotlin; project file detection; unknown blocks explicitly.",
+                    valueSchema = ConfigSchema.StrEnum(listOf("always", "never", "rust", "python", "kotlin")),
+                    reader = { ConfigValue.Str(stage(forId).condition) }, writer = { value ->
+                        val condition = (value as? ConfigValue.Str)?.value ?: throw ConfigError.TypeMismatch("string")
+                        update(forId) { it.copy(condition = condition) }
+                    }),
                 ClosureField(path = "$basePath.$forId.communication", displayName = "Communication scope",
                     description = "same_stage, parent_only or run; enforced during message routing.", valueSchema = ConfigSchema.Str(),
                     reader = { ConfigValue.Str(stage(forId).communication.token) }, writer = { value ->

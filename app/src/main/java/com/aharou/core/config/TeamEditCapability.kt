@@ -16,7 +16,7 @@ object TeamEditCapability {
     private var expiry: kotlinx.coroutines.Job? = null
     private val _address = MutableStateFlow<String?>(null)
     val address = _address.asStateFlow()
-    private val fields = Regex("(?:teams\\.project:[0-9a-f]+\\.routes|team\\.stages\\.project:[0-9a-f]+:[0-9]+\\.(?:communication|message_limit|communication_guide))")
+    private val fields = Regex("(?:teams\\.(?:global|project):[0-9a-f]+\\.(?:routes|nodes)|team\\.stages\\.(?:global|project):[0-9a-f]+:[0-9]+\\.(?:communication|message_limit|communication_guide|condition))")
     const val PREFIX = "aharou-team://"
 
     @Synchronized fun issue(workspace: String): String {

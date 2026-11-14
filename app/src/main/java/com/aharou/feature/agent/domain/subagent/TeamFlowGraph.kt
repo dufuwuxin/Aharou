@@ -44,6 +44,7 @@ object TeamFlowGraph {
             predecessors(team, target).all { it in completed && target in selections[it].orEmpty() } }
 
     fun validate(team: AgentTeam): String? {
+        if (team.stages.any { it.condition !in setOf("always", "never", "rust", "python", "kotlin") }) return "INVALID_STAGE_CONDITION"
         if (team.admins.size != 1 || team.admins.single().isBlank()) return "ONE_ADMIN_REQUIRED"
         if (team.members.any { it.name.trim().equals(MAIN_AGENT_ADMIN, ignoreCase = true) } ||
             team.stages.any { stage -> stage.tasks.any { it.agent?.trim()?.equals(MAIN_AGENT_ADMIN, ignoreCase = true) == true } }) return "RESERVED_MEMBER"

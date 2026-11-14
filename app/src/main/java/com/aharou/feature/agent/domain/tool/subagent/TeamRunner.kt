@@ -42,8 +42,11 @@ object TeamRunner {
      * 阶段内任务数超过并发上限时**自动分批排队**（后一批依赖前一批），不报错——预设里多写两个
      * 成员不该逼用户去拆阶段。
      */
-    fun build(team: AgentTeam, goal: String, enabled: List<AgentDefinition>, maxRunning: Int): Plan {
-        val badRoles = unknownRoles(team, enabled)
+    fun build(team: AgentTeam, goal: String, enabled: List<AgentDefinition>, maxRunning: Int, projectFiles: Set<String>? = null): Plan {
+        if (team.stages.any { TeamStageCondition.evaluate(it.condition, projectFiles) == TeamStageCondition.Result.UNKNOWN })
+            return Plan.Rejected("TEAM_CONDITION_UNKNOWN", "Cannot determine stage conditions from this workspace")
+        val active = team.copy(stages = team.stages.filter { TeamStageCondition.evaluate(it.condition, projectFiles) == TeamStageCondition.Result.RUN })
+        val badRoles = unknownRoles(active, enabled)
         if (badRoles.isNotEmpty()) {
             return Plan.Rejected(
                 "AGENT_NOT_FOUND",
@@ -107,9 +110,14 @@ object TeamRunner {
         goal: String,
         upstreamBrief: String,
         enabled: List<AgentDefinition>,
-        maxRunning: Int
+        maxRunning: Int,
+        projectFiles: Set<String>? = null
     ): Plan {
-        val badRoles = unknownRoles(team, enabled).toMutableList()
+        if (team.stages.any { TeamStageCondition.evaluate(it.condition, projectFiles) == TeamStageCondition.Result.UNKNOWN })
+            return Plan.Rejected("TEAM_CONDITION_UNKNOWN", "Cannot determine workflow stage conditions from the bound workspace")
+        val active = team.copy(stages = team.stages.filter { TeamStageCondition.evaluate(it.condition, projectFiles) == TeamStageCondition.Result.RUN })
+        if (active.stages.isEmpty()) return Plan.Ready(JsonArray(emptyList()), 0, 0)
+        val badRoles = unknownRoles(active, enabled).toMutableList()
         val lead = ref.lead?.trim()?.takeIf { it.isNotEmpty() }
         if (lead != null && enabled.none { it.name.equals(lead, ignoreCase = true) }) {
             badRoles += "协调者 → $lead"
@@ -123,7 +131,8 @@ object TeamRunner {
         }
 
         // 协调者三级回退：工作流里点名的 lead → 该团队首个任务点名的角色 → 首个任务的部门/关键词选角。
-        val firstTask = team.stages.firstOrNull()?.tasks?.firstOrNull()
+        val firstTask = active.stages.firstOrNull()?.tasks?.firstOrNull()
+        if (firstTask == null && lead == null) return Plan.Ready(JsonArray(emptyList()), 0, 0)
         val judgeAgent = lead ?: firstTask?.agent
         val judgeDepartment = if (judgeAgent == null) firstTask?.department else null
         val judgeQuery = if (judgeAgent == null) firstTask?.agentQuery else null
@@ -137,6 +146,7 @@ object TeamRunner {
         val pipeline = buildJsonArray {
             var upstream: List<String> = emptyList()
             team.stages.forEachIndexed { stageIndex, stage ->
+                if (TeamStageCondition.evaluate(stage.condition, projectFiles) == TeamStageCondition.Result.SKIP) return@forEachIndexed
                 val previousStage = upstream
                 val stageIds = mutableListOf<String>()
                 stage.tasks.chunked(batchSize).forEachIndexed { batchIndex, batch ->
@@ -192,7 +202,7 @@ object TeamRunner {
                 }
             }
         }
-        return Plan.Ready(pipeline, layers + 1, team.taskCount + 1)
+        return Plan.Ready(pipeline, layers + 1, active.taskCount + 1)
     }
 
     /**

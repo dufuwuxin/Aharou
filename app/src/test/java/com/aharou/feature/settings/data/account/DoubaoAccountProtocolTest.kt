@@ -56,7 +56,7 @@ class DoubaoAccountProtocolTest {
         manager.awaitLogin(pending)
     }
     private fun json(stream: Boolean) = """{"model":"7","messages":[{"role":"system","content":"Reply in Chinese"},{"role":"user","content":"Earlier"},{"role":"assistant","content":"Earlier reply"},{"role":"user","content":"Hello"}],"stream":$stream}"""
-    private fun call(manager: AccountProviderManager, stream: Boolean) = OkHttpClient.Builder().addInterceptor(manager.interceptor()).build().newCall(
+    private fun call(manager: AccountProviderManager, stream: Boolean) = OkHttpClient.Builder().connectionSpecs(listOf(ConnectionSpec.CLEARTEXT)).addInterceptor(manager.interceptor()).build().newCall(
         Request.Builder().url(manager.baseUrl(kind, "provider") + "/chat/completions").post(json(stream).toRequestBody()).build(),
     )
     private fun failure(code: String, block: () -> Unit) {
@@ -234,7 +234,7 @@ class DoubaoAccountProtocolTest {
         MockWebServer().use { server ->
             val manager = manager(server)
             login(manager, server)
-            val client = OkHttpClient.Builder().addInterceptor(manager.interceptor()).build()
+            val client = OkHttpClient.Builder().connectionSpecs(listOf(ConnectionSpec.CLEARTEXT)).addInterceptor(manager.interceptor()).build()
             val api = retrofit2.Retrofit.Builder().baseUrl("https://api.openai.com/").client(client)
                 .addConverterFactory(retrofit2.converter.gson.GsonConverterFactory.create()).build()
                 .create(com.aharou.feature.agent.data.remote.openai.OpenAIApi::class.java)

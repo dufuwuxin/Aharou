@@ -22,6 +22,9 @@ import com.aharou.feature.agent.domain.workflow.AgentEvent
 import com.aharou.feature.agent.domain.workflow.AgentTurnTrigger
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -48,6 +51,8 @@ class ScheduledTaskExecutionService : Service() {
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
+    private val runs = ScheduledTaskRunState()
+
     override fun onCreate() {
         super.onCreate()
         ensureChannel()
@@ -58,9 +63,10 @@ class ScheduledTaskExecutionService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
+        runs.started(startId)
         val taskId = intent?.getStringExtra(EXTRA_TASK_ID) ?: run {
             FileLogger.w(TAG, "自动化任务服务缺少 taskId，直接停止")
-            stopSelf()
+            runs.finished(startId)?.let { stopSelfResult(it) }
             return START_NOT_STICKY
         }
         val taskName = intent.getStringExtra(EXTRA_TASK_NAME) ?: taskId
@@ -70,7 +76,11 @@ class ScheduledTaskExecutionService : Service() {
 
         startForegroundWithNotification(taskName)
         serviceScope.launch {
-            runTask(taskId, taskName, prompt, workspacePath, targetSessionId)
+            try {
+                runTask(taskId, taskName, prompt, workspacePath, targetSessionId)
+            } finally {
+                runs.finished(startId)?.let { stopSelfResult(it) }
+            }
         }
         return START_NOT_STICKY
     }
@@ -82,7 +92,8 @@ class ScheduledTaskExecutionService : Service() {
         workspacePath: String?,
         targetSessionId: String?,
     ) {
-        val succeeded = try {
+        val terminal = ScheduledTaskTerminalState()
+        try {
             val sessionId = targetSessionId?.takeIf { it.isNotBlank() }
                 ?: agentTurnRunner.ensureSession(workspacePath.orEmpty())
             // 定时任务在既有会话里跑时，以会话自己的工作区为准（与主界面同一口径）。
@@ -97,24 +108,25 @@ class ScheduledTaskExecutionService : Service() {
                     skipTitleUpdate = true,
                 )
             ).collect { event ->
+                terminal.accept(event)
                 when (event) {
                     is AgentEvent.Failed -> FileLogger.w(TAG, "自动化任务执行失败: $taskName - ${event.error}")
                     else -> Unit
                 }
             }
-            true
+        } catch (cancelled: CancellationException) {
+            terminal.failed()
+            throw cancelled
         } catch (e: Exception) {
+            terminal.failed()
             FileLogger.e(TAG, "自动化任务服务执行异常: $taskName", e)
-            false
+        } finally {
+            withContext(NonCancellable) {
+                runCatching {
+                    scheduledTaskDao.recordOutcome(taskId, terminal.outcome, System.currentTimeMillis())
+                }.onFailure { FileLogger.w(TAG, "回写自动化任务结果失败: $taskName", it) }
+            }
         }
-        runCatching {
-            scheduledTaskDao.recordOutcome(
-                taskId,
-                if (succeeded) ScheduledTaskOutcome.COMPLETED else ScheduledTaskOutcome.FAILED,
-                System.currentTimeMillis(),
-            )
-        }.onFailure { FileLogger.w(TAG, "回写自动化任务结果失败: $taskName", it) }
-        stopSelf()
     }
 
     override fun onDestroy() {

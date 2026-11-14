@@ -104,7 +104,7 @@ class DumateAccountProtocolTest {
                     else """{"choices":[{"message":{"role":"assistant","tool_calls":[{"id":"raw-call","type":"function","function":{"name":"fixture_tool","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}"""
                 gateway.enqueue(MockResponse().setHeader("Content-Type", if (stream) "text/event-stream" else "application/json").setBody(answer))
                 val json = """{"model":"fixture-directory-model","messages":[{"role":"user","content":"hi"}],"stream":$stream,"tools":[{"type":"function","function":{"name":"fixture_tool","parameters":{"type":"object"}}}],"tool_choice":"auto","parallel_tool_calls":true,"vendor_extension":{"raw":42}}"""
-                val client = OkHttpClient.Builder().addInterceptor(manager.interceptor()).build()
+                val client = OkHttpClient.Builder().connectionSpecs(listOf(ConnectionSpec.CLEARTEXT)).addInterceptor(manager.interceptor()).build()
                 val request = Request.Builder().url(manager.baseUrl(kind, "provider") + "/chat/completions")
                     .header("Authorization", "fixture-untrusted-override").header("Cookie", "fixture-untrusted-cookie")
                     .post(json.toRequestBody()).build()

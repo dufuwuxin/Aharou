@@ -35,6 +35,17 @@ class LocalFileAccessTest {
         return LocalFileAccess(pathMapper)
     }
 
+    @Test fun checkedDirectoryFailureIsNotAnEmptyDirectory() {
+        val access = newAccess()
+        access.writeFile("not-a-directory", "keep")
+        assertTrue(access.listFiles("not-a-directory").isEmpty())
+        assertThrows(java.io.IOException::class.java) { access.checked().listFiles("not-a-directory") }
+        assertThrows(java.io.IOException::class.java) { access.checked().forWorkspace("/bound").listFiles("missing") }
+        tmp.newFolder("empty")
+        assertTrue(access.checked().listFiles("empty").isEmpty())
+        assertEquals("keep", access.readFile("not-a-directory"))
+    }
+
     // ---------- readFile / writeFile ----------
 
     @Test

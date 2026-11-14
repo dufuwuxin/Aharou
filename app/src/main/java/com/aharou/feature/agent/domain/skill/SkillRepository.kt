@@ -24,6 +24,9 @@ class SkillRepository @Inject constructor(
     private val agents: com.aharou.feature.agent.domain.subagent.AgentDefinitionRepository
 ) {
     /** 全部技能（含来源作用域），未过滤禁用；同名按 内置 < 全局 < 项目 逐级覆盖。 */
+    fun isBuiltinName(name: String): Boolean = builtinSkillSource.listSkills().any { it.name.equals(name.trim(), true) }
+    private fun mayModify(name: String): Boolean = !isBuiltinName(name) || com.aharou.core.config.BuiltinSkillEditCapability.enabled.value
+
     fun listAllSkills(): List<SkillEntry> = mergeAll(
         visibleBuiltinSkills(),
         globalDirectorySkillSource.listSkills(),
@@ -131,24 +134,28 @@ class SkillRepository @Inject constructor(
      * 编辑时写回原目录里的原指令文件（可能叫 CLAUDE.md），改名只改 frontmatter 的 name、不动目录名——
      * 技能正文常按 `~/.aharou/skills/<目录>/run.py` 引用同目录脚本，跟着改名会把这些引用打断。
      */
-    fun save(form: SkillForm, scope: SkillScope, originalName: String? = null): SkillSaveError? = synchronized(SkillParser) {
-        if (scope == SkillScope.BUILTIN) return@synchronized SkillSaveError.READ_ONLY
+    fun save(form: SkillForm, scope: SkillScope, originalName: String? = null): SkillSaveError? = synchronized(com.aharou.core.config.BuiltinSkillEditCapability) { synchronized(SkillParser) save@ {
+        if (!mayModify(form.name) || originalName?.let { !mayModify(it) } == true) return@save SkillSaveError.READ_ONLY
+        if (scope == SkillScope.BUILTIN) {
+            if (!isBuiltinName(form.name) || originalName != null && !originalName.equals(form.name, true)) return@save SkillSaveError.READ_ONLY
+            return@save save(form, SkillScope.GLOBAL, originalName ?: form.name)
+        }
         val name = form.name.trim()
-        if (!isValidName(name)) return@synchronized SkillSaveError.INVALID_NAME
-        if (form.instructions.isBlank()) return@synchronized SkillSaveError.EMPTY_INSTRUCTIONS
+        if (!isValidName(name)) return@save SkillSaveError.INVALID_NAME
+        if (form.instructions.isBlank()) return@save SkillSaveError.EMPTY_INSTRUCTIONS
         val scopeSkills = entriesIn(scope)
         val keywordEnabled = form.keywordEnabled
         val keywords = form.keywords.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
-        if (!validKeywordPolicy(keywordEnabled, keywords)) return@synchronized SkillSaveError.EMPTY_KEYWORDS
+        if (!validKeywordPolicy(keywordEnabled, keywords)) return@save SkillSaveError.EMPTY_KEYWORDS
         if (keywordEnabled && agents.listAll().any { entry ->
             entry.definition.skills.any { it.equals(originalName ?: name, true) || it.equals(name, true) }
-        }) return@synchronized SkillSaveError.BOUND_KEYWORD_POLICY
+        }) return@save SkillSaveError.BOUND_KEYWORD_POLICY
         val keepingName = originalName != null && originalName.equals(name, ignoreCase = true)
         if (originalName != null && !keepingName && agents.listAll().any { entry ->
             entry.definition.skills.any { it.equals(originalName, ignoreCase = true) }
-        }) return@synchronized SkillSaveError.BOUND_RENAME
+        }) return@save SkillSaveError.BOUND_RENAME
         if (!keepingName && scopeSkills.any { it.name.equals(name, ignoreCase = true) }) {
-            return@synchronized SkillSaveError.NAME_CONFLICT
+            return@save SkillSaveError.NAME_CONFLICT
         }
 
         val existingDir = originalName?.let { old ->
@@ -165,7 +172,7 @@ class SkillRepository @Inject constructor(
         )
 
         val provider = fileAccess
-        return@synchronized try {
+        return@save try {
             val dir = existingDir?.takeIf { provider.isDirectory(it) } ?: "${skillsRoot(scope)}/$name"
             provider.mkdirs(dir)
             val target = instructionFile(provider, dir) ?: "${dir.trimEnd('/')}/$INSTRUCTION_FILE"
@@ -198,7 +205,7 @@ class SkillRepository @Inject constructor(
             FileLogger.e(TAG, "保存技能失败: $name", e)
             SkillSaveError.IO_FAILED
         }
-    }
+    } }
 
     /** 指定作用域的技能根目录（容器路径）。内置技能随 App 打包，没有可写目录。 */
     fun skillsRoot(scope: SkillScope): String = when (scope) {
@@ -216,10 +223,11 @@ class SkillRepository @Inject constructor(
         fallbackName: String,
         scope: SkillScope,
         overwrite: Boolean = false
-    ): SkillImportReport =
+    ): SkillImportReport = synchronized(com.aharou.core.config.BuiltinSkillEditCapability) {
         SkillImporter.importMarkdown(
-            fileAccess, skillsRoot(scope), existingNamesIn(scope), text, fallbackName, overwrite
+            guardedImportAccess(scope), skillsRoot(scope), existingNamesIn(scope), text, fallbackName, overwrite, ::mayModify
         )
+    }
 
     /** 从 zip 输入流导入技能（可含多个技能目录）到指定作用域。[overwrite] 同 [importMarkdown]。 */
     fun importZip(
@@ -227,16 +235,38 @@ class SkillRepository @Inject constructor(
         fallbackName: String,
         scope: SkillScope,
         overwrite: Boolean = false
-    ): SkillImportReport =
+    ): SkillImportReport = synchronized(com.aharou.core.config.BuiltinSkillEditCapability) {
         SkillImporter.importArchive(
-            fileAccess, skillsRoot(scope), existingNamesIn(scope), input, fallbackName, overwrite
+            guardedImportAccess(scope), skillsRoot(scope), existingNamesIn(scope), input, fallbackName, overwrite, ::mayModify
         )
+    }
 
     /**
      * 指定作用域里真实存在的技能。**必须按来源直查**：`listAllSkills()` 是合并视图，
      * 同名技能只留优先级最高的那一条，用它按作用域找实体时低优先级那侧会被整条藏掉——
      * 结果就是「目标已有同名」判不出来，删除 / 导出也定位不到目录。
      */
+    private fun guardedImportAccess(scope: SkillScope): FileAccessProvider = object : FileAccessProvider by fileAccess {
+        private fun checkWrite(path: String, content: String?) {
+            val root = skillsRoot(scope).trimEnd('/') + "/"
+            val name = path.removePrefix(root).substringBefore('/')
+            check(mayModify(name)) { "Builtin skill editing is disabled" }
+            entriesIn(scope).filter { it.dirPath != null && path.startsWith(it.dirPath!!.trimEnd('/') + "/") }
+                .forEach { check(mayModify(it.name)) { "Builtin skill editing is disabled" } }
+            if (content != null && path.substringAfterLast('/') in setOf("SKILL.md", "CLAUDE.md")) {
+                check(mayModify(SkillParser.parseText(content, name).name)) { "Builtin skill editing is disabled" }
+            }
+        }
+        override fun writeFile(path: String, content: String, overwrite: Boolean, encoding: java.nio.charset.Charset) {
+            checkWrite(path, content)
+            fileAccess.writeFile(path, content, overwrite, encoding)
+        }
+        override fun writeBytes(path: String, bytes: ByteArray, overwrite: Boolean) {
+            checkWrite(path, bytes.toString(Charsets.UTF_8))
+            fileAccess.writeBytes(path, bytes, overwrite)
+        }
+    }
+
     private fun entriesIn(scope: SkillScope): List<Skill> = when (scope) {
         SkillScope.BUILTIN -> visibleBuiltinSkills()
         SkillScope.GLOBAL -> globalDirectorySkillSource.listSkills()
@@ -295,6 +325,8 @@ class SkillRepository @Inject constructor(
 
     /** APK 资产不可写；内置技能保存删除记录，其余技能删除目录。 */
     fun deleteSkill(name: String, scope: SkillScope): Boolean {
+        return synchronized(com.aharou.core.config.BuiltinSkillEditCapability) {
+        if (scope != SkillScope.BUILTIN && !mayModify(name)) return false
         if (scope == SkillScope.BUILTIN) return synchronized(this) {
             if (builtinSkillSource.listSkills().none { it.name.equals(name, true) }) return@synchronized false
             val deleted = deletedBuiltinNames() + name.lowercase()
@@ -305,6 +337,7 @@ class SkillRepository @Inject constructor(
         val dirPath = entriesIn(scope).firstOrNull { it.name.equals(name, ignoreCase = true) }
             ?.dirPath ?: return false
         return safeDeleteSkillDir(fileAccess, dirPath)
+        }
     }
 
     /**
@@ -315,6 +348,8 @@ class SkillRepository @Inject constructor(
      * 任何一道静默失败都会变成“什么都没发生”，而且目录名会被换成技能名——技能名与目录名不一致时就搬歪了。
      */
     fun moveSkill(name: String, fromScope: SkillScope, toScope: SkillScope): SkillMoveResult {
+        return synchronized(com.aharou.core.config.BuiltinSkillEditCapability) {
+        if (!mayModify(name)) return SkillMoveResult.READ_ONLY
         if (fromScope == SkillScope.BUILTIN || toScope == SkillScope.BUILTIN) return SkillMoveResult.READ_ONLY
         if (fromScope == toScope) return SkillMoveResult.FAILED
         if (name.lowercase() in existingNamesIn(toScope)) return SkillMoveResult.NAME_CONFLICT
@@ -334,6 +369,7 @@ class SkillRepository @Inject constructor(
         } catch (e: Exception) {
             FileLogger.e(TAG, "移动技能失败：$name ($source -> $target)", e)
             SkillMoveResult.FAILED
+        }
         }
     }
 

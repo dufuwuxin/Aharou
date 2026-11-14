@@ -859,11 +859,16 @@ class AIAgentViewModel @Inject constructor(
         fileMentionController.dismiss()  // 切工作区：@ 候选菜单先收起（清单按工作区惰性失效）
     }
 
-    /**
-     * 当前会话绑定的工作区路径；会话没绑定（老会话）或还没选会话时回退当前选中的工作区。
-     *
-     * 界面拿它当 projectRoot：文件落哪个工作区跟会话走，不跟界面上选中的工作区走。
-     */
+    val sessionWorkspaces get() = workspaceRepository.workspaces
+    suspend fun bindSessionWorkspace(sessionId: String, path: String) {
+        check(workspaceRepository.workspaces.value.any { it.path == path && it.available }) { "WORKSPACE_UNAVAILABLE" }
+        sessionUseCase.bindWorkspace(sessionId, path) {
+            _currentSessionId.value == sessionId && sessionJobs[sessionId]?.isActive != true &&
+                sessionId !in _runningCommandSessions.value && sessionId !in _activeAgentSessions.value
+        }
+        fileMentionController.dismiss()
+    }
+
     val currentSessionWorkspace: StateFlow<String> = combine(
         _currentSessionId.flatMapLatest { id ->
             if (id == null) flowOf("")
@@ -882,10 +887,7 @@ class AIAgentViewModel @Inject constructor(
         }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
-    /**
-     * 会话按工作区分组（文件夹 = 工作区 = 仓库）。侧边栏要看其他文件夹里有什么，
-     * 而 [sessions] 只含当前工作区，所以这里单独走一次全量查询。
-     */
+    /** Sidebar groups root sessions without mixing workspace lists. */
     val sessionsByWorkspace: StateFlow<Map<String, List<ChatSession>>> = chatSessionDao
         .getAllRootSessions()
         .map { list -> list.map { it.toDomain() }.groupBy { it.workspacePath } }
@@ -1990,6 +1992,7 @@ class AIAgentViewModel @Inject constructor(
         var effectiveModelRequest = modelRequest
         try {
             while (true) {
+                sessionUseCase.awaitWorkspaceBinding(sessionId)
                 stoppingSessions[sessionId]?.await()
                 val previousJob = sessionJobs[sessionId]
                 if (previousJob == null || previousJob === currentJob || previousJob.isCompleted) break
@@ -2038,7 +2041,7 @@ class AIAgentViewModel @Inject constructor(
                 }
             }
             // projectRoot 空时回落会话自己的工作区：否则中途切区会让本轮后续工具漂到新目录。
-            val turnProjectRoot = projectRoot.ifBlank { sessionUseCase.getSessionById(sessionId)?.workspacePath.orEmpty() }
+            val turnProjectRoot = sessionUseCase.getSessionById(sessionId)?.workspacePath?.takeIf { it.isNotBlank() } ?: projectRoot
             deliverInboxMessages(sessionId, turnProjectRoot)
             agentTurnRunner.run(
                 AgentTurnRequest(

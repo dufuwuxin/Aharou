@@ -34,6 +34,10 @@ class LocalFileAccess @Inject constructor(
 
     /** 会话绑定的工作区路径；null = 跟随全局当前工作区。 */
     private var boundWorkspace: String? = null
+    private var strictListings = false
+    override fun checked(): FileAccessProvider = if (strictListings) this else LocalFileAccess(pathMapper).also {
+        it.boundWorkspace = boundWorkspace; it.strictListings = true
+    }
 
     /**
      * @param followFinalLink 末级是软链时是否解析到目标。默认跟随（读写内容）；
@@ -69,7 +73,7 @@ class LocalFileAccess @Inject constructor(
 
     override fun forWorkspace(workspacePath: String): FileAccessProvider {
         if (workspacePath.isBlank()) return this
-        return LocalFileAccess(pathMapper).also { it.boundWorkspace = workspacePath }
+        return LocalFileAccess(pathMapper).also { it.boundWorkspace = workspacePath; it.strictListings = strictListings }
     }
 
     override fun readFile(path: String): String {
@@ -119,7 +123,8 @@ class LocalFileAccess @Inject constructor(
 
     override fun listFiles(path: String): List<FileEntry> {
         val dir = resolve(path)
-        return dir.listFiles().orEmpty().map { child ->
+        val entries = dir.listFiles() ?: if (strictListings) throw java.io.IOException("Cannot list directory: $path") else emptyArray()
+        return entries.map { child ->
             FileEntry(
                 name = child.name,
                 isDirectory = child.isDirectory,

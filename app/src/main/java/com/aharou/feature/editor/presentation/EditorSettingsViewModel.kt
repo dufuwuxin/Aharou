@@ -50,11 +50,14 @@ class EditorSettingsViewModel @Inject constructor(
     /** 安装语言服务器；安装中忽略重复点击。 */
     fun install(extension: LanguageExtension) {
         if (_installing.value != null) return
+        _installing.value = extension
         viewModelScope.launch {
-            _installing.value = extension
-            val result = languageServerInstaller.install(extension)
-            _extensionStatus.value = _extensionStatus.value + (extension to result.status)
-            _installing.value = null
+            try {
+                val result = languageServerInstaller.install(extension)
+                _extensionStatus.value = _extensionStatus.value + (extension to result.status)
+            } finally {
+                _installing.value = null
+            }
         }
     }
 

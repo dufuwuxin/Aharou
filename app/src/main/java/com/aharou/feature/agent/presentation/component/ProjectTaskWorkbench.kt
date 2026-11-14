@@ -160,8 +160,12 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
         }
         if (tasks.isEmpty() && !planning) Text(stringResource(R.string.project_created_next_step),
             style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag("project_empty_next_step"))
-        state.error?.let { Text(stringResource(R.string.project_task_error, projectTaskExecutionReasonLabel(it)), color = MaterialTheme.colorScheme.error) }
+        state.error?.let { Text(stringResource(R.string.project_task_error, if (it == "BRANCH_EXTERNAL_DEPENDENCY") stringResource(R.string.project_task_delete_dependency) else projectTaskExecutionReasonLabel(it)), color = MaterialTheme.colorScheme.error) }
         tasks.firstOrNull { it.id == expandedId }?.let { task ->
+            TextButton(enabled = !state.busy && !planning, onClick = { deletingBranchId = task.id },
+                modifier = Modifier.testTag("project_task_delete_${task.id}")) {
+                Text(stringResource(R.string.project_task_delete))
+            }
             TextButton(onClick = { readerSession = selectedRecords[task.id]; readerId = task.id },
                 modifier = Modifier.fillMaxWidth().testTag("task_open_reader")) {
                 Text(stringResource(R.string.project_process_read_full))
@@ -282,19 +286,19 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
             }
         }
     }
-    tasks.singleOrNull { it.id == deletingBranchId && it.isRequirementBranch }?.let { branch ->
+    tasks.singleOrNull { it.id == deletingBranchId }?.let { branch ->
         AlertDialog(onDismissRequest = { deletingBranchId = null },
-            title = { Text(stringResource(R.string.project_branch_delete)) },
+            title = { Text(stringResource(R.string.project_task_delete)) },
             text = { Text(stringResource(R.string.project_branch_delete_confirm, branch.title,
                 ProjectTaskGraph.subtree(branch.id, tasks).size - 1)) },
             confirmButton = { TextButton(enabled = !state.busy && !planning, modifier = Modifier.testTag("project_branch_delete_confirm"),
                 onClick = {
                     val removedIds = ProjectTaskGraph.subtree(branch.id, tasks).map { it.id }.toSet()
-                    viewModel.deleteRequirementBranch(projectId, branch.id) {
-                        if (currentBranchId in removedIds) selectCurrentBranch(null)
-                    }
+                    val onDeleted = { if (currentBranchId in removedIds) selectCurrentBranch(null) }
+                    if (branch.isRequirementBranch) viewModel.deleteRequirementBranch(projectId, branch.id, onDeleted)
+                    else viewModel.deleteTask(projectId, branch.id, onDeleted)
                     deletingBranchId = null
-                }) { Text(stringResource(R.string.project_branch_delete)) } },
+                }) { Text(stringResource(R.string.project_task_delete)) } },
             dismissButton = { TextButton(onClick = { deletingBranchId = null }) { Text(stringResource(android.R.string.cancel)) } })
     }
     if (adding) ProjectTaskAddSheet(parentTitle = tasks.firstOrNull { it.id == addingParentId }?.title,

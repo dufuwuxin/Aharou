@@ -31,10 +31,10 @@ class TeamStageExecutor @Inject constructor(private val registry: TeamRunRegistr
     enum class Review { PASS, REJECT, INVALID }
 
     suspend fun run(team: AgentTeam, goal: String, enabled: List<AgentDefinition>, maxRunning: Int,
-        parent: String, exec: suspend (JsonArray) -> ToolResult): ToolResult {
+        parent: String, projectFiles: Set<String>? = null, exec: suspend (JsonArray) -> ToolResult): ToolResult {
         if (parent.isBlank()) return ToolResult.Error("缺少会话上下文", "NO_SESSION")
         TeamFlowGraph.validate(team)?.let { return ToolResult.Error(it, "INVALID_TEAM_FLOW") }
-        val plan = TeamRunner.build(team, goal, enabled, maxRunning)
+        val plan = TeamRunner.build(team, goal, enabled, maxRunning, projectFiles)
         if (plan is TeamRunner.Plan.Rejected) return ToolResult.Error(plan.message, plan.code)
         plan as TeamRunner.Plan.Ready
         if (team.stages.isEmpty() || team.stages.any { it.tasks.isEmpty() }) {
@@ -45,7 +45,7 @@ class TeamStageExecutor @Inject constructor(private val registry: TeamRunRegistr
                 return ToolResult.Error("驳回目标必须是唯一的早先阶段：${stage.title}", "INVALID_REJECT_TARGET")
             }
         }
-        if (team.routes.isNotEmpty()) return runGraph(team, plan, parent, maxRunning, exec)
+        if (team.routes.isNotEmpty()) return runGraph(team, plan, parent, maxRunning, projectFiles, exec)
         val run = registry.begin(parent, plan.pipeline)
         val outputs = linkedMapOf<String, String>()
         val history = mutableListOf<JsonObject>()
@@ -56,9 +56,15 @@ class TeamStageExecutor @Inject constructor(private val registry: TeamRunRegistr
             put("state", state); put("runId", run); put("reason", reason); put("reworkRounds", rounds)
             put("outputs", buildJsonObject { outputs.forEach { (id, text) -> put(id, text) } })
             put("history", JsonArray(history))
+            put("skippedSteps", history.count { it["state"]?.jsonPrimitive?.content == "skipped" })
         })
         while (stageIndex < team.stages.size) {
             val stage = team.stages[stageIndex]
+            if (TeamStageCondition.evaluate(stage.condition, projectFiles) == TeamStageCondition.Result.SKIP) {
+                history += buildJsonObject { put("stage", stage.title); put("state", "skipped"); put("condition", stage.condition) }
+                stageIndex++
+                continue
+            }
             val members = plan.pipeline.map { it.jsonObject }.filter { it.getValue("id").jsonPrimitive.content.startsWith("s${stageIndex + 1}-") }
             val ids = members.map { it.getValue("id").jsonPrimitive.content }.toSet()
             val handoff = buildString {
@@ -116,7 +122,7 @@ class TeamStageExecutor @Inject constructor(private val registry: TeamRunRegistr
 
     /** Routes alter actual scheduling; interfaces remain prompt-only collaboration hints. */
     private suspend fun runGraph(team: AgentTeam, plan: TeamRunner.Plan.Ready, parent: String,
-        maxRunning: Int, exec: suspend (JsonArray) -> ToolResult): ToolResult {
+        maxRunning: Int, projectFiles: Set<String>?, exec: suspend (JsonArray) -> ToolResult): ToolResult {
         val batchSize = maxRunning.coerceAtLeast(1)
         val taskByNode = linkedMapOf<TeamFlowNode, JsonObject>()
         val pipelineById = plan.pipeline.map { it.jsonObject }.associateBy { it.getValue("id").jsonPrimitive.content }
@@ -137,20 +143,33 @@ class TeamStageExecutor @Inject constructor(private val registry: TeamRunRegistr
             put("routing", "routes")
             put("unselected", JsonArray(taskByNode.keys.filter { it !in scheduled }.map { JsonPrimitive(id(it)) }))
             put("reviewGates", buildJsonObject { taskByNode.keys.filter { TeamFlowGraph.isReview(team, it) }.forEach {
-                put(id(it), if (it in completed && review(outputs[it].orEmpty()) == Review.PASS) "PASSED" else "PENDING")
+                put(id(it), if (it in completed && it !in outputs) "SKIPPED" else if (it in completed && review(outputs[it].orEmpty()) == Review.PASS) "PASSED" else "PENDING")
             } })
             put("outputs", buildJsonObject { outputs.forEach { (node, text) -> put(id(node), text) } })
             put("history", JsonArray(history))
+            put("skippedSteps", history.count { it["state"]?.jsonPrimitive?.content == "skipped" })
         })
         while (!completed.containsAll(scheduled)) {
-            val ready = TeamFlowGraph.selectedReady(team, scheduled, completed, selections).take(batchSize)
+            val candidates = TeamFlowGraph.selectedReady(team, scheduled, completed, selections)
+            val skipped = candidates.filter { node -> TeamStageCondition.evaluate(
+                team.stages.first { it.id == node.stageId }.condition, projectFiles) == TeamStageCondition.Result.SKIP }
+            if (skipped.isNotEmpty()) {
+                skipped.forEach { node ->
+                    completed += node
+                    val next = TeamFlowGraph.forward(team).filter { it.from == node }.map { it.to }.toSet()
+                    selections[node] = next; scheduled += next
+                    history += buildJsonObject { put("node", "${node.stageId}:${node.taskId}"); put("state", "skipped") }
+                }
+                continue
+            }
+            val ready = candidates.take(batchSize)
             if (ready.isEmpty()) return finish("blocked", "No eligible route target; predecessors are missing")
             val batch = JsonArray(ready.map { node ->
                 val original = taskByNode.getValue(node)
                 val handoff = buildString {
                     append("## Necessary predecessor evidence (original text)\n")
                     TeamFlowGraph.predecessors(team, node).forEach { upstream ->
-                        append("### ").append(id(upstream)).append('\n').append(outputs.getValue(upstream)).append("\n\n")
+                        append("### ").append(id(upstream)).append('\n').append(outputs[upstream] ?: "Stage skipped by workspace condition; no delivery exists").append("\n\n")
                     }
                     feedback[node]?.let { append("## Rework reason and original evidence\n").append(it).append('\n') }
                     val allowed = TeamFlowGraph.forward(team).filter { it.from == node }.map { it.to }

@@ -16,15 +16,21 @@ internal fun teamCapabilityRequest(context: Context, action: String, address: St
         TeamEditCapability.use(address, workspace) { path ->
             val registry = ConfigRegistry.isolated().also { fields.forWorkspace(requireNotNull(workspace)).registerInto(it) }
             if (path.isEmpty()) {
-                require(action == "get" || action == "list") { "Choose a returned field address first" }
+                require(action in setOf("get", "list", "schema")) { "Choose a returned field address first" }
                 ToolResult.Success(buildJsonObject {
                     put("expires", "one hour or immediately when disabled; app restart revokes")
-                    put("usage", "get a field address for revision; set with value={expectedRevision,value}. Only routes and communication are allowed.")
+                    put("usage", "get a field address for revision; set with value={expectedRevision,value}. Only routes, stage conditions and communication are writable. Global changes affect every project using that team.")
                     put("fields", buildJsonArray {
                         listOf("teams", "team.stages").flatMap { base ->
                             registry.collection(base)?.let { collection -> collection.childIds().flatMap { collection.fields(it).map { field -> field.path } } }.orEmpty()
                         }.filter(TeamEditCapability::allowed).forEach { field ->
-                            add(TeamEditCapability.childAddress(address, field))
+                            val definition = registry.resolveField(field) ?: error("Unknown field")
+                            add(buildJsonObject {
+                                put("address", TeamEditCapability.childAddress(address, field))
+                                put("field", field); put("type", definition.valueSchema.helpDescription)
+                                put("access", definition.access.name); put("description", definition.description)
+                                put("value", Json.parseToJsonElement(definition.read().jsonString()))
+                            })
                         }
                     })
                 })
@@ -33,8 +39,8 @@ internal fun teamCapabilityRequest(context: Context, action: String, address: St
                 val old = field.read()
                 val revision = TeamEditCapability.fingerprint(old.jsonString())
                 when (action) {
-                    "get" -> ToolResult.Success(buildJsonObject {
-                        put("field", path); put("revision", revision); put("value", Json.parseToJsonElement(old.jsonString()))
+                    "get", "schema" -> ToolResult.Success(buildJsonObject {
+                        put("field", path); put("type", field.valueSchema.helpDescription); put("description", field.description); put("access", field.access.name); put("revision", revision); put("value", Json.parseToJsonElement(old.jsonString()))
                     })
                     "set" -> {
                         require(field.access == ConfigAccess.READWRITE)

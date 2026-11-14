@@ -64,7 +64,9 @@ class WorkspaceRepository @Inject constructor(
     private val pathHomeResolver: PathHomeResolver,
     private val sessionUseCase: SessionUseCase,
     private val generalSettingsRepository: GeneralSettingsRepository,
-    private val profileResolver: com.aharou.feature.agent.domain.container.ContainerProfileResolver
+    private val profileResolver: com.aharou.feature.agent.domain.container.ContainerProfileResolver,
+    private val modelChains: com.aharou.feature.settings.data.repository.WorkspaceModelChainRepository =
+        com.aharou.feature.settings.data.repository.WorkspaceModelChainRepository(context)
 ) {
     /**
      * 外部工作区记录的读改写互斥。
@@ -695,7 +697,19 @@ class WorkspaceRepository @Inject constructor(
 
         // 目录已改名，会话归属必须跟着走；迁移失败就把目录改回去，不留半途状态。
         if (newPath != target.path) {
-            val migrated = runCatching { sessionUseCase.updateSessionsWorkspacePath(target.path, newPath) }
+            val migrated = runCatching {
+                val count = sessionUseCase.updateSessionsWorkspacePath(target.path, newPath)
+                check(count >= 0) { "Session path migration failed" }
+                try {
+                    modelChains.move(target.path, newPath)
+                } catch (failure: Exception) {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                        sessionUseCase.updateSessionsWorkspacePath(newPath, target.path)
+                    }
+                    throw failure
+                }
+                count
+            }
                 .getOrElse {
                     FileLogger.e(TAG, "重命名工作区失败：会话路径迁移异常", it)
                     -1

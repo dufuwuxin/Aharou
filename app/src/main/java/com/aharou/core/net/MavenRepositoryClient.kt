@@ -7,6 +7,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.Response
+import java.io.IOException
 import java.io.File
 import java.net.URI
 import java.security.MessageDigest
@@ -68,7 +70,7 @@ class MavenRepositoryClient @Inject constructor(
                 .header("User-Agent", "aharou-dependency-checker")
                 .get()
                 .build()
-            client.newCall(request).execute().use { response ->
+            executeSafeMavenRequest(client, request).use { response ->
                 when {
                     response.code == 404 -> MetadataResult.NotFound(base)
 
@@ -120,10 +122,32 @@ class MavenRepositoryClient @Inject constructor(
 
         val client: OkHttpClient by lazy {
             OkHttpClient.Builder()
+                .followRedirects(false)
+                .followSslRedirects(false)
                 .connectTimeout(8, TimeUnit.SECONDS)
                 .readTimeout(15, TimeUnit.SECONDS)
                 .proxyAuthenticator(AppProxy.okHttpAuthenticator)
                 .build()
         }
     }
+}
+
+/** 自动跳转必须关闭，否则第二跳会先连接、后校验。 */
+internal fun executeSafeMavenRequest(client: OkHttpClient, initial: Request): Response {
+    require(!client.followRedirects && !client.followSslRedirects)
+    var request = initial
+    for (hop in 0..10) {
+        if (UrlSafetyPolicy.isBlockedHost(request.url.host)) {
+            throw IOException("拒绝访问内网/本机仓库地址：${request.url.host}")
+        }
+        val response = client.newCall(request).execute()
+        if (response.code !in setOf(300, 301, 302, 303, 307, 308)) return response
+        val next = response.use {
+            if (hop == 10) throw IOException("仓库重定向次数过多")
+            val location = it.header("Location") ?: throw IOException("仓库重定向缺少 Location")
+            request.url.resolve(location) ?: throw IOException("仓库重定向地址无效")
+        }
+        request = request.newBuilder().url(next).build()
+    }
+    throw IOException("仓库重定向次数过多")
 }

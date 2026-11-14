@@ -38,6 +38,10 @@ class WorkflowRunner @Inject constructor(
     private val maxRunningSource: MaxRunningSource
 ) {
 
+    fun forWorkspace(workspace: String): WorkflowRunner = WorkflowRunner(
+        workflowRepository.forWorkspace(workspace), teamRepository.forWorkspace(workspace),
+        agentDefinitionRepository, maxRunningSource)
+
     /** 列工作流清单；给了 [workflow] 就展开它的团队链。 */
     fun list(target: String): ToolResult {
         val entries = try {
@@ -134,6 +138,7 @@ class WorkflowRunner @Inject constructor(
             return ToolResult.Error("读取团队预设失败：${e.message ?: "未知错误"}", "TEAM_LIST_FAILED")
         }
 
+        val projectFiles = teamRepository.projectFiles()
         val ledger = WorkflowOrchestrator.RejectLedger(workflow.maxRejectRounds)
         val report = mutableListOf<String>()
         var brief = ""
@@ -158,13 +163,24 @@ class WorkflowRunner @Inject constructor(
                 goal = goal,
                 upstreamBrief = brief,
                 enabled = enabled,
-                maxRunning = maxRunningSource.maxRunning()
+                maxRunning = maxRunningSource.maxRunning(),
+                projectFiles = projectFiles
             )
             val pipeline = when (layerPlan) {
                 is TeamRunner.Plan.Rejected -> return ToolResult.Error(layerPlan.message, layerPlan.code)
                 is TeamRunner.Plan.Ready -> layerPlan.pipeline
             }
 
+            val skipped = team.stages.filter { TeamStageCondition.evaluate(it.condition, projectFiles) == TeamStageCondition.Result.SKIP }
+            if (skipped.isNotEmpty()) {
+                val notice = "Layer $layer skipped stages: ${skipped.joinToString { it.title }}; no delivery was produced by these stages."
+                report += notice
+                brief = mergeBrief(brief, notice)
+            }
+            if (pipeline.isEmpty()) {
+                layerIndex++
+                continue
+            }
             FileLogger.i(TAG, "工作流「${workflow.name}」第 $layer 层「${team.name}」开始执行")
             val executed = exec(pipeline)
             if (executed is ToolResult.Error) {
@@ -212,7 +228,7 @@ class WorkflowRunner @Inject constructor(
                         val upstreamTeam = teams[upstreamRef.teamName.lowercase()]?.team
                         val targetExpert = verdict.targetExpert
                             ?: upstreamRef.lead
-                            ?: upstreamTeam?.stages?.firstOrNull()?.tasks?.firstOrNull()?.agent
+                            ?: upstreamTeam?.stages?.firstOrNull { TeamStageCondition.evaluate(it.condition, projectFiles) == TeamStageCondition.Result.RUN }?.tasks?.firstOrNull()?.agent
                         if (targetExpert.isNullOrBlank()) {
                             report += "  └ 驳回没有指名到具体专家，无法返工：已升级裁决"
                             return finish(
@@ -226,6 +242,13 @@ class WorkflowRunner @Inject constructor(
                                     "团队首个任务也没用 agent 点名）。请在工作流的该层补 lead，或让协调者按 " +
                                     "'[[JUDGE]] REJECT | 团队·专家 | 交付 | 理由' 指名。"
                             )
+                        }
+                        val targetStages = upstreamTeam?.stages.orEmpty().filter { stage ->
+                            stage.tasks.any { it.agent.equals(targetExpert, ignoreCase = true) }
+                        }
+                        if (targetExpert != upstreamRef.lead && targetStages.isNotEmpty() &&
+                            targetStages.all { TeamStageCondition.evaluate(it.condition, projectFiles) == TeamStageCondition.Result.SKIP }) {
+                            return ToolResult.Error("Cannot rework an expert whose stages were skipped", "WORKFLOW_REWORK_TARGET_SKIPPED")
                         }
                         val downstreamExpert = judgeName(ref, team)
                         val key = WorkflowOrchestrator.rejectKey(
@@ -368,6 +391,7 @@ class WorkflowRunner @Inject constructor(
                 put("layers", workflow.layerCount)
                 put("completedLayers", completedLayers)
                 put("report", report.joinToString("\n"))
+                put("skippedLayers", report.count { it.contains(" skipped stages: ") })
                 put("message", body)
                 if (brief.isNotBlank()) put("brief", brief)
             }
