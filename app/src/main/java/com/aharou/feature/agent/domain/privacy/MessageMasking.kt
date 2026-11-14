@@ -14,8 +14,23 @@ import kotlinx.serialization.json.JsonPrimitive
  * 只覆盖会进入模型上下文的文本（用户消息、工具结果、助手历史正文与思考、历史工具参数）。
  * 图片/附件不动——脱敏规则是文本正则，碰到 base64 只会白跑一遍。
  */
-fun List<AgentMessage>.maskedForOutbound(masker: OutboundMasker): List<AgentMessage> = map { msg ->
-    when (msg) {
+data class MaskedOutboundRequest(val systemPrompt: String, val messages: List<AgentMessage>)
+
+fun maskedOutboundRequest(systemPrompt: String, messages: List<AgentMessage>, masker: OutboundMasker?): MaskedOutboundRequest {
+    if (masker == null) return MaskedOutboundRequest(systemPrompt, messages)
+    masker.mask(systemPrompt)
+    val masked = messages.maskedForOutbound(masker)
+    return MaskedOutboundRequest(masker.mask(systemPrompt), masked)
+}
+
+fun List<AgentMessage>.maskedForOutbound(masker: OutboundMasker): List<AgentMessage> {
+    forEach { it.maskedForOutbound(masker) }
+    return map { it.maskedForOutbound(masker) }
+}
+
+private fun AgentMessage.maskedForOutbound(masker: OutboundMasker): AgentMessage {
+    val msg = this
+    return when (msg) {
         is AgentMessage.UserMessage -> msg.copy(content = masker.mask(msg.content))
         is AgentMessage.ToolResultMessage -> msg.copy(
             result = masker.mask(msg.result),
@@ -23,7 +38,7 @@ fun List<AgentMessage>.maskedForOutbound(masker: OutboundMasker): List<AgentMess
         )
         is AgentMessage.AssistantMessage -> msg.copy(
             content = masker.mask(msg.content),
-            reasoning = masker.mask(msg.reasoning),
+            reasoning = if (msg.signature.isNotBlank() || msg.thinkingBlocksJson.isNotBlank()) msg.reasoning else masker.mask(msg.reasoning),
             toolCalls = msg.toolCalls.map { it.copy(arguments = transformArguments(it.arguments, masker::mask)) }
         )
     }
@@ -36,8 +51,8 @@ fun List<AgentMessage>.maskedForOutbound(masker: OutboundMasker): List<AgentMess
  * 占位符可能被切在两个 chunk 之间，逐片替换永远匹配不上。
  */
 fun AIResponse.restoredFromOutbound(masker: OutboundMasker): AIResponse = copy(
-    content = masker.restore(content),
-    toolCalls = toolCalls.map { it.copy(arguments = transformArguments(it.arguments, masker::restore)) }
+    content = masker.restoreComplete(content),
+    toolCalls = toolCalls.map { it.copy(arguments = transformArguments(it.arguments, masker::restoreComplete)) }
 )
 
 /** 工具参数的字符串值递归替换（对象/数组都进去，非字符串原样保留）。 */

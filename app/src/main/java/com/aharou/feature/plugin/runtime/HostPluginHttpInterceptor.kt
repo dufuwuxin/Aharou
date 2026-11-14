@@ -21,6 +21,9 @@ class HostPluginHttpInterceptor(
 ) : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
         val original = chain.request()
+        val path = original.url.encodedPath.trimEnd('/').lowercase()
+        if (listOf("/login", "/signin", "/sign-in", "/oauth/token", "/oauth2/token", "/oauth/authorize",
+                "/oauth2/authorize", "/auth/token", "/auth/refresh").any(path::endsWith)) return chain.proceed(original)
         val body = original.body ?: return chain.proceed(original)
         if (body.isDuplex() || body.isOneShot() || body.contentType()?.subtype?.contains("json") != true) {
             return chain.proceed(original)

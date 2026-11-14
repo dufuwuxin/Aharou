@@ -3113,6 +3113,9 @@
     <string name="connector_client_id_required">请填写 Client ID</string>
     <string name="connector_client_submit">开始授权</string>
     <string name="vault_intro">密钥加密保存在本机；模型只能看到占位符，由配置了它的连接器使用。</string>
+    <string name="privacy_outbound_enable">发送给模型前脱敏</string>
+    <string name="privacy_outbound_preview">出站替换预览（本地演示，未发送）</string>
+    <string name="privacy_outbound_scope">在本机把系统提示和消息中的敏感文本替换为稳定占位符，回复及工具参数再本地还原。默认关闭；不修改认证头、登录凭据或原文件。长密钥可能节省 token，短文本可能增加；图片和签名内容不作文本替换。</string>
     <string name="vault_list_header">已保存的凭据</string>
     <string name="vault_empty">还没有凭据</string>
     <string name="vault_add">添加凭据</string>

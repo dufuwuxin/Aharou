@@ -19,10 +19,10 @@ import java.util.concurrent.atomic.AtomicReference
  * 凭据时会到几百毫秒级（实测 1MB 含 1.2 万条约 0.6s）。
  *
  * 接线约定（调用方必读）：
- * - 一次会话共用一个实例，换实例等于丢失映射，上一轮的历史就再也回填不回来；
+ * - 同一出站请求及其回填共用一个实例；映射只用于该请求，不共享给其它会话；
  * - [mask] 在请求体序列化之前调，正文、工具调用参数、工具结果都要过一遍；
- * - [restore] 对正文增量与工具调用参数分别调，流结束时调一次 [flush]——流式会被切在
- *   占位符中间，[restore] 会把可能的半截占位符掐住等下一段，尾巴由 [flush] 吐出。
+ * - [restore] 仅拼接同一条文本流，结束时调 [flush]；完整正文和工具参数用
+ *   [restoreComplete]，避免它们与被切开的流式占位符串在一起。
  */
 class OutboundMasker private constructor(private val rules: List<MaskingRule>) {
 
@@ -38,19 +38,45 @@ class OutboundMasker private constructor(private val rules: List<MaskingRule>) {
             if (!rule.enabled) continue
             out = rule.regex.replace(out) { match -> replaceMatch(rule, match) }
         }
-        return out
+        return maskKnown(out)
+    }
+
+    private fun maskKnown(text: String): String {
+        val snapshot = state.get()
+        val known = snapshot.knownValuesByPrefix
+        if (known.isEmpty()) return text
+        fun replace(part: String) = buildString {
+            var at = 0
+            while (at < part.length) {
+                if (at + 8 > part.length) { append(part.substring(at)); break }
+                val match = known[part.substring(at, at + 8)]?.firstOrNull { part.startsWith(it.first, at) }
+                if (match == null) append(part[at++])
+                else { append(PREFIX + match.second + SUFFIX); at += match.first.length }
+            }
+        }
+        return buildString {
+            var from = 0
+            PLACEHOLDER.findAll(text).forEach { placeholder ->
+                append(replace(text.substring(from, placeholder.range.first)))
+                append(placeholder.value)
+                from = placeholder.range.last + 1
+            }
+            append(replace(text.substring(from)))
+        }
+    }
+
+    fun restoreComplete(text: String): String {
+        val snapshot = state.get()
+        return PLACEHOLDER.replace(text) { match ->
+            snapshot.valueOf(match.groupValues[1].lowercase()) ?: match.value
+        }
     }
 
     fun restore(text: String): String {
         while (true) {
             val carried = pending.get()
             if (carried.isEmpty() && text.isEmpty()) return text
-            val snapshot = state.get()
-            // id 全小写，但模型偶尔会把占位符写成大写，回填失败只会让用户看到占位符，
-            // 所以顺手按大小写不敏感匹配。
-            val replaced = PLACEHOLDER.replace(carried + text) { match ->
-                snapshot.valueOf(match.groupValues[1].lowercase()) ?: match.value
-            }
+            val replaced = restoreComplete(carried + text)
             val tailLength = partialTailLength(replaced)
             if (pending.compareAndSet(carried, replaced.takeLast(tailLength))) {
                 return replaced.dropLast(tailLength)
@@ -185,6 +211,10 @@ private class MaskState(
     private val idToValue: Map<String, String>,
 ) {
     val size: Int get() = idToValue.size
+    val knownValuesByPrefix: Map<String, List<Pair<String, String>>> by lazy(LazyThreadSafetyMode.PUBLICATION) {
+        valueToId.entries.filter { it.key.length >= 8 }.sortedByDescending { it.key.length }
+            .groupBy({ it.key.take(8) }, { it.key to it.value })
+    }
 
     fun idOf(value: String): String? = valueToId[value]
 

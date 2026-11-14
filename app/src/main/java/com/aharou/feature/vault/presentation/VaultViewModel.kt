@@ -4,6 +4,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.aharou.feature.vault.VaultReadOnlyException
 import com.aharou.feature.vault.VaultRepository
+import com.aharou.feature.settings.data.repository.GeneralSettingsRepository
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.stateIn
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -15,12 +19,25 @@ import javax.inject.Inject
 /** 凭据库页状态：只暴露名字列表，值与占位符解析都留在仓库侧。 */
 @HiltViewModel
 class VaultViewModel @Inject constructor(
-    private val repository: VaultRepository
+    private val repository: VaultRepository,
+    private val generalSettings: GeneralSettingsRepository,
 ) : ViewModel() {
 
     private val _names = MutableStateFlow<List<String>>(emptyList())
     val names: StateFlow<List<String>> = _names.asStateFlow()
     val privacyRedaction = repository.privacyRedaction
+    val outboundMasking = generalSettings.privacyMaskingEnabledFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+    private val _outboundError = MutableStateFlow(false)
+    val outboundError = _outboundError.asStateFlow()
+
+    fun setOutboundMasking(enabled: Boolean) = viewModelScope.launch(Dispatchers.IO) {
+        try {
+            generalSettings.setPrivacyMaskingEnabled(enabled)
+            _outboundError.value = false
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { _outboundError.value = true }
+    }
     private val _privacyError = MutableStateFlow(false)
     val privacyError = _privacyError.asStateFlow()
 
@@ -29,6 +46,7 @@ class VaultViewModel @Inject constructor(
     }
 
     fun previewRedaction(text: String): String = repository.previewRedaction(text)
+    fun previewOutboundMasking(text: String): String = com.aharou.core.privacy.OutboundMasker.create().mask(text)
 
     /** 写入被拒（凭据库解密失败进入只读保护）时置真，由界面提示用户先导出或重置。 */
     private val _writeBlocked = MutableStateFlow(false)

@@ -215,6 +215,74 @@ class StatefulAgentWorkflowTest {
     }
 
     @Test
+    fun privacyMaskingCoversTheActualSystemPromptBeforeProviderCall() = runTest {
+        prepare(flow { emit(AIStreamChunk.Final(AIResponse("done"))) })
+        coEvery { generalSettings.privacyMaskingEnabled() } returns true
+        every { prompts.build(any(), any()) } returns "native system password=AbCdEf987654321"
+        val sent = slot<String>()
+        every { provider.completeStream(capture(sent), any(), any(), any()) } returns flow {
+            emit(AIStreamChunk.Final(AIResponse("done")))
+        }
+        workflow.executeEvents("request", context, emptyList()).collect {
+            if (it is AgentEvent.AssistantText) it.persisted?.complete(Unit)
+        }
+        assertFalse("Raw system secrets must not reach the provider", sent.captured.contains("AbCdEf987654321"))
+        assertTrue(sent.captured.contains("{{SECRET_"))
+    }
+
+    @Test
+    fun privacyMaskingRestoresSplitProviderTextBeforePublishingIt() = runTest {
+        prepare(flow { emit(AIStreamChunk.Final(AIResponse("done"))) })
+        coEvery { generalSettings.privacyMaskingEnabled() } returns true
+        every { prompts.build(any(), any()) } returns "password=AbCdEf987654321"
+        every { provider.completeStream(any(), any(), any(), any()) } answers {
+            val token = firstArg<String>().substringAfter("password=").substringBefore('\n')
+            flow {
+                for (part in ("Echo " + token).chunked(2)) emit(AIStreamChunk.TextDelta(part))
+                emit(AIStreamChunk.Final(AIResponse("Echo " + token)))
+            }
+        }
+        val final = mutableListOf<String>()
+        val deltas = mutableListOf<String>()
+        workflow.executeEvents("request", context, emptyList()).collect {
+            if (it is AgentEvent.AssistantDelta) deltas += it.accumulated
+            if (it is AgentEvent.AssistantText) { final += it.content; it.persisted?.complete(Unit) }
+        }
+        assertTrue(final.toString(), final.any { it == "Echo AbCdEf987654321" })
+        assertTrue(deltas.toString(), deltas.any { it == "Echo AbCdEf987654321" })
+    }
+
+    @Test
+    fun privacyMaskingPreservesLiteralTailAfterIoFailure() = runTest {
+        prepare(flow { emit(AIStreamChunk.TextDelta("literal {{")); throw java.io.IOException("disconnected") })
+        coEvery { generalSettings.privacyMaskingEnabled() } returns true
+        val outputs = mutableListOf<String>()
+        workflow.executeEvents("request", context, emptyList()).collect {
+            if (it is AgentEvent.AssistantText) outputs += it.content
+        }
+        assertTrue(outputs.toString(), outputs.contains("literal {{"))
+        coVerify { persistence.persist("session", MessageRole.ASSISTANT, "literal {{", id = any(),
+            reasoning = "", signature = "", thinkingBlocksJson = "") }
+    }
+
+    @Test
+    fun privacyMaskingPreservesLiteralTailDuringCancellation() = runTest {
+        val emitted = CompletableDeferred<Unit>()
+        prepare(flow {
+            emit(AIStreamChunk.TextDelta("literal {{"))
+            emitted.complete(Unit)
+            awaitCancellation()
+        })
+        coEvery { generalSettings.privacyMaskingEnabled() } returns true
+        val job = launch { workflow.executeEvents("request", context, emptyList()).collect {} }
+        emitted.await()
+        job.cancelAndJoin()
+        assertTrue(job.isCancelled)
+        coVerify { persistence.persist("session", MessageRole.ASSISTANT, "literal {{", id = any(),
+            reasoning = "", signature = "", thinkingBlocksJson = "") }
+    }
+
+    @Test
     fun underMaxTheRealProviderReceivesTheSameNativeSystemPromptWithMiddlewareEnabled() = runTest {
         prepare(flow { emit(AIStreamChunk.Final(AIResponse("done"))) })
         coEvery { generalSettings.compactionThresholdPercent() } returns 90

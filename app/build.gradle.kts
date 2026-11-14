@@ -512,3 +512,41 @@ val syncPluginSdk = tasks.register<Sync>("syncPluginSdk") {
 }
 android.sourceSets.getByName("main").assets.srcDir(pluginSdkAssets)
 tasks.named("preBuild") { dependsOn(syncPluginSdk) }
+
+afterEvaluate {
+    tasks.named<org.gradle.api.tasks.testing.Test>("testArmsoloDebugUnitTest").configure {
+        val original = classpath
+        classpath = original.filter { it.name.endsWith("quickjs-jvm.jar") } + original
+    }
+}
+
+val pluginPatrolDirectory = layout.buildDirectory.dir("reports/pluginPatrol")
+val pluginPatrolTest = tasks.register<Exec>("pluginPatrolTest") {
+    val unitTests = tasks.named<org.gradle.api.tasks.testing.Test>("testArmsoloDebugUnitTest").get()
+    val runtimeClasspath = unitTests.classpath
+    val directory = pluginPatrolDirectory.get().asFile
+    val classpathFile = directory.resolve("classpath.txt")
+    val java = unitTests.javaLauncher.get().executablePath.asFile
+    val caseFilter = providers.gradleProperty("pluginPatrolCaseFilter").orNull
+    dependsOn(unitTests.taskDependencies.getDependencies(unitTests))
+    outputs.upToDateWhen { false }
+    workingDir(rootProject.projectDir)
+    commandLine("python3", "scripts/plugin_preflight.py", "--results",
+        layout.buildDirectory.dir("test-results/pluginPatrolTest").get().asFile.absolutePath,
+        "--classpath-file", classpathFile.absolutePath, "--java", java.absolutePath,
+        "--output", directory.resolve("latest.json").absolutePath)
+    if (caseFilter != null) args("--case-filter", caseFilter)
+    doFirst {
+        directory.mkdirs()
+        classpathFile.writeText(runtimeClasspath.asPath)
+        directory.resolve("latest.json").writeText("""{"schemaVersion":1,"status":"running"}""")
+    }
+}
+val pluginPreflight = tasks.register("pluginPreflight") {
+    dependsOn(pluginPatrolTest)
+}
+tasks.configureEach {
+    if (name in setOf("packageArmsoloDebug", "packageArmsoloBeta", "packageArmsoloRelease")) {
+        dependsOn(pluginPreflight)
+    }
+}

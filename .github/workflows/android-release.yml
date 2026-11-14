@@ -170,6 +170,7 @@ jobs:
 
       - name: Run unit tests
         run: |
+          python3 scripts/test_plugin_preflight.py
           python3 scripts/test_void_toolchain.py
           python3 scripts/test_build_logging.py
           python3 scripts/test_code_structure.py
@@ -195,6 +196,17 @@ jobs:
       - name: Build ARM64 Release APK
         run: ./gradlew :app:assembleArmsoloRelease --stacktrace
 
+      - name: Upload plugin patrol evidence
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: plugin-patrol-evidence
+          path: |
+            app/build/reports/pluginPatrol/**
+            app/build/test-results/pluginPatrolTest/**
+          retention-days: 7
+          if-no-files-found: warn
+
       # 保留 ARM64 发布包的文件名，兼容已有客户端的更新选择。
       #   Aharou-arm64-v1.0.0-rc1.apk      (armsolo)
       - name: Rename ARM64 APK
@@ -209,6 +221,15 @@ jobs:
           out="dist/Aharou-arm64-${ver}.apk"
           cp "$src" "$out"
           echo "packaged $out"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path("app/build/reports/pluginPatrol/latest.json").read_text())
+          assert report["status"] == "passed_with_device_checks_unverified"
+          assert len(report["runtime"]["cases"]) == 2
+          assert set(report["packages"]) == {"java", "js"}
+          PY
+          cp app/build/reports/pluginPatrol/latest.json "dist/Aharou-arm64-${ver}-plugin-patrol.json"
 
           # 保留 R8 混淆映射（mapping.txt）到 dist/，随 Release 一起发布，供崩溃堆栈反混淆。
           # gzip 压缩后只有几 MB（原始约 90MB），retrace/Android Studio 解析前 gunzip 一下。
@@ -304,6 +325,7 @@ jobs:
           files: |
             dist/Aharou-arm64-*.apk
             dist/Aharou-arm64-*mapping.txt.gz
+            dist/Aharou-arm64-*-plugin-patrol.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

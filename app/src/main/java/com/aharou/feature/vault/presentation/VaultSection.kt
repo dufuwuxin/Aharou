@@ -59,10 +59,15 @@ internal fun VaultSection(viewModel: VaultViewModel = hiltViewModel()) {
     val writeBlocked by viewModel.writeBlocked.collectAsStateWithLifecycle()
     val privacyEnabled by viewModel.privacyRedaction.collectAsStateWithLifecycle()
     val privacyError by viewModel.privacyError.collectAsStateWithLifecycle()
+    val outboundEnabled by viewModel.outboundMasking.collectAsStateWithLifecycle()
+    val outboundError by viewModel.outboundError.collectAsStateWithLifecycle()
     var previewInput by remember { mutableStateOf("") }
     var previewOutput by remember { mutableStateOf("") }
+    var outboundPreview by remember { mutableStateOf("") }
     LaunchedEffect(previewInput) {
-        previewOutput = withContext(Dispatchers.IO) { viewModel.previewRedaction(previewInput) }
+        val result = withContext(Dispatchers.IO) { viewModel.previewRedaction(previewInput) to viewModel.previewOutboundMasking(previewInput) }
+        previewOutput = result.first
+        outboundPreview = result.second
     }
     var showAdd by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf<String?>(null) }
@@ -87,11 +92,17 @@ internal fun VaultSection(viewModel: VaultViewModel = hiltViewModel()) {
         SettingsGroupHeader(text = stringResource(R.string.vault_privacy_title))
         SettingsGroup {
             SettingsRow(
+                title = stringResource(R.string.privacy_outbound_enable),
+                subtitle = stringResource(R.string.privacy_outbound_scope),
+                trailing = { AppSwitch(checked = outboundEnabled, onCheckedChange = { viewModel.setOutboundMasking(it) }) },
+            )
+            SettingsDivider()
+            SettingsRow(
                 title = stringResource(R.string.vault_privacy_enable),
                 subtitle = stringResource(R.string.vault_privacy_scope),
                 trailing = { AppSwitch(checked = privacyEnabled, onCheckedChange = { viewModel.setPrivacyRedaction(it) }) },
             )
-            if (privacyError) {
+            if (privacyError || outboundError) {
                 Text(stringResource(R.string.vault_privacy_save_failed), color = MaterialTheme.colorScheme.error,
                     modifier = Modifier.padding(Spacing.md))
             }
@@ -102,6 +113,10 @@ internal fun VaultSection(viewModel: VaultViewModel = hiltViewModel()) {
                     label = stringResource(R.string.vault_privacy_preview_input), minLines = 2, maxLines = 5)
                 if (previewOutput.isNotEmpty()) {
                     SelectionContainer { Text(previewOutput, style = MaterialTheme.typography.bodySmall) }
+                }
+                if (outboundPreview.isNotEmpty()) {
+                    Text(stringResource(R.string.privacy_outbound_preview), style = MaterialTheme.typography.labelMedium)
+                    SelectionContainer { Text(outboundPreview, style = MaterialTheme.typography.bodySmall) }
                 }
                 Text(stringResource(R.string.vault_privacy_limits), style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)

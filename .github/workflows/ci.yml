@@ -134,6 +134,7 @@ jobs:
       - name: Verify host plugin SDK and real DEX compilation
         run: |
           python3 scripts/test_plugin_sdk.py
+          python3 scripts/test_plugin_preflight.py
           python3 - <<'PY'
           from pathlib import Path
           import os
@@ -240,6 +241,17 @@ jobs:
               echo '```'
             fi
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload plugin patrol evidence
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: plugin-patrol-evidence
+          path: |
+            app/build/reports/pluginPatrol/**
+            app/build/test-results/pluginPatrolTest/**
+          retention-days: 7
+          if-no-files-found: warn
 
       - name: Upload test report
         if: always() && steps.unit_tests.outcome != 'skipped'

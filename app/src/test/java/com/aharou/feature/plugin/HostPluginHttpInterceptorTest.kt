@@ -46,6 +46,27 @@ class HostPluginHttpInterceptorTest {
         }
     }
 
+    @Test fun authenticationRoutesRemainUntouchedEvenWithModelShapedBodies() {
+        MockWebServer().use { server ->
+            var hooks = 0
+            val client = OkHttpClient.Builder().connectionSpecs(listOf(ConnectionSpec.CLEARTEXT))
+                .addInterceptor(HostPluginHttpInterceptor({ hooks++; it.replace("original", "changed") }, { hooks++; it })).build()
+            try {
+                val body = "{\"model\":\"original\",\"messages\":[]}"
+                for (path in listOf("/login", "/oauth/token", "/auth/refresh", "/v1/oauth/token", "/auth/refresh/")) {
+                    server.enqueue(MockResponse().setHeader("Content-Type", "application/json").setBody("{\"token\":\"fixture\"}"))
+                    client.newCall(Request.Builder().url(server.url(path))
+                        .post(body.toRequestBody("application/json".toMediaType())).build()).execute().close()
+                    assertEquals(body, server.takeRequest().body.readUtf8())
+                }
+                assertEquals(0, hooks)
+            } finally {
+                client.connectionPool.evictAll()
+                client.dispatcher.executorService.shutdown()
+            }
+        }
+    }
+
     @Test fun hookErrorsAndMalformedResultsPreservePayload() {
         assertEquals("{}", HostPluginHttpInterceptor.applyHook("{}") { error("fixture") })
         assertEquals("{}", HostPluginHttpInterceptor.applyHook("{}") { "invalid" })

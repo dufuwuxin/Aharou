@@ -22,4 +22,4 @@ fun String.maskIfNeeded(masker: OutboundMasker?): String =
 
 /** 回填单段文本；[masker] 为空时原样返回。 */
 fun String.restoreIfNeeded(masker: OutboundMasker?): String =
-    masker?.restore(this) ?: this
+    masker?.restoreComplete(this) ?: this

@@ -4,7 +4,7 @@ import android.util.Base64
 import com.aharou.core.util.FileLogger
 import com.aharou.core.util.runCancellationSafeTail
 import com.aharou.feature.agent.domain.privacy.maskIfNeeded
-import com.aharou.feature.agent.domain.privacy.maskedForOutbound
+import com.aharou.feature.agent.domain.privacy.maskedOutboundRequest
 import com.aharou.feature.agent.domain.privacy.outboundMaskerOrNull
 import com.aharou.feature.agent.domain.privacy.restoreIfNeeded
 import com.aharou.feature.agent.domain.privacy.restoredFromOutbound
@@ -689,19 +689,23 @@ class StatefulAgentWorkflow @Inject constructor(
         }
         // 遥测的调用序号在 try 内产生，但 catch 分支也要用它标记这一次流失败，故声明在 try 之外。
         var callId = -1
-
+        var outboundMasker: com.aharou.core.privacy.OutboundMasker? = null
+        fun flushMaskTail() {
+            outboundMasker?.flush()?.takeIf { it.isNotEmpty() }?.let {
+                acc.append(it); pendingTextDelta = true
+            }
+        }
         try {
-            // 早轮次里已落盘的工具结果换成引用，长会话不必每轮重发全文。图片投影沿用上面那份：估算的就是发出去的。
-            val outboundMasker = outboundMaskerOrNull(generalSettingsRepository.privacyMaskingEnabled())
-            val messagesToSend = foldStoredToolResults(sendProjection)
-                .let { list -> if (outboundMasker == null) list else list.maskedForOutbound(outboundMasker) }
-            injectedContexts.recordRequest(currentContext.sessionId, RequestContextComposition.capture(requestVersion, requestSystemPrompt, messagesToSend, promptTools))
+            outboundMasker = outboundMaskerOrNull(generalSettingsRepository.privacyMaskingEnabled())
+            val outbound = maskedOutboundRequest(requestSystemPrompt, foldStoredToolResults(sendProjection), outboundMasker)
+            val messagesToSend = outbound.messages
+            injectedContexts.recordRequest(currentContext.sessionId, RequestContextComposition.capture(requestVersion, outbound.systemPrompt, messagesToSend, promptTools))
             // 采样循环检测：命中后 takeWhile 会取消上游流，模型不再继续把重复内容刷下去。
             var samplingLoopCut = false
             // 用户打断：与采样检测共用同一个 takeWhile，命中即掉断上游流，不再继续吐字。
             var userInterruptCut = false
             callId = telemetry.llmRequest(providerInUse.providerId, providerInUse.model, messagesToSend.size, promptTools.size, predictedInput)
-            providerInUse.completeStream(requestSystemPrompt, messagesToSend, promptTools, currentContext.reasoningEffort)
+            providerInUse.completeStream(outbound.systemPrompt, messagesToSend, promptTools, currentContext.reasoningEffort)
                 .takeWhile { !samplingLoopCut && !userInterruptCut }
                 .collect { chunk ->
                     if (!userInterruptCut && consumeUserInterrupt(currentContext.sessionId)) {
@@ -710,7 +714,7 @@ class StatefulAgentWorkflow @Inject constructor(
                 when (chunk) {
                     is AIStreamChunk.TextDelta -> {
                         if (ttfbElapsed == null) { ttfbElapsed = SystemClock.elapsedRealtime() - callStartElapsed; telemetry.llmFirstByte(callId) }
-                        acc.append(chunk.text)
+                        acc.append(outboundMasker?.restore(chunk.text) ?: chunk.text)
                         val loopStart = samplingLoopStart(acc)
                         if (loopStart >= 0) {
                             samplingLoopCut = true
@@ -759,11 +763,10 @@ class StatefulAgentWorkflow @Inject constructor(
                         emit(AgentEvent.KeySwitched(chunk.newIndex, chunk.total))
                     }
                     is AIStreamChunk.Final -> {
-                        // 纯工具调用轮没有文本/思考增量，Final 是首个内容事件，兜底记为 TTFB
                         if (ttfbElapsed == null) { ttfbElapsed = SystemClock.elapsedRealtime() - callStartElapsed; telemetry.llmFirstByte(callId) }
                         // 回填必须在完整文本上做：占位符可能被切在两个 chunk 之间
                         finalResponse = chunk.response
-                            .let { resp -> if (outboundMasker == null) resp else resp.restoredFromOutbound(outboundMasker) }
+                            .let { resp -> outboundMasker?.let { resp.restoredFromOutbound(it) } ?: resp }
                     }
                     is AIStreamChunk.ToolCallDeclared -> {
                         // 工具名先于参数到达：立刻告诉 UI「模型准备调什么」，
@@ -773,6 +776,7 @@ class StatefulAgentWorkflow @Inject constructor(
                     }
                 }
             }
+            flushMaskTail()
             // 节流窗口内可能还压着最新累积文本：补发，保证 UI 尾巴拿到完整文本再交接落库。
             flushPendingTextDelta()
             flushPendingReasoningDelta()
@@ -809,8 +813,9 @@ class StatefulAgentWorkflow @Inject constructor(
                 )
             )
         } catch (e: CancellationException) {
-            throw e
+            flushMaskTail(); throw e
         } catch (e: Exception) {
+            flushMaskTail()
             if (finalResponse == null && !captureSnapshot().hasSnapshotData() &&
                 (workspaceModelChain.configured(currentContext.sessionId) || e.isKeySwitchFailure() || e.isQuotaExhausted())) {
                 val target = if (workspaceModelChain.configured(currentContext.sessionId)) workspaceModelChain.next(currentContext.sessionId)
