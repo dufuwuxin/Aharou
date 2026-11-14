@@ -126,7 +126,7 @@ def audit_payload(payload: Path) -> list[str]:
     return sorted(libraries)
 
 
-def probe_lsp(command: list[str], timeout: float = 90) -> None:
+def probe_lsp(command: list[str], timeout: float = 90, shutdown_result: bool | None = None) -> None:
     messages = queue.Queue()
     with tempfile.TemporaryFile() as errors:
         process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=errors)
@@ -177,12 +177,16 @@ def probe_lsp(command: list[str], timeout: float = 90) -> None:
                 raise ValueError("LSP initialize missing capabilities")
             send({"method": "initialized", "params": {}})
             send({"id": 2, "method": "shutdown", "params": None})
-            if response(2).get("result", "missing") is not None:
+            if response(2).get("result", "missing") is not shutdown_result:
                 raise ValueError("invalid LSP shutdown response")
             send({"method": "exit"})
             process.stdin.close()
             if process.wait(timeout=timeout) != 0:
                 raise ValueError("LSP did not exit successfully")
+        except (ValueError, KeyError, OSError, queue.Empty) as exc:
+            errors.seek(0)
+            detail = errors.read(4096).decode("utf-8", errors="replace")
+            raise ValueError(f"{exc}; server stderr: {detail}") from exc
         finally:
             if process.poll() is None:
                 process.kill()
@@ -225,7 +229,8 @@ def build(name: str, output: Path) -> None:
         payload.rename(moved)
         libraries = audit_payload(moved)
         args = ["start"] if name == "shell" else ["--stdio"] if name in NODE else ["--locale=zh-cn"] if name == "lua" else []
-        probe_lsp([str(moved / "launch.sh"), *args])
+        # The fixed LuaLS shutdown handler returns boolean true; all other pinned servers require null.
+        probe_lsp([str(moved / "launch.sh"), *args], shutdown_result=True if name == "lua" else None)
         temporary = output / (filename + ".part")
         try:
             pack(moved, temporary)

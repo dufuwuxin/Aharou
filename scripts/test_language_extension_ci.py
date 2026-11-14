@@ -39,6 +39,18 @@ class BuildTests(unittest.TestCase):
     def test_real_stdio_handshake_and_exit(self):
         build.probe_lsp([sys.executable, "-c", FAKE_LSP], timeout=3)
 
+    def test_pinned_lua_shutdown_requires_explicit_true_profile(self):
+        program = FAKE_LSP.replace("else None", "else True")
+        with self.assertRaises(ValueError):
+            build.probe_lsp([sys.executable, "-c", program], timeout=3)
+        build.probe_lsp([sys.executable, "-c", program], timeout=3, shutdown_result=True)
+        with self.assertRaises(ValueError):
+            build.probe_lsp([sys.executable, "-c", program.replace("else True", "else False")], timeout=3, shutdown_result=True)
+
+    def test_failed_handshake_preserves_server_diagnostic(self):
+        with self.assertRaisesRegex(ValueError, "fixture-runtime-error"):
+            build.probe_lsp([sys.executable, "-c", "import sys; print('fixture-runtime-error', file=sys.stderr)"], timeout=3)
+
     def test_bad_handshake_and_exit_are_rejected(self):
         for program in ("print('garbage')", FAKE_LSP.replace("sys.exit(0)", "sys.exit(4)"),
                         FAKE_LSP.replace("{'capabilities': {}}", "{}")):
