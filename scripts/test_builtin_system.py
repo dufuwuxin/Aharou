@@ -33,7 +33,7 @@ AGENTS = {
     "engineering-python-backend-engineer": "Python Backend Engineer",
     "engineering-rust-engineer": "Rust Engineer",
     "engineering-software-architect": "Software Architect",
-    "explore": "Explore",
+    "general-specialist": "通用专家",
     "migration-checker": "Migration Checker",
     "product-manager": "Product Manager",
     "product-trend-researcher": "Trend Researcher",
@@ -50,7 +50,7 @@ TEAMS = {
          "Python Backend Engineer", "Code Reviewer", "Reality Checker"),
     ),
     "research-review": (
-        "调研评审团队", ("Explore", "Reality Checker", "Docs Writer"),
+        "调研评审团队", ("通用专家", "Reality Checker", "Docs Writer"),
     ),
     "ui-delivery": (
         "界面交付团队",
@@ -120,7 +120,7 @@ class BuiltinSystemTest(unittest.TestCase):
     def test_builtin_teams_have_complete_rosters_and_one_admin(self):
         admins = {
             "feature-delivery": "Software Architect",
-            "research-review": "Explore",
+            "research-review": "通用专家",
             "ui-delivery": "UX Architect",
         }
         for entry, (_, named_agents) in TEAMS.items():
