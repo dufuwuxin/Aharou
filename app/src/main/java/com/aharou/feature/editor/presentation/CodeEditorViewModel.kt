@@ -5,32 +5,36 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.aharou.core.util.FileLogger
 import com.aharou.feature.agent.domain.tool.FileVersionRegistry
+import com.aharou.feature.agent.domain.tool.WorkspaceFileLock
 import com.aharou.feature.editor.data.EditorSettings
 import com.aharou.feature.editor.data.EditorSettingsRepository
+import com.aharou.feature.editor.domain.EditorDocumentStore
+import com.aharou.feature.editor.domain.TextMateSetup
 import com.aharou.feature.editor.lsp.DefinitionTarget
 import com.aharou.feature.editor.lsp.EditorLspManager
-import com.aharou.feature.editor.domain.TextMateSetup
+import com.aharou.feature.workspace.data.repository.WorkspaceRepository
 import com.aharou.feature.workspace.domain.FileAccessProvider
-import com.aharou.feature.workspace.domain.sha256Fingerprint
-import kotlinx.coroutines.CancellationException
+import com.aharou.feature.workspace.domain.model.Workspace
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.github.rosemoe.sora.lang.Language
 import io.github.rosemoe.sora.langs.textmate.TextMateLanguage
 import io.github.rosemoe.sora.widget.CodeEditor
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.withContext
+import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import javax.inject.Inject
+import kotlinx.coroutines.withContext
 
 /** 编辑器页状态。 */
 sealed interface EditorUiState {
@@ -43,15 +47,16 @@ sealed interface EditorUiState {
 
 /** 保存结果，一次性事件，经 [CodeEditorViewModel.saveEvents] 下发；带 path 以便标签页分辨来源。 */
 sealed interface SaveResult {
-    data class Success(val path: String, val content: String) : SaveResult
+    val workspace: String
+    data class Success(val path: String, val content: String, override val workspace: String = "") : SaveResult
 
     /**
      * 磁盘内容在编辑器打开之后被改过（多半是 AI 会话写的），本次保存**未写入**。
      * 携带磁盘当前内容供 UI 展示差异，由用户决定覆盖磁盘还是放弃自己的编辑，不静默覆盖也不静默丢弃。
      */
-    data class Conflict(val path: String, val diskContent: String) : SaveResult
+    data class Conflict(val path: String, val diskContent: String, override val workspace: String = "") : SaveResult
 
-    data class Error(val path: String, val detail: String?) : SaveResult
+    data class Error(val path: String, val detail: String?, override val workspace: String = "") : SaveResult
 }
 
 @HiltViewModel
@@ -60,7 +65,10 @@ class CodeEditorViewModel @Inject constructor(
     private val fileAccess: FileAccessProvider,
     private val editorSettings: EditorSettingsRepository,
     private val editorLspManager: EditorLspManager,
-    private val versions: FileVersionRegistry
+    versions: FileVersionRegistry,
+    fileLock: WorkspaceFileLock = WorkspaceFileLock(),
+    workspaceRepository: WorkspaceRepository? = null,
+    workspaceIdentity: com.aharou.feature.editor.domain.EditorWorkspaceIdentity? = null
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow<EditorUiState>(EditorUiState.Loading)
@@ -85,6 +93,14 @@ class CodeEditorViewModel @Inject constructor(
     val settings: StateFlow<EditorSettings> = editorSettings.settingsFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), EditorSettings())
 
+    val workspace: StateFlow<Workspace?> = workspaceRepository?.current ?: MutableStateFlow(null)
+    val documentScope = (workspaceIdentity?.observe(workspace)
+        ?: workspace.map { com.aharou.feature.editor.domain.EditorWorkspaceIdentity.Scope(it?.path.orEmpty(), it?.path.orEmpty()) })
+        .stateIn(viewModelScope, SharingStarted.Eagerly, com.aharou.feature.editor.domain.EditorWorkspaceIdentity.Scope("", ""))
+    private var currentScope = ""
+    private val scopePaths = java.util.concurrent.ConcurrentHashMap<String, String>()
+    private fun cacheKey(scope: String, path: String) = "$scope\u0000$path"
+
     private var currentPath: String? = null
     private var loadGeneration = 0L
     private var loadJob: Job? = null
@@ -99,7 +115,7 @@ class CodeEditorViewModel @Inject constructor(
      * 打开过的文件内容缓存（LRU）。
      *
      * 以前只在关标签页时删条目，翻过的文件就全量常驻：单文件门禁 2MB，翻十几个大文件
-     * 就能把堆顶穿。改为按条数 + 总字符数双阈值淘汰；淘汰不动 [loadedFingerprints]，
+     * 就能把堆顶穿。改为按条数 + 总字符数双阈值淘汰；淘汰不动 [documents]，
      * 保存冲突检测依赖每个路径各自的基线指纹。
      */
     private class DocumentCache {
@@ -140,8 +156,7 @@ class CodeEditorViewModel @Inject constructor(
     }
 
     /** 各路径「打开时磁盘内容」的指纹，用于保存前判断文件是否被 AI/其他会话改过。 */
-    private val loadedFingerprints = java.util.concurrent.ConcurrentHashMap<String, String>()
-    private val loadedAccesses = java.util.concurrent.ConcurrentHashMap<String, FileAccessProvider>()
+    private val documents = EditorDocumentStore(fileLock, versions)
 
     /**
      * 把当前文件挂到语言服务器上（成功返回 true）。[wrapper] 是原本的 TextMate 语言，继续负责着色；
@@ -164,11 +179,16 @@ class CodeEditorViewModel @Inject constructor(
 
     /** 重复调用同一路径不会重复读盘，供 Compose 重组时安全调用。 */
     fun load(path: String) {
-        if (currentPath == path) return
+        val binding = documentScope.value
+        val scope = binding.identity
+        scopePaths[scope] = binding.workspacePath
+        if (currentPath == path && currentScope == scope) return
+        currentScope = scope
         currentPath = path
+        val cacheKey = cacheKey(scope, path)
         val generation = ++loadGeneration
         loadJob?.cancel()
-        loadedStates[path]?.let { cached ->
+        loadedStates[cacheKey]?.let { cached ->
             _uiState.value = cached
             _documentVersion.value++
             return
@@ -177,7 +197,7 @@ class CodeEditorViewModel @Inject constructor(
         loadJob = viewModelScope.launch {
             var baseline: Pair<ByteArray, FileAccessProvider>? = null
             val state = withContext(Dispatchers.IO) { runCatching {
-                val access = loadedAccesses[path] ?: fileAccess.checked().also { loadedAccesses[path] = it }
+                val access = documents.accessFor(path, scope) ?: (if (scope.isBlank()) fileAccess else fileAccess.forWorkspace(scopePaths[scope].orEmpty())).checked()
                 if (!access.exists(path) || !access.isFile(path)) {
                     return@runCatching EditorUiState.Error(null)
                 }
@@ -208,8 +228,8 @@ class CodeEditorViewModel @Inject constructor(
             }
             coroutineContext.ensureActive()
             if (generation != loadGeneration) return@launch
-            baseline?.let { (bytes, access) -> refreshBaseline(path, bytes, access) }
-            loadedStates[path] = state
+            baseline?.let { (bytes, access) -> refreshBaseline(path, bytes, access, scope) }
+            loadedStates[cacheKey] = state
             // Generation covers A→B→A, including cache and file-version publication.
             if (currentPath == path) {
                 _uiState.value = state
@@ -218,11 +238,9 @@ class CodeEditorViewModel @Inject constructor(
         }
     }
 
-    /** 刷新指定路径的磁盘指纹基线，并登记给并发保护（AI 会话据此把手上版本视为过期）。 */
-    private fun refreshBaseline(path: String, bytes: ByteArray, access: FileAccessProvider) {
-        val fingerprint = sha256Fingerprint(bytes)
-        loadedFingerprints[path] = fingerprint
-        versions.recordExternal(access.toDisplayPath(path), fingerprint)
+    /** A read updates only this human document, never an AI session's observation or writer. */
+    private fun refreshBaseline(path: String, bytes: ByteArray, access: FileAccessProvider, scope: String) {
+        documents.observe(path, bytes, access, scope)
     }
 
     /**
@@ -232,19 +250,14 @@ class CodeEditorViewModel @Inject constructor(
      * 改为下发 [SaveResult.Conflict]，由用户决定覆盖还是放弃自己的编辑——否则这次保存会静默抹掉对方的改动。
      */
     fun save(path: String, content: String) {
+        val scope = currentScope
         viewModelScope.launch(Dispatchers.IO) {
             _saving.value = true
             try {
                 val result = try {
-                    val access = loadedAccesses[path] ?: fileAccess.checked()
-                    val baseline = loadedFingerprints[path]
-                    val current = access.fingerprint(path)
-                    if (baseline != null && current != baseline) {
-                        val disk = if (current == null) "" else access.readFile(path)
-                        SaveResult.Conflict(path, disk)
-                    } else writeThrough(path, content, access)
+                    writeThrough(path, content, scope = scope)
                 } catch (cancelled: CancellationException) { throw cancelled }
-                catch (failure: Exception) { SaveResult.Error(path, failure.message) }
+                catch (failure: Exception) { SaveResult.Error(path, failure.message, scope) }
                 _saveEvents.send(result)
             } finally {
                 _saving.value = false
@@ -254,10 +267,11 @@ class CodeEditorViewModel @Inject constructor(
 
     /** 无视冲突直接覆盖磁盘（用户在冲突提示里选了「覆盖」）；仍走 [fileAccess] 的原子写。 */
     fun saveForce(path: String, content: String) {
+        val scope = currentScope
         viewModelScope.launch(Dispatchers.IO) {
             _saving.value = true
             try {
-                _saveEvents.send(writeThrough(path, content))
+                _saveEvents.send(writeThrough(path, content, force = true, scope = scope))
             } finally {
                 _saving.value = false
             }
@@ -269,24 +283,27 @@ class CodeEditorViewModel @Inject constructor(
      * [load] 会因路径未变直接返回、且命中缓存，故先清掉这条路径的状态与缓存再加载。
      */
     fun reloadFromDisk(path: String) {
-        loadedStates.remove(path)
-        loadedFingerprints.remove(path)
+        loadedStates.remove(cacheKey(currentScope, path))
+        documents.forget(path, currentScope)
         if (currentPath == path) currentPath = null
         load(path)
     }
 
     /** 真正写盘并刷新版本基线，避免紧接着的第二次保存被自己上一次的写入判成冲突。 */
-    private fun writeThrough(path: String, content: String, access: FileAccessProvider? = null): SaveResult =
-        runCatching {
-            val checked = access ?: loadedAccesses[path] ?: fileAccess.checked()
-            checked.writeFile(path, content)
-            refreshBaseline(path, content.toByteArray(Charsets.UTF_8), checked)
-            markSaved(path, content)
-            SaveResult.Success(path, content)
-        }.getOrElse { failure ->
+    private suspend fun writeThrough(path: String, content: String, force: Boolean = false, scope: String): SaveResult =
+        try {
+            val access = documents.accessFor(path, scope) ?: (if (scope.isBlank()) fileAccess else fileAccess.forWorkspace(scopePaths[scope].orEmpty())).checked()
+            when (val result = documents.save(path, content, access, force, scope)) {
+                EditorDocumentStore.WriteResult.Saved -> {
+                    markSaved(path, content, scope)
+                    SaveResult.Success(path, content, scope)
+                }
+                is EditorDocumentStore.WriteResult.Conflict -> SaveResult.Conflict(path, result.diskContent, scope)
+            }
+        } catch (failure: Exception) {
             if (failure is CancellationException) throw failure
             FileLogger.w(TAG, "保存文件失败: $path", failure)
-            SaveResult.Error(path, failure.message)
+            SaveResult.Error(path, failure.message, scope)
         }
 
     /**
@@ -297,14 +314,11 @@ class CodeEditorViewModel @Inject constructor(
      * 新建文件（打开时内容是空串）编辑后保存就会因此被判成「仍有未保存修改」——
      * 标题一直挂 `*`、返回时反复弹「未保存的修改」。2026-10-05 实机踩到。
      */
-    private fun markSaved(path: String, content: String) {
-        val scope = (loadedStates[path] as? EditorUiState.Success)?.scopeName
-            ?: (_uiState.value as? EditorUiState.Success)?.scopeName
-        val saved = EditorUiState.Success(content = content, scopeName = scope)
-        loadedStates[path] = saved
-        if (currentPath == path) {
-            _uiState.value = saved
-        }
+    private fun markSaved(path: String, content: String, scope: String) {
+        val languageScope = (loadedStates[cacheKey(scope, path)] as? EditorUiState.Success)?.scopeName
+        val saved = EditorUiState.Success(content = content, scopeName = languageScope)
+        loadedStates[cacheKey(scope, path)] = saved
+        if (currentPath == path && currentScope == scope) _uiState.value = saved
     }
 
     private companion object {

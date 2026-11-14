@@ -4,6 +4,7 @@ import io.mockk.every
 import io.mockk.mockk
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertThrows
@@ -44,6 +45,18 @@ class LocalFileAccessTest {
         tmp.newFolder("empty")
         assertTrue(access.checked().listFiles("empty").isEmpty())
         assertEquals("keep", access.readFile("not-a-directory"))
+    }
+
+    @Test fun transactionIdentitySeparatesWorkspacesButUnifiesAliases() {
+        val mapper = mockk<WorkspacePathMapper>()
+        every { mapper.resolveFile(any(), any(), any()) } answers {
+            val workspace = secondArg<String?>() ?: "one"
+            val input = firstArg<String>()
+            File(tmp.root, "$workspace/${input.removePrefix("~/workspace/").removePrefix("./")}")
+        }
+        val access = LocalFileAccess(mapper)
+        assertEquals(access.forWorkspace("one").transactionKey("~/workspace/file.kt"), access.forWorkspace("one").transactionKey("./file.kt"))
+        assertNotEquals(access.forWorkspace("one").transactionKey("~/workspace/file.kt"), access.forWorkspace("two").transactionKey("~/workspace/file.kt"))
     }
 
     // ---------- readFile / writeFile ----------

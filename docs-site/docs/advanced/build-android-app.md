@@ -297,3 +297,7 @@ public class TemporaryFile implements Closeable {
 ```
 
 编译这段源码，把 `.class` 文件替换回 Gradle 缓存中的 `instrumented-apkzlib-*.jar` 即可。
+
+### 分层验证
+
+CI 先验证核心 agent、存储 JVM 编译和终端基础模块，再按功能域执行 Android 回归，核对没有漏组、重复或零执行，随后执行迁移、资源、团队及组合检查，最后组装 APK 并完成插件巡检。app 内的功能目录仍属于同一个 Gradle 模块，功能域分组是测试隔离，不声称每个目录可独立编译。各阶段失败直接显示对应模块或功能域，最终打包不替代前面的回归。

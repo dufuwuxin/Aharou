@@ -26,56 +26,72 @@ object EditorSessionManager {
         val baselineContent: String? = null
     )
 
-    private val _tabs = MutableStateFlow<List<String>>(emptyList())
-    val tabs: StateFlow<List<String>> = _tabs.asStateFlow()
+    private val sessions = java.util.concurrent.ConcurrentHashMap<String, Session>()
+    fun forWorkspace(workspace: String): Session = sessions.computeIfAbsent(workspace) { Session() }
+    private val defaultSession get() = forWorkspace("")
+    val tabs get() = defaultSession.tabs
+    val activePath get() = defaultSession.activePath
+    val snapshots get() = defaultSession.snapshots
+    fun open(path: String) = defaultSession.open(path)
+    fun activate(path: String) = defaultSession.activate(path)
+    fun close(path: String) = defaultSession.close(path)
+    fun snapshot(path: String) = defaultSession.snapshot(path)
+    fun saveSnapshot(path: String, snapshot: Snapshot) = defaultSession.saveSnapshot(path, snapshot)
+    fun markSaved(path: String, content: String) = defaultSession.markSaved(path, content)
+    fun forget(path: String) = defaultSession.forget(path)
 
-    private val _activePath = MutableStateFlow("")
-    val activePath: StateFlow<String> = _activePath.asStateFlow()
+    class Session {
+        private val _tabs = MutableStateFlow<List<String>>(emptyList())
+        val tabs: StateFlow<List<String>> = _tabs.asStateFlow()
 
-    private val _snapshots = MutableStateFlow<Map<String, Snapshot>>(emptyMap())
-    val snapshots: StateFlow<Map<String, Snapshot>> = _snapshots.asStateFlow()
+        private val _activePath = MutableStateFlow("")
+        val activePath: StateFlow<String> = _activePath.asStateFlow()
 
-    /** 打开文件：已在标签栏里则只激活，否则追加到末尾后激活。 */
-    fun open(path: String) {
-        if (path.isBlank()) return
-        if (path !in _tabs.value) {
-            _tabs.value = _tabs.value + path
-        }
-        _activePath.value = path
-    }
+        private val _snapshots = MutableStateFlow<Map<String, Snapshot>>(emptyMap())
+        val snapshots: StateFlow<Map<String, Snapshot>> = _snapshots.asStateFlow()
 
-    fun activate(path: String) {
-        if (path in _tabs.value && _activePath.value != path) {
+        /** 打开文件：已在标签栏里则只激活，否则追加到末尾后激活。 */
+        fun open(path: String) {
+            if (path.isBlank()) return
+            if (path !in _tabs.value) {
+                _tabs.value = _tabs.value + path
+            }
             _activePath.value = path
         }
-    }
 
-    /** 关闭标签页：同时丢掉它的快照；关掉的是激活页时自动切到相邻一个。 */
-    fun close(path: String) {
-        val remaining = _tabs.value.filterNot { it == path }
-        _tabs.value = remaining
-        _snapshots.value = _snapshots.value - path
-        if (_activePath.value == path) {
-            _activePath.value = remaining.lastOrNull() ?: ""
+        fun activate(path: String) {
+            if (path in _tabs.value && _activePath.value != path) {
+                _activePath.value = path
+            }
         }
-    }
 
-    fun snapshot(path: String): Snapshot? = _snapshots.value[path]
-
-    fun saveSnapshot(path: String, snapshot: Snapshot) {
-        val retained = if (snapshot.dirty) snapshot else snapshot.copy(content = null, baselineContent = null)
-        _snapshots.value = _snapshots.value + (path to retained)
-    }
-
-    fun markSaved(path: String, content: String) {
-        val current = _snapshots.value[path] ?: return
-        if (!current.dirty || current.content == content) forget(path)
-        else _snapshots.value = _snapshots.value + (path to current.copy(dirty = true, baselineContent = content))
-    }
-
-    fun forget(path: String) {
-        if (_snapshots.value.containsKey(path)) {
+        /** 关闭标签页：同时丢掉它的快照；关掉的是激活页时自动切到相邻一个。 */
+        fun close(path: String) {
+            val remaining = _tabs.value.filterNot { it == path }
+            _tabs.value = remaining
             _snapshots.value = _snapshots.value - path
+            if (_activePath.value == path) {
+                _activePath.value = remaining.lastOrNull() ?: ""
+            }
+        }
+
+        fun snapshot(path: String): Snapshot? = _snapshots.value[path]
+
+        fun saveSnapshot(path: String, snapshot: Snapshot) {
+            val retained = if (snapshot.dirty) snapshot else snapshot.copy(content = null, baselineContent = null)
+            _snapshots.value = _snapshots.value + (path to retained)
+        }
+
+        fun markSaved(path: String, content: String) {
+            val current = _snapshots.value[path] ?: return
+            if (!current.dirty || current.content == content) forget(path)
+            else _snapshots.value = _snapshots.value + (path to current.copy(dirty = true, baselineContent = content))
+        }
+
+        fun forget(path: String) {
+            if (_snapshots.value.containsKey(path)) {
+                _snapshots.value = _snapshots.value - path
+            }
         }
     }
 }

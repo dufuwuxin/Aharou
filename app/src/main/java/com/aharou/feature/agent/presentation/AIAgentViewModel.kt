@@ -2530,8 +2530,7 @@ class AIAgentViewModel @Inject constructor(
     /** 新建会话；当前会话为空则复用，否则切到工作区里已存在的空会话，都没有才新建。 */
     fun newSession() = viewModelScope.launch {
         if (_currentWorkspace.value.isBlank()) return@launch
-        val reusableId = _currentSessionId.value?.takeIf { sessionUseCase.isSessionEmpty(it) }
-            ?: sessionUseCase.getEmptySessionOfWorkspace(_currentWorkspace.value)?.id
+        val reusableId = sessionUseCase.getOrdinaryEmptySession(_currentWorkspace.value, _currentSessionId.value)?.id
         if (reusableId != null) {
             setAgentState(reusableId, AgentUIState.Idle)
             _currentSessionId.value = reusableId

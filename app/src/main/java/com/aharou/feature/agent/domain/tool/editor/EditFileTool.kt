@@ -1,5 +1,7 @@
 package com.aharou.feature.agent.domain.tool.editor
 
+import com.aharou.feature.workspace.domain.transactionKey
+
 import com.aharou.feature.agent.domain.inbox.SharedInbox
 import com.aharou.feature.agent.domain.inbox.SharedInboxEvents
 import com.aharou.feature.agent.domain.model.AgentContext
@@ -252,7 +254,7 @@ class EditFileTool @Inject constructor(
         sessionId: String?,
         block: suspend () -> ToolResult
     ): ToolResult {
-        val key = access.toDisplayPath(path)
+        val key = access.transactionKey(path)
         checkVersion(access, path, key, sessionId)?.let { return it }
 
         return fileLock.withLock(key) {

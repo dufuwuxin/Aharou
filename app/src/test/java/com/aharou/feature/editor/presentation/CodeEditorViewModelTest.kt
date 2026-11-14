@@ -7,7 +7,6 @@ import com.aharou.feature.editor.data.EditorSettings
 import com.aharou.feature.editor.data.EditorSettingsRepository
 import com.aharou.feature.editor.domain.TextMateSetup
 import com.aharou.feature.workspace.domain.FileAccessProvider
-import com.aharou.feature.workspace.domain.sha256Fingerprint
 import io.mockk.*
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -74,8 +73,7 @@ class CodeEditorViewModelTest {
             oldJob.join()
             assertEquals("new", (vm.uiState.value as EditorUiState.Success).content)
             assertEquals(version, vm.documentVersion.value)
-            verify(exactly = 1) { versions.recordExternal("/a", sha256Fingerprint("new".toByteArray())) }
-            verify(exactly = 0) { versions.recordExternal("/a", sha256Fingerprint("old".toByteArray())) }
+            verify(exactly = 0) { versions.recordExternal(any(), any()) }
             vm.load("/b")
             vm.load("/a")
             assertEquals("new", (vm.uiState.value as EditorUiState.Success).content)

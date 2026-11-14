@@ -24,7 +24,7 @@ jobs:
       - uses: actions/setup-node@v7
         if: contains(fromJSON('["typescript","shell","yaml","vue"]'), matrix.id)
         with:
-          node-version: '24'
+          node-version: '24.22.2'
       - name: Verify fixed sources and isolated fixtures
         run: |
           python3 scripts/vendor_language_extensions.py
@@ -58,6 +58,20 @@ jobs:
           echo 'RUSTUP_TOOLCHAIN=1.98.0' >> "$GITHUB_ENV"
       - name: Build, relocate, handshake and pack
         run: python3 scripts/build_language_extensions.py --id '${{ matrix.id }}' --output dist
+      - name: Verify in clean Ubuntu without global Node
+        env:
+          EXTENSION_ID: ${{ matrix.id }}
+        run: |
+          set -euo pipefail
+          docker run --rm --platform linux/arm64 \
+            -e GITHUB_ACTIONS=true -e PYTHONDONTWRITEBYTECODE=1 -e EXTENSION_ID \
+            -v "$PWD:/repo:ro" -v "$PWD/dist:/artifacts" -w /repo ubuntu:24.04 \
+            /bin/sh -ec '
+              apt-get update
+              DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends python3.12 libstdc++6 libatomic1 ca-certificates
+              if command -v node; then echo "unexpected global Node" >&2; exit 1; fi
+              python3.12 scripts/build_language_extensions.py --verify-clean --id "$EXTENSION_ID" --output /artifacts
+            '
       - uses: actions/upload-artifact@v4
         with:
           name: language-extension-${{ matrix.id }}
@@ -75,7 +89,7 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: language-extension-*
           path: dist

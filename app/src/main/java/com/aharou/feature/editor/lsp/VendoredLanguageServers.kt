@@ -221,6 +221,8 @@ class VendoredLanguageServers @Inject constructor(
     private val profiles: ContainerProfileResolver,
     private val connection: RemoteSshConnection,
 ) {
+    @Inject internal lateinit var localEngine: com.aharou.feature.agent.domain.container.LinuxContainerEngine
+    @Inject internal lateinit var remoteEngine: com.aharou.feature.agent.domain.container.RemoteSshEngine
     private val installLock = Mutex()
     private val mutableProgress = MutableStateFlow<Map<String, Float>>(emptyMap())
     val downloadProgress: StateFlow<Map<String, Float>> = mutableProgress.asStateFlow()
@@ -259,21 +261,33 @@ class VendoredLanguageServers @Inject constructor(
     suspend fun install(extension: LanguageExtension) = withContext(Dispatchers.IO) {
         installLock.withLock {
             val profile = profiles.forWorkspace(null)
+            val priorTarget = if (profile.mode == ExecutionMode.REMOTE_SSH) connection.bootstrapTarget() else null
+            commands.ensureInstalled()
+            currentCoroutineContext().ensureActive()
+            check(profiles.forWorkspace(null) == profile) { "EXTENSION_BACKEND_CHANGED" }
+            check(priorTarget == null || connection.isCurrentBootstrap(priorTarget)) { "EXTENSION_BACKEND_CHANGED" }
             val target = if (profile.mode == ExecutionMode.REMOTE_SSH) connection.bootstrapTarget() else null
             val root = rootForCurrentBackend() ?: return@withLock null
+            val commands = pinnedExtensionCommands(this@VendoredLanguageServers.commands,
+                { command, timeout ->
+                    if (profile.mode == ExecutionMode.REMOTE_SSH) remoteEngine.runCommandOnTarget(requireNotNull(target), command, timeout)
+                    else localEngine.runCommandOnProfile(profile, command, timeout)
+                })
             fun checkBackend() {
-                check(profiles.forWorkspace(null).id == profile.id &&
+                check(profiles.forWorkspace(null) == profile &&
                     (profile.mode != ExecutionMode.REMOTE_SSH || target != null && connection.isCurrentBootstrap(target))) { "EXTENSION_BACKEND_CHANGED" }
             }
+            checkBackend()
+            val runtime = ExtensionRuntimeBootstrap.prepare(commands, ::checkBackend) ?: return@withLock null
+            if (runtime.exitCode != 0) return@withLock runtime
             checkBackend()
             mutableRecovery.value = mutableRecovery.value - extension.id
             if (installedVersion(extension) != null) {
                 val ready = commands.runCommandSyncIfReady("test -x ${shellQuote("$root/${extension.id}/current/launch.sh")}", timeoutMs = 15_000L)
                 if (ready?.exitCode == 0) return@withLock ready
             }
-            // Readiness and the platform are checked before any network/download side effect.
-            val preflight = commands.runCommandSyncIfReady("python3 - <<'AHAROU_PLATFORM'\nimport platform\nfrom pathlib import Path\nassert platform.machine() in ('aarch64', 'arm64'), 'EXTENSION_REQUIRES_ARM64'\ns = Path('/etc/os-release').read_text()\nassert 'ID=ubuntu' in s and 'VERSION_ID=\"24.04\"' in s, 'EXTENSION_REQUIRES_UBUNTU_24_04'\nAHAROU_PLATFORM", timeoutMs = 15_000L) ?: return@withLock null
-            check(preflight.exitCode == 0) { "EXTENSION_PLATFORM_NOT_READY: ${preflight.output.takeLast(500)}" }
+            // Backend pin is rechecked after bootstrap, before the first download.
+            checkBackend()
             val catalog = catalog()
             val raw = extensionRequest(client, Request.Builder().url(catalog.manifestUrl).build()) { response ->
                 check(response.code != 404) { "EXTENSION_RELEASE_NOT_PUBLISHED" }
@@ -321,7 +335,7 @@ class VendoredLanguageServers @Inject constructor(
                 }.toString()
                 checkBackend()
                 val prepared = commands.runCommandSyncIfReady(
-                    "python3 - ${shellQuote(upload)} ${shellQuote(stage)} ${shellQuote(metadata)} <<'AHAROU_EXTRACT'\n$EXTRACT_SCRIPT\nAHAROU_EXTRACT",
+                    "python3.12 - ${shellQuote(upload)} ${shellQuote(stage)} ${shellQuote(metadata)} <<'AHAROU_EXTRACT'\n$EXTRACT_SCRIPT\nAHAROU_EXTRACT",
                     timeoutMs = 300_000L,
                 ) ?: return@withLock null
                 if (prepared.exitCode != 0) return@withLock prepared
@@ -329,7 +343,7 @@ class VendoredLanguageServers @Inject constructor(
                 checkBackend()
                 try {
                     val committed = commands.runCommandSyncIfReady(
-                        "python3 - ${shellQuote(root)} ${shellQuote(extension.id)} ${shellQuote(extension.command)} ${shellQuote(stage)} <<'AHAROU_COMMIT'\n$COMMIT_SCRIPT\nAHAROU_COMMIT",
+                        "python3.12 - ${shellQuote(root)} ${shellQuote(extension.id)} ${shellQuote(extension.command)} ${shellQuote(stage)} <<'AHAROU_COMMIT'\n$COMMIT_SCRIPT\nAHAROU_COMMIT",
                         timeoutMs = 15_000L,
                     )
                     currentCoroutineContext().ensureActive()
@@ -337,7 +351,7 @@ class VendoredLanguageServers @Inject constructor(
                     if (committed == null || committed.exitCode != 0) {
                         runCatching {
                             checkBackend()
-                            val restored = commands.runCommandSyncIfReady("python3 - ${shellQuote(stage)} <<'AHAROU_ROLLBACK'\n$ROLLBACK_SCRIPT\nAHAROU_ROLLBACK", timeoutMs = 15_000L)
+                            val restored = commands.runCommandSyncIfReady("python3.12 - ${shellQuote(stage)} <<'AHAROU_ROLLBACK'\n$ROLLBACK_SCRIPT\nAHAROU_ROLLBACK", timeoutMs = 15_000L)
                             check(restored?.exitCode == 0) { "EXTENSION_ROLLBACK_FAILED" }
                         }.onFailure { mutableRecovery.value = mutableRecovery.value + extension.id }
                     }
@@ -346,7 +360,7 @@ class VendoredLanguageServers @Inject constructor(
                     kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
                         runCatching {
                             checkBackend()
-                            val restored = commands.runCommandSyncIfReady("python3 - ${shellQuote(stage)} <<'AHAROU_ROLLBACK'\n$ROLLBACK_SCRIPT\nAHAROU_ROLLBACK", timeoutMs = 15_000L)
+                            val restored = commands.runCommandSyncIfReady("python3.12 - ${shellQuote(stage)} <<'AHAROU_ROLLBACK'\n$ROLLBACK_SCRIPT\nAHAROU_ROLLBACK", timeoutMs = 15_000L)
                             check(restored?.exitCode == 0) { "EXTENSION_ROLLBACK_FAILED" }
                         }.onFailure { mutableRecovery.value = mutableRecovery.value + extension.id }
                     }
@@ -355,7 +369,7 @@ class VendoredLanguageServers @Inject constructor(
                     kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
                         runCatching {
                             checkBackend()
-                            val restored = commands.runCommandSyncIfReady("python3 - ${shellQuote(stage)} <<'AHAROU_ROLLBACK'\n$ROLLBACK_SCRIPT\nAHAROU_ROLLBACK", timeoutMs = 15_000L)
+                            val restored = commands.runCommandSyncIfReady("python3.12 - ${shellQuote(stage)} <<'AHAROU_ROLLBACK'\n$ROLLBACK_SCRIPT\nAHAROU_ROLLBACK", timeoutMs = 15_000L)
                             check(restored?.exitCode == 0) { "EXTENSION_ROLLBACK_FAILED" }
                         }.onFailure { mutableRecovery.value = mutableRecovery.value + extension.id }
                     }
@@ -428,8 +442,12 @@ try:
     source = json.loads((stage / 'source.json').read_text())
     assert all(source[key] == metadata[key] for key in ('id', 'revision', 'sourceSha256', 'version')), 'EXTENSION_SOURCE_METADATA_MISMATCH'
     if metadata['id'] in ('typescript', 'shell', 'yaml', 'vue'):
-        version = subprocess.check_output(['node', '--version'], text=True).strip()
-        assert int(version.lstrip('v').split('.')[0]) >= 24, 'EXTENSION_REQUIRES_NODE_24'
+        node = stage / 'bin/node'
+        assert node.is_file() and not node.is_symlink() and os.access(node, os.X_OK), 'EXTENSION_MISSING_PRIVATE_NODE'
+        version = subprocess.check_output([str(node), '--version'], text=True).strip()
+        assert version == 'v24.22.2' and source.get('privateNodeVersion') == '24.22.2', 'EXTENSION_REQUIRES_PRIVATE_NODE_24'
+        with node.open('rb') as binary:
+            assert hashlib.file_digest(binary, 'sha256').hexdigest() == source.get('privateNodeSha256'), 'EXTENSION_PRIVATE_NODE_HASH_MISMATCH'
     assert sys.version_info[:2] == (3, 12), 'EXTENSION_REQUIRES_PYTHON_3_12'
     for path in stage.rglob('*'):
         if path.is_file() and not path.is_symlink():

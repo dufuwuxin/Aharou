@@ -1,5 +1,7 @@
 package com.aharou.feature.agent.domain.tool.file
 
+import com.aharou.feature.workspace.domain.transactionKey
+
 import com.aharou.feature.agent.domain.inbox.SharedInbox
 import com.aharou.feature.agent.domain.inbox.SharedInboxEvents
 import com.aharou.feature.agent.domain.model.AgentContext
@@ -116,7 +118,7 @@ class ReadFileTool @Inject constructor(
         runCatching { runFileOpWithTimeout { access.fingerprint(path) } }
             .onFailure { FileLogger.w(TAG, "read_file 登记版本失败: $path", it) }
             .getOrNull()
-            ?.let { versions.record(sessionId, access.toDisplayPath(path), it) }
+            ?.let { versions.record(sessionId, access.transactionKey(path), it) }
     }
 
     /** 真正的读取逻辑（不涉及版本登记）；成功时由调用方登记版本来建立后续写入的基线。 */
@@ -317,7 +319,7 @@ class WriteFileTool @Inject constructor(
         sessionId: String?,
         block: suspend () -> ToolResult
     ): ToolResult {
-        val key = access.toDisplayPath(path)
+        val key = access.transactionKey(path)
         val existedBefore = access.exists(path)
         checkVersion(access, path, key, sessionId, existedBefore)?.let { return it }
 

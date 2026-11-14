@@ -95,6 +95,81 @@ class BuildTests(unittest.TestCase):
             self.assertFalse(os.path.isabs(os.readlink(link)))
             self.assertEqual("exports.protocol = true", (link / "index.js").read_text())
 
+    def test_private_node_launch_survives_move_without_global_node(self):
+        for name in sorted(build.NODE):
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                release = root / "release"
+                package = release / "source" / build.PACKAGE_ROOT[name]
+                package.mkdir(parents=True)
+                (package / "package.json").write_text(json.dumps({"name": name}))
+                entry = package / build.ENTRY[name]
+                entry.parent.mkdir(parents=True, exist_ok=True)
+                entry.write_text("fixture")
+                for dependency in ("typescript", "vscode-languageserver-protocol"):
+                    dep = package / "node_modules" / dependency
+                    dep.mkdir(parents=True)
+                    (dep / "package.json").write_text(json.dumps({"name": dependency}))
+                binary = root / "build-node"
+                binary.write_text(f'#!{sys.executable}\nimport sys\n'
+                                  f'if sys.argv[1:] == ["--version"]: print("v{build.NODE_VERSION}"); sys.exit(0)\n' + FAKE_LSP)
+                binary.chmod(0o755)
+                payload = root / "payload"
+                with patch.object(build.shutil, "which", return_value=str(binary)):
+                    build.assemble(name, release, payload, vendor.BUNDLES / name / "bundle")
+                moved = root / "new location with spaces"
+                payload.rename(moved)
+                self.assertEqual(vendor.digest(binary), vendor.digest(moved / "bin/node"))
+                identity = json.loads((moved / "source.json").read_text())
+                self.assertEqual(build.NODE_VERSION, identity["privateNodeVersion"])
+                self.assertEqual(vendor.digest(binary), identity["privateNodeSha256"])
+                self.assertNotIn(str(release), (moved / "launch.sh").read_text())
+                tools = root / "tools"
+                tools.mkdir()
+                (tools / "dirname").symlink_to("/usr/bin/dirname")
+                with patch.dict(os.environ, {"PATH": str(tools)}):
+                    self.assertIsNone(build.shutil.which("node"))
+                    build.probe_lsp([str(moved / "launch.sh")], timeout=3)
+
+    def test_node_packaging_rejects_unpinned_runtime(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            source = root / "release/source"
+            source.mkdir(parents=True)
+            (source / "package.json").write_text('{}')
+            with patch.object(build.shutil, "which", return_value="/fake/node"), \
+                 patch.object(build.subprocess, "check_output", return_value="v18.0.0\n"), \
+                 patch.object(build, "package_node", return_value=root / "payload/modules/0"):
+                with self.assertRaisesRegex(ValueError, "expected Node 24.22.2"):
+                    build.assemble("yaml", root / "release", root / "payload", vendor.BUNDLES / "yaml/bundle")
+
+    def test_clean_verification_rejects_global_node_and_clears_stale_success(self):
+        with tempfile.TemporaryDirectory() as folder:
+            output = Path(folder)
+            artifact = output / "python-linux-arm64.tar.gz"
+            with tarfile.open(artifact, "w:gz") as archive:
+                member = tarfile.TarInfo("launch.sh")
+                member.size = 1
+                archive.addfile(member, io.BytesIO(b"x"))
+            metadata = output / "python.json"
+            metadata.write_text(json.dumps({"sizeBytes": artifact.stat().st_size,
+                                            "sha256": vendor.digest(artifact), "cleanUbuntuVerified": True}))
+            with patch.dict(os.environ, {"GITHUB_ACTIONS": "true"}), \
+                 patch.object(build.platform, "machine", return_value="aarch64"), \
+                 patch.object(build.platform, "freedesktop_os_release", return_value={"ID": "ubuntu", "VERSION_ID": "24.04"}), \
+                 patch.object(build.shutil, "which", return_value="/fake/node") as which, \
+                 patch.object(build, "probe_lsp", side_effect=ValueError("fake handshake failure")) as probe:
+                with self.assertRaisesRegex(ValueError, "global Node"):
+                    build.verify_clean("python", output)
+                probe.assert_not_called()
+                which.return_value = None
+                with self.assertRaisesRegex(ValueError, "fake handshake failure"):
+                    build.verify_clean("python", output)
+                self.assertFalse(json.loads(metadata.read_text())["cleanUbuntuVerified"])
+                probe.side_effect = None
+                build.verify_clean("python", output)
+                self.assertTrue(json.loads(metadata.read_text())["cleanUbuntuVerified"])
+
     def test_python_runtime_has_relative_launch_not_venv(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
@@ -109,7 +184,11 @@ class BuildTests(unittest.TestCase):
             moved = root / "space runtime"
             payload.rename(moved)
             self.assertNotIn(str(release), (moved / "launch.sh").read_text())
-            build.probe_lsp([str(moved / "launch.sh")], timeout=3)
+            commands = root / "commands"
+            commands.mkdir()
+            (commands / "python3.12").symlink_to(sys.executable)
+            with patch.dict(os.environ, {"PATH": str(commands) + os.pathsep + os.environ["PATH"]}):
+                build.probe_lsp([str(moved / "launch.sh")], timeout=3)
             archive = root / "python.tar.gz"
             build.pack(moved, archive)
             with tarfile.open(archive) as packed:
@@ -162,10 +241,24 @@ class BuildTests(unittest.TestCase):
                 artifact = output / f"{source['id']}-linux-arm64.tar.gz"
                 artifact.write_bytes(b"isolated-test-fixture")
                 entry = {key: source[key] for key in ("id", "command", "revision", "sourceSha256", "version")}
-                entry.update(fileName=artifact.name, sha256=vendor.digest(artifact), sizeBytes=artifact.stat().st_size)
+                entry.update(fileName=artifact.name, sha256=vendor.digest(artifact), sizeBytes=artifact.stat().st_size,
+                             cleanUbuntuVerified=True)
+                if source["id"] in build.NODE:
+                    entry.update(privateNodeVersion=build.NODE_VERSION, privateNodeSha256="a" * 64)
                 (output / f"{source['id']}.json").write_text(json.dumps(entry))
             build.manifest(output)
             self.assertEqual(7, len(json.loads((output / "manifest.json").read_text())["extensions"]))
+            metadata = output / "yaml.json"
+            valid = metadata.read_text()
+            for field, bad in (("cleanUbuntuVerified", False), ("privateNodeVersion", "18.0.0"),
+                               ("privateNodeSha256", "invalid")):
+                entry = json.loads(valid)
+                entry[field] = bad
+                metadata.write_text(json.dumps(entry))
+                with self.assertRaises(ValueError):
+                    build.manifest(output)
+                self.assertFalse((output / "manifest.json").exists())
+            metadata.write_text(valid)
             (output / "lua-linux-arm64.tar.gz").write_bytes(b"tampered")
             with self.assertRaises(ValueError):
                 build.manifest(output)

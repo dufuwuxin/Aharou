@@ -53,12 +53,16 @@ internal fun rememberProjectChatBinding(agent: AIAgentViewModel, projects: Proje
     }
     LaunchedEffect(id, workspace, project != null, state.workspace, requirementBranchId) {
         if (project == null || workspace.isBlank() || state.workspace != workspace) return@LaunchedEffect
+        val startingSession = agent.currentSessionId.value
         try {
             val requestedBranch = requirementBranchId
             val target = if (requestedBranch == null) projects.ensureProjectSession(id, workspace)
                 else projects.ensureBranchSession(requestedBranch, workspace)
             kotlinx.coroutines.currentCoroutineContext().ensureActive()
-            if (projects.state.value.workspace == workspace && requirementBranchId == requestedBranch) {
+            val current = agent.currentSessionId.value
+            val stillBound = current == startingSession || current in project.flowSessionIds ||
+                state.tasks.any { it.projectId == id && (current in it.sessionIds || current in it.processSessionIds) }
+            if (stillBound && projects.state.value.workspace == workspace && requirementBranchId == requestedBranch) {
                 sessionId = target; agent.selectSession(target)
             }
         } catch (cancelled: CancellationException) { throw cancelled }

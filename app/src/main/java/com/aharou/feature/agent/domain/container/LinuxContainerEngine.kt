@@ -362,7 +362,10 @@ class LinuxContainerEngine @Inject constructor(
         projectPath: String?,
         timeoutMs: Long
     ): CommandResult? {
-        val profile = profileResolver.forWorkspace(projectPath)
+        return runCommandOnProfile(profileResolver.forWorkspace(projectPath), command, timeoutMs, projectPath)
+    }
+
+    internal suspend fun runCommandOnProfile(profile: ContainerProfile, command: String, timeoutMs: Long, projectPath: String? = null): CommandResult? {
         if (!containerInstaller.isInstalledFor(profile)) return null
         val result = execCaptured(command, projectPath, timeoutMs, profile)
         return CommandResult(result.output, result.exitCode, result.truncated)

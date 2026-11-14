@@ -113,12 +113,24 @@ class TaskTool @Inject constructor(
     internal fun selectProjectTeam(teamName: String?, goal: String, context: AgentContext): ToolResult =
         teamTasks.selectProjectTeam(teamName, goal, requireNotNull(context.projectRoot))
 
-    internal suspend fun runProjectTeam(teamName: String, goal: String, context: AgentContext, signature: String): ToolResult {
-        val spawned = mutableSetOf<String>()
+    internal suspend fun runProjectTeam(teamName: String, goal: String, context: AgentContext, signature: String,
+        onCreated: (suspend (String, String) -> Unit)? = null): ToolResult {
+        val spawned = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
         try {
             return teamTasks.run(buildJsonObject { put("team", teamName); put("goal", goal) },
                 context.sessionId.orEmpty(), workspace = context.projectRoot, expectedSignature = signature) { pipeline ->
-                runPipeline(buildJsonObject { put("pipeline", pipeline) }, context) { spawned += it }
+                runPipeline(buildJsonObject { put("pipeline", pipeline) }, context) { id ->
+                    spawned += id
+                    try {
+                        if (onCreated != null) {
+                            val session = checkNotNull(sessionUseCase.getSessionById(id)) { "PROJECT_MEMBER_SESSION_MISSING" }
+                            onCreated(id, session.subagentType?.takeIf { it.isNotBlank() } ?: session.title)
+                        }
+                    } catch (failure: Exception) {
+                        try { stopProjectMember(id, context) } catch (stopFailure: Exception) { failure.addSuppressed(stopFailure) }
+                        throw failure
+                    }
+                }
             }
         } finally {
             kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
@@ -150,12 +162,12 @@ class TaskTool @Inject constructor(
         return ToolResult.Error(WriteLease.conflictMessage(conflictId, title, mine, theirs, next, root), "WRITE_CONFLICT")
     }
 
-    private suspend fun runPipeline(args: Map<String, JsonElement>, context: AgentContext, onCreated: ((String) -> Unit)? = null): ToolResult =
+    private suspend fun runPipeline(args: Map<String, JsonElement>, context: AgentContext, onCreated: (suspend (String) -> Unit)? = null): ToolResult =
         stageExecutor.pipeline(args, context, eventBus, { argsToCreate ->
             if (onCreated == null) createSubagent(argsToCreate, context) else
                 kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
                     createSubagent(argsToCreate, context).also { result ->
-                        ((result as? ToolResult.Success)?.data as? JsonObject)?.get("id")?.jsonPrimitive?.contentOrNull?.let(onCreated)
+                        ((result as? ToolResult.Success)?.data as? JsonObject)?.get("id")?.jsonPrimitive?.contentOrNull?.let { onCreated(it) }
                     }
                 }
         }, { readSubagentOutput(it, context) })

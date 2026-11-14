@@ -344,6 +344,8 @@ class LocalFileAccess @Inject constructor(
         return pathMapper.toContainerPath(parent.absolutePath, boundWorkspace)
     }
 
+    internal fun transactionIdentity(path: String): String = "local:" + resolve(path).canonicalPath
+
     override fun toDisplayPath(path: String): String {
         return pathMapper.toContainerPath(pathMapper.toHostFile(path, boundWorkspace).absolutePath, boundWorkspace)
     }

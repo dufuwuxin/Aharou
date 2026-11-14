@@ -424,6 +424,14 @@ class RemoteSftpFileAccess @Inject constructor(
         return toDisplayPathFromRemote(parent)
     }
 
+    internal fun transactionIdentity(path: String): String {
+        requireBoundTarget()
+        val endpoint = boundEndpoint ?: connection.config?.let { Triple(it.host, it.port, it.username) }
+            ?: error("SSH_NOT_CONNECTED")
+        return listOf("ssh", endpoint.first, endpoint.second.toString(), endpoint.third,
+            Paths.get(toRemotePath(path)).normalize().toString()).joinToString("\u0000")
+    }
+
     override fun toDisplayPath(path: String): String = toDisplayPathFromRemote(toRemotePath(path))
 
     /** 读取远程文件全部字节；不存在抛 [NoSuchFileException]，超过 [MAX_REMOTE_READ_BYTES] 抛 [RemoteOutputTooLargeException]。 */

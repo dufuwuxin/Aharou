@@ -142,9 +142,21 @@ class SessionUseCase @Inject constructor(
     /**
      * 工作区里一条「还没发过消息」的根会话，供新建会话时复用，避免每点一次「新建」就多插一条空会话。
      */
-    suspend fun getEmptySessionOfWorkspace(workspacePath: String): ChatSessionEntity? {
-        // 单次子查询完成，不再把全部根会话拉回内存逐条查。
-        return chatSessionDao.getEmptyRootSessionByWorkspace(workspacePath)
+    suspend fun getEmptySessionOfWorkspace(workspacePath: String): ChatSessionEntity? =
+        getOrdinaryEmptySession(workspacePath)
+
+    private suspend fun projectSessionIds(workspacePath: String): Set<String> {
+        val store = projectTasks.get().load(workspacePath)
+        return (store.projects.flatMap { it.flowSessionIds } +
+            store.tasks.flatMap { it.sessionIds + it.processSessionIds }).toSet()
+    }
+
+    suspend fun getOrdinaryEmptySession(workspacePath: String, currentSessionId: String? = null): ChatSessionEntity? {
+        val owned = projectSessionIds(workspacePath)
+        suspend fun reusable(session: ChatSessionEntity): Boolean = session.workspacePath == workspacePath &&
+            session.parentId == null && session.id !in owned && !agentMessageDao.hasMessages(session.id)
+        currentSessionId?.let { chatSessionDao.getById(it) }?.let { if (reusable(it)) return it }
+        return chatSessionDao.getRootSessionsByWorkspaceOnce(workspacePath).firstOrNull { reusable(it) }
     }
 
     /** 工作区里最近更新的根会话（忽略置顶），供启动时进入最近会话。 */
@@ -155,8 +167,10 @@ class SessionUseCase @Inject constructor(
     /** 回收工作区下多余的空会话（从未发送过消息），保留 [keepId]；保证列表最多一个空会话。 */
     suspend fun recycleEmptySessions(workspacePath: String, keepId: String? = null): Int {
         var count = 0
+        val owned = projectSessionIds(workspacePath)
         chatSessionDao.getRootSessionsByWorkspaceOnce(workspacePath).forEach { session ->
-            if (session.id != keepId && !agentMessageDao.hasMessages(session.id)) {
+            if (session.id != keepId && session.id !in owned && !agentMessageDao.hasMessages(session.id) &&
+                chatSessionDao.getSubSessionsByParentOnce(session.id).none { it.id in owned }) {
                 deleteSession(session.id)
                 count++
             }

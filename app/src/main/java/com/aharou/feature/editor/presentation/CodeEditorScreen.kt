@@ -114,16 +114,19 @@ fun CodeEditorScreen(
 ) {
     // 标签页会话：外部每次带新 path 进编辑器都开（或激活）一个标签页，
     // 之前打开过的文件留在标签栏里，切文件不再丢未保存的改动。
-    val tabs by EditorSessionManager.tabs.collectAsStateWithLifecycle()
-    val sessionActivePath by EditorSessionManager.activePath.collectAsStateWithLifecycle()
-    val snapshots by EditorSessionManager.snapshots.collectAsStateWithLifecycle()
-    LaunchedEffect(path) { EditorSessionManager.open(path) }
+    val documentScope by viewModel.documentScope.collectAsStateWithLifecycle()
+    val workspaceKey = documentScope.identity
+    val sessions = remember(workspaceKey) { EditorSessionManager.forWorkspace(workspaceKey) }
+    val tabs by sessions.tabs.collectAsStateWithLifecycle()
+    val sessionActivePath by sessions.activePath.collectAsStateWithLifecycle()
+    val snapshots by sessions.snapshots.collectAsStateWithLifecycle()
+    LaunchedEffect(path, workspaceKey) { sessions.open(path) }
     val activePath = sessionActivePath.ifBlank { path }
     val currentActivePath by rememberUpdatedState(activePath)
     // 定义跳转用「工作区内为 ~/workspace/…」的统一写法，当前路径也归一化后比对，
     // 免得同一个文件因为写法不同被当成两个路径、在标签栏里开出两份。
     val normalizedActivePath = viewModel.displayPath(activePath)
-    LaunchedEffect(activePath) { viewModel.load(activePath) }
+    LaunchedEffect(activePath, workspaceKey) { viewModel.load(activePath) }
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     // 文档版本：只在装载出新文档时变，用于让编辑器按文档重建（见下面 key(documentVersion)）。
     val documentVersion by viewModel.documentVersion.collectAsStateWithLifecycle()
@@ -160,7 +163,7 @@ fun CodeEditorScreen(
     val saving by viewModel.saving.collectAsStateWithLifecycle()
 
     // 切换标签页时重置编辑态，避免旧文件的撤销/脏标记残留到新文件；带未保存快照的页恢复脏标记与光标。
-    LaunchedEffect(activePath) {
+    LaunchedEffect(activePath, workspaceKey) {
         canUndo = false
         canRedo = false
         dirty = snapshots[activePath]?.dirty == true
@@ -199,11 +202,14 @@ fun CodeEditorScreen(
     val savedText = stringResource(R.string.editor_save_success)
     val saveFailedText = stringResource(R.string.editor_save_failed)
     val noDefinitionText = stringResource(R.string.editor_goto_definition_not_found)
-    LaunchedEffect(Unit) {
+    LaunchedEffect(workspaceKey) {
         viewModel.saveEvents.collect { result ->
+            if (result is SaveResult.Success) {
+                EditorSessionManager.forWorkspace(result.workspace).markSaved(result.path, result.content)
+            }
+            if (result.workspace != workspaceKey) return@collect
             when (result) {
                 is SaveResult.Success -> {
-                    EditorSessionManager.markSaved(result.path, result.content)
                     if (result.path == currentActivePath) {
                         baselineText.value = result.content
                         dirty = editorRef.value?.text?.toString()?.let { it != result.content } ?: dirty
@@ -250,7 +256,7 @@ fun CodeEditorScreen(
     /** 把当前编辑器的内容/光标/滚动存进会话，供切走后再切回来恢复。 */
     fun persistCurrentTab() {
         val editor = editorRef.value ?: return
-        EditorSessionManager.saveSnapshot(
+        sessions.saveSnapshot(
             activePath,
             EditorSessionManager.Snapshot(
                 content = if (dirty) editor.text.toString() else null,
@@ -267,17 +273,17 @@ fun CodeEditorScreen(
         if (target == activePath) return
         persistCurrentTab()
         editorFind.close()
-        EditorSessionManager.activate(target)
+        sessions.activate(target)
     }
 
     fun performCloseTab(target: String) {
-        EditorSessionManager.close(target)
-        if (EditorSessionManager.tabs.value.isEmpty()) onBack()
+        sessions.close(target)
+        if (sessions.tabs.value.isEmpty()) onBack()
     }
 
     fun closeTab(target: String) {
         if (target == activePath) persistCurrentTab()
-        if (EditorSessionManager.snapshot(target)?.dirty == true) {
+        if (sessions.snapshot(target)?.dirty == true) {
             pendingCloseTab = target
             showCloseTabDialog = true
         } else {
@@ -301,7 +307,7 @@ fun CodeEditorScreen(
                 return@launch
             }
             if (target.path != normalizedActivePath) {
-                EditorSessionManager.open(target.path)
+                sessions.open(target.path)
             }
             jumpTarget = target.path to (target.line + 1)
         }
@@ -448,7 +454,7 @@ fun CodeEditorScreen(
             is EditorUiState.Loading -> CenterBox(content) { CircularProgressIndicator() }
             is EditorUiState.Success -> Box(modifier = content) {
                 // 有未保存快照时用快照文本而不是磁盘内容——切走再切回来，改动不能消失。
-                val surfaceState = remember(activePath, s.content) {
+                val surfaceState = remember(workspaceKey, activePath, documentVersion, s.content) {
                     snapshots[activePath]?.let { s.copy(content = it.content ?: s.content, baselineContent = it.baselineContent ?: s.baselineContent) } ?: s
                 }
                 // 按「文档」重建编辑器：大屏右栏常驻在聊天页里，切文件时这个组合位置不变，
@@ -557,7 +563,7 @@ fun CodeEditorScreen(
             onUseDisk = {
                 saveConflictDiskContent = null
                 dirty = false
-                EditorSessionManager.forget(activePath)
+                sessions.forget(activePath)
                 viewModel.reloadFromDisk(activePath)
             },
             onDismiss = { saveConflictDiskContent = null }

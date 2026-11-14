@@ -56,7 +56,7 @@ data class InstallResult(
     val status: ExtensionStatus
 )
 
-/** App-side downloads and backend-private, atomic artifact installation; no package manager fallback. */
+/** App-side downloads and backend-private, atomic artifact installation; fixed runtime bootstrap only. */
 @Singleton
 class LanguageServerInstaller @Inject constructor(
     private val commandEngine: CommandEngine,
@@ -86,7 +86,6 @@ class LanguageServerInstaller @Inject constructor(
 
     suspend fun install(extension: LanguageExtension): InstallResult = withContext(Dispatchers.IO) {
         val result = try {
-            commandEngine.ensureInstalled()
             vendored.install(extension)
         } catch (cancelled: CancellationException) {
             throw cancelled

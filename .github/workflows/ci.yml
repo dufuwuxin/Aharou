@@ -1,6 +1,6 @@
 name: CI
 
-# push 到 master 或 PR 时触发：构建 armsolo debug（单 flavor 冒烟）+ 跑单元测试。
+# push / PR: foundation modules -> app domain regressions -> combined gates -> final APK.
 # 目的是合入前的兜底门禁，避免编译错误/回归推迟到打 tag 发版当天才暴露。
 # 打 v* tag 的发版构建走 android-release.yml，不在这里。
 on:
@@ -32,57 +32,212 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
-    name: Build & Test
+  foundation:
+    name: Foundation (${{ matrix.module }})
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
       contents: read
     env:
-      # 编译闸门的 CI 放行开关（gradlew 读它）：一个 job 里会多次调 gradlew，
-      # 而本地授权文件是一次性消费的，不显式放行的话第二次（单测）会被误拒。
-      # gradlew 还要求 GITHUB_ACTIONS=true 同时成立，本地 export 一行绕不过去。
       AHAROU_CI_BUILD: "1"
-
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - module: core-agent
+            task: ':core-agent:test'
+            report: core-agent/build/test-results/test
+          - module: core-storage
+            task: ':core-storage:jvmJar'
+            report: ''
+          - module: terminal-emulator
+            task: ':terminal-emulator:compileDebugJavaWithJavac'
+            report: ''
+          # terminal-view applies only com.android.library, not the Kotlin plugin.
+          - module: terminal-view
+            task: ':terminal-view:compileDebugJavaWithJavac'
+            report: ''
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          # versionCode 由 build.gradle.kts 的 gitCommitCount() 在配置阶段取
-          # git rev-list --count HEAD，浅克隆（默认 depth=1）会得到 1，必须拉完整历史。
           fetch-depth: 0
           persist-credentials: false
-
-      - name: Set up JDK 21
-        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6
+      - name: Set up verification
+        uses: ./.github/actions/setup-verification
+      - name: Verify real foundation module
+        run: ./gradlew ${{ matrix.task }} --stacktrace --console=plain
+      - name: Upload foundation results
+        if: always() && matrix.report != ''
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          distribution: temurin
-          java-version: '21'
+          name: foundation-${{ matrix.module }}
+          path: ${{ matrix.report }}/**
+          retention-days: 7
+          if-no-files-found: error
 
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5
+  feature-tests:
+    name: App feature regressions
+    needs: foundation
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    env:
+      AHAROU_CI_BUILD: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          # PR 用只读缓存，仅 master 的 push 写回缓存，避免被 PR 污染。
-          cache-read-only: ${{ github.ref != 'refs/heads/master' }}
-
-      # Robolectric 的 android-all-instrumented 运行时（约 190MB）由它自己的 Maven 拉取器下载到
-      # ~/.m2/repository，不在 setup-gradle 的缓存范围内。不缓存则每次跑单测都要重下一遍，
-      # 网络抖动会让 MigrationTest 在类初始化就挂（MavenArtifactFetcher FileNotFoundException）。
-      - name: Cache Robolectric runtime
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
-        with:
-          path: ~/.m2/repository/org/robolectric
-          key: robolectric-${{ runner.os }}-${{ hashFiles('app/build.gradle.kts') }}
-          restore-keys: |
-            robolectric-${{ runner.os }}-
-
-      - name: Grant execute permission for gradlew
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up verification
+        uses: ./.github/actions/setup-verification
+      - name: Check CI layering contract
+        run: python3 scripts/test_ci_layers.py
+      # All domains use :app:testArmsoloDebugUnitTest, NOT independently compiled features.
+      # Gradle reuses the app compilation between steps; each domain archives its own XML.
+      - name: Test agent domain
+        if: ${{ !cancelled() }}
         run: |
-          chmod +x ./gradlew
-          # API 推送会丢文件执行位；不关掉 fileMode，chmod 会让 git 判定工作区脏，
-          # 版本号被挂上 -dirty，装上去之后会一直提示有新版。
-          git config core.fileMode false
+          set -o pipefail
+          python3 scripts/ci_test_groups.py --group agent 2>&1 | tee -a /tmp/unit.log
+      - name: Test backup domain
+        if: ${{ !cancelled() }}
+        run: |
+          set -o pipefail
+          python3 scripts/ci_test_groups.py --group backup 2>&1 | tee -a /tmp/unit.log
+      - name: Test browser domain
+        if: ${{ !cancelled() }}
+        run: |
+          set -o pipefail
+          python3 scripts/ci_test_groups.py --group browser 2>&1 | tee -a /tmp/unit.log
+      - name: Test credentials domain
+        if: ${{ !cancelled() }}
+        run: |
+          set -o pipefail
+          python3 scripts/ci_test_groups.py --group credentials 2>&1 | tee -a /tmp/unit.log
+      - name: Test editor domain
+        if: ${{ !cancelled() }}
+        run: |
+          set -o pipefail
+          python3 scripts/ci_test_groups.py --group editor 2>&1 | tee -a /tmp/unit.log
+      - name: Test git domain
+        if: ${{ !cancelled() }}
+        run: |
+          set -o pipefail
+          python3 scripts/ci_test_groups.py --group git 2>&1 | tee -a /tmp/unit.log
+      - name: Test localmodel domain
+        if: ${{ !cancelled() }}
+        run: |
+          set -o pipefail
+          python3 scripts/ci_test_groups.py --group localmodel 2>&1 | tee -a /tmp/unit.log
+      - name: Test onboarding domain
+        if: ${{ !cancelled() }}
+        run: |
+          set -o pipefail
+          python3 scripts/ci_test_groups.py --group onboarding 2>&1 | tee -a /tmp/unit.log
+      - name: Test pet domain
+        if: ${{ !cancelled() }}
+        run: |
+          set -o pipefail
+          python3 scripts/ci_test_groups.py --group pet 2>&1 | tee -a /tmp/unit.log
+      - name: Test plugin domain
+        if: ${{ !cancelled() }}
+        run: |
+          set -o pipefail
+          python3 scripts/ci_test_groups.py --group plugin 2>&1 | tee -a /tmp/unit.log
+      - name: Test sandbox domain
+        if: ${{ !cancelled() }}
+        run: |
+          set -o pipefail
+          python3 scripts/ci_test_groups.py --group sandbox 2>&1 | tee -a /tmp/unit.log
+      - name: Test settings domain
+        if: ${{ !cancelled() }}
+        run: |
+          set -o pipefail
+          python3 scripts/ci_test_groups.py --group settings 2>&1 | tee -a /tmp/unit.log
+      - name: Test terminal domain
+        if: ${{ !cancelled() }}
+        run: |
+          set -o pipefail
+          python3 scripts/ci_test_groups.py --group terminal 2>&1 | tee -a /tmp/unit.log
+      - name: Test vault domain
+        if: ${{ !cancelled() }}
+        run: |
+          set -o pipefail
+          python3 scripts/ci_test_groups.py --group vault 2>&1 | tee -a /tmp/unit.log
+      - name: Test workspace domain
+        if: ${{ !cancelled() }}
+        run: |
+          set -o pipefail
+          python3 scripts/ci_test_groups.py --group workspace 2>&1 | tee -a /tmp/unit.log
+      - name: Test core domain
+        if: ${{ !cancelled() }}
+        run: |
+          set -o pipefail
+          python3 scripts/ci_test_groups.py --group core 2>&1 | tee -a /tmp/unit.log
+      - name: Verify complete disjoint app regression
+        id: group_manifest
+        if: ${{ !cancelled() }}
+        run: python3 scripts/ci_test_groups.py --verify-all
+      - name: Collect core-agent results
+        if: always()
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: foundation-core-agent
+          path: core-agent/build/test-results/test
+      - name: Upload unit test log
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: unit-test-log
+          path: /tmp/unit.log
+          retention-days: 7
+          if-no-files-found: warn
+      - name: Upload disjoint feature reports
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: feature-group-results
+          path: app/build/test-results/ciGroups/**
+          retention-days: 7
+          if-no-files-found: error
+      - name: Upload test report
+        if: always() && steps.group_manifest.outcome == 'success'
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: unit-test-results
+          path: |
+            app/build/test-results/testArmsoloDebugUnitTest/**
+            core-agent/build/test-results/test/**
+          retention-days: 7
+          if-no-files-found: error
 
+  combination:
+    name: Combined quality gates
+    needs: feature-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      AHAROU_CI_BUILD: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up verification
+        uses: ./.github/actions/setup-verification
+      - name: Download complete regression reports
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: feature-group-results
+          path: app/build/test-results/ciGroups
+      - name: Reconcile complete app regression
+        run: python3 scripts/ci_test_groups.py --verify-all
       # 迁移版本号对账：编号连续、SCHEMA_VERSION 一致、已发布迁移未被篡改/复用
       # （hotfix 合流后 master 未把未发布迁移后移会在这里被拦）。
       - name: Check migration versions
@@ -125,6 +280,30 @@ jobs:
       - name: Verify architecture baseline only shrinks
         run: python3 scripts/check_architecture.py --check-ratchet
 
+      - name: Verify built-in team evidence fixtures
+        run: python3 scripts/test_builtin_team_evidence.py
+
+      - name: Verify minified YAML package reflection
+        run: python3 scripts/test_release_yaml.py
+
+
+  build:
+    name: Build & Test
+    needs: combination
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      AHAROU_CI_BUILD: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up verification
+        uses: ./.github/actions/setup-verification
       # 单 flavor 冒烟：只构 armsolo debug（CLAUDE.md 规范：AI 改完编译型代码默认跑这个），
       # 不构全量三 flavor，省三倍 Kotlin 编译。编译闸门在 CI 由 AHAROU_CI_BUILD=1 放行，
       # 不再写本地 build-allowed 令牌（闸门双条件：用户弹窗确认或 CI 环境变量）。
@@ -163,91 +342,6 @@ jobs:
               subprocess.run(["python3", cli, "--source-dir", str(examples / "js"), "--manifest", str(examples / "js/manifest.json"), "--output", str(Path(folder) / "js.txplugin")], check=True)
           PY
 
-      # 单元测试（app/src/test 与 core-agent/src/test 下的 Kotlin 单测）。
-      # 只跑 ARM64 debug 变体：
-      # 跑全 flavor 6 变体是重复编译，无额外覆盖。
-      - name: Use preinstalled JDK 21 for unit tests
-        run: |
-          test -n "$JAVA_HOME_21_X64"
-          test -x "$JAVA_HOME_21_X64/bin/java"
-          echo "JAVA_HOME=$JAVA_HOME_21_X64" >> "$GITHUB_ENV"
-          echo "$JAVA_HOME_21_X64/bin" >> "$GITHUB_PATH"
-          "$JAVA_HOME_21_X64/bin/java" -version
-
-      - name: Run unit tests
-        id: unit_tests
-        # 用 tee 而不是重定向：重定向会把 Gradle 输出全写进文件，job 日志里就只剩一行命令，
-        # 失败时完全看不到原因（2026-10-25 为此绕了一大圈）。pipefail 保证 gradle 的退出码不被 tee 吃掉。
-        # ContextCompactorTest 的 6 个用例在 c72700f4 后因实现层多级压缩/超时语义改动断言未同步而挂，
-        # 已逐一对齐新行为（commit 用稳定 headIds+最早尾时间戳、无模型精简的安全降级、短窗内同材料不重跑等），
-        # 全量已绿（1906 用例 0 失败）。不再排除，CI 跑全量。
-        # 本地复现：./gradlew :app:testArmsoloDebugUnitTest --no-build-cache
-        run: |
-          set -o pipefail
-          ./gradlew :core-agent:test :app:testArmsoloDebugUnitTest \
-            --console=plain 2>&1 | tee /tmp/unit.log
-
-      - name: Verify built-in team evidence fixtures
-        run: python3 scripts/test_builtin_team_evidence.py
-
-      - name: Verify minified YAML package reflection
-        run: python3 scripts/test_release_yaml.py
-
-      - name: Upload unit test log
-        if: always() && steps.unit_tests.outcome != 'skipped'
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-        with:
-          name: unit-test-log
-          path: /tmp/unit.log
-          retention-days: 7
-          if-no-files-found: warn
-
-      # 失败原因写进步骤摘要 + 错误注解：GitHub 的日志接口会截断长日志，单测挂在哪一条
-      # 从日志里看不到（之前只能拿到 exit code 1），而注解能通过 API 直接读到。
-      # 注解必须直接打到 stdout：整块重定向进 $GITHUB_STEP_SUMMARY 时，::error 只是摘要里的一行
-      # 普通文字，不会变成 Actions annotation。
-      - name: Summarize unit test failures
-        if: always() && steps.unit_tests.outcome != 'skipped'
-        run: |
-          reports=app/build/test-results/testArmsoloDebugUnitTest
-          failed_files=""
-          tests_failed=0
-          if compgen -G "$reports/*.xml" > /dev/null; then
-            failed_files=$(grep -l '<failure' "$reports"/*.xml 2>/dev/null || true)
-            if [ -n "$failed_files" ]; then
-              tests_failed=1
-              for f in $failed_files; do
-                echo "::error title=单测失败::$(basename "$f")"
-              done
-            fi
-          else
-            tests_failed=1
-            echo '::error title=单测无报告::测试进程在写出报告前就崩了（OOM / 超时）'
-          fi
-          # 日志尾部只在失败时进注解：成功时也打 error 注解的话，每次跑绿都挂着一条红字。
-          if [ "$tests_failed" = 1 ]; then
-            crash=$(tail -8 /tmp/unit.log 2>/dev/null | tr '\n' '~' | cut -c1-900 || true)
-            if [ -n "$crash" ]; then
-              echo "::error title=单测日志尾::${crash}"
-            fi
-          fi
-
-          {
-            echo '### 单测结果'
-            if [ -n "$failed_files" ]; then
-              for f in $failed_files; do
-                echo "失败文件: $(basename "$f")"
-              done
-            elif compgen -G "$reports/*.xml" > /dev/null; then
-              echo '全部用例通过'
-            else
-              echo '没有生成测试报告：测试进程可能在写出报告前就崩了（OOM / 超时）'
-              echo '```'
-              tail -30 /tmp/unit.log 2>/dev/null || echo '（没有 /tmp/unit.log）'
-              echo '```'
-            fi
-          } >> "$GITHUB_STEP_SUMMARY"
-
       - name: Upload plugin patrol evidence
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
@@ -259,14 +353,10 @@ jobs:
           retention-days: 7
           if-no-files-found: warn
 
-      - name: Upload test report
-        if: always() && steps.unit_tests.outcome != 'skipped'
+      - name: Upload verified APK
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: unit-test-results
-          path: |
-            app/build/test-results/testArmsoloDebugUnitTest/**
-            core-agent/build/test-results/test/**
-            app/build/outputs/apk/armsolo/debug/*.apk
+          name: verified-debug-apk
+          path: app/build/outputs/apk/armsolo/debug/*.apk
           retention-days: 7
-          if-no-files-found: warn
+          if-no-files-found: error

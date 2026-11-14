@@ -303,6 +303,19 @@ class RemoteSshConnection @Inject constructor(
         return cmd
     }
 
+    internal fun startExecSession(command: String, target: BootstrapTarget): Session.Command {
+        check(isCurrentBootstrap(target)) { "SSH_CONNECTION_CHANGED" }
+        val session = target.client.startSession()
+        try {
+            val cmd = session.exec(command)
+            runCatching { cmd.outputStream.close() }
+            return cmd
+        } catch (failure: Exception) {
+            runCatching { session.close() }
+            throw failure
+        }
+    }
+
     /**
      * 开 exec 会话但**保留 stdin 可写**，供大内容经 stdin 传输（避免命令行参数超过远端 ARG_MAX）。
      * 调用方负责写入并关闭 [Session.Command.outputStream]、读取输出、关闭 session。

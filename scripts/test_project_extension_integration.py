@@ -1,5 +1,8 @@
 """Source wiring checks, not Android click tests or real language-server builds."""
 import json
+import shutil
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -75,6 +78,73 @@ class IntegrationContracts(unittest.TestCase):
             self.assertIn(token, bundle)
         self.assertNotIn("DownloadManager", bundle)
 
+    def test_bootstrap_is_locked_and_before_network(self):
+        installer = self.read("feature/editor/lsp/LanguageServerInstaller.kt")
+        bundle = self.read("feature/editor/lsp/VendoredLanguageServers.kt")
+        self.assertNotIn("ensureInstalled()", installer)
+        install = bundle[bundle.index("suspend fun install("):]
+        self.assertLess(install.index("installLock.withLock"), install.index("commands.ensureInstalled()"))
+        self.assertLess(install.index("val profile ="), install.index("commands.ensureInstalled()"))
+        self.assertLess(install.index("ExtensionRuntimeBootstrap.prepare"), install.index("extensionRequest(client"))
+        self.assertIn("checkBackend()", install[install.index("ExtensionRuntimeBootstrap.prepare"):install.index("extensionRequest(client")])
+        self.assertIn("node = stage / 'bin/node'", bundle)
+        self.assertNotIn("check_output(['node'", bundle)
+        self.assertNotIn('"python3 - ', bundle)
+
+    def test_runtime_script_with_whitelisted_fake_commands(self):
+        source = self.read("feature/editor/lsp/ExtensionRuntimeBootstrap.kt")
+        script = source.split('internal val SCRIPT = """', 1)[1].split('""".trimIndent()', 1)[0].replace("${'$'}", "$")
+        # No real package manager is reachable: PATH contains only these exact stubs
+        # and grep; /bin/sh is the sole absolute executable in this fixed script.
+        self.assertNotIn("sudo", script)
+        self.assertNotIn("/usr/bin/", script)
+        self.assertNotIn("/bin/", script)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            stubs = {
+                "uname": 'printf "%s\n" "$ARCH"',
+                "cat": 'printf "ID=%s\nVERSION_ID=\"24.04\"\n" "$DISTRO"',
+                "id": 'printf "%s\n" "$UID_VALUE"',
+                "python3.12": 'test -f "$READY"',
+                "dpkg-query": "printf 'install ok installed'",
+                "apt-get": 'printf "%s\n" "$*" >> "$CALLS"; test "$APT_RC" = 0 || exit "$APT_RC"; case " $* " in *" install "*) : > "$READY" ;; esac',
+            }
+            for name, body in stubs.items():
+                path = root / name
+                path.write_text("#!/bin/sh\n" + body + "\n")
+                path.chmod(0o755)
+            (root / "grep").symlink_to(shutil.which("grep"))
+            env = {"PATH": str(root), "ARCH": "aarch64", "DISTRO": "ubuntu", "UID_VALUE": "0", "APT_RC": "0", "READY": str(root / "ready"), "CALLS": str(root / "calls")}
+
+            def run(**changes):
+                result = subprocess.run(["/bin/sh", "-c", script], env=env | changes, capture_output=True, text=True, timeout=5)
+                return result.returncode, result.stdout + result.stderr
+
+            self.assertEqual(64, run(ARCH="x86_64")[0])
+            self.assertEqual(65, run(DISTRO="debian")[0])
+            self.assertEqual(77, run(UID_VALUE="1000")[0])
+            self.assertFalse((root / "calls").exists())
+            self.assertEqual(100, run(APT_RC="100")[0])
+            self.assertFalse((root / "ready").exists())
+            self.assertEqual((0, ""), run())
+            calls = (root / "calls").read_text()
+            self.assertIn("install -y --no-install-recommends python3.12 libstdc++6 libatomic1 ca-certificates", calls)
+            self.assertNotIn("node", calls)
+            self.assertEqual((0, ""), run(UID_VALUE="1000"))
+            self.assertEqual(calls, (root / "calls").read_text())
+
+    def test_node_artifacts_ship_private_runtime_and_require_clean_verification(self):
+        builder = (ROOT / "scripts/build_language_extensions.py").read_text()
+        workflow = (ROOT / ".github/workflows/language-extensions.yml").read_text()
+        self.assertIn('exec "$here/bin/node"', builder)
+        self.assertNotIn('runtime.append("node >=24")', builder)
+        self.assertIn('entry.get("cleanUbuntuVerified") is not True', builder)
+        self.assertIn("node-version: '24.22.2'", workflow)
+        self.assertIn("ubuntu:24.04", workflow)
+        self.assertIn("--verify-clean", workflow)
+        self.assertIn("python3.12 libstdc++6 libatomic1 ca-certificates", workflow)
+        self.assertLess(workflow.index("--verify-clean"), workflow.index("actions/upload-artifact"))
+
     def test_old_global_cache_does_not_claim_managed_installation(self):
         installer = self.read("feature/editor/lsp/LanguageServerInstaller.kt")
         self.assertIn("vendored.installedVersion(extension)", installer)
@@ -97,7 +167,7 @@ class IntegrationContracts(unittest.TestCase):
         self.assertIn("if (requested && enabled", preview)
         self.assertNotIn("rememberTranslatedText(text)", preview)
         service = self.read("core/translation/OfflineTranslation.kt")
-        translate = service[service.index("private suspend fun translateReady("):service.index("private fun cache(")]
+        translate = service[service.index("suspend fun translateRequired("):service.index("private fun cache(")]
         self.assertNotIn("prepareModel()", translate)
         self.assertNotIn("LocalLlmEngine", service)
 

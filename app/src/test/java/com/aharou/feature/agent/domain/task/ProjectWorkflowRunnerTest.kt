@@ -25,7 +25,9 @@ class ProjectWorkflowRunnerTest {
     private fun task(id: String, deps: List<String> = emptyList()) = ProjectTask(id = id, workspace = "w", projectId = "p",
         title = id, requirement = id, owner = "legacy", dependencyIds = deps, version = 1, order = if (id == "a") 1 else 2, createdAt = 1)
 
-    private fun fixture(accepted: Boolean, team: Boolean = false, teamResult: ToolResult? = null, wait: Boolean = false, owner: String = "", members: List<String> = emptyList(),
+    private fun fixture(accepted: Boolean, team: Boolean = false, teamResult: ToolResult? = null, wait: Boolean = false,
+        onTeamCreated: (suspend (ProjectTaskSnapshot) -> ProjectTaskSnapshot)? = null,
+        beforeTeamCreated: ((ProjectTaskSnapshot) -> ProjectTaskSnapshot)? = null, owner: String = "", members: List<String> = emptyList(),
         rejectAt: Int? = null, waitAt: Int? = null, capacityWait: Boolean = false, fullChecks: Int = 2, holdFirstMember: Boolean = false,
         beforeCommit: ((ProjectTaskSnapshot) -> ProjectTaskSnapshot)? = null,
         afterMemberEnds: ((ProjectTaskSnapshot) -> ProjectTaskSnapshot)? = null,
@@ -71,11 +73,18 @@ class ProjectWorkflowRunnerTest {
         }
         val sessions = mockk<SessionUseCase>(relaxed = true)
         val tasks = mockk<TaskTool>()
+        var teamCreates = 0
+        var beforeTeamHook = beforeTeamCreated
+        var afterTeamHook = onTeamCreated
         if (team) {
             every { tasks.selectProjectTeam(any(), any(), any()) } returns ToolResult.Success(buildJsonObject {
                 put("team", "builders"); put("signature", "hash"); put("selectionReason", "auto:first-buildable-by-name")
             })
-            coEvery { tasks.runProjectTeam("builders", any(), any(), "hash") } coAnswers {
+            coEvery { tasks.runProjectTeam("builders", any(), any(), "hash", any()) } coAnswers {
+                val id = "team-child-${teamCreates++}"
+                beforeTeamHook?.let { change -> beforeTeamHook = null; snapshot = change(snapshot) }
+                arg<(suspend (String, String) -> Unit)?>(4)?.invoke(id, "real-builder")
+                afterTeamHook?.let { change -> afterTeamHook = null; snapshot = change(snapshot) }
                 teamResult ?: ToolResult.Success(buildJsonObject { put("state", "done"); put("runId", "real-run")
                     put("outputs", buildJsonObject { put("builder", "actual output") }) })
             }
@@ -124,7 +133,7 @@ class ProjectWorkflowRunnerTest {
         every { events.isFull } answers { capacityWait && capacityChecks++ < fullChecks }
         every { events.terminalEvent(any()) } answers {
             val id = firstArg<String>()
-            (if (wait || created[id] == waitAt || (holdFirstMember && id == "member-a")) null else SubAgentEvent(id, rootId, SubAgentEventType.COMPLETED,
+            (if (id.startsWith("team-child-") && !wait) SubAgentEvent(id, rootId, SubAgentEventType.COMPLETED, accepted = true) else if (wait || created[id] == waitAt || (holdFirstMember && id == "member-a")) null else SubAgentEvent(id, rootId, SubAgentEventType.COMPLETED,
                 accepted = accepted && created[id] != rejectAt)).also { if (it != null && id == "member-a") memberEnded = true }
         }
         val messages = mockk<MessagePersistenceUseCase>(relaxed = true)
@@ -145,10 +154,68 @@ class ProjectWorkflowRunnerTest {
         val (runner, snapshot) = fixture(false, team = true)
         runner.run("p", "w")
         val tool = requireNotNull(teamTool)
-        io.mockk.coVerify(exactly = 2) { tool.runProjectTeam("builders", any(), match { it.sessionId == rootId }, "hash") }
+        io.mockk.coVerify(exactly = 2) { tool.runProjectTeam("builders", any(), match { it.sessionId == rootId }, "hash", any()) }
         val task = snapshot().tasks.first { it.id == "a" }
         assertEquals(ProjectTaskStatus.REVIEW, task.status)
         assertTrue(task.evidenceRefs.single().contains(":v1:run:real-run"))
+    }
+
+    @Test fun teamChildrenAreLinkedWithRealRoleAndOnlyCurrentRunRecordsAreFinished() = runBlocking {
+        val (runner, snapshot) = fixture(false, team = true, seed = { it.copy(
+            processSessionIds = listOf("older-run"), processParticipants = listOf("team:builders:hash"),
+            processMembers = mapOf("older-run" to ProjectTaskMemberRun("old-role", 1, 0, "FAILED"))) })
+        runner.run("p", "w", "a")
+        val task = snapshot().tasks.first { it.id == "a" }
+        assertEquals(listOf("older-run", "team-child-0"), task.processSessionIds)
+        assertEquals("FAILED", task.processMembers.getValue("older-run").outcome)
+        val actual = task.processMembers.getValue("team-child-0")
+        assertEquals("real-builder", actual.role)
+        assertEquals(task.requirementsVersion, actual.requirementsVersion)
+        assertEquals("SUCCEEDED", actual.outcome)
+    }
+
+    @Test fun supplementBeforeLinkRejectsStaleChildAndLinksOnlyFreshAttempt() = runBlocking {
+        val (runner, snapshot) = fixture(false, team = true, beforeTeamCreated = { store ->
+            store.reviseA { it.copy(requirement = "new requirement") }
+        })
+        runner.run("p", "w", "a")
+        val task = snapshot().tasks.first()
+        assertFalse("stale child linked", "team-child-0" in task.processSessionIds)
+        assertEquals(listOf("team-child-1"), task.processSessionIds)
+        assertEquals(2L, task.processMembers.getValue("team-child-1").requirementsVersion)
+    }
+
+    @Test fun supplementAfterSpawnKeepsOldRecordSupersededAndFreshRunIndependent() = runBlocking {
+        val (runner, snapshot) = fixture(false, team = true, onTeamCreated = { store ->
+            store.reviseA { it.copy(requirement = "new requirement") }
+        })
+        runner.run("p", "w", "a")
+        val task = snapshot().tasks.first()
+        assertEquals(listOf("team-child-0", "team-child-1"), task.processSessionIds)
+        assertEquals("SUPERSEDED", task.processMembers.getValue("team-child-0").outcome)
+        assertEquals(1L, task.processMembers.getValue("team-child-0").requirementsVersion)
+        assertEquals("SUCCEEDED", task.processMembers.getValue("team-child-1").outcome)
+        assertEquals(2L, task.processMembers.getValue("team-child-1").requirementsVersion)
+    }
+
+    @Test fun deletedTaskIsNotRecreatedByTeamReceiptOrCleanup() = runBlocking {
+        val (runner, snapshot) = fixture(false, team = true, onTeamCreated = { store ->
+            store.copy(tasks = emptyList())
+        })
+        runner.run("p", "w")
+        assertTrue(snapshot().tasks.isEmpty())
+    }
+
+    @Test fun cancellationMarksOnlyThisTeamsChildrenAndDoesNotResurrectTask() = runBlocking {
+        val entered = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val (runner, snapshot) = fixture(false, team = true, wait = true, onTeamCreated = { _ ->
+            entered.complete(Unit)
+            kotlinx.coroutines.awaitCancellation()
+        })
+        val job = launch { runner.run("p", "w", "a") }
+        entered.await(); job.cancelAndJoin()
+        assertEquals("STOPPED", snapshot().tasks.first().processMembers.getValue("team-child-0").outcome)
+        assertEquals(ProjectTaskStatus.BLOCKED, snapshot().tasks.first().status)
     }
 
     @Test fun projectTeamDoneWithoutRunIdBlocksInsteadOfReview() = runBlocking {

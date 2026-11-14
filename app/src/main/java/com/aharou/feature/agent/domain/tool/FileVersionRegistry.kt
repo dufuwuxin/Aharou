@@ -37,7 +37,7 @@ import javax.inject.Singleton
 class FileVersionRegistry @Inject constructor() {
 
     /**
-     * sessionId → (逻辑路径 → 指纹)。
+     * sessionId → (文件事务身份 → 指纹)。
      *
      * 内层用**访问序** LinkedHashMap 并在超出上限时淘汰最久未用的条目；因为要维持访问序，
      * 内层所有访问都在 `synchronized` 下进行。
@@ -64,17 +64,9 @@ class FileVersionRegistry @Inject constructor() {
         synchronized(map) { return map[key] }
     }
 
-    /**
-     * 登记一次**不属于任何 AI 会话**的写入（典型是编辑器保存）。
-     *
-     * 这里刻意不按会话分桶：编辑器是用户本人的操作，用户改完文件后，**所有**会话手上的版本都已过期，
-     * 因此每个已存在的会话桶都要更新。只记在"通配桶"里会漏判——写前校验查的是自己会话的桶。
-     */
+    /** External writes change provenance, never what another session actually observed. */
+    @Suppress("UNUSED_PARAMETER")
     fun recordExternal(key: String, fingerprint: String) {
-        if (key.isEmpty()) return
-        for (map in sessions.values) {
-            synchronized(map) { map[key] = fingerprint }
-        }
         recordWriter(key, "用户/编辑器")
     }
 

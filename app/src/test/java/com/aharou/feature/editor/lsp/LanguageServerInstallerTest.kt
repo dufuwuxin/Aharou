@@ -17,30 +17,29 @@ class LanguageServerInstallerTest {
     }
     private val installer = LanguageServerInstaller(commands, mockk(), vendored)
 
-    @Test fun explicitInstallationInitializesBackendBeforeArtifactsAndVerifiesInstalledVersion() = runBlocking {
-        coEvery { commands.ensureInstalled() } just Runs
+    @Test fun explicitInstallationDelegatesLockedBootstrapAndVerifiesInstalledVersion() = runBlocking {
         coEvery { vendored.install(LanguageExtension.PYTHON) } returns CommandResult("installed", 0)
         every { vendored.activeProgram(any()) } returns "/extensions/bin/pylsp"
         every { vendored.rootForCurrentBackend() } returns "/extensions"
         every { vendored.installedVersion(any()) } returns "1.2.3"
         coEvery { commands.runCommandSyncIfReady(any(), any(), any()) } returns CommandResult("ready", 0)
         assertTrue(installer.install(LanguageExtension.PYTHON).success)
-        coVerifyOrder { commands.ensureInstalled(); vendored.install(LanguageExtension.PYTHON); commands.runCommandSyncIfReady(any(), any(), any()) }
+        coVerifyOrder { vendored.install(LanguageExtension.PYTHON); commands.runCommandSyncIfReady(any(), any(), any()) }
     }
 
     @Test fun initializationFailureIsActionableAndDoesNotDownloadArtifacts() = runBlocking {
-        coEvery { commands.ensureInstalled() } throws IllegalStateException("SSH connection refused")
+        coEvery { vendored.install(LanguageExtension.PYTHON) } throws IllegalStateException("SSH connection refused")
         val result = installer.install(LanguageExtension.PYTHON)
         assertFalse(result.success)
         assertEquals("SSH connection refused", (result.status as ExtensionStatus.Unavailable).reason)
-        coVerify(exactly = 0) { vendored.install(any()) }
+        coVerify(exactly = 0) { commands.runCommandSyncIfReady(any(), any(), any()) }
     }
 
     @Test fun cancellationIsNotAnInstallFailureAndDoesNotDownload() = runBlocking {
-        coEvery { commands.ensureInstalled() } throws CancellationException("cancelled")
+        coEvery { vendored.install(LanguageExtension.PYTHON) } throws CancellationException("cancelled")
         try { installer.install(LanguageExtension.PYTHON); fail("cancelled install succeeded") }
         catch (_: CancellationException) { }
-        coVerify(exactly = 0) { vendored.install(any()) }
+        coVerify(exactly = 0) { commands.runCommandSyncIfReady(any(), any(), any()) }
     }
 
     @Test fun readOnlyProbeNeverInitializesContainer() = runBlocking {

@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "platform": "linux-arm64-ubuntu24.04",
-  "sourceSetSha256": "199f2c9c6ee7312c129b6d05d69ac1c391955c0d80cbdf2d44f1ba3c1b3971df",
-  "releaseTag": "language-extensions-199f2c9c6ee7312c129b6d05d69ac1c391955c0d80cbdf2d44f1ba3c1b3971df",
+  "sourceSetSha256": "0690bbc461fbae5d06b64663c2d496c590101f929c8fbe2359006eb6f600356a",
+  "releaseTag": "language-extensions-0690bbc461fbae5d06b64663c2d496c590101f929c8fbe2359006eb6f600356a",
   "extensions": [
     {
       "id": "lua",

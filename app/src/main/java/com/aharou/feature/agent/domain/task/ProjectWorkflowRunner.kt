@@ -114,16 +114,51 @@ class ProjectWorkflowRunner @Inject constructor(
                 try {
                     if (selectedTeam != null) {
                         val remaining = (ProjectGoalPlan.timeBudgetMs(horizon) - (android.os.SystemClock.elapsedRealtime() - startedAt)).coerceAtLeast(1L)
-                        val result = ProjectTeamExecution.execute(minOf(memberTimeoutMs, remaining),
-                            current = { requireCurrent(workspace, next, participants) },
-                            invoke = { tasks.runProjectTeam(selectedTeam.name,
-                                ProjectWorkflowPlan.prompt(next, projectTasks, currentProject.requirements + "\n" + ProjectGoalPlan.context(goal, acceptance, horizon)),
-                                context, selectedTeam.signature) })
-                        val fresh = ProjectTeamExecution.selection(tasks.selectProjectTeam(currentProject.executionTeam, goal, context))
-                        if (fresh.participant != selectedTeam.participant) throw ProjectTaskSuperseded()
-                        val (evidence, output) = ProjectTeamExecution.receipt(result, selectedTeam, next.requirementsVersion)
-                        teamEvidence = evidence
-                        outputs += output
+                        val spawned = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+                        try {
+                            val result = ProjectTeamExecution.execute(minOf(memberTimeoutMs, remaining),
+                                current = { requireCurrent(workspace, next, participants) },
+                                invoke = { tasks.runProjectTeam(selectedTeam.name,
+                                    ProjectWorkflowPlan.prompt(next, projectTasks, currentProject.requirements + "\n" + ProjectGoalPlan.context(goal, acceptance, horizon)),
+                                    context, selectedTeam.signature, onCreated = { id, role ->
+                                        repository.transact(workspace) { store ->
+                                            val latest = store.tasks.firstOrNull { it.id == next.id } ?: throw ProjectTaskSuperseded()
+                                            if (latest.requirementsVersion != next.requirementsVersion || !participantsCurrent(latest, participants))
+                                                throw ProjectTaskSuperseded()
+                                            listOf(ProjectTaskChange(latest.copy(processSessionIds = latest.processSessionIds + id,
+                                                processMembers = latest.processMembers + (id to ProjectTaskMemberRun(role,
+                                                    latest.processMembers.values.count { it.requirementsVersion == next.requirementsVersion } + 1,
+                                                    next.requirementsVersion)))))
+                                        }
+                                        spawned += id
+                                    }) })
+                            val fresh = ProjectTeamExecution.selection(tasks.selectProjectTeam(currentProject.executionTeam, goal, context))
+                            if (fresh.participant != selectedTeam.participant) throw ProjectTaskSuperseded()
+                            val (evidence, output) = ProjectTeamExecution.receipt(result, selectedTeam, next.requirementsVersion)
+                            teamEvidence = evidence
+                            outputs += output
+                        } finally {
+                            withContext(NonCancellable) {
+                                repository.transact(workspace) { store ->
+                                    val latest = store.tasks.firstOrNull { it.id == next.id } ?: return@transact emptyList()
+                                    val superseded = latest.requirementsVersion != next.requirementsVersion || !participantsCurrent(latest, participants)
+                                    val records = latest.processMembers.toMutableMap()
+                                    for (id in spawned) {
+                                        val record = records[id]?.takeIf { it.requirementsVersion == next.requirementsVersion } ?: continue
+                                        val terminal = events.terminalEvent(id)
+                                        val outcome = when {
+                                            superseded -> "SUPERSEDED"
+                                            terminal?.type == SubAgentEventType.COMPLETED && terminal.accepted == true -> "SUCCEEDED"
+                                            terminal == null || terminal.type == SubAgentEventType.STOPPED -> "STOPPED"
+                                            else -> "FAILED"
+                                        }
+                                        records[id] = record.copy(outcome = outcome, reason = if (superseded) "UPSTREAM_CHANGED" else terminal?.detail.orEmpty())
+                                    }
+                                    if (records == latest.processMembers) emptyList()
+                                    else listOf(ProjectTaskChange(latest.copy(processMembers = records)))
+                                }
+                            }
+                        }
                     } else {
                     // Serial execution shares the existing global capacity and never drops duplicate roles.
                     for ((index, member) in participants.withIndex()) {
@@ -180,14 +215,15 @@ class ProjectWorkflowRunner @Inject constructor(
                     }
                     requireCurrent(workspace, next, participants)
                 } catch (_: ProjectTaskSuperseded) {
-                    withContext(NonCancellable) { supersede(workspace, next.id, child, context) }
+                    withContext(NonCancellable) { supersede(workspace, next, child, context) }
                     active = null; child = null
                     continue
                 }
                 // Compared and saved under the store lock: a supplement or branch committed after the last check is never overwritten.
                 var superseded = false
                 repository.transact(workspace) { store ->
-                    val latest = store.tasks.first { it.id == next.id }
+                    val latest = store.tasks.firstOrNull { it.id == next.id }
+                        ?: run { superseded = true; return@transact emptyList() }
                     superseded = latest.requirementsVersion != next.requirementsVersion || !participantsCurrent(latest, participants)
                     listOf(ProjectTaskChange(if (superseded) latest.copy(status = ProjectTaskStatus.READY, processRequirementsVersion = null,
                         executionReason = "UPSTREAM_CHANGED") else latest.copy(status = ProjectTaskStatus.REVIEW,
@@ -218,7 +254,9 @@ class ProjectWorkflowRunner @Inject constructor(
                 }
                 active?.let { task ->
                     repository.transact(workspace) { store ->
-                        val latest = store.tasks.first { it.id == task.id }
+                        val latest = store.tasks.firstOrNull { it.id == task.id } ?: return@transact emptyList()
+                        if (latest.requirementsVersion != task.requirementsVersion || !participantsCurrent(latest, task.processParticipants.orEmpty()))
+                            return@transact emptyList()
                         val records = latest.processMembers.toMutableMap()
                         child?.let { id -> records[id]?.let { records[id] = it.copy(outcome = reason, reason = failure.message.orEmpty()) } }
                         listOf(ProjectTaskChange(latest.copy(status = if (reason == "UPSTREAM_CHANGED") ProjectTaskStatus.READY else ProjectTaskStatus.BLOCKED,
@@ -251,18 +289,20 @@ class ProjectWorkflowRunner @Inject constructor(
     }
 
     /** Same stop path as a failed attempt, but the member record is SUPERSEDED and the task returns to the queue. */
-    private suspend fun supersede(workspace: String, taskId: String, child: String?, context: AgentContext) {
+    private suspend fun supersede(workspace: String, started: ProjectTask, child: String?, context: AgentContext) {
         child?.let { id ->
             try { tasks.stopProjectMember(id, context) }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { } // A member that already ended needs no stop; its record is still superseded below.
         }
         repository.transact(workspace) { store ->
-            val latest = store.tasks.first { it.id == taskId }
+            val latest = store.tasks.firstOrNull { it.id == started.id } ?: return@transact emptyList()
+            val stillCurrent = latest.requirementsVersion == started.requirementsVersion
             val records = latest.processMembers.toMutableMap()
             child?.let { id -> records[id]?.let { records[id] = it.copy(outcome = "SUPERSEDED", reason = "UPSTREAM_CHANGED") } }
-            listOf(ProjectTaskChange(latest.copy(status = ProjectTaskStatus.READY, processRequirementsVersion = null,
-                processMembers = records, executionReason = "UPSTREAM_CHANGED")))
+            listOf(ProjectTaskChange(latest.copy(status = if (stillCurrent) ProjectTaskStatus.READY else latest.status,
+                processRequirementsVersion = if (stillCurrent) null else latest.processRequirementsVersion,
+                processMembers = records, executionReason = if (stillCurrent) "UPSTREAM_CHANGED" else latest.executionReason)))
         }
     }
 

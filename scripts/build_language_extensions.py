@@ -16,6 +16,7 @@ from pathlib import Path
 import vendor_language_extensions as vendor
 
 NODE = {"typescript", "shell", "yaml", "vue"}
+NODE_VERSION = "24.22.2"
 PACKAGE_ROOT = {"typescript": "", "shell": "server", "yaml": "", "vue": "packages/language-server"}
 ENTRY = {"typescript": "lib/cli.mjs", "shell": "out/cli.js", "yaml": "bin/yaml-language-server",
          "vue": "bin/vue-language-server.js"}
@@ -84,10 +85,18 @@ def assemble(name: str, release: Path, payload: Path, bundle: Path) -> None:
                               ("typescript",) if name in {"typescript", "vue"} else
                               ("vscode-languageserver-protocol",) if name == "yaml" else ())
         entry = (module / ENTRY[name]).relative_to(payload).as_posix()
-        command = f'exec node "$here/{entry}" "$@"'
+        binary = shutil.which("node")
+        if binary is None:
+            raise ValueError("missing build Node runtime")
+        version = subprocess.check_output([binary, "--version"], text=True).strip()
+        if version != f"v{NODE_VERSION}":
+            raise ValueError(f"expected Node {NODE_VERSION}, found {version}")
+        (payload / "bin").mkdir()
+        shutil.copy2(Path(binary).resolve(), payload / "bin/node")
+        command = f'exec "$here/bin/node" "$here/{entry}" "$@"'
     elif name == "python":
         shutil.copytree(release / "lib", payload / "lib", ignore=shutil.ignore_patterns("bin", "__pycache__"))
-        command = 'export PYTHONPATH="$here/lib${PYTHONPATH:+:$PYTHONPATH}"\nexec python3 -m pylsp "$@"'
+        command = 'export PYTHONPATH="$here/lib${PYTHONPATH:+:$PYTHONPATH}"\nexec python3.12 -m pylsp "$@"'
     elif name == "rust":
         (payload / "bin").mkdir()
         shutil.copy2(source / "target/release/rust-analyzer", payload / "bin/rust-analyzer")
@@ -101,6 +110,10 @@ def assemble(name: str, release: Path, payload: Path, bundle: Path) -> None:
         command = 'exec "$here/bin/lua-language-server" "$@"'
     for item in ("LICENSE", "source.json"):
         shutil.copy2(bundle / item, payload / item)
+    if name in NODE:
+        identity = json.loads((payload / "source.json").read_text())
+        identity.update(privateNodeVersion=NODE_VERSION, privateNodeSha256=vendor.digest(payload / "bin/node"))
+        (payload / "source.json").write_text(json.dumps(identity, indent=2) + "\n")
     (payload / "launch.sh").write_text('#!/bin/sh\nset -eu\nhere=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\n' + command + "\n")
     (payload / "launch.sh").chmod(0o755)
 
@@ -229,6 +242,7 @@ def build(name: str, output: Path) -> None:
         moved = work / "relocated payload"
         payload.rename(moved)
         libraries = audit_payload(moved)
+        private_node_hash = vendor.digest(moved / "bin/node") if name in NODE else None
         args = ["start"] if name == "shell" else ["--stdio"] if name in NODE else ["--locale=zh-cn"] if name == "lua" else []
         # The fixed LuaLS shutdown handler returns boolean true; all other pinned servers require null.
         probe_lsp([str(moved / "launch.sh"), *args], shutdown_result=True if name == "lua" else None)
@@ -239,14 +253,50 @@ def build(name: str, output: Path) -> None:
         finally:
             temporary.unlink(missing_ok=True)
     runtime = ["Ubuntu 24.04 ARM64"]
-    if name in NODE:
-        runtime.append("node >=24")
     if name == "python":
         runtime.append("python3.12")
     result = {key: entry[key] for key in ("id", "command", "revision", "sourceSha256", "version")}
     result.update(fileName=filename, sha256=vendor.digest(output / filename), sizeBytes=(output / filename).stat().st_size,
-                  prerequisites=runtime + libraries, verification="LSP initialize/shutdown/exit passed after relocation")
+                  prerequisites=runtime + libraries, verification="LSP initialize/shutdown/exit passed after relocation",
+                  cleanUbuntuVerified=False)
+    if name in NODE:
+        result.update(privateNodeVersion=NODE_VERSION, privateNodeSha256=private_node_hash)
     (output / f"{name}.json").write_text(json.dumps(result, indent=2) + "\n")
+
+
+def verify_clean(name: str, output: Path) -> None:
+    """Verify the packed artifact inside the workflow's minimal native Ubuntu container."""
+    os_release = platform.freedesktop_os_release()
+    if os.environ.get("GITHUB_ACTIONS") != "true" or platform.machine() not in {"aarch64", "arm64"} or \
+            os_release.get("ID") != "ubuntu" or os_release.get("VERSION_ID") != "24.04":
+        raise ValueError("clean verification requires native Ubuntu 24.04 ARM64 Actions")
+    if shutil.which("node") is not None:
+        raise ValueError("clean verification must not have global Node")
+    metadata = output / f"{name}.json"
+    result = json.loads(metadata.read_text())
+    result["cleanUbuntuVerified"] = False
+    metadata.write_text(json.dumps(result, indent=2) + "\n")
+    artifact = output / f"{name}-linux-arm64.tar.gz"
+    if artifact.stat().st_size != result["sizeBytes"] or vendor.digest(artifact) != result["sha256"]:
+        raise ValueError("clean artifact integrity mismatch")
+    with tempfile.TemporaryDirectory(prefix="clean-lsp-") as folder:
+        payload = Path(folder) / "unpacked"
+        with tarfile.open(artifact) as archive:
+            archive.extractall(payload, filter="data")
+        moved = Path(folder) / "relocated payload"
+        payload.rename(moved)
+        libraries = audit_payload(moved)
+        if name in NODE:
+            binary = moved / "bin/node"
+            if result.get("privateNodeVersion") != NODE_VERSION or vendor.digest(binary) != result.get("privateNodeSha256"):
+                raise ValueError("private Node identity mismatch")
+            if subprocess.check_output([str(binary), "--version"], text=True).strip() != f"v{NODE_VERSION}":
+                raise ValueError("private Node version mismatch")
+        args = ["start"] if name == "shell" else ["--stdio"] if name in NODE else ["--locale=zh-cn"] if name == "lua" else []
+        probe_lsp([str(moved / "launch.sh"), *args], shutdown_result=True if name == "lua" else None)
+    result.update(cleanUbuntuVerified=True, cleanUbuntuLibraries=libraries,
+                  verification="LSP initialize/shutdown/exit passed after relocation in clean Ubuntu 24.04 ARM64 without global Node")
+    metadata.write_text(json.dumps(result, indent=2) + "\n")
 
 
 def manifest(output: Path) -> None:
@@ -260,6 +310,13 @@ def manifest(output: Path) -> None:
         entry = json.loads((output / f"{name}.json").read_text())
         if any(entry[key] != source[key] for key in ("id", "command", "revision", "sourceSha256", "version")):
             raise ValueError(f"{name}: source identity mismatch")
+        if entry.get("cleanUbuntuVerified") is not True:
+            raise ValueError(f"{name}: clean Ubuntu verification missing")
+        if name in NODE and (entry.get("privateNodeVersion") != NODE_VERSION or
+                             not isinstance(entry.get("privateNodeSha256"), str) or
+                             len(entry["privateNodeSha256"]) != 64 or
+                             any(c not in "0123456789abcdef" for c in entry["privateNodeSha256"])):
+            raise ValueError(f"{name}: private Node identity missing")
         expected = f"{name}-linux-arm64.tar.gz"
         artifact = output / expected
         if not 0 < entry["sizeBytes"] <= 512 * 1024 * 1024:
@@ -278,12 +335,17 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--id", choices=vendor.COMMANDS)
     parser.add_argument("--manifest", action="store_true")
+    parser.add_argument("--verify-clean", action="store_true")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
+    if args.verify_clean and (args.manifest or not args.id):
+        parser.error("--verify-clean requires --id and forbids --manifest")
     if args.manifest == bool(args.id):
         parser.error("choose exactly one of --id or --manifest")
     if args.manifest:
         manifest(args.output)
+    elif args.verify_clean:
+        verify_clean(args.id, args.output)
     else:
         build(args.id, args.output)
 
