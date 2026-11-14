@@ -45,7 +45,7 @@ else
   # （实际发生过：把「a，b，c」当成编译许可就起了构建）。
   _quote=$(sed -n 's/^quote: *//p' "$_gate" | head -1)
   case "$_quote" in
-    *编*|*build*|*BUILD*|*Build*|*打包*|*APK*|*apk*|*出包*) ;;
+    *编*|*构建*|*build*|*BUILD*|*Build*|*打包*|*APK*|*apk*|*出包*) ;;
     *)
       echo "[拒绝] 授权话术里没有编译意图（quote: $_quote）。请让主人明说「编译 / 打包 / 出包」后再写令牌。" >&2
       exit 1

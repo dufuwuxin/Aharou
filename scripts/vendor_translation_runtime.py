@@ -48,9 +48,10 @@ def main():
     ]:
         license_text = fetch(url).decode("utf-8")
         notices.append(package + "\n" + url + "\n\n" + license_text)
-    notices.append("Model: Xenova/opus-mt-en-zh, based on Helsinki-NLP/opus-mt-en-zh.\n"
-                   "Base model metadata declares Apache-2.0. Model weights are downloaded separately.\n"
-                   "https://huggingface.co/Helsinki-NLP/opus-mt-en-zh\n")
+    for direction in ("en-zh", "zh-en"):
+        notices.append(f"Model: Xenova/opus-mt-{direction}, based on Helsinki-NLP/opus-mt-{direction}.\n"
+                       "Base model metadata declares Apache-2.0. Model weights are downloaded separately.\n"
+                       f"https://huggingface.co/Helsinki-NLP/opus-mt-{direction}\n")
     for name, data in staged.items():
         (ASSETS / name).write_bytes(data)
     (ASSETS / "THIRD_PARTY_NOTICES.txt").write_text("\n\n".join(notices))

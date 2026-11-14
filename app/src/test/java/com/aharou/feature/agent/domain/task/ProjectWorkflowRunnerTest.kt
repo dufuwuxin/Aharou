@@ -32,6 +32,7 @@ class ProjectWorkflowRunnerTest {
         commitStatus: ProjectTaskStatus = ProjectTaskStatus.REVIEW,
         seed: (ProjectTask) -> ProjectTask = { it }): Triple<ProjectWorkflowRunner, () -> ProjectTaskSnapshot, ((ProjectTaskSnapshot) -> ProjectTaskSnapshot) -> Unit> {
         val repository = mockk<ProjectTaskRepository>()
+        coEvery { repository.checkpointProjectGoal(any(), any()) } returns Unit
         val guard = Any()
         var snapshot = ProjectTaskSnapshot(version = 1, projects = listOf(ProjectPlan(id = "p", workspace = "w", title = "p", requirements = "a then b")),
             tasks = listOf(seed(task("a").copy(owner = owner, members = members)), task("b", listOf("a"))))

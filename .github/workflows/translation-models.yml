@@ -1,0 +1,51 @@
+name: Translation model quality
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: translation-model-quality-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Validate locked assets and bridge contract
+        run: |
+          python3 scripts/prepare_translation_models.py
+          python3 scripts/test_translation_app_download.py
+          python3 scripts/test_translation_quality.py --bridge-test
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ${{ runner.temp }}/translation-models
+          key: translation-quantized-v1-${{ hashFiles('app/src/main/assets/translation/model-manifest*.json') }}
+      - name: Download or revalidate fixed model bytes
+        run: python3 scripts/prepare_translation_models.py --output "$RUNNER_TEMP/translation-models"
+      - name: Prepare matching Node runtime
+        # Same existing transformers.js version as the bundled WebView runtime.
+        run: npm install --prefix "$RUNNER_TEMP/translation-runtime" --no-audit --no-fund --save-exact @xenova/transformers@2.17.2
+      - name: Run real bidirectional quality fixtures
+        run: |
+          python3 scripts/test_translation_quality.py \
+            --models "$RUNNER_TEMP/translation-models" \
+            --runtime "$RUNNER_TEMP/translation-runtime/node_modules/@xenova/transformers/src/transformers.js" \
+            --report "$RUNNER_TEMP/translation-quality/quality.json"
+      - name: Preserve actual quality output and provenance
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: translation-quality-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/translation-quality/quality.json
+            app/src/main/assets/translation/model-manifest*.json
+            app/src/main/assets/translation/runtime-manifest.json
+          if-no-files-found: error
+          retention-days: 14

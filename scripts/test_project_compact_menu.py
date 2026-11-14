@@ -38,11 +38,11 @@ class CompactProjectMenuTest(unittest.TestCase):
 
     def test_fit_and_pinch_remain_without_obsolete_controls(self):
         ui = source("ProjectTaskMap.kt")
-        for tag in ("map_expand_all", "map_fit"):
+        for tag in ("map_expand_all",):
             self.assertIn('testTag("' + tag + '")', ui)
-        for removed in ("map_zoom_in", "map_zoom_out", "map_reset", "map_legend", "showLegend", "zoomAtCenter", "ZOOM_STEP"):
+        for removed in ("map_zoom_in", "map_zoom_out", "map_reset", "map_fit", "map_legend", "showLegend", "zoomAtCenter", "ZOOM_STEP"):
             self.assertNotIn(removed, ui)
-        self.assertIn("detectTransformGestures", ui)
+        self.assertIn("detectProjectMapGestures", ui)
         self.assertIn("zoom * scale", ui)
         self.assertNotIn("Modifier.align(Alignment.TopEnd)", ui)
 
@@ -54,12 +54,12 @@ class CompactProjectMenuTest(unittest.TestCase):
 
     def test_project_menu_owns_sheets_and_useful_navigation(self):
         ui = source("ProjectChatMenu.kt")
-        self.assertIn("CompositionLocalProvider(LocalProjectChatMenu provides menu)", ui)
+        self.assertIn("CompositionLocalProvider(LocalProjectChatMenu provides menu, LocalProjectDiagnostics provides", ui)
         provider = ui.index("CompositionLocalProvider(LocalProjectChatMenu provides menu")
         for sheet in ("stewardOpen",):
             self.assertGreater(ui.index("if (" + sheet + " && sessionId != null)"), provider)
         for entry in ("steward_entry_title", "chat_open_terminal", "chat_open_git",
-                      "chat_open_browser", "chat_open_sandbox", "chat_open_shared", "chat_open_observe", "chat_open_activity"):
+                      "chat_open_browser", "chat_open_sandbox", "chat_open_shared", "session_diagnostics_title"):
             self.assertIn("R.string." + entry, ui)
         self.assertNotIn("onOpenDrawer", ui)
         self.assertIn("onClick = { dismiss(); action() }", ui)

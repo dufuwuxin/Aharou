@@ -372,7 +372,13 @@ class VdTool @Inject constructor(
                 }
 
                 "nodes" -> {
-                    val list = vdController.nodes()
+                    val list = try { vdController.nodes() } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                    catch (_: IllegalStateException) {
+                        return ToolResult.Success(buildJsonObject {
+                            put("count", 0); put("nodesAvailable", false)
+                            put("message", "UiAutomation 节点通道不可用；影子屏并未整体失效。请用 shot 查看画面、按像素坐标 tap/swipe/key，type 可尝试原生输入；不要把未知节点当作空页面。")
+                        })
+                    }
                     ToolResult.Success(
                         buildJsonObject {
                             put("count", list.size)

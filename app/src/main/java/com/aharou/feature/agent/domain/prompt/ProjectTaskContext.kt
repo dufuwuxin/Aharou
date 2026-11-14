@@ -32,7 +32,9 @@ class ProjectTaskContext @Inject constructor(private val repository: ProjectTask
             val project = snapshot.projects.singleOrNull { sessionId in it.flowSessionIds } ?: return null
             return buildString {
             append("kind=root; project=").append(project.id).append('\n')
-            append("requirements=").append(project.requirements.take(150)).append('\n')
+            append("horizon=").append(project.horizon).append("; goal=").append(project.overallGoal.take(70)).append('\n')
+            append("goal_acceptance=").append(project.goalAcceptance.take(55)).append("; checkpoint=").append(project.goalCheckpoint).append('\n')
+            append("requirements=").append(project.requirements.take(75)).append('\n')
             snapshot.tasks.asSequence().filter { it.projectId == project.id }.take(2).forEach {
                 append("task=").append(it.id).append(':').append(it.status).append(':')
                     .append(it.title.take(20)).append(':').append(it.requirement.take(30)).append('\n')
@@ -44,12 +46,17 @@ class ProjectTaskContext @Inject constructor(private val repository: ProjectTask
             append(" branch=").append(task.id).append('\n')
             append("requirements=").append(task.requirement.take(170)).append('\n')
         }
+        val project = snapshot.projects.singleOrNull { it.id == task.projectId }
         return buildString {
             append("kind=task; project=").append(task.projectId).append("; id=").append(task.id)
                 .append("; v=").append(task.version).append("; state=").append(task.status).append('\n')
-            append("requirement=").append(task.requirement.take(140)).append('\n')
+            append("goal=").append(project?.overallGoal.orEmpty().take(45)).append("; goal_acceptance=")
+                .append(project?.goalAcceptance.orEmpty().take(35)).append('\n')
+            append("requirement=").append(task.requirement.take(60)).append('\n')
             append("constraints=").append(task.constraints.joinToString("; ").take(45)).append('\n')
-            append("acceptance=").append(task.acceptance.take(45))
+            append("acceptance=").append(task.acceptance.take(45)).append('\n')
+            append("horizon=").append(project?.horizon.orEmpty()).append("; goal=").append(project?.overallGoal.orEmpty().take(100)).append('\n')
+            append("goal_acceptance=").append(project?.goalAcceptance.orEmpty().take(100)).append("; checkpoint=").append(project?.goalCheckpoint.orEmpty())
         }
     }
 }

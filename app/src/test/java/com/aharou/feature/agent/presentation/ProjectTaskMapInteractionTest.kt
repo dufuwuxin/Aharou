@@ -4,6 +4,7 @@ import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import com.aharou.R
@@ -35,7 +36,10 @@ class ProjectTaskMapInteractionTest {
                     modifier = Modifier.fillMaxSize(), onOpenRoot = { opens++ })
             }
         }
-        compose.onNodeWithTag("map_zoom_out").performClick()
+        compose.onNodeWithTag("map_viewport").performTouchInput {
+            pinch(Offset(center.x - 80f, center.y), Offset(center.x - 64f, center.y),
+                Offset(center.x + 80f, center.y), Offset(center.x + 64f, center.y), durationMillis = 200)
+        }
         compose.onNodeWithText("Project root").performTouchInput { click(center) }
         assertEquals(1, opens)
         val before = compose.onNodeWithTag("map_node_project:p").fetchSemanticsNode().boundsInRoot
@@ -50,7 +54,7 @@ class ProjectTaskMapInteractionTest {
         assertEquals(before.top, after.top, 2f)
     }
 
-    @Test fun expandedOutlineSurvivesRepeatedZoomButtonsAndReturnsToSameGeometry() {
+    @Test fun expandedOutlineSurvivesRepeatedPinchAndReturnsToSameGeometry() {
         val task = ProjectTask(id = "a", workspace = "w", projectId = "p", title = "Task", requirement = "Implement feature",
             constraints = listOf("Keep accounts", "Keep history"))
         compose.setContent {
@@ -62,8 +66,14 @@ class ProjectTaskMapInteractionTest {
         compose.onNodeWithText(compose.activity.getString(R.string.project_task_expand_all)).performClick()
         val before = compose.onNodeWithTag("map_outline_a").fetchSemanticsNode().boundsInRoot
         repeat(3) {
-            compose.onNodeWithTag("map_zoom_in").performClick()
-            compose.onNodeWithTag("map_zoom_out").performClick()
+            compose.onNodeWithTag("map_viewport").performTouchInput {
+                pinch(Offset(center.x - 64f, center.y), Offset(center.x - 80f, center.y),
+                    Offset(center.x + 64f, center.y), Offset(center.x + 80f, center.y), durationMillis = 200)
+            }
+            compose.onNodeWithTag("map_viewport").performTouchInput {
+                pinch(Offset(center.x - 80f, center.y), Offset(center.x - 64f, center.y),
+                    Offset(center.x + 80f, center.y), Offset(center.x + 64f, center.y), durationMillis = 200)
+            }
         }
         val after = compose.onNodeWithTag("map_outline_a").fetchSemanticsNode().boundsInRoot
         assertEquals(before.width, after.width, 1f)

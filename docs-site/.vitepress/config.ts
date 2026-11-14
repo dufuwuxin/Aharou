@@ -158,6 +158,9 @@ export default defineConfig({
           text: '模型与用量',
           items: [
             { text: 'AI 供应商与模型', link: '/guide/providers' },
+            { text: '离线双向翻译', link: '/guide/translation' },
+            { text: '项目长期目标与过程树', link: '/guide/projects' },
+            { text: '特殊权限', link: '/guide/special-permissions' },
             { text: '默认与专用模型', link: '/guide/default-models' },
             { text: '端侧本地模型', link: '/guide/local-models' },
             { text: 'Token 统计与费用', link: '/guide/token-stats' }

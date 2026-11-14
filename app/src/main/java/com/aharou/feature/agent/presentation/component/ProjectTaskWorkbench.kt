@@ -48,6 +48,9 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
     val project = state.projects.firstOrNull { it.id == projectId }
     val tasks = state.tasks.filter { it.projectId == projectId }
     val executableTasks = tasks.filterNot { it.isRequirementBranch }
+    var goal by remember(projectId, project?.overallGoal) { mutableStateOf(project?.overallGoal.orEmpty()) }
+    var acceptance by remember(projectId, project?.goalAcceptance) { mutableStateOf(project?.goalAcceptance.orEmpty()) }
+    var horizon by remember(projectId, project?.horizon) { mutableStateOf(project?.horizon ?: "short") }
     val selectedBranch = tasks.singleOrNull { it.id == requirementBranchId && it.isRequirementBranch }
     val currentBranchId by rememberUpdatedState(requirementBranchId)
     val selectCurrentBranch by rememberUpdatedState(onSelectRequirementBranch)
@@ -304,6 +307,17 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
     if (overview && project != null) AlertDialog(onDismissRequest = { overview = false },
         title = { Text(project.title) }, text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+                        listOf("short" to stringResource(R.string.project_horizon_short), "medium" to stringResource(R.string.project_horizon_medium), "long" to stringResource(R.string.project_horizon_long)).forEach { (value, label) ->
+                            FilterChip(selected = horizon == value, onClick = { horizon = value }, label = { Text(label) })
+                        }
+                    }
+                    com.aharou.core.ui.AppTextField(goal, { goal = it }, label = stringResource(R.string.project_overall_goal), minLines = 2, singleLine = false)
+                    com.aharou.core.ui.AppTextField(acceptance, { acceptance = it }, label = stringResource(R.string.project_goal_acceptance), minLines = 2, singleLine = false)
+                    if (project.goalCheckpoint.isNotBlank()) Text(
+                        com.aharou.feature.agent.domain.task.ProjectGoalPlan.label(project.goalCheckpoint))
+                    TextButton(enabled = !state.busy && !planning && projectId !in state.activeProjectIds,
+                        onClick = { viewModel.saveProjectGoal(project, horizon, goal, acceptance) }) { Text(stringResource(R.string.project_goal_save)) }
                 if (project.purpose.isNotBlank()) {
                     Text(stringResource(R.string.project_purpose), style = MaterialTheme.typography.labelLarge)
                     Text(project.purpose)

@@ -37,5 +37,21 @@ internal fun OfflineTranslationSettings() {
             },
         )
         Text(stringResource(R.string.translation_attribution))
+        val reverse by translation.reverseModelState.collectAsStateWithLifecycle()
+        SettingsDivider()
+        SettingsRow(
+            title = stringResource(R.string.translation_reverse_model),
+            subtitle = stringResource(when (reverse) {
+                TranslationModelState.CHECKING -> R.string.translation_checking
+                TranslationModelState.MISSING -> R.string.translation_missing
+                TranslationModelState.DOWNLOADING -> R.string.translation_downloading
+                TranslationModelState.READY -> R.string.translation_ready
+                TranslationModelState.FAILED -> R.string.translation_failed
+            }),
+            onClick = if (reverse == TranslationModelState.MISSING || reverse == TranslationModelState.FAILED) {
+                { translation.prepareModel(retry = true, target = "en") }
+            } else null,
+        )
+
     }
 }

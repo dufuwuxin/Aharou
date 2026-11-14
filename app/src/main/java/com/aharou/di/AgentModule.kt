@@ -578,7 +578,8 @@ object AgentModule {
         ocrEngine: TesseractOcrEngine,
         injectedContexts: com.aharou.feature.agent.domain.prompt.InjectedContextStore,
         vault: VaultRepository,
-        reminderEngine: com.aharou.feature.agent.domain.reminder.ReminderEngine
+        reminderEngine: com.aharou.feature.agent.domain.reminder.ReminderEngine,
+        languageRoutingFactory: com.aharou.core.translation.LanguageRoutingProvider.Factory
     ): AgentWorkflow {
         return StatefulAgentWorkflow(
             toolRegistry,
@@ -615,7 +616,7 @@ object AgentModule {
             injectedContexts,
             vault,
             reminderEngine,
-            memoryCompactor, toolInjectionGate
+            memoryCompactor, toolInjectionGate, languageRoutingFactory
         )
     }
 }

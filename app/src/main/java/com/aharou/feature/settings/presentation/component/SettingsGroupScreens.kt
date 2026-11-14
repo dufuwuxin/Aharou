@@ -69,8 +69,8 @@ internal fun SettingsAharouRows(onOpen: (SettingsSection) -> Unit) {
         SettingsGroup {
             SettingsRow(
                 icon = FeatherIcons.Clock,
-                title = stringResource(SettingsSection.ConfigAudit.titleRes),
-                onClick = { onOpen(SettingsSection.ConfigAudit) }
+                title = stringResource(SettingsSection.SpecialPermissions.titleRes),
+                onClick = { onOpen(SettingsSection.SpecialPermissions) }
             )
 
         }
@@ -272,12 +272,6 @@ internal fun SettingsMoreRows(onOpen: (SettingsSection) -> Unit) {
                 icon = FeatherIcons.FileText,
                 title = stringResource(SettingsSection.Log.titleRes),
                 onClick = { onOpen(SettingsSection.Log) }
-            )
-            SettingsDivider()
-            SettingsRow(
-                icon = FeatherIcons.Monitor,
-                title = stringResource(SettingsSection.ShadowScreen.titleRes),
-                onClick = { onOpen(SettingsSection.ShadowScreen) }
             )
             SettingsDivider()
             // 团队入口已收进「配置」页（AiGroup），这里不再重复；角色在团队页里管理。

@@ -8,6 +8,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aharou.R
@@ -69,13 +70,19 @@ internal fun rememberProjectChatBinding(agent: AIAgentViewModel, projects: Proje
     val rootConversation: @Composable () -> Unit = {
         val records = rootSessions.filter { it.id in project?.flowSessionIds.orEmpty() && it.parentId == null && it.workspacePath == workspace }
             .sortedByDescending { it.updatedAt }.map { it.id }
-        key(id, workspace) { ProjectRootConversation(records, agent, onToolDetail) }
+        key(id, workspace) {
+            val root = sessionId?.takeIf { requirementBranchId == null } ?: records.firstOrNull()
+            if (root == null) Text("发送项目需求后显示实时过程")
+            else Box(Modifier.testTag("project_root_record_$root")) { ProjectProgressConversation(root, agent) { ProjectRootConversation(records, agent, onToolDetail) } }
+        }
     }
     return ProjectChatBinding(sessionId.takeIf { ready }, rootConversation) { collapse ->
         if (project != null) ProjectTaskWorkbench(id, projects, onBack, onContentDrag = collapse,
             requirementBranchId = requirementBranchId, onSelectRequirementBranch = chooseBranch,
             branchSessionId = sessionId.takeIf { requirementBranchId != null },
-            rootConversation = rootConversation, conversation = { _, record -> key(record) { ProjectTaskConversation(record, agent, onToolDetail) } })
+            rootConversation = rootConversation, conversation = { _, record -> key(record) {
+                ProjectProgressConversation(record, agent) { ProjectTaskConversation(record, agent, onToolDetail) }
+            } })
         else Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             if (failed) Text(stringResource(R.string.project_chat_binding_failed), color = MaterialTheme.colorScheme.error)
             else CircularProgressIndicator()

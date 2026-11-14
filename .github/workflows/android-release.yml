@@ -171,6 +171,9 @@ jobs:
       - name: Run unit tests
         run: |
           python3 scripts/test_plugin_preflight.py
+          python3 scripts/test_build_intent.py
+          python3 scripts/test_translation_app_download.py
+          python3 scripts/test_translation_quality.py --bridge-test
           python3 scripts/test_void_toolchain.py
           python3 scripts/test_build_logging.py
           python3 scripts/test_code_structure.py

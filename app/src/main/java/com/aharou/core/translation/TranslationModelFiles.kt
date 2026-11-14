@@ -27,39 +27,55 @@ import kotlin.coroutines.resumeWithException
 @Singleton
 class TranslationModelFiles @Inject constructor(@param:ApplicationContext private val context: Context) {
     data class Artifact(val path: String, val size: Long, val sha256: String)
-    private val manifest = JSONObject(context.assets.open("translation/model-manifest.json").bufferedReader().use { it.readText() })
-    val model: String = manifest.getString("model")
-    private val revision = manifest.getString("revision")
-    private val baseUrl = manifest.getString("baseUrl")
-    val artifacts: List<Artifact> = manifest.getJSONArray("files").let { files ->
-        List(files.length()) { index ->
-            val item = files.getJSONObject(index)
-            Artifact(item.getString("path"), item.getLong("size"), item.getString("sha256"))
-        }
-    }
+    private data class Package(val model: String, val revision: String, val baseUrl: String, val artifacts: List<Artifact>)
+    private val packages = mapOf("zh" to readPackage("model-manifest.json", "opus-mt-en-zh"),
+        "en" to readPackage("model-manifest-zh-en.json", "opus-mt-zh-en"))
     private val root = File(context.filesDir, "translation_models")
-    private val installed = File(root, revision)
-    private val client = OkHttpClient.Builder().connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS).callTimeout(20, TimeUnit.MINUTES)
-        .followSslRedirects(false).build()
+    val model: String get() = packages.getValue("zh").model
+    val artifacts: List<Artifact> get() = packages.getValue("zh").artifacts
 
-    init {
+    private fun readPackage(name: String, expectedModel: String): Package {
+        val manifest = JSONObject(context.assets.open("translation/$name").bufferedReader().use { it.readText() })
+        val model = manifest.getString("model")
+        val revision = manifest.getString("revision")
+        val baseUrl = manifest.getString("baseUrl")
+        val artifacts = manifest.getJSONArray("files").let { files ->
+            List(files.length()) { index ->
+                val item = files.getJSONObject(index)
+                Artifact(item.getString("path"), item.getLong("size"), item.getString("sha256"))
+            }
+        }
         require(revision.matches(Regex("[a-f0-9]{40}")))
-        require(model == "opus-mt-en-zh")
-        require(baseUrl == "https://huggingface.co/Xenova/opus-mt-en-zh/resolve/$revision/")
+        require(model == expectedModel)
+        require(baseUrl == "https://huggingface.co/Xenova/$expectedModel/resolve/$revision/")
         require(artifacts.isNotEmpty() && artifacts.map { it.path }.distinct().size == artifacts.size)
         artifacts.forEach {
             require(it.path.matches(Regex("(?:onnx/)?[a-zA-Z0-9_.-]+")) && !it.path.contains(".."))
             require(it.size > 0 && it.sha256.matches(Regex("[a-f0-9]{64}")))
         }
+        return Package(model, revision, baseUrl, artifacts)
     }
 
-    suspend fun isInstalled(): Boolean = withContext(Dispatchers.IO) {
+    private fun installed(target: String): File {
+        val pack = packages.getValue(target)
+        return File(root, "${pack.model}/${pack.revision}")
+    }
+    private val client = OkHttpClient.Builder().connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS).callTimeout(20, TimeUnit.MINUTES)
+        .followSslRedirects(false).build()
+
+    suspend fun isInstalled(target: String = "zh"): Boolean = withContext(Dispatchers.IO) {
+        val installed = installed(target)
+        val artifacts = packages.getValue(target).artifacts
         installed.isDirectory && artifacts.all { valid(File(installed, it.path), it) }
     }
 
-    suspend fun install() = withContext(Dispatchers.IO) {
-        if (isInstalled()) return@withContext
+    suspend fun install(target: String = "zh") = withContext(Dispatchers.IO) {
+        val pack = packages.getValue(target)
+        val installed = installed(target)
+        val artifacts = pack.artifacts
+        val baseUrl = pack.baseUrl
+        if (isInstalled(target)) return@withContext
         check(root.mkdirs() || root.isDirectory)
         val staging = File(root, "staging-${UUID.randomUUID()}")
         check(staging.mkdir())
@@ -98,15 +114,16 @@ class TranslationModelFiles @Inject constructor(@param:ApplicationContext privat
             currentCoroutineContext().ensureActive()
             // All files are closed, synced and verified before publishing on the same filesystem.
             if (installed.exists()) check(installed.deleteRecursively())
+            check(installed.parentFile?.mkdirs() == true || installed.parentFile?.isDirectory == true)
             Os.rename(staging.absolutePath, installed.absolutePath)
         } finally {
             if (staging.exists()) staging.deleteRecursively()
         }
     }
 
-    fun openArtifact(path: String): java.io.InputStream? {
-        if (artifacts.none { it.path == path }) return null
-        val file = File(installed, path)
+    fun openArtifact(path: String, target: String = "zh"): java.io.InputStream? {
+        if (packages.getValue(target).artifacts.none { it.path == path }) return null
+        val file = File(installed(target), path)
         return if (file.isFile) file.inputStream() else null
     }
 

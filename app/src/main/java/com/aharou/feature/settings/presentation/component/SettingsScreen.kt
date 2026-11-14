@@ -118,6 +118,7 @@ private val SettingsTwoPaneMinWidth = 840.dp
 /** 设置页内部二级菜单分区。Menu 为首页菜单，其余为各自的二级页。 */
 enum class SettingsSection(@param:StringRes val titleRes: Int) {
     Menu(R.string.settings_title),
+    SpecialPermissions(R.string.settings_special_permissions),
     ConfigAudit(R.string.config_audit_title),
     ShadowScreen(R.string.vd_settings_title),
     EnvVars(R.string.envvars_title),
@@ -384,7 +385,7 @@ fun SettingsScreen(
     val parentSection: SettingsSection? = sectionHistory.dropLast(1).lastOrNull() ?: when (section) {
         SettingsSection.Menu -> null
         SettingsSection.AiGroup -> if (section == configHome) null else SettingsSection.Menu
-        SettingsSection.ConfigAudit -> (configHome ?: SettingsSection.Menu)
+        SettingsSection.ConfigAudit, SettingsSection.ShadowScreen -> SettingsSection.SpecialPermissions
         SettingsSection.Memory -> (configHome ?: SettingsSection.AiGroup)
         SettingsSection.Providers, SettingsSection.DefaultModels -> (configHome ?: SettingsSection.Menu)
         SettingsSection.Connectors -> connectorsReturnSection
@@ -395,7 +396,7 @@ fun SettingsScreen(
         SettingsSection.BackgroundRun -> (configHome ?: SettingsSection.Menu)
         SettingsSection.Container,
         SettingsSection.Proxy,
-        SettingsSection.ShadowScreen,
+        SettingsSection.SpecialPermissions,
         SettingsSection.Teams,
         SettingsSection.EnvVars,
         SettingsSection.Vault,
@@ -820,6 +821,7 @@ fun SettingsScreen(
                 // 大屏菜单已常驻左栏，右栏在没选中分区时给个占位提示
                 SettingsSection.Menu -> if (expanded) SettingsDetailPlaceholder() else menuBody()
                 SettingsSection.AiGroup -> SettingsAiGroupScreen(onOpen = openSection)
+                SettingsSection.SpecialPermissions -> SpecialPermissionsSection(onOpen = openSection)
                 SettingsSection.ConfigAudit -> ConfigAuditSection()
                 SettingsSection.ShadowScreen -> ShadowScreenSection()
                 SettingsSection.Experiments -> ExperimentsSection()

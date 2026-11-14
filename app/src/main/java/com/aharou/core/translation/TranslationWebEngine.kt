@@ -17,7 +17,6 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CancellableContinuation
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
@@ -32,22 +31,26 @@ class TranslationWebEngine @Inject constructor(
 ) {
     private val main = Handler(Looper.getMainLooper())
     private var view: WebView? = null
-    private var prepared = false
+    private var preparedTarget: String? = null
     private val pending = mutableMapOf<String, CancellableContinuation<String>>()
 
-    suspend fun prepare() = withContext(Dispatchers.Main) {
-        if (prepared) return@withContext
+    suspend fun prepare(target: String = "zh") = withContext(Dispatchers.Main) {
+        require(target == "zh" || target == "en")
+        if (preparedTarget == target) return@withContext
         withTimeout(180_000) {
-            request { id -> createView(id) }
+            request { id ->
+                if (view == null) createView(id, target)
+                else view?.evaluateJavascript("window.prepareLocal(${JSONObject.quote(id)},${JSONObject.quote(target)})", null)
+            }
         }
-        prepared = true
+        preparedTarget = target
     }
 
-    suspend fun translate(text: String): String = withContext(NonCancellable + Dispatchers.Main) {
-        prepare()
+    suspend fun translate(text: String, target: String = "zh"): String = withContext(Dispatchers.Main) {
+        prepare(target)
         withTimeout(60_000) {
             request { id ->
-                view?.evaluateJavascript("window.translateLocal(${JSONObject.quote(id)},${JSONObject.quote(text)})", null)
+                view?.evaluateJavascript("window.translateLocal(${JSONObject.quote(id)},${JSONObject.quote(text)},${JSONObject.quote(target)})", null)
                     ?: error("Translation runtime unavailable")
             }
         }
@@ -69,7 +72,7 @@ class TranslationWebEngine @Inject constructor(
     }
 
     @SuppressLint("SetJavaScriptEnabled")
-    private fun createView(id: String) {
+    private fun createView(id: String, target: String) {
         view?.destroy()
         view = WebView(context).apply {
             settings.javaScriptEnabled = true
@@ -87,7 +90,7 @@ class TranslationWebEngine @Inject constructor(
                     return intercept(request)
                 }
             }
-            loadUrl("$ORIGIN/index.html?request=$id")
+            loadUrl("$ORIGIN/index.html?request=$id&target=$target")
         }
     }
 
@@ -107,7 +110,8 @@ class TranslationWebEngine @Inject constructor(
         val stream = try {
             when {
                 asset != null -> context.assets.open("translation/$asset")
-                path.startsWith("/models/${models.model}/") -> models.openArtifact(path.removePrefix("/models/${models.model}/"))
+                path.startsWith("/models/opus-mt-en-zh/") -> models.openArtifact(path.removePrefix("/models/opus-mt-en-zh/"), "zh")
+                path.startsWith("/models/opus-mt-zh-en/") -> models.openArtifact(path.removePrefix("/models/opus-mt-zh-en/"), "en")
                 else -> null
             }
         } catch (_: Exception) { null } ?: return blocked()
@@ -121,7 +125,7 @@ class TranslationWebEngine @Inject constructor(
         val headers = mapOf(
             "Cache-Control" to "no-store",
             "X-Content-Type-Options" to "nosniff",
-            "Content-Security-Policy" to "default-src 'none'; script-src 'self' 'unsafe-eval' 'sha256-qourRVL6XUTFrJKiLPUsC/jsRhhslMxC2pqqDgUxXzg='; connect-src 'self'; worker-src 'none'; base-uri 'none'; form-action 'none'",
+            "Content-Security-Policy" to "default-src 'none'; script-src 'self' 'unsafe-eval' 'sha256-36xGPsQzVE5kRkAGmV5tO58FxFeJp1kIrGTn+1Uhpvg='; connect-src 'self'; worker-src 'none'; base-uri 'none'; form-action 'none'",
         )
         return WebResourceResponse(mime, "UTF-8", 200, "OK", headers, stream)
     }
@@ -129,7 +133,7 @@ class TranslationWebEngine @Inject constructor(
     private fun blocked() = WebResourceResponse("text/plain", "UTF-8", 403, "Forbidden", emptyMap(), ByteArrayInputStream(ByteArray(0)))
 
     private fun reset() {
-        prepared = false
+        preparedTarget = null
         view?.removeJavascriptInterface("TranslationResult")
         view?.stopLoading()
         view?.destroy()

@@ -101,17 +101,21 @@ class ConfigTool @Inject constructor(
         executeInternal(
             args,
             // ALLOW（完全放行）同样视作自动批准：配置类写入也不再弹确认。
-            autoMode = context.mode == AgentMode.AUTO || context.mode == AgentMode.ALLOW
+            autoMode = context.mode == AgentMode.AUTO || context.mode == AgentMode.ALLOW,
+            workspace = context.projectRoot
         )
 
     /** 无上下文的兜底路径（正常不会走到）：拿不到会话模式，一律按「必须人工确认」处理。 */
     override suspend fun execute(args: Map<String, JsonElement>): ToolResult =
         executeInternal(args, autoMode = false)
 
-    private suspend fun executeInternal(args: Map<String, JsonElement>, autoMode: Boolean): ToolResult {
+    private suspend fun executeInternal(args: Map<String, JsonElement>, autoMode: Boolean, workspace: String? = null): ToolResult {
         val action = (args["action"] as? JsonPrimitive)?.contentOrNull?.trim()?.lowercase()
             ?: return ToolResult.Error("缺少 action（list / get / set）", "MISSING_ACTION")
         val path = (args["path"] as? JsonPrimitive)?.contentOrNull?.trim().orEmpty()
+        if (path.startsWith(com.aharou.core.config.TeamEditCapability.PREFIX)) {
+            return teamCapabilityRequest(context, action, path, (args["value"] as? JsonPrimitive)?.contentOrNull, workspace)
+        }
         return try {
             val registry = ConfigRegistry.get()
             when (action) {

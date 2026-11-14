@@ -167,6 +167,12 @@ class AharouAccessibilityService : AccessibilityService() {
         return listOf(Display.DEFAULT_DISPLAY to (windows ?: emptyList()))
     }
 
+    fun rootNodesOnDisplay(displayId: Int): List<AccessibilityNodeInfo>? {
+        if (displayId == Display.DEFAULT_DISPLAY || Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
+        val roots = windowsByDisplay().firstOrNull { it.first == displayId }?.second?.mapNotNull { it.root }
+        return roots?.takeIf { it.isNotEmpty() }
+    }
+
     fun foregroundPackage(): Pair<String?, String?> {
         return try {
             val r = rootInActiveWindow

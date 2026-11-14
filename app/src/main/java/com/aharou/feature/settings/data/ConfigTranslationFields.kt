@@ -5,6 +5,7 @@ import com.aharou.R
 import com.aharou.core.config.ConfigRegistry
 import com.aharou.core.config.ConfigSchema
 import com.aharou.core.config.ConfigValue
+import com.aharou.core.config.fields.ReadOnlyField
 import com.aharou.core.config.fields.ClosureField
 import com.aharou.core.translation.OfflineTranslation
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -33,5 +34,17 @@ class ConfigTranslationFields @Inject constructor(
             reader = { ConfigValue.Bool(false) },
             writer = { if ((it as ConfigValue.Bool).value) translation.prepareModel(retry = true) },
         ))
+        registry.register(ReadOnlyField(
+            path = "translation.reverse_model_state", displayName = context.getString(R.string.translation_reverse_model),
+            description = context.getString(R.string.translation_download_description), valueSchema = ConfigSchema.Str(),
+            reader = { ConfigValue.Str(translation.reverseModelState.value.name.lowercase()) },
+        ))
+        registry.register(ClosureField(
+            path = "translation.download_reverse", displayName = context.getString(R.string.translation_reverse_download),
+            description = context.getString(R.string.translation_download_description), valueSchema = ConfigSchema.Bool,
+            reader = { ConfigValue.Bool(false) },
+            writer = { if ((it as ConfigValue.Bool).value) translation.prepareModel(retry = true, target = "en") },
+        ))
+
     }
 }

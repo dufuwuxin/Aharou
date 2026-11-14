@@ -18,6 +18,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.*
@@ -46,6 +48,15 @@ class ProjectWorkflowRunner @Inject constructor(
         ProjectFlowSessions.register(parent.id)
         val context = AgentContext(null, null, workspace, null, sessionId = parent.id)
         messages.persist(parent.id, MessageRole.USER, project.requirements)
+        val horizon = project.horizon
+        val goal = project.overallGoal.ifBlank { project.purpose.ifBlank { project.requirements } }
+        val acceptance = project.goalAcceptance
+        val startedAt = android.os.SystemClock.elapsedRealtime()
+        var attempts = 0
+        suspend fun checkpoint(reason: String) {
+            repository.checkpointProjectGoal(project, reason)
+            messages.persist(parent.id, MessageRole.ASSISTANT, "项目阶段已暂停：${ProjectGoalPlan.label(reason)}。请核对总目标与验收标准，确认后补充下一阶段需求；本次回复不代表项目完成。")
+        }
         var active: ProjectTask? = null
         var child: String? = null
         try {
@@ -53,9 +64,25 @@ class ProjectWorkflowRunner @Inject constructor(
                 val snapshot = repository.load(workspace)
                 val currentProject = snapshot.projects.first { it.id == projectId }
                 val projectTasks = snapshot.tasks.filter { it.projectId == projectId }
+                currentCoroutineContext().ensureActive()
+                if (attempts >= ProjectGoalPlan.taskBudget(horizon) ||
+                    android.os.SystemClock.elapsedRealtime() - startedAt >= ProjectGoalPlan.timeBudgetMs(horizon)) {
+                    checkpoint(ProjectGoalPlan.checkpoint(goal, acceptance, projectTasks, budgetReached = true))
+                    break
+                }
                 // A single-task run first runs the member branches its task now waits on, then the task itself.
-                val next = if (onlyTaskId == null) ProjectWorkflowPlan.next(projectTasks) ?: break
-                    else ProjectWorkflowPlan.nextWithin(projectTasks, onlyTaskId) ?: break
+                val next = if (onlyTaskId == null) ProjectWorkflowPlan.next(projectTasks)
+                    else ProjectWorkflowPlan.nextWithin(projectTasks, onlyTaskId)
+                if (next == null) {
+                    val proposal = if (onlyTaskId == null && horizon != "short" && goal.isNotBlank() && acceptance.isNotBlank()) {
+                        val remaining = ProjectGoalPlan.timeBudgetMs(horizon) - (android.os.SystemClock.elapsedRealtime() - startedAt)
+                        try { withTimeout(minOf(120_000L, remaining).coerceAtLeast(1L)) { repository.proposeGoalStage(currentProject) } }
+                        catch (timeout: TimeoutCancellationException) { false }
+                    } else false
+                    checkpoint(if (proposal) "NEXT_STAGE_CONFIRMATION_REQUIRED" else ProjectGoalPlan.checkpoint(goal, acceptance, projectTasks))
+                    break
+                }
+                attempts++
                 val participants = ProjectWorkflowPlan.participants(next)
                 val reused = ProjectWorkflowPlan.reusableRuns(next)
                 // Marked under the store lock; a supplement or branch committed since the pick sends the loop back to pick again.
@@ -77,12 +104,17 @@ class ProjectWorkflowRunner @Inject constructor(
                         }
                         val projectTools = projectToolsFor(member)
                         while (child == null) {
-                            while (events.isFull) delay(100)
+                            currentCoroutineContext().ensureActive()
+                            check(android.os.SystemClock.elapsedRealtime() - startedAt < ProjectGoalPlan.timeBudgetMs(horizon)) { "PROJECT_BUDGET_REACHED" }
+                            while (events.isFull) {
+                                check(android.os.SystemClock.elapsedRealtime() - startedAt < ProjectGoalPlan.timeBudgetMs(horizon)) { "PROJECT_BUDGET_REACHED" }
+                                delay(100)
+                            }
                             requireCurrent(workspace, next, participants)
                             // Cancellation must not strand a created child between creation and durable linking.
                             withContext(NonCancellable) {
                                 val result = tasks.createProjectMember(next.title,
-                                    ProjectWorkflowPlan.prompt(next, projectTasks, currentProject.requirements, member, index + 1, outputs.toList(), projectTools),
+                                    ProjectWorkflowPlan.prompt(next, projectTasks, currentProject.requirements + "\n" + ProjectGoalPlan.context(goal, acceptance, horizon), member, index + 1, outputs.toList(), projectTools),
                                     member.takeIf { it.isNotBlank() }, context)
                                 if (result is ToolResult.Error && result.code == "MAX_SUBAGENTS_REACHED") return@withContext
                                 check(result is ToolResult.Success) { (result as? ToolResult.Error)?.message ?: "PROJECT_MEMBER_START_FAILED" }
@@ -99,7 +131,8 @@ class ProjectWorkflowRunner @Inject constructor(
                         val id = requireNotNull(child)
                         // Waiting for a free member slot above is queueing, not execution time. A branch or supplement that
                         // changes this task while the member runs supersedes the member instead of ending the flow.
-                        withTimeout(memberTimeoutMs) { while (events.terminalEvent(id) == null) { requireCurrent(workspace, next, participants); delay(100) } }
+                        withTimeout(minOf(memberTimeoutMs, (ProjectGoalPlan.timeBudgetMs(horizon) -
+                            (android.os.SystemClock.elapsedRealtime() - startedAt)).coerceAtLeast(1L))) { while (events.terminalEvent(id) == null) { requireCurrent(workspace, next, participants); delay(100) } }
                         requireCurrent(workspace, next, participants)
                         val terminal = requireNotNull(events.terminalEvent(id))
                         val passed = terminal.type == SubAgentEventType.COMPLETED && terminal.accepted == true
@@ -139,6 +172,10 @@ class ProjectWorkflowRunner @Inject constructor(
                     failure is CancellationException || failure.message == "PROJECT_MEMBER_STOPPED" -> "STOPPED"
                     failure.message == "UPSTREAM_CHANGED" -> "UPSTREAM_CHANGED"
                     else -> "FAILED"
+                }
+                if (failure.message == "PROJECT_BUDGET_REACHED" || failure is TimeoutCancellationException) {
+                    try { checkpoint(if (android.os.SystemClock.elapsedRealtime() - startedAt >= ProjectGoalPlan.timeBudgetMs(horizon) ||
+                        failure.message == "PROJECT_BUDGET_REACHED") "BUDGET_REACHED" else "MEMBER_TIMEOUT") } catch (saveFailure: Exception) { failure.addSuppressed(saveFailure) }
                 }
                 child?.let { id ->
                     try {

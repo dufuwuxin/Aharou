@@ -407,12 +407,20 @@ class ProjectTaskViewModel @Inject constructor(
         if (mutable.value.workspace == saved.workspace) mutable.update { it.copy(selectedId = saved.id) }
     }
 
+    fun saveProjectGoal(project: ProjectPlan, horizon: String, goal: String, acceptance: String) = operation { workspace ->
+        check(project.workspace == workspace) { "CROSS_WORKSPACE" }
+        // Close races with a queued run as well as a currently visible active run.
+        flows.withProjectStopped(project.id, workspace) {
+            repository.saveProjectGoal(project, horizon, goal, acceptance)
+        }
+    }
+
     fun startProject(projectId: String) {
         val state = mutable.value
         if (state.loading || state.busy) return
         val project = state.projects.singleOrNull { it.id == projectId && it.workspace == state.workspace }
         if (project != null && state.tasks.none { it.projectId == projectId && !it.isRequirementBranch }) {
-            val requirement = project.requirements.ifBlank { project.purpose }
+            val requirement = project.requirements.ifBlank { project.overallGoal.ifBlank { project.purpose } }
             if (requirement.isNotBlank()) addTaskByDescription(projectId, requirement)
             return
         }

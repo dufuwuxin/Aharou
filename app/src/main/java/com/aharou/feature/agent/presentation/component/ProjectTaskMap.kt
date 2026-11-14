@@ -5,7 +5,6 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -36,7 +35,6 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import com.aharou.R
@@ -57,11 +55,7 @@ import compose.icons.feathericons.Search
 import compose.icons.feathericons.X
 import compose.icons.feathericons.Maximize
 import compose.icons.feathericons.Minimize
-import compose.icons.feathericons.RotateCcw
-import compose.icons.feathericons.ZoomIn
-import compose.icons.feathericons.ZoomOut
 import kotlin.math.abs
-import kotlin.math.roundToInt
 
 private const val DEFAULT_ZOOM = 0.9f
 private const val MAX_ZOOM = 2f
@@ -194,16 +188,7 @@ fun ProjectTaskMap(projectId: String, projectTitle: String, tasks: List<ProjectT
                     if (allOpen) { expanded = emptySet(); measured.clear() } else expanded = tasks.mapTo(HashSet()) { it.id }
                     suppressed = emptySet(); dismiss()
                 })
-            DropdownMenuItem(text = { Text(stringResource(R.string.project_map_fit)) },
-                modifier = Modifier.testTag("map_fit"), onClick = {
-                    if (viewportWidth.isFinite() && viewportHeight > 0f) {
-                        zoom = ProjectTaskMapLayout.fitZoom(viewportWidth - Spacing.lg.value * 2,
-                            viewportHeight - Spacing.lg.value * 2, layout.width, layout.height, MAX_ZOOM)
-                        panX = (viewportWidth - layout.width * zoom) / 2f
-                        panY = (viewportHeight - layout.height * zoom) / 2f
-                    }
-                    dismiss()
-                })
+
 
         }
         if (showSearch) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -224,10 +209,10 @@ fun ProjectTaskMap(projectId: String, projectTitle: String, tasks: List<ProjectT
             overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag("map_hint"))
         BoxWithConstraints(Modifier.weight(1f).fillMaxWidth().clipToBounds().testTag("map_viewport")
             .onSizeChanged { viewportHeight = it.height / density }.pointerInput(projectId, layout.width, layout.height) {
-            detectTransformGestures { centroid, pan, scale, _ ->
+            detectProjectMapGestures { centroid, pan, scale, _ ->
                 onDrag()
                 if (!scale.isFinite() || scale <= 0f || !pan.x.isFinite() || !pan.y.isFinite() ||
-                    !centroid.x.isFinite() || !centroid.y.isFinite()) return@detectTransformGestures
+                    !centroid.x.isFinite() || !centroid.y.isFinite()) return@detectProjectMapGestures
                 val minimum = ProjectTaskMapLayout.minimumZoom(ProjectTaskMapLayout.fitZoom(
                     size.width / density, size.height / density, layout.width, layout.height, MAX_ZOOM))
                 val next = ProjectTaskMapLayout.clampZoom(zoom * scale, minimum, MAX_ZOOM)
@@ -322,12 +307,14 @@ fun ProjectTaskMap(projectId: String, projectTitle: String, tasks: List<ProjectT
                     }
                 }
             }
-            visible.forEach { node -> key(node.id) {
+            (visible + layout.nodes.filter { it.id in shown && it !in visible }).forEach { node -> key(node.id) {
                 val task = byId[node.id]
                 val unfolded = task != null && node.id in shown
-                Box(Modifier.offset { IntOffset(((node.x * zoom + panX) * density).roundToInt(),
-                        ((node.y * zoom + panY) * density).roundToInt()) }
-                    .graphicsLayer { scaleX = zoom; scaleY = zoom; transformOrigin = TransformOrigin(0f, 0f) }
+                Box(Modifier.graphicsLayer {
+                        translationX = (node.x * zoom + panX) * density
+                        translationY = (node.y * zoom + panY) * density
+                        scaleX = zoom; scaleY = zoom; transformOrigin = TransformOrigin(0f, 0f)
+                    }
                     .wrapContentSize(Alignment.TopStart, unbounded = true)
                     .width(node.width.dp)
                     .then(if (unfolded) Modifier.onSizeChanged { size ->
@@ -355,23 +342,7 @@ fun ProjectTaskMap(projectId: String, projectTitle: String, tasks: List<ProjectT
                     }
                 }
             } }
-            fun stepZoom(factor: Float) {
-                val minimum = ProjectTaskMapLayout.minimumZoom(ProjectTaskMapLayout.fitZoom(viewW, viewH, layout.width, layout.height, MAX_ZOOM))
-                val next = ProjectTaskMapLayout.clampZoom(zoom * factor, minimum, MAX_ZOOM)
-                val ratio = next / zoom
-                panX = viewW / 2f - (viewW / 2f - panX) * ratio
-                panY = viewH / 2f - (viewH / 2f - panY) * ratio
-                zoom = next
-            }
-            Row(Modifier.align(Alignment.BottomEnd).padding(Spacing.sm)
-                .background(colors.surface, RoundedCornerShape(Radius.mdLarge))) {
-                IconButton(onClick = { stepZoom(1f / 1.25f) }, modifier = Modifier.testTag("map_zoom_out")) {
-                    Icon(FeatherIcons.ZoomOut, stringResource(R.string.project_map_zoom_out))
-                }
-                IconButton(onClick = { stepZoom(1.25f) }, modifier = Modifier.testTag("map_zoom_in")) {
-                    Icon(FeatherIcons.ZoomIn, stringResource(R.string.project_map_zoom_in))
-                }
-            }
+
         }
     }
     if (processId == ProjectTaskMapLayout.rootId(projectId)) AdaptiveModalBottomSheet(onDismissRequest = onDismissProcess,

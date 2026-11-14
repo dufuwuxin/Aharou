@@ -142,7 +142,8 @@ class StatefulAgentWorkflow @Inject constructor(
     private val ocrEngine: TesseractOcrEngine,
     private val injectedContexts: com.aharou.feature.agent.domain.prompt.InjectedContextStore,
     private val vault: VaultRepository, private val reminderEngine: com.aharou.feature.agent.domain.reminder.ReminderEngine,
-    private val memoryCompactor: Lazy<MemoryCompactor>, private val toolInjectionGate: ToolInjectionGate // Lazy breaks compactor cycle
+    private val memoryCompactor: Lazy<MemoryCompactor>, private val toolInjectionGate: ToolInjectionGate, // Lazy breaks compactor cycle
+    private val languageRoutingFactory: com.aharou.core.translation.LanguageRoutingProvider.Factory? = null
 ) : AgentWorkflow {
     /** 卡死提示文案：从 prompts 文件读一次并缓存，用户可编辑该文件定制。 */
     private val stuckNudgeText: String get() = promptProvider.resolvePrompt(STUCK_NUDGE_FILE)
@@ -385,7 +386,7 @@ class StatefulAgentWorkflow @Inject constructor(
         provider.firstByteTimeoutMs = generalSettingsRepository.firstByteTimeoutMs()
         provider.streamIdleTimeoutMs = generalSettingsRepository.streamIdleTimeoutMs()
         provider.maxNetworkRetries = generalSettingsRepository.maxNetworkRetries()
-        return provider
+        return languageRoutingFactory?.wrap(provider) ?: provider
     }
 
     /** 中间件注入的系统提示：按供应商配置追加，取不到配置就原样返回。 */
@@ -597,7 +598,8 @@ class StatefulAgentWorkflow @Inject constructor(
         val inputBudget = ContextWatermarks.from(ModelContextPolicy.effectiveInputBudget(callMetadata),
             generalSettingsRepository.softCompactionThresholdPercent(), generalSettingsRepository.compactionThresholdPercent()).maxTokens
         val requestVersion = injectedContexts.beginRequest(currentContext.sessionId)
-        val requestSystemPrompt = appendMiddlewarePrompt(providerInUse.providerId, systemPrompt)
+        val baseRequestPrompt = appendMiddlewarePrompt(providerInUse.providerId, systemPrompt)
+        var requestSystemPrompt = baseRequestPrompt
         val promptTools = requestTools(currentTools, currentContext)
         val compactionProvider = resolveCompactionFallbackProvider(currentContext.sessionId) ?: providerInUse
         val reuseMainPrefix = compactionProvider.providerId == providerInUse.providerId && compactionProvider.model == providerInUse.model  // 前缀缓存只同 provider 同 model 内生效，配了独立压缩模型就不复用主前缀
@@ -606,7 +608,9 @@ class StatefulAgentWorkflow @Inject constructor(
         // 算两遍迟早因视觉能力解析或占位文案不同而漂移，那会反向低估、真撞窗口。
         val supportsVision = callMetadata.supportsVision
         val trimRounds = generalSettingsRepository.contextTrimRounds()
-        var sendProjection = keepNewestImages(sanitizeImagesForModel(state.messages, supportsVision)).trimToRecentRounds(trimRounds)
+        var history = com.aharou.feature.agent.domain.tool.projectFileHistory(foldStoredToolResults(keepNewestImages(sanitizeImagesForModel(state.messages, supportsVision)).trimToRecentRounds(trimRounds)))
+        var sendProjection = history.messages
+        requestSystemPrompt = baseRequestPrompt + history.index
         if (!budget.compactionAttemptFailed) {
             telemetry.compactionStart()
             val estimate = withContext(Dispatchers.Default) { ContextTokenEstimator.estimate(requestSystemPrompt, sendProjection, promptTools) }
@@ -626,7 +630,11 @@ class StatefulAgentWorkflow @Inject constructor(
             }
         }
         // 压缩真的改写过消息时内容变了，投影得按新的那份重算；源没变就沿用上面那份（同一个对象）。
-        if (compactedMessages !== initialState.messages) sendProjection = keepNewestImages(sanitizeImagesForModel(compactedMessages, supportsVision)).trimToRecentRounds(trimRounds)
+        if (compactedMessages !== initialState.messages) {
+            history = com.aharou.feature.agent.domain.tool.projectFileHistory(foldStoredToolResults(keepNewestImages(sanitizeImagesForModel(compactedMessages, supportsVision)).trimToRecentRounds(trimRounds)))
+            sendProjection = history.messages
+            requestSystemPrompt = baseRequestPrompt + history.index
+        }
         val requestEstimate = withContext(Dispatchers.Default) { ContextTokenEstimator.estimate(requestSystemPrompt, sendProjection, promptTools) }
         val predictedInput = ContextTokenEstimator.calibrated(requestEstimate, budget.baselineEstimate, budget.baselineUsage)
         emit(AgentEvent.ContextUsage(predictedInput, inputBudget, true))
@@ -697,7 +705,7 @@ class StatefulAgentWorkflow @Inject constructor(
         }
         try {
             outboundMasker = outboundMaskerOrNull(generalSettingsRepository.privacyMaskingEnabled())
-            val outbound = maskedOutboundRequest(requestSystemPrompt, foldStoredToolResults(sendProjection), outboundMasker)
+            val outbound = maskedOutboundRequest(requestSystemPrompt, sendProjection, outboundMasker)
             val messagesToSend = outbound.messages
             injectedContexts.recordRequest(currentContext.sessionId, RequestContextComposition.capture(requestVersion, outbound.systemPrompt, messagesToSend, promptTools))
             // 采样循环检测：命中后 takeWhile 会取消上游流，模型不再继续把重复内容刷下去。

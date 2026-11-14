@@ -1,5 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="project_horizon_short">短期</string>
+    <string name="project_horizon_medium">中期</string>
+    <string name="project_horizon_long">长期</string>
+    <string name="project_overall_goal">总目标</string>
+    <string name="project_goal_acceptance">总目标验收标准</string>
+    <string name="project_goal_save">保存长期目标</string>
+    <string name="project_progress_tree_title">目标 → 计划 → 工具 → 结果</string>
+    <string name="project_original_collapse">收起原始会话</string>
+    <string name="project_original_expand">展开原始会话</string>
+    <string name="project_progress_unavailable">过程记录暂不可用，请展开原始会话重试</string>
+    <string name="settings_special_permissions">特殊权限</string>
+    <string name="team_capability_title">团队修改权限</string>
+    <string name="team_capability_scope">默认关闭。开启后生成仅当前工作区可用的团队流程/通信修改地址；一小时后、关闭或重启立即失效，不开放命令、文件和其它设置。</string>
+    <string name="team_capability_usage">仅在你主动把地址复制给 AI 后使用。先通过 config 的 get 读取地址获取字段及版本；修改必须带 expectedRevision 和 value。此权限不改变系统授权。</string>
+    <string name="team_capability_copy">复制团队修改地址</string>
     <string name="app_name">Aharou Fork</string>
 
     <!-- 设置页菜单标题 -->
@@ -3641,7 +3656,6 @@
     <string name="memory_review_proposals_description">默认开启：合并与摘要改写仅生成可检视提议，批准具体稿后写入。关闭后恢复原自动写入路径，不关闭整理任务。</string>
     <string name="chat_context_request_metadata">请求版本 %1$s · 时间戳 %2$s\n系统 %3$s / 工具定义 %4$s / 历史与消息开销 %5$s / 图片估算 %6$s token（非模型账单）</string>
     <string name="prompts_injection_keyword">关键词 %1$d</string>
-    <string name="project_map_fit">适配全图</string>
     <string name="container_recommendation_title">开发容器怎么选</string>
     <string name="container_recommendation_body">默认内置 Ubuntu 24.04 LTS ARM64，离线解压后按需安装开发工具。不再提供或启动 Alpine、x86 或 32 位 ARM 本地镜像，不使用跨架构转译；Debian 也是可选开发环境；Arch / Manjaro 适合接受滚动更新的用户；Void 请选择 aarch64 glibc，在线条目须同步发布成功后才出现。各镜像使用独立容器，不混用 libc。</string>
     <string name="translation_title">离线英译中</string>
@@ -3807,8 +3821,6 @@
     <string name="project_process_no_reasoning">模型未返回思考摘要。</string>
     <string name="project_process_reply">完整回复与工具过程</string>
     <string name="project_process_live">正在执行 · 实时思考、回复与工具</string>
-    <string name="project_map_zoom_in">放大导图</string>
-    <string name="project_map_zoom_out">缩小导图</string>
     <string name="project_main_conversation">主会话 / 规划过程</string>
     <string name="project_main_record">主会话记录 %1$d</string>
     <string name="project_member_status_unconfirmed">成员记录尚无终态；是否执行以实时会话为准</string>
@@ -4106,4 +4118,11 @@
     <string name="plugin_host_open">打开插件界面</string>
     <string name="plugin_host_no_view">此插件没有提供原生界面。</string>
     <string name="plugin_host_compile_output">编译输出</string>
+    <string name="provider_language_title">供应商输入语言</string>
+    <string name="provider_language_description">原文不转换；中文或英文仅在本机转换自然语言。代码、路径、工具结果与签名不变；关闭离线翻译则全部保持原文。缺包或失败时保持原文，请到离线翻译查看状态。</string>
+    <string name="provider_language_native">原文</string>
+    <string name="provider_language_zh">中文</string>
+    <string name="provider_language_en">英文</string>
+    <string name="translation_reverse_model">中译英离线模型（供应商英文输入）</string>
+    <string name="translation_reverse_download">下载离线中译英语言包</string>
 </resources>

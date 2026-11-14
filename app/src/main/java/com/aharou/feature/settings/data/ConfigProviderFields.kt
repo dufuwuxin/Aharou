@@ -51,7 +51,10 @@ class ConfigProviderFields @Inject constructor(
     private val modelMetadataStore: CustomModelMetadataStore,
     private val providers: AIProviderRepository,
     private val accounts: com.aharou.feature.settings.data.account.AccountProviderManager,
+    private val languageSettings: com.aharou.core.translation.ProviderLanguageSettings? = null,
 ) {
+
+    private val languages by lazy { languageSettings ?: com.aharou.core.translation.ProviderLanguageSettings(context) }
 
     fun registerInto(registry: ConfigRegistry) {
         registry.register(ProviderCollection())
@@ -265,6 +268,16 @@ class ConfigProviderFields @Inject constructor(
             if (!exists) return emptyList()
 
             return listOf(
+                ClosureField(
+                    path = "providers.$forId.language", displayName = context.getString(com.aharou.R.string.provider_language_title),
+                    description = context.getString(com.aharou.R.string.provider_language_description),
+                    valueSchema = ConfigSchema.StrEnum(listOf("native", "zh", "en")),
+                    reader = { ConfigValue.Str(languages.get(forId).wireValue) },
+                    writer = {
+                        if (!exists) throw ConfigError.InvalidValue("Provider does not exist")
+                        languages.set(forId, com.aharou.core.translation.ProviderLanguagePolicy.fromWire((it as ConfigValue.Str).value))
+                    },
+                ),
                 accountAction(
                     field = "account_session", name = "Loomy会话导入",
                     desc = "用户主动提供自己的Loomy会话；验证后保存账号池，并同步合并模型目录，不返回凭据。",
@@ -621,6 +634,7 @@ class ConfigProviderFields @Inject constructor(
         override fun remove(id: String) {
             if (snapshot(id) == null) throw ConfigError.InvalidValue("供应商不存在：$id")
             runBlocking { providers.deleteProvider(id) }
+            languages.remove(id)
         }
     }
 

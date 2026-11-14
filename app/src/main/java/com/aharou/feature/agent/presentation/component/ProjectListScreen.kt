@@ -1,5 +1,8 @@
 package com.aharou.feature.agent.presentation.component
 
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
@@ -38,6 +41,7 @@ fun ProjectListScreen(viewModel: ProjectTaskViewModel, createRequested: Boolean,
     var menuProject by remember { mutableStateOf<ProjectPlan?>(null) }
     var creating by rememberSaveable { mutableStateOf(false) }
     var showSessions by rememberSaveable { mutableStateOf(false) }
+    val swipeThreshold = with(LocalDensity.current) { 64.dp.toPx() }
     var createMenu by remember { mutableStateOf(false) }
     var name by rememberSaveable { mutableStateOf("") }
     var purpose by rememberSaveable { mutableStateOf("") }
@@ -55,7 +59,14 @@ fun ProjectListScreen(viewModel: ProjectTaskViewModel, createRequested: Boolean,
             submitted = false
         }
     }
-    Box(Modifier.fillMaxSize()) {
+    Box(Modifier.fillMaxSize().pointerInput(swipeThreshold) {
+        var distance = 0f
+        detectHorizontalDragGestures(onDragStart = { distance = 0f },
+            onDragCancel = { distance = 0f }, onDragEnd = {
+                if (kotlin.math.abs(distance) >= swipeThreshold) showSessions = distance < 0f
+                distance = 0f
+            }) { change, delta -> change.consume(); distance += delta }
+    }) {
     Column(Modifier.fillMaxSize()
         .padding(Spacing.lg), verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
         Column(verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {

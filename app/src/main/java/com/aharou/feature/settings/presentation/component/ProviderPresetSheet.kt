@@ -19,10 +19,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
-import com.aharou.core.ui.AdaptiveModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -32,6 +30,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.material3.TextButton
 import androidx.compose.ui.unit.dp
 import com.aharou.R
 import com.aharou.core.theme.Spacing
@@ -66,17 +68,16 @@ internal fun ProviderPresetSheet(
     val officialPresets = accountPresets + remember { ProviderPresetLibrary.loadOfficial(context) }
     val screenHeight = LocalConfiguration.current.screenHeightDp.dp
     val sheetContentHeight = screenHeight * 0.85f
-    AdaptiveModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = MaterialTheme.colorScheme.surface
-    ) {
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false)) {
+        Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surface,
+            modifier = Modifier.fillMaxWidth(0.94f).imePadding()) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(bottom = Spacing.xl)
                 .height(sheetContentHeight)
         ) {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_close)) }
             Text(
                 text = stringResource(R.string.provider_add_sheet_title),
                 style = MaterialTheme.typography.titleMedium,
@@ -247,5 +248,6 @@ internal fun ProviderPresetSheet(
                 }
             }
         }
+    }
     }
 }

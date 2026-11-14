@@ -14,5 +14,11 @@ data class ProjectPlan(
     val flowSessionIds: List<String> = emptyList(),
     val workspaceOwnership: String = "legacy_shared",
     val continuationSourceProjectId: String? = null,
-    val purpose: String = ""
+    val purpose: String = "",
+    /** Additive project JSON fields; independent of tasks and execution sessions. */
+    val horizon: String = "short",
+    val overallGoal: String = "",
+    val goalAcceptance: String = "",
+    val goalCheckpoint: String = "",
+    val goalRevision: Long = 0
 )

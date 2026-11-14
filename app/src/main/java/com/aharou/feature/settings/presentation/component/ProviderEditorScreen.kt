@@ -165,6 +165,9 @@ fun ProviderEditorScreen(
     val focusManager = LocalFocusManager.current
     val accountManager = rememberAccountProviderManager()
     val providerId = androidx.compose.runtime.saveable.rememberSaveable { initialProvider?.id ?: System.currentTimeMillis().toString() }
+    val languageSettings = remember(context) { com.aharou.core.translation.ProviderLanguageSettings(context.applicationContext) }
+    var languageValue by androidx.compose.runtime.saveable.rememberSaveable(providerId) { mutableStateOf(languageSettings.get(providerId).wireValue) }
+    var lastSubmittedLanguage by remember(providerId) { mutableStateOf(languageValue) }
     val accountPreset = presetPrefill?.id?.takeIf { it.startsWith("account-") }?.removePrefix("account-")
         ?.let { com.aharou.feature.settings.data.account.AccountProviderKind.fromWireId(it) }
     val presetType by remember {
@@ -275,7 +278,6 @@ fun ProviderEditorScreen(
     var showHeadersSheet by remember { mutableStateOf(false) }
     var showScriptParamsSheet by remember { mutableStateOf(false) }
     var fetchDialogKey by remember { mutableIntStateOf(0) }
-
     // 两个 tab 的滚动状态提升到页面层，聚合出「是否正在滚动」供底部 tab栏滚动弱化（同 Git 页面）。
     val configScrollState = rememberScrollState()
     val modelsListState = rememberLazyListState()
@@ -285,7 +287,6 @@ fun ProviderEditorScreen(
             configScrollState.isScrollInProgress || modelsListState.isScrollInProgress
         }
     }
-
     val fetchState by viewModel.fetchState.collectAsStateWithLifecycle()
     val autoRemoveStaleModels by viewModel.autoRemoveStaleModels.collectAsStateWithLifecycle()
     val testResults by viewModel.testResults.collectAsStateWithLifecycle()
@@ -298,7 +299,6 @@ fun ProviderEditorScreen(
     val modelIdSet by remember {
         derivedStateOf { models.toSet() }
     }
-
     DisposableEffect(Unit) {
         viewModel.resetFetchState()
         viewModel.clearTestResults()
@@ -309,22 +309,18 @@ fun ProviderEditorScreen(
             viewModel.clearDashboardTestState()
         }
     }
-
     LaunchedEffect(type, modelIdSet) {
         viewModel.resolveModelMetadata(providerId, type, models.toList())
     }
-
     LaunchedEffect(onboardingStep) {
         if (onboardingStep == OnboardingStep.SIMULATE_FETCH_DIALOG) {
             fetchDialogKey++
             showFetchDialog = true
         }
     }
-
     LaunchedEffect(providerId) {
         customMetadata = customMetadataStore.all()
     }
-
     fun currentConfig() = accountManager.normalizeConfig(AIProviderConfig(
         id = providerId,
         name = name.ifEmpty { context.getString(R.string.provider_new) },
@@ -361,7 +357,6 @@ fun ProviderEditorScreen(
         fallbackProviderId = fallbackChain.firstOrNull()?.providerId ?: "",
         fallbackModel = fallbackChain.firstOrNull()?.model ?: ""
     ).sanitized())
-
     // 新建场景下判断用户是否填写了实质内容：名称、API Key、Base URL 任一非空白，或已添加模型 / DIY 脚本参数。
     // 全空白时退出编辑页（防止新建一个名为「默认供应商」的空记录）。
     fun hasSubstantiveInput(): Boolean =
@@ -374,31 +369,28 @@ fun ProviderEditorScreen(
             scriptParams.any { it.first.isNotBlank() } ||
             customHeaders.any { it.first.isNotBlank() } ||
             models.isNotEmpty()
-
     // 与上次提交内容完全相同则跳过保存（改了又改回原值、或原样返回都不应触发 DB 写入）；编辑场景以进入时配置为基线，新建场景为 null 保证首次填写必存。
     var lastSubmittedConfig by remember {
         mutableStateOf(if (initialProvider != null) currentConfig() else null)
     }
-
     fun saveCurrent() {
         if (!hasSubstantiveInput()) return
         val config = currentConfig()
-        if (config == lastSubmittedConfig) return
+        if (config == lastSubmittedConfig && languageValue == lastSubmittedLanguage) return
+        languageSettings.set(providerId, com.aharou.core.translation.ProviderLanguagePolicy.fromWire(languageValue))
+        lastSubmittedLanguage = languageValue
         onSave(config)
         lastSubmittedConfig = config
     }
-
     fun applyIcon(newIcon: String) {
         customIcon = newIcon
         saveCurrent()
     }
-
     val iconPickLauncher = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) {
             ProviderIconStore.import(context, providerId, uri)?.let { applyIcon(it) }
         }
     }
-
     // 拉取成功后自动对齐：远端已不存在的本地模型直接移除（可在「偏好设置」关掉）。拉取失败或返回空列表时不动列表。
     LaunchedEffect(fetchState, showFetchDialog, autoRemoveStaleModels) {
         if (!autoRemoveStaleModels) return@LaunchedEffect
@@ -417,14 +409,12 @@ fun ProviderEditorScreen(
             ).show()
         }
     }
-
     val modelsReorderableState = rememberReorderableLazyListState(modelsListState) { from, to ->
         if (from.index !in models.indices || to.index !in models.indices || from.index == to.index) return@rememberReorderableLazyListState
         models.add(to.index, models.removeAt(from.index))
         modelsOrderDirty = true
     }
     val hapticFeedback = LocalHapticFeedback.current
-
     // 模型列表多选：与其余设置列表共用同一套选中状态（选中集合 + 多选开关）
     val modelSelection = rememberListSelectionState()
     var showBatchDeleteConfirm by remember { mutableStateOf(false) }
@@ -433,13 +423,11 @@ fun ProviderEditorScreen(
     LaunchedEffect(pagerState.currentPage) {
         if (pagerState.currentPage == 0 && modelSelection.selectionMode) modelSelection.exit()
     }
-
     fun saveAndNavigateBack() {
         modelsOrderDirty = false
         saveCurrent()
         onNavigateBack()
     }
-
     if (showProxyPage || showKeysPage) {
         BackHandler {
             showProxyPage = false
@@ -450,7 +438,6 @@ fun ProviderEditorScreen(
     } else {
         BackHandler { saveAndNavigateBack() }
     }
-
     Scaffold(
         containerColor = settingsPageBackground(),
         topBar = {
@@ -529,7 +516,6 @@ fun ProviderEditorScreen(
                             models.addAll(remoteModels)
                         }
                     }
-
                     // ── 选项 ──
                     SettingsGroupHeader(text = stringResource(R.string.provider_section_options))
                     SettingsGroup {
@@ -552,6 +538,26 @@ fun ProviderEditorScreen(
                             title = stringResource(R.string.common_enabled),
                             checked = isEnabled,
                             onCheckedChange = { isEnabled = it }
+                        )
+                        SettingsDivider()
+                        SettingsRow(
+                            title = stringResource(R.string.provider_language_title),
+                            subtitle = stringResource(R.string.provider_language_description),
+                            trailing = {
+                                Row {
+                                    com.aharou.core.translation.ProviderLanguagePolicy.entries.forEach { policy ->
+                                        androidx.compose.material3.FilterChip(
+                                            selected = languageValue == policy.wireValue,
+                                            onClick = { languageValue = policy.wireValue; saveCurrent() },
+                                            label = { Text(stringResource(when (policy) {
+                                                com.aharou.core.translation.ProviderLanguagePolicy.NATIVE -> R.string.provider_language_native
+                                                com.aharou.core.translation.ProviderLanguagePolicy.CHINESE -> R.string.provider_language_zh
+                                                com.aharou.core.translation.ProviderLanguagePolicy.ENGLISH -> R.string.provider_language_en
+                                            })) },
+                                        )
+                                    }
+                                }
+                            },
                         )
                         SettingsDivider()
                         // 端侧模型不走 HTTP：完整 URL、新版端点、缓存这些开关对它们没有意义。
@@ -630,7 +636,6 @@ fun ProviderEditorScreen(
                             }
                         )
                     }
-
                     // ── 自定义面板 (DIY) ──
                     ProviderDashboardGroup(
                         scriptPath = dashboardScriptPath,
@@ -843,7 +848,6 @@ fun ProviderEditorScreen(
                 }
             }
             }
-
             FloatingTabBar(
                 pagerState = pagerState,
                 items = listOf(
@@ -856,7 +860,6 @@ fun ProviderEditorScreen(
             )
         }
     }
-
     if (showTypeSheet) {
         ProviderTypeSelectionSheet(
             selected = type,
@@ -864,7 +867,6 @@ fun ProviderEditorScreen(
             onDismiss = { showTypeSheet = false }
         )
     }
-
     if (showProxyPage) {
         ProviderProxyPage(
             config = ProxyConfig(
@@ -898,7 +900,6 @@ fun ProviderEditorScreen(
             }
         )
     }
-
     if (showKeysPage) {
         ProviderKeysPage(
             keys = apiKeys,
@@ -911,7 +912,6 @@ fun ProviderEditorScreen(
             onSetSwitchStatusCodes = { keySwitchStatusCodes = it }
         )
     }
-
     if (showScriptPickerSheet) {
         ScriptPickerBottomSheet(
             scripts = dashboardScripts,

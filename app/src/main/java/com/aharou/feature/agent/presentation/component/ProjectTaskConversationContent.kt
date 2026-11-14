@@ -49,3 +49,25 @@ internal fun projectLiveToolMessages(messages: List<AgentUIMessage>, tools: List
         stored?.copy(content = tool.text) ?: AgentUIMessage(id = tool.messageId, role = MessageRole.TOOL,
             content = tool.text, toolName = tool.toolName, toolArgs = tool.toolArgs)
     }
+
+internal data class ProjectProgressNode(val id: String, val kind: String, val text: String)
+
+/** Ordering comes from persisted user/assistant/tool messages, not synthesized thinking. */
+internal fun projectProgressNodes(messages: List<AgentUIMessage>, liveTools: List<AgentUIMessage>,
+    liveText: String, running: Boolean = false): List<ProjectProgressNode> {
+    val rounds = projectConversationRounds(messages)
+    val toolIds = liveTools.mapTo(hashSetOf()) { it.id }
+    val nodes = rounds.flatMap { round ->
+        val finalId = round.finalReply?.id?.takeIf { (!running && liveText.isBlank()) || round != rounds.lastOrNull() }
+        round.messages.filter { it.id !in toolIds && it.content.isNotBlank() }.map { message ->
+            ProjectProgressNode(message.id, when (message.role) {
+                MessageRole.USER -> "目标"
+                MessageRole.TOOL -> "工具"
+                else -> if (message.id == finalId) "结果" else "计划（公开回复）"
+            }, message.content)
+        }
+    }.toMutableList()
+    nodes += liveTools.filter { it.content.isNotBlank() }.map { ProjectProgressNode(it.id, "工具（运行中）", it.content) }
+    if (liveText.isNotBlank()) nodes += ProjectProgressNode("stream", "公开回复（生成中）", liveText)
+    return nodes
+}

@@ -150,8 +150,9 @@ class SettingsNavigationTest(unittest.TestCase):
         self.assertIn("fun minimumZoom(", layout)
         self.assertIn("fun clampZoom(", layout)
         self.assertIn("target.isFinite()", layout)
-        self.assertIn('modifier = Modifier.testTag("map_fit")', task_map)
-        self.assertIn("DropdownMenuItem(text = { Text(stringResource(R.string.project_map_fit)) }", task_map)
+        self.assertNotIn('testTag("map_fit")', task_map)
+        self.assertIn("detectProjectMapGestures", task_map)
+        self.assertIn("Modifier.graphicsLayer", task_map)
         self.assertIn("ProjectTaskMapLayout.fitZoom(", task_map)
         self.assertIn("ProjectTaskMapLayout.clampZoom(", task_map)
         self.assertIn("(r - RING_DP * density / 2f).coerceAtLeast(0f)", task_map)
@@ -167,8 +168,11 @@ class SettingsNavigationTest(unittest.TestCase):
         config = function(self.groups, "SettingsAiGroupScreen")
         self.assertIn("onOpen(SettingsSection.Memory)", masked(config))
         self.assertEqual(1, masked(self.groups).count("onOpen(SettingsSection.Memory)"))
-        self.assertIn("onOpen(SettingsSection.ConfigAudit)", account)
-        for name in ("Memory", "ConfigAudit"):
+        self.assertIn("onOpen(SettingsSection.SpecialPermissions)", account)
+        special = source(SETTINGS / "SpecialPermissionsSection.kt")
+        self.assertIn("onOpen(SettingsSection.ConfigAudit)", special)
+        self.assertIn("onOpen(SettingsSection.ShadowScreen)", special)
+        for name in ("Memory", "SpecialPermissions"):
             with self.subTest(section=name):
                 self.assertRegex(self.screen, rf"SettingsSection\.{name}\s*->")
         self.assertIn("UserIdentityStore.observe(context)", source(SRC / "feature/agent/presentation/component/SoulChatHeader.kt"))

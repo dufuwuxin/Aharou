@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """Static delivery gates, not Android runtime/inference tests."""
+import argparse
 import base64
 import hashlib
 import json
 import re
 import unittest
 from pathlib import Path
+
+from prepare_translation_models import MANIFESTS, validate_manifest
 
 ROOT = Path(__file__).resolve().parents[1]
 ASSETS = ROOT / "app/src/main/assets/translation"
@@ -24,17 +27,15 @@ class TranslationDeliveryTest(unittest.TestCase):
         self.assertGreater((ASSETS / "THIRD_PARTY_NOTICES.txt").stat().st_size, 1000)
 
     def test_model_manifest_fixed_and_not_bundled(self):
-        manifest = json.loads((ASSETS / "model-manifest.json").read_text())
-        self.assertEqual(manifest["revision"], "046f55aec303cdee3e0318604406d4df20f1e8ea")
-        self.assertIn(manifest["revision"], manifest["baseUrl"])
-        self.assertEqual(len(manifest["files"]), 6)
-        for item in manifest["files"]:
-            self.assertRegex(item["sha256"], r"^[a-f0-9]{64}$")
-            self.assertRegex(item["path"], r"^(?:onnx/)?[a-zA-Z0-9_.-]+$")
-            self.assertNotIn("..", item["path"])
-            if item["path"].endswith(".onnx"):
-                self.assertFalse((ASSETS / item["path"]).exists())
-        self.assertEqual(sum(x["size"] for x in manifest["files"]), 119495576)
+        for name, model in zip(MANIFESTS, ("opus-mt-en-zh", "opus-mt-zh-en")):
+            manifest = validate_manifest(json.loads((ASSETS / name).read_text()))
+            self.assertEqual(manifest["model"], model)
+            for item in manifest["files"]:
+                if item["path"].endswith(".onnx"):
+                    self.assertFalse((ASSETS / item["path"]).exists())
+            if model == "opus-mt-en-zh":
+                self.assertEqual(manifest["revision"], "046f55aec303cdee3e0318604406d4df20f1e8ea")
+                self.assertEqual(sum(x["size"] for x in manifest["files"]), 119495576)
 
     def test_sdk_not_download_owner(self):
         service = (SOURCE / "OfflineTranslation.kt").read_text()
@@ -44,7 +45,8 @@ class TranslationDeliveryTest(unittest.TestCase):
         self.assertNotIn("DownloadManager", storage)
         for evidence in ["MessageDigest.getInstance(\"SHA-256\")", "Os.rename", "file.fd.sync()", "count <= artifact.size", "invokeOnCancellation"]:
             self.assertIn(evidence, storage)
-        self.assertLess(service.index("models.install()"), service.index("engine.prepare()", service.index("models.install()")))
+        self.assertLess(service.index("models.install(target)"), service.index("engine.prepare(", service.index("models.install(target)")))
+        self.assertIn("model-manifest-zh-en.json", storage)
 
     def test_sandbox_and_exact_csp(self):
         html = (ASSETS / "index.html").read_text()
@@ -61,4 +63,10 @@ class TranslationDeliveryTest(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main(verbosity=2)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--assets-only", action="store_true", help="Exclude Kotlin integration gates before worktree merge")
+    args = parser.parse_args()
+    names = ("test_runtime_bytes_match_lock", "test_model_manifest_fixed_and_not_bundled") if args.assets_only else unittest.defaultTestLoader.getTestCaseNames(TranslationDeliveryTest)
+    suite = unittest.TestSuite(TranslationDeliveryTest(name) for name in names)
+    if not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful():
+        raise SystemExit(1)

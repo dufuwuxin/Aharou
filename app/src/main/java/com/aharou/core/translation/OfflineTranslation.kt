@@ -25,31 +25,28 @@ class OfflineTranslation @Inject constructor(
     private val preferences = context.getSharedPreferences("offline_translation", Context.MODE_PRIVATE)
     private val _enabled = MutableStateFlow(preferences.getBoolean("enabled", true))
     val enabled = _enabled.asStateFlow()
-    private val _modelState = MutableStateFlow(TranslationModelState.CHECKING)
-    val modelState = _modelState.asStateFlow()
+    private val states = mapOf("zh" to MutableStateFlow(TranslationModelState.CHECKING),
+        "en" to MutableStateFlow(TranslationModelState.CHECKING))
+    val modelState = states.getValue("zh").asStateFlow()
+    val reverseModelState = states.getValue("en").asStateFlow()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val modelLock = Mutex()
     private val translationLock = Mutex()
     private val cache = LinkedHashMap<String, String>(128, 0.75f, true)
     private var cacheChars = 0
-    private var automaticDownloadAttempted = false
+    private val automaticDownloadAttempted = mutableSetOf<String>()
 
     init {
         scope.launch {
             modelLock.withLock {
-                _modelState.value = try {
-                    if (models.isInstalled()) {
-                        engine.prepare()
-                        TranslationModelState.READY
-                    } else {
-                        TranslationModelState.MISSING
+                for ((target, state) in states) {
+                    state.value = try {
+                        if (models.isInstalled(target)) TranslationModelState.READY else TranslationModelState.MISSING
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (_: Exception) {
+                        TranslationModelState.FAILED
                     }
-                } catch (e: CancellationException) {
-                    _modelState.value = TranslationModelState.FAILED
-                    throw e
-                } catch (failure: Exception) {
-                    com.aharou.core.util.FileLogger.e("OfflineTranslation", "Model preparation failed", failure)
-                    TranslationModelState.FAILED
                 }
             }
         }
@@ -60,45 +57,54 @@ class OfflineTranslation @Inject constructor(
         _enabled.value = value
     }
 
-    fun prepareModel(retry: Boolean = false) {
+    fun prepareModel(retry: Boolean = false, target: String = "zh") {
+        val state = states.getValue(target)
         scope.launch {
             modelLock.withLock {
-                if (_modelState.value == TranslationModelState.READY) return@withLock
-                if (automaticDownloadAttempted && !retry) return@withLock
-                automaticDownloadAttempted = true
-                _modelState.value = TranslationModelState.DOWNLOADING
-                _modelState.value = try {
-                    models.install()
-                    engine.prepare()
+                if (state.value == TranslationModelState.READY) return@withLock
+                if (target in automaticDownloadAttempted && !retry) return@withLock
+                automaticDownloadAttempted += target
+                state.value = TranslationModelState.DOWNLOADING
+                state.value = try {
+                    models.install(target)
+                    translationLock.withLock { engine.prepare(target) }
                     TranslationModelState.READY
                 } catch (e: CancellationException) {
-                    _modelState.value = TranslationModelState.FAILED
+                    state.value = TranslationModelState.FAILED
                     throw e
                 } catch (failure: Exception) {
-                    com.aharou.core.util.FileLogger.e("OfflineTranslation", "Model preparation failed", failure)
+                    com.aharou.core.util.FileLogger.e("OfflineTranslation", "Model preparation failed: $target", failure)
                     TranslationModelState.FAILED
                 }
             }
         }
     }
 
-    suspend fun translate(text: String): String = translationOrOriginal(text) { translateReady(text) }
+    suspend fun translateRequired(text: String, target: String): String {
+        if (isStructuredTranslationPayload(text) || TranslationDocument.parts(text, target).none { it.translate }) return text
+        check(states.getValue(target).value == TranslationModelState.READY) {
+            "Offline $target translation package is not ready; open Settings / Offline translation and download the selected direction, or choose native provider language."
+        }
+        val result = translate(text, target)
+        check(enabled.value && states.getValue(target).value == TranslationModelState.READY) { "Offline translation settings changed or inference failed; original request was not sent" }
+        return result
+    }
 
-    private suspend fun translateReady(text: String): String {
-        if (!enabled.value) return text
-        val parts = TranslationDocument.parts(text)
-        if (parts.none { it.translate }) return text
-        if (modelState.value != TranslationModelState.READY) return text
+    suspend fun translate(text: String, target: String = "zh"): String {
+        val state = states.getValue(target)
+        if (!enabled.value || isStructuredTranslationPayload(text)) return text
+        val parts = TranslationDocument.parts(text, target)
+        if (parts.none { it.translate } || state.value != TranslationModelState.READY) return text
         return translationLock.withLock {
             try {
                 buildString {
                     for (part in parts) {
                         if (!enabled.value) return@withLock text
-                        if (!part.translate) {
-                            append(part.text)
-                        } else {
-                            val translated = cache[part.text] ?: engine.translate(part.text)
-                                .takeIf { it.isNotBlank() }?.also { cache(part.text, it) } ?: part.text
+                        if (!part.translate) append(part.text) else {
+                            val key = "$target\u0000${part.text}"
+                            val translated = cache[key] ?: engine.translate(part.text, target)
+                                .takeIf { it.isNotBlank() }?.also { cache(key, it) }
+                                ?: error("Empty local translation")
                             append(translated)
                         }
                     }
@@ -106,15 +112,15 @@ class OfflineTranslation @Inject constructor(
             } catch (e: CancellationException) {
                 throw e
             } catch (failure: Exception) {
-                com.aharou.core.util.FileLogger.e("OfflineTranslation", "Local inference failed", failure)
-                _modelState.value = TranslationModelState.FAILED
+                com.aharou.core.util.FileLogger.e("OfflineTranslation", "Local inference failed: $target", failure)
+                state.value = TranslationModelState.FAILED
                 text
             }
         }
     }
 
     private fun cache(source: String, translated: String) {
-        cache[source] = translated
+        cache.put(source, translated)?.let { cacheChars -= source.length + it.length }
         cacheChars += source.length + translated.length
         while (cache.size > 256 || cacheChars > 256_000) {
             val oldest = cache.entries.iterator().next()

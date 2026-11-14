@@ -6,6 +6,21 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class TranslationDocumentTest {
+    @org.junit.Test fun multilineEmbeddedJsonIsNotTranslated() {
+        val text = "Use this JSON:\n[\n  true,\n  false\n]\n"
+        val parts = TranslationDocument.parts(text, "zh")
+        org.junit.Assert.assertEquals(text, parts.joinToString("") { it.text })
+        org.junit.Assert.assertTrue(parts.filter { it.translate }.none { "true" in it.text || "false" in it.text })
+    }
+
+    @org.junit.Test fun embeddedJsonWithWhitespaceAndNestedObjectsStaysByteExact() {
+        for (text in listOf("Use { \"message\": \"Hello world\" } here", "Use {\"a\":{\"x\":1},\"label\":\"Keep raw\"} now", "数组 [1, {\"label\":\"原样\"}] 保留")) {
+            val parts = TranslationDocument.parts(text, "zh")
+            org.junit.Assert.assertEquals(text, parts.joinToString("") { it.text })
+            org.junit.Assert.assertTrue(parts.none { it.translate })
+        }
+    }
+
     @Test fun splittingNeverChangesOriginalBytes() {
         listOf(
             "", "Hello world\r\n第二行 Test words\n", "  Hello   world  ",
@@ -70,4 +85,23 @@ class TranslationDocumentTest {
         assertEquals(3, parts.count { it.translate })
         assertTrue(parts.filter { it.translate }.all { it.text.split(' ').size <= 64 })
     }
+    @Test fun chineseDirectionPreservesCodePathsAndPlaceholders() {
+        val source = "请检查 `保存代码()` 和 /tmp/中文.txt，再打开 https://example.com/a 与 {{name}}。\n```kotlin\nval x = \"中文代码\"\n```"
+        val parts = TranslationDocument.parts(source, "en")
+        assertEquals(source, parts.joinToString("") { it.text })
+        assertTrue(parts.any { it.translate && it.text.contains("请检查") })
+        assertFalse(parts.filter { it.translate }.any { it.text.contains("保存代码") || it.text.contains("中文代码") || it.text.contains("/tmp/") || it.text.contains("example.com") || it.text.contains("{{") })
+    }
+    @Test fun chineseChunksHaveBoundedInferenceInput() {
+        val source = "中文说明".repeat(1000)
+        val parts = TranslationDocument.parts(source, "en")
+        assertEquals(source, parts.joinToString("") { it.text })
+        assertTrue(parts.filter { it.translate }.all { it.text.length <= 192 })
+    }
+    @Test fun credentialLinesAndJsonStringsStayVerbatim() {
+        for (source in listOf("Authorization: Bearer opaque", "api_key=opaque", "\"Hello world\"", "{\"message\":\"中文\"}")) {
+            for (target in listOf("en", "zh")) assertFalse(TranslationDocument.parts(source, target).any { it.translate })
+        }
+    }
+
 }

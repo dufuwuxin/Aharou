@@ -179,7 +179,8 @@ class ProjectTaskRepository @Inject constructor(@ApplicationContext context: Con
         require(projectId != sourceProjectId) { "PROJECT_EXISTS" }
         val workspace = workspaces.get().allocateProjectWorkspace(projectId, sourceWorkspace)
         return planProject(ProjectPlan(id = projectId, workspace = workspace.path, title = original.title,
-            requirements = original.requirements, workspaceOwnership = "owned", continuationSourceProjectId = original.id, purpose = original.purpose))
+            requirements = original.requirements, workspaceOwnership = "owned", continuationSourceProjectId = original.id, purpose = original.purpose,
+            horizon = original.horizon, overallGoal = original.overallGoal, goalAcceptance = original.goalAcceptance))
     }
 
     suspend fun createProject(name: String, requirements: String, workspace: String,
@@ -352,6 +353,79 @@ class ProjectTaskRepository @Inject constructor(@ApplicationContext context: Con
 
     private fun nextOrder(snapshot: ProjectTaskSnapshot): Long =
         maxOf(System.currentTimeMillis(), (snapshot.tasks.maxOfOrNull { it.order } ?: 0L) + 1)
+
+    /** Goal writes share the existing store lock and AtomicFile transaction, including for empty projects. */
+    suspend fun saveProjectGoal(project: ProjectPlan, horizon: String, goal: String, acceptance: String) =
+        withContext(Dispatchers.IO) { saveProjectGoalLocked(project, horizon, goal, acceptance) }
+
+    @Synchronized
+    private fun saveProjectGoalLocked(expected: ProjectPlan, horizon: String, goal: String, acceptance: String) {
+        require(horizon in com.aharou.feature.agent.domain.task.ProjectGoalPlan.horizons) { "INVALID_HORIZON" }
+        val current = snapshot(expected.workspace)
+        val project = current.projects.single { it.id == expected.id }
+        check(project.goalRevision == expected.goalRevision) { "PROJECT_GOAL_CHANGED" }
+        check(current.tasks.none { it.projectId == project.id && it.status == ProjectTaskStatus.RUNNING }) { "PROJECT_BUSY" }
+        val updated = project.copy(horizon = horizon, overallGoal = goal.trim(), goalAcceptance = acceptance.trim(),
+            goalCheckpoint = "", goalRevision = project.goalRevision + 1)
+        val semanticChange = project.overallGoal != updated.overallGoal || project.goalAcceptance != updated.goalAcceptance
+        val revisedTasks = if (!semanticChange) current.tasks else current.tasks.map { task ->
+            if (task.projectId != project.id || task.isRequirementBranch) task else task.copy(
+                status = ProjectTaskStatus.DRAFT, requirementsVersion = task.requirementsVersion + 1,
+                acceptedRequirementsVersion = null, processRequirementsVersion = null, processParticipants = null,
+                processMembers = emptyMap(), brief = "", executionReason = "PROJECT_GOAL_CHANGED", evidenceRefs = emptyList(),
+                version = current.version + 1)
+        }
+        val next = current.copy(version = current.version + 1, tasks = revisedTasks,
+            projects = current.projects.map { if (it.id == project.id) updated else it })
+        persist(expected.workspace, next)
+        mutable.value = mutable.value + (expected.workspace to next)
+    }
+
+    suspend fun proposeGoalStage(expected: ProjectPlan): Boolean = withContext(Dispatchers.IO) {
+        val current = snapshot(expected.workspace)
+        val project = current.projects.single { it.id == expected.id }
+        if (project.goalRevision != expected.goalRevision || project.goalCheckpoint == "NEXT_STAGE_CONFIRMATION_REQUIRED") return@withContext false
+        val previous = current.tasks.filter { it.projectId == project.id && !it.isRequirementBranch }
+        if (previous.any { !com.aharou.feature.agent.domain.task.ProjectWorkflowPlan.delivered(it) }) return@withContext false
+        val planner = plannerProvider.get()
+        val request = buildString {
+            append("Propose concrete next-stage tasks towards the overall goal, without claiming previous REVIEW work was accepted.\n")
+            append("Overall goal: ").append(project.overallGoal).append("\nAcceptance: ").append(project.goalAcceptance)
+            append("\nHorizon: ").append(project.horizon).append("\nPrevious evidence:\n")
+            previous.takeLast(12).forEach { append(it.title).append(": ").append(it.brief.take(400)).append('\n') }
+        }
+        val planned = planner.plan(project, request, current.tasks.filter { it.projectId == project.id }, planner.members())
+        if (planned.ruleFallback || planned.tasks.isEmpty() || planned.tasks.size > 6) return@withContext false
+        commitGoalStage(project, planned.tasks, current.version)
+    }
+
+    @Synchronized private fun commitGoalStage(expected: ProjectPlan, proposed: List<ProjectTask>, expectedStoreVersion: Long): Boolean {
+        val current = snapshot(expected.workspace)
+        val project = current.projects.single { it.id == expected.id }
+        if (current.version != expectedStoreVersion || project.goalRevision != expected.goalRevision || project.goalCheckpoint == "NEXT_STAGE_CONFIRMATION_REQUIRED") return false
+        val start = nextOrder(current)
+        val tasks = proposed.mapIndexed { index, task -> task.copy(workspace = expected.workspace, projectId = expected.id,
+            status = ProjectTaskStatus.DRAFT, executionReason = "NEXT_STAGE_CONFIRMATION_REQUIRED", order = start + index) }
+        val next = current.copy(version = current.version + 1, tasks = current.tasks + tasks,
+            projects = current.projects.map { if (it.id == project.id) it.copy(goalCheckpoint = "NEXT_STAGE_CONFIRMATION_REQUIRED") else it })
+        require(ProjectTaskGraph.validate(next.tasks) == null) { "INVALID_TASK_GRAPH" }
+        persist(expected.workspace, next); mutable.value = mutable.value + (expected.workspace to next)
+        return true
+    }
+
+    suspend fun checkpointProjectGoal(project: ProjectPlan, reason: String) =
+        withContext(Dispatchers.IO) { checkpointProjectGoalLocked(project, reason) }
+
+    @Synchronized
+    private fun checkpointProjectGoalLocked(expected: ProjectPlan, reason: String) {
+        val current = snapshot(expected.workspace)
+        val project = current.projects.singleOrNull { it.id == expected.id } ?: return
+        if (project.goalRevision != expected.goalRevision) return // A newer goal cannot inherit an old run's checkpoint.
+        val next = current.copy(version = current.version + 1,
+            projects = current.projects.map { if (it.id == project.id) it.copy(goalCheckpoint = reason) else it })
+        persist(expected.workspace, next)
+        mutable.value = mutable.value + (expected.workspace to next)
+    }
 
     suspend fun linkProjectExecution(projectId: String, workspace: String, sessionId: String) = withContext(Dispatchers.IO) {
         linkProjectExecutionLocked(projectId, workspace, sessionId)

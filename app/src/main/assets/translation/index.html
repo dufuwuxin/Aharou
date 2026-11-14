@@ -10,19 +10,44 @@ env.localModelPath = origin + '/models/';
 env.backends.onnx.wasm.wasmPaths = origin + '/runtime/';
 env.backends.onnx.wasm.numThreads = 1;
 env.backends.onnx.wasm.proxy = false;
+const models = { zh: 'opus-mt-en-zh', en: 'opus-mt-zh-en' };
+const params = new URL(window.location.href).searchParams;
+const defaultTarget = params.get('target') || 'zh';
 let translator;
+let loadedTarget;
+let queue = Promise.resolve();
 const finish = (id, success, value) => window.TranslationResult.finish(id, success, value);
-window.translateLocal = async (id, text) => {
-  try {
-    const output = await translator(text, { max_new_tokens: 256, num_beams: 1 });
-    const value = output?.[0]?.translation_text;
-    if (typeof value !== 'string' || !value.trim()) throw new Error('Empty translation');
-    finish(id, true, value);
-  } catch (_) { finish(id, false, ''); }
+const prepare = async (target) => {
+  if (!Object.prototype.hasOwnProperty.call(models, target)) throw new Error('Unsupported target language');
+  if (translator && loadedTarget === target) return;
+  if (translator) {
+    const previous = translator;
+    translator = undefined;
+    loadedTarget = undefined;
+    await previous.dispose();
+  }
+  translator = await pipeline('translation', models[target], { quantized: true, local_files_only: true });
+  loadedTarget = target;
 };
-const request = new URL(window.location.href).searchParams.get('request');
-try {
-  translator = await pipeline('translation', 'opus-mt-en-zh', { quantized: true, local_files_only: true });
-  finish(request, true, '');
-} catch (_) { finish(request, false, ''); }
+const submit = (id, operation) => {
+  // Serialize direction changes so no inference races disposal or loads a second pipeline.
+  queue = queue.then(async () => {
+    try { finish(id, true, await operation()); }
+    catch (_) { finish(id, false, ''); }
+  });
+  return queue;
+};
+window.prepareLocal = (id, targetLanguage = defaultTarget) => submit(id, async () => {
+  await prepare(targetLanguage);
+  return '';
+});
+window.translateLocal = (id, text, targetLanguage = defaultTarget) => submit(id, async () => {
+  if (typeof text !== 'string' || !text.trim()) throw new Error('Empty input');
+  await prepare(targetLanguage);
+  const output = await translator(text, { max_new_tokens: 256, num_beams: 3, do_sample: false });
+  const value = output?.[0]?.translation_text;
+  if (typeof value !== 'string' || !value.trim()) throw new Error('Empty translation');
+  return value;
+});
+window.prepareLocal(params.get('request'), defaultTarget);
 </script></body></html>

@@ -464,7 +464,11 @@ class VdController @Inject constructor(
         }.getOrDefault("").lineSequence().firstOrNull { " $displayName " in " $it " }.orEmpty()
         val path = parseRunnerShotPath(args)
         val ownDir = context.getExternalFilesDir(null)?.absolutePath
-        check(path != null && ownDir != null && path.startsWith(ownDir)) {
+        check(path != null && ownDir != null && runCatching {
+            val root = File(ownDir).canonicalFile.toPath()
+            val candidate = File(path).canonicalFile.toPath()
+            candidate != root && candidate.startsWith(root)
+        }.getOrDefault(false)) {
             "影子屏由另一个 Aharou 实例启动（截图写在 ${path ?: "未知路径"}），先 stop 再 start"
         }
         runnerShotPath = path
@@ -550,9 +554,13 @@ class VdController @Inject constructor(
      * 读影子屏上的控件（可点、可编辑或带文字的）。拿不到时抛错，错误里写明原因。
      */
     suspend fun nodes(): List<VdNode> {
-        currentInfo()
+        val info = currentInfo()
         if (ctlAvailable == null) probeChannel()
-        nodeTreeUnavailableReason()?.let { error(it) }
+        nodeTreeUnavailableReason()?.let { reason ->
+            val fallback = withContext(kotlinx.coroutines.Dispatchers.Main) { accessibleShadowNodes(info.displayId) }
+            if (fallback != null) return fallback
+            error(reason)
+        }
         return when (val r = runnerCommand("dump")) {
             is CtlResult.Ok -> parseNodes(r.body)
             is CtlResult.Err -> error("读控件失败：${r.reason.take(200)}")

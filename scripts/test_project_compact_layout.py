@@ -125,31 +125,19 @@ class ProjectCompactLayoutContract(unittest.TestCase):
         self.assert_search(MAP)
 
     def assert_zoom_controls(self, task_map):
-        marker = "Row(Modifier.align(Alignment.BottomEnd)"
-        self.assertIn(marker, task_map)
-        controls = region(task_map, marker)
-        self.assertEqual(2, controls.count("IconButton("))
-        for tag, factor in (("map_zoom_in", "1.25f"), ("map_zoom_out", "1f / 1.25f")):
-            self.assertEqual(1, controls.count(f'testTag("{tag}")'))
-            buttons = [region(controls[m.start():], "IconButton", "(")
-                       for m in re.finditer(r"\bIconButton(?=\()", controls)]
-            button = next(call for call in buttons if f'testTag("{tag}")' in call)
-            self.assertIn(f"onClick = {{ stepZoom({factor}) }}", button)
-        step = region(task_map, "fun stepZoom(factor: Float)")
-        for contract in ("ProjectTaskMapLayout.clampZoom(zoom * factor, minimum, MAX_ZOOM)",
-                         "panX = viewW / 2f", "panY = viewH / 2f", "zoom = next"):
-            self.assertIn(contract, step)
+        for removed in ('testTag("map_zoom_in")', 'testTag("map_zoom_out")', 'testTag("map_fit")', "fun stepZoom("):
+            self.assertNotIn(removed, task_map)
+        gesture = region(task_map, "            detectProjectMapGestures")
+        for contract in ("onDrag()", "ProjectTaskMapLayout.clampZoom(zoom * scale, minimum, MAX_ZOOM)",
+                         "panX = centroid.x", "panY = centroid.y", "zoom = next"):
+            self.assertIn(contract, gesture)
+        self.assertIn("Modifier.graphicsLayer", task_map)
 
     def test_zoom_and_empty_project_start_mutants_are_rejected(self):
         self.assert_zoom_controls(MAP)
-        for old, new in (('testTag("map_zoom_in")', 'testTag("missing_zoom_in")'),
-                         ('testTag("map_zoom_out")', 'testTag("missing_zoom_out")'),
-                         ("Alignment.BottomEnd", "Alignment.TopEnd"),
-                         ("stepZoom(1.25f)", ""),
-                         ("stepZoom(1f / 1.25f)", ""),
-                         ("stepZoom(1.25f)", "stepZoom(1f / 1.25f)"),
-                         ("stepZoom(1f / 1.25f)", "stepZoom(1.25f)"),
-                         ("ProjectTaskMapLayout.clampZoom(zoom * factor, minimum, MAX_ZOOM)", "zoom * factor")):
+        for old, new in (("ProjectTaskMapLayout.clampZoom(zoom * scale, minimum, MAX_ZOOM)", "zoom * scale"),
+                         ("panX = centroid.x", "panX = 0f"), ("panY = centroid.y", "panY = 0f"),
+                         ("zoom = next", "zoom = 1f"), ("Modifier.graphicsLayer", "Modifier")):
             mutant = MAP.replace(old, new, 1)
             self.assertNotEqual(mutant, MAP)
             with self.assertRaises(AssertionError):
@@ -167,13 +155,10 @@ class ProjectCompactLayoutContract(unittest.TestCase):
         for old in ("R.string.project_task_dependency_legend", "R.string.project_map_legend", '"map_reset"', "ProjectMapIcon("):
             self.assertNotIn(old, WORKBENCH + MAP)
         menu = region(MAP, "        header")
-        self.assertEqual(3, menu.count("DropdownMenuItem("))
+        self.assertEqual(2, menu.count("DropdownMenuItem("))
         self.assertIn("if (allOpen) { expanded = emptySet(); measured.clear() } else expanded = tasks.mapTo(HashSet()) { it.id }", menu)
         self.assertIn("suppressed = emptySet(); dismiss()", menu)
-        fit = menu[menu.index("R.string.project_map_fit"):]
-        for contract in ("zoom = ProjectTaskMapLayout.fitZoom(", "panX = (viewportWidth - layout.width * zoom) / 2f", "panY = (viewportHeight - layout.height * zoom) / 2f", "dismiss()"):
-            self.assertIn(contract, fit)
-        gesture = region(MAP, "            detectTransformGestures")
+        gesture = region(MAP, "            detectProjectMapGestures")
         for contract in ("onDrag()", "ProjectTaskMapLayout.clampZoom(zoom * scale, minimum, MAX_ZOOM)", "panX = centroid.x", "panY = centroid.y", "zoom = next"):
             self.assertIn(contract, gesture)
 
@@ -224,7 +209,7 @@ class ProjectCompactLayoutContract(unittest.TestCase):
 
     def test_menu_semantics_use_existing_chinese_resources(self):
         strings = {item.attrib["name"]: "".join(item.itertext()) for item in ET.parse(ROOT / "app/src/main/res/values/strings.xml").getroot() if item.tag == "string"}
-        for resource in ("project_view_actions", "project_task_overview", "project_map_search_close", "project_add_task", "project_task_tree", "project_task_map", "project_map_fit"):
+        for resource in ("project_view_actions", "project_task_overview", "project_map_search_close", "project_add_task", "project_task_tree", "project_task_map"):
             self.assertIn("R.string." + resource, WORKBENCH + MAP)
             self.assertRegex(strings[resource], r"[\u4e00-\u9fff]")
         for resource in set(re.findall(r"R\.string\.(\w+)", WORKBENCH + MAP)):
