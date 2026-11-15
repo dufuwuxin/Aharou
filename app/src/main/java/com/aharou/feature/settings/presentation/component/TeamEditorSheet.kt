@@ -20,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -45,6 +46,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import com.aharou.core.theme.Radius
 import androidx.compose.ui.unit.dp
 import com.aharou.R
 import com.aharou.core.theme.Spacing
@@ -150,7 +153,11 @@ internal fun TeamEditorSheet(
         ) },
         routes = routes
     ))
-    val canSave = flowError == null && name.isNotBlank() && stages.any { it.members.isNotEmpty() || it.prompt.isNotBlank() }
+    val canSave = flowError == null && name.isNotBlank() && stages.any { stage ->
+        stage.members.isNotEmpty() || stage.prompt.isNotBlank() || stage.tasks.any { task ->
+            task.prompt.isNotBlank() && (task.agent.isNotBlank() || task.department.isNotBlank() || task.agentQuery.isNotBlank())
+        }
+    }
 
     AdaptiveModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -316,6 +323,12 @@ internal fun TeamEditorSheet(
                     expanded = expanded,
                     onToggleExpand = { expanded = it },
                     onChange = { updated ->
+                        val added = updated.tasks.map { it.agent }.filter { candidate ->
+                            candidate in availableMembers &&
+                                candidate != com.aharou.feature.agent.domain.subagent.MAIN_AGENT_ADMIN &&
+                                members.none { it.name.equals(candidate, true) }
+                        }.distinct().map { TeamMemberRef(it) }
+                        members = members + added
                         updateStages(stages.mapIndexed { i, current ->
                             when {
                                 i == index -> updated
@@ -326,7 +339,8 @@ internal fun TeamEditorSheet(
                     },
                     onRemove = { updateStages(stages.filterIndexed { i, _ -> i != index }) },
                     canRemove = stages.size > 1,
-                    members = stageMembers
+                    members = stageMembers,
+                    availableMembers = availableMembers
                 )
             }
             TextButton(onClick = {
@@ -339,7 +353,11 @@ internal fun TeamEditorSheet(
                 Text(stringResource(R.string.team_editor_add_stage))
             }
 
-            TeamFlowMap(admins, stages, routes)
+            var mapExpanded by rememberSaveable { mutableStateOf(false) }
+            TextButton(onClick = { mapExpanded = !mapExpanded }, modifier = Modifier.testTag("team_topology_toggle")) {
+                Text(stringResource(if (mapExpanded) R.string.team_topology_hide else R.string.team_topology_show))
+            }
+            if (mapExpanded) TeamFlowMap(admins, stages, routes)
             var routesExpanded by rememberSaveable { mutableStateOf(false) }
             TextButton(onClick = { routesExpanded = !routesExpanded }, modifier = Modifier.testTag("team_routes_advanced")) {
                 Text(stringResource(R.string.team_advanced_options))
@@ -410,6 +428,7 @@ private fun StageEditor(
     index: Int,
     stage: AgentTeamStageForm,
     members: List<String>,
+    availableMembers: List<String>,
     earlierTitles: List<String>,
     onChange: (AgentTeamStageForm) -> Unit,
     onRemove: () -> Unit,
@@ -446,7 +465,7 @@ private fun StageEditor(
                         // with 侧有意不清：目标可以是部门/标签，未必是本阶段成员
                         onChange(stage.copy(
                             members = next,
-                            tasks = stage.tasks.filter { it.agent.isBlank() || it.agent in next }.let { tasks ->
+                            tasks = stage.tasks.filterNot { picked && it.agent.equals(memberName, true) }.let { tasks ->
                                 if (!picked && stage.prompt.isNotBlank() && tasks.none { it.agent.equals(memberName, true) }) tasks + com.aharou.feature.agent.domain.subagent.AgentTeamTaskForm(agent = memberName, prompt = stage.prompt) else tasks
                             },
                             interfaces = stage.interfaces.filter { edge -> next.any { it.equals(edge.from, ignoreCase = true) } }
@@ -464,7 +483,7 @@ private fun StageEditor(
             minLines = 2,
             maxLines = 5
         )
-        TeamTaskEditor(tasks = stage.tasks, onChange = { tasks ->
+        TeamTaskEditor(tasks = stage.tasks, availableMembers = availableMembers, onChange = { tasks ->
             onChange(stage.copy(tasks = tasks,
                 members = tasks.map { it.agent }.filter { it.isNotBlank() }.distinct(),
                 interfaces = tasks.flatMap { task -> task.interfaces.map { edge ->
@@ -604,10 +623,11 @@ internal fun MemberPickerSheet(
     available: List<String>,
     selected: List<String>,
     onConfirm: (List<String>) -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    singleSelection: Boolean = false
 ) {
     var picked by remember(selected) { mutableStateOf(selected.toMutableSet()) }
-    val canConfirm = picked.isNotEmpty()
+    val canConfirm = if (singleSelection) picked.size == 1 else picked.isNotEmpty()
 
     AdaptiveModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -623,7 +643,7 @@ internal fun MemberPickerSheet(
             verticalArrangement = Arrangement.spacedBy(Spacing.sm)
         ) {
             Text(
-                text = stringResource(R.string.team_select_members_title),
+                text = stringResource(if (singleSelection) R.string.team_task_role_choose else R.string.team_select_members_title),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurface
@@ -642,12 +662,20 @@ internal fun MemberPickerSheet(
                             .padding(vertical = Spacing.xs),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Checkbox(
-                            checked = name in picked,
-                            onCheckedChange = { checked ->
-                                picked = (if (checked) picked + name else picked - name).toMutableSet()
-                            }
-                        )
+                        if (singleSelection) {
+                            RadioButton(
+                                selected = name in picked,
+                                onClick = { picked = mutableSetOf(name) },
+                                modifier = Modifier.testTag("team_role_option_$name")
+                            )
+                        } else {
+                            Checkbox(
+                                checked = name in picked,
+                                onCheckedChange = { checked ->
+                                    picked = (if (checked) picked + name else picked - name).toMutableSet()
+                                }
+                            )
+                        }
                         Text(
                             text = name,
                             style = MaterialTheme.typography.bodyLarge,
@@ -661,7 +689,7 @@ internal fun MemberPickerSheet(
             Button(
                 onClick = { onConfirm(picked.toList()); onDismiss() },
                 enabled = canConfirm,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth().testTag("team_member_picker_confirm")
             ) {
                 Text(
                     text = stringResource(R.string.team_select_members_confirm, picked.size),
@@ -750,13 +778,14 @@ private fun ProcessNodeCard(
     onChange: (AgentTeamStageForm) -> Unit,
     onRemove: () -> Unit,
     canRemove: Boolean,
-    members: List<String>
+    members: List<String>,
+    availableMembers: List<String>
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(MaterialTheme.semanticColors.cardSurface, RoundedCornerShape(10.dp))
+                .background(MaterialTheme.semanticColors.cardSurface, RoundedCornerShape(Radius.mdLarge))
                 .clickable { onToggleExpand(!expanded) }
                 .padding(horizontal = Spacing.md, vertical = Spacing.sm),
             verticalAlignment = Alignment.CenterVertically
@@ -785,7 +814,10 @@ private fun ProcessNodeCard(
                         text = stage.title.takeIf { it.isNotBlank() } ?: stringResource(R.string.team_editor_stage_title_hint, index),
                         style = MaterialTheme.typography.bodyLarge,
                         fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.onSurface
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.weight(1f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                     if (isReview) {
                         Spacer(modifier = Modifier.width(4.dp))
@@ -809,7 +841,9 @@ private fun ProcessNodeCard(
                             text = stage.members.joinToString(", "),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(end = Spacing.xs)
+                            modifier = Modifier.weight(1f).padding(end = Spacing.xs),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                     if (stage.interfaces.isNotEmpty()) {
@@ -843,12 +877,27 @@ private fun ProcessNodeCard(
                 modifier = Modifier.size(18.dp)
             )
         }
+        if (!expanded) {
+            stage.tasks.filter { it.prompt.isNotBlank() }.forEach { task ->
+                Text(
+                    text = stringResource(R.string.team_task_summary,
+                        task.agent.ifBlank { listOf(task.department, task.agentQuery).filter { it.isNotBlank() }.joinToString(" · ") },
+                        task.prompt),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = Spacing.md, top = Spacing.xs),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
         if (expanded) {
             HorizontalDivider(modifier = Modifier.padding(start = 36.dp, end = Spacing.md))
             StageEditor(
                 index = index - 1,
                 stage = stage,
                 members = members,
+                availableMembers = availableMembers,
                 earlierTitles = rejectTargets,
                 onChange = onChange,
                 onRemove = onRemove,

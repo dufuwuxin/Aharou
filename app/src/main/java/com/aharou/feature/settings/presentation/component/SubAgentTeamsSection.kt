@@ -325,38 +325,56 @@ private fun TeamDetailSheet(
                         }
                     },
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
                 )
+                stage.tasks.forEach { task ->
+                    Text(
+                        text = stringResource(R.string.team_task_summary,
+                            task.agent ?: listOfNotNull(task.department, task.agentQuery).joinToString(" · "), task.prompt),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
 
-            // 协作拓扑：把阶段里的接口边画成「成员 → 对齐对象」的行，一眼看出谁和谁对接
-            SettingsGroupHeader(text = stringResource(R.string.team_detail_topology))
-            val topology = team.stages.map { stage ->
-                stage to stage.tasks.mapNotNull { task ->
-                    val from = task.agent?.trim().orEmpty()
-                    if (from.isEmpty() || task.interfaces.isEmpty()) null
-                    else from to task.interfaces
-                }
-            }.filter { (_, rows) -> rows.isNotEmpty() }
-            if (topology.isEmpty()) {
-                Text(
-                    text = stringResource(R.string.team_detail_topology_empty),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            } else {
-                topology.forEach { (stage, rows) ->
+            var topologyExpanded by remember(entry) { mutableStateOf(false) }
+            TextButton(onClick = { topologyExpanded = !topologyExpanded }) {
+                Text(stringResource(if (topologyExpanded) R.string.team_topology_hide else R.string.team_topology_show))
+            }
+            if (topologyExpanded) {
+                SettingsGroupHeader(text = stringResource(R.string.team_detail_topology))
+                val topology = team.stages.map { stage ->
+                    stage to stage.tasks.mapNotNull { task ->
+                        val from = task.agent?.trim().orEmpty()
+                        if (from.isEmpty() || task.interfaces.isEmpty()) null
+                        else from to task.interfaces
+                    }
+                }.filter { (_, rows) -> rows.isNotEmpty() }
+                if (topology.isEmpty()) {
                     Text(
-                        text = stage.title,
-                        style = MaterialTheme.typography.labelLarge,
+                        text = stringResource(R.string.team_detail_topology_empty),
+                        style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    rows.forEach { (from, edges) ->
-                        edges.forEach { edge ->
-                            TopologyRow(from = from, target = edge.with, about = edge.about)
+                } else {
+                    topology.forEach { (stage, rows) ->
+                        Text(
+                            text = stage.title,
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        rows.forEach { (from, edges) ->
+                            edges.forEach { edge ->
+                                TopologyRow(from = from, target = edge.with, about = edge.about)
+                            }
                         }
                     }
                 }
+
             }
 
             if (team.charter.isNotBlank()) {

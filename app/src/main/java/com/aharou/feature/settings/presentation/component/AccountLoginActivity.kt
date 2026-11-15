@@ -12,6 +12,7 @@ import android.widget.LinearLayout
 import android.widget.Button
 import android.widget.TextView
 import com.aharou.R
+import com.aharou.feature.settings.data.account.DoubaoAccountProtocol
 
 /** No manager or credentials live in this process; the main-process receiver owns the login. */
 class AccountLoginActivity : Activity() {
@@ -26,6 +27,7 @@ class AccountLoginActivity : Activity() {
     private var closingFromOwner = false
     private var fresh = false
     private var windowToken = 0L
+    private var documentVersion = 0L
     private var webCookieLogin = false
     private var webKind: com.aharou.feature.settings.data.account.AccountProviderKind? = null
 
@@ -46,6 +48,7 @@ class AccountLoginActivity : Activity() {
             ?: if (webCookieLogin) com.aharou.feature.settings.data.account.AccountProviderKind.DUMATE else null
         if (webCookieLogin) {
             val expected = when (webKind) {
+                com.aharou.feature.settings.data.account.AccountProviderKind.DEEPSEEK -> com.aharou.feature.settings.data.account.DeepSeekAccountProtocol.LOGIN
                 com.aharou.feature.settings.data.account.AccountProviderKind.DUMATE -> com.aharou.feature.settings.data.account.DumateAccountProtocol.LOGIN
                 com.aharou.feature.settings.data.account.AccountProviderKind.DOUBAO -> com.aharou.feature.settings.data.account.DoubaoAccountProtocol.LOGIN
                 else -> null
@@ -90,11 +93,32 @@ class AccountLoginActivity : Activity() {
             awaitingReply = false
             receiptConfirmed = false
             if (resultData?.getBoolean(ACCEPTED) == true) { callbackSent = true; finish() }
-            else feedback(if (resultData?.getBoolean(RETRY_ALLOWED) == true) R.string.account_login_retry_validation else R.string.account_login_rejected)
+            else if (resultData?.getBoolean(RETRY_ALLOWED) == true) {
+                val failure = DoubaoAccountProtocol.loginFailureCode(resultData.getString(ERROR_CODE))
+                if (webKind == com.aharou.feature.settings.data.account.AccountProviderKind.DOUBAO && failure != null) validationFeedback(failure)
+                else feedback(R.string.account_login_retry_validation)
+            } else feedback(R.string.account_login_rejected)
         } else { closingFromOwner = true; finish() }
     }
 
     private fun feedback(message: Int) { status?.setText(message) }
+
+    private fun validationFeedback(code: String) {
+        val stage = when {
+            code.startsWith("doubao_identity_") -> R.string.account_login_stage_identity
+            code.startsWith("doubao_catalog_") -> R.string.account_login_stage_catalog
+            else -> R.string.account_login_stage_cookie
+        }
+        val reason = when {
+            code.endsWith("_http_401") -> getString(R.string.account_login_http_401)
+            code.endsWith("_http_403") -> getString(R.string.account_login_http_403)
+            code.contains("_http_") -> getString(R.string.account_login_http_failed, code.substringAfterLast('_'))
+            code.endsWith("_network") -> getString(R.string.account_login_network_failed)
+            code.endsWith("_empty") -> getString(R.string.account_login_catalog_empty)
+            else -> getString(R.string.account_login_stage_invalid)
+        }
+        status?.text = getString(R.string.account_login_stage_failure, getString(stage), reason, code)
+    }
 
     private fun submit(code: Int, data: Bundle) {
         val owner = receiver
@@ -144,6 +168,10 @@ class AccountLoginActivity : Activity() {
                 if (awaitingReply) { feedback(R.string.account_login_validating); return@setOnClickListener }
                 if (loading) { feedback(R.string.account_login_loading); return@setOnClickListener }
                 val current = browser?.url.orEmpty()
+                if (webKind == com.aharou.feature.settings.data.account.AccountProviderKind.DEEPSEEK) {
+                    readDeepSeekToken(current)
+                    return@setOnClickListener
+                }
                 val doubao = webKind == com.aharou.feature.settings.data.account.AccountProviderKind.DOUBAO
                 val origin = if (doubao) com.aharou.feature.settings.data.account.DoubaoAccountProtocol.WEB
                     else com.aharou.feature.settings.data.account.DumateAccountProtocol.WEB
@@ -176,6 +204,7 @@ class AccountLoginActivity : Activity() {
             android.webkit.WebStorage.getInstance().deleteAllData()
             AccountLoginWebPolicy.configure(this, ::navigate, { active ->
                 loading = active
+                if (active) documentVersion++
                 if (!awaitingReply) feedback(if (active) R.string.account_login_loading else R.string.account_login_ready)
             }, { feedback(R.string.account_login_page_failed) })
             loadUrl(url)
@@ -183,6 +212,53 @@ class AccountLoginActivity : Activity() {
         layout.addView(browser, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
         setContentView(layout)
         AccountLoginWebPolicy.applyInsets(layout)
+    }
+
+    private fun readDeepSeekToken(page: String) {
+        val protocol = com.aharou.feature.settings.data.account.DeepSeekAccountProtocol
+        if (!protocol.isWebOrigin(page) || android.net.Uri.parse(page).path == "/sign_in") {
+            feedback(R.string.account_login_wrong_page); return
+        }
+        val view = browser ?: return
+        awaitingReply = true
+        val attempt = ++submission
+        val version = documentVersion
+        feedback(R.string.account_login_validating)
+        view.evaluateJavascript(DEEPSEEK_TOKEN_SCRIPT) { raw -> receiveDeepSeekToken(raw, page, version, attempt) }
+        Handler(Looper.getMainLooper()).postDelayed({
+            if (submission == attempt && awaitingReply && windows.isCurrent(windowToken) && !isFinishing && !isDestroyed) {
+                awaitingReply = false
+                feedback(R.string.account_login_missing_web_token)
+            }
+        }, 8000L)
+    }
+
+    internal fun receiveDeepSeekToken(raw: String?, page: String, version: Long, attempt: Long) {
+        if (!windows.isCurrent(windowToken) || isFinishing || isDestroyed || callbackSent || closingFromOwner ||
+            submission != attempt || !awaitingReply) return
+        awaitingReply = false
+        if (loading || documentVersion != version || browser?.url != page ||
+            !com.aharou.feature.settings.data.account.DeepSeekAccountProtocol.isWebOrigin(page)) {
+            feedback(R.string.account_login_wrong_page); return
+        }
+        val token = try {
+            val parsed = com.google.gson.JsonParser.parseString(raw)
+            if (!parsed.isJsonPrimitive || !parsed.asJsonPrimitive.isString) throw IllegalArgumentException()
+            com.aharou.feature.settings.data.account.DeepSeekAccountProtocol.requireToken(parsed.asString)
+        } catch (_: RuntimeException) {
+            feedback(R.string.account_login_missing_web_token); return
+        } catch (_: com.aharou.feature.settings.data.account.AccountProviderException) {
+            feedback(R.string.account_login_missing_web_token); return
+        }
+        val loginId = intent.getStringExtra(LOGIN_ID)
+        val state = intent.getStringExtra(LOGIN_STATE)
+        if (loginId == null || state == null) { feedback(R.string.account_login_rejected); return }
+        submit(WEB_SESSION, Bundle().apply {
+            putString(ORIGIN, com.aharou.feature.settings.data.account.DeepSeekAccountProtocol.WEB)
+            putString(LOGIN_KIND, webKind?.wireId)
+            putString(LOGIN_ID, loginId); putString(LOGIN_STATE, state)
+            putString(WEB_COOKIE, token)
+        })
     }
 
     override fun onDestroy() {
@@ -200,6 +276,17 @@ class AccountLoginActivity : Activity() {
     }
 
     companion object {
+        internal const val DEEPSEEK_TOKEN_SCRIPT = """
+            (() => {
+                if (location.origin !== 'https://chat.deepseek.com' || location.pathname === '/sign_in') return null;
+                const stored = localStorage.getItem('userToken');
+                if (!stored) return null;
+                try {
+                    const decoded = JSON.parse(stored);
+                    return typeof decoded === 'string' ? decoded : (typeof decoded?.value === 'string' ? decoded.value : null);
+                } catch (_) { return stored; }
+            })()
+        """
         private var profileConfigured = false
         private val windows = AccountLoginWindowCoordinator()
         internal const val URL = "account_login_url"
@@ -213,6 +300,14 @@ class AccountLoginActivity : Activity() {
         internal const val RESULT_PENDING = 6
         internal const val RETRY_ALLOWED = "account_login_retry_allowed"
         internal const val ACCEPTED = "account_login_accepted"
+        internal const val ERROR_CODE = "account_login_error_code"
+
+        internal fun validationAck(failure: String?): Bundle = Bundle().apply {
+            putBoolean(ACCEPTED, failure == null)
+            putBoolean(RETRY_ALLOWED, failure != null)
+            DoubaoAccountProtocol.loginFailureCode(failure)?.let { putString(ERROR_CODE, it) }
+        }
+
         internal const val WEB_COOKIE_LOGIN = "account_web_cookie_login"
         internal const val WEB_COOKIE = "account_web_cookie"
         internal const val ORIGIN = "account_web_origin"

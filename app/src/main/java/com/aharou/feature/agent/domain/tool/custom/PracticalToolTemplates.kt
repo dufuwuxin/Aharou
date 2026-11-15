@@ -96,6 +96,13 @@ object PracticalToolTemplates {
                 CustomToolParameter("path", description = "Directory used by the find operation; otherwise ignored")
             ), injectionMode = ToolInjectionMode.KEYWORD,
             keywords = listOf("rtk", "filtered output", "输出过滤")
+        ),
+        CustomToolDefinition(
+            name = "auggie_command", description = "Run your installed and signed-in Auggie CLI using its service and permissions. May read/write project files, invoke tools, index code and incur charges. No installation or fallback.",
+            command = "printf '%s\\n' {{instruction}} | auggie --print --workspace-root {{path}} 'Follow the task supplied on standard input.'",
+            parameters = listOf(path(), CustomToolParameter("instruction", description = "Task sent literally on standard input", required = true)),
+            timeoutSeconds = 600, injectionMode = ToolInjectionMode.KEYWORD,
+            keywords = listOf("auggie", "Auggie", "Augment")
         )
     )
 

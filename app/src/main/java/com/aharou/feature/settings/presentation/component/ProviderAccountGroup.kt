@@ -60,6 +60,7 @@ internal fun accountProviderName(kind: AccountProviderKind): String = stringReso
         AccountProviderKind.TRAE -> R.string.provider_account_trae
         AccountProviderKind.TRAE_GLOBAL -> R.string.provider_account_trae_global
         AccountProviderKind.WORKBUDDY_GLOBAL -> R.string.provider_account_workbuddy_global
+        AccountProviderKind.DEEPSEEK -> R.string.provider_account_deepseek
         AccountProviderKind.DOUBAO -> R.string.provider_account_doubao
         AccountProviderKind.DUMATE -> R.string.provider_account_dumate
         AccountProviderKind.LOOMY -> R.string.provider_account_loomy
@@ -193,7 +194,8 @@ internal fun ProviderAccountGroup(
         SettingsDivider()
         SettingsRow(
             title = stringResource(R.string.provider_account_points),
-            subtitle = if (kind == AccountProviderKind.DOUBAO) stringResource(R.string.provider_account_doubao_text_only)
+            subtitle = if (kind == AccountProviderKind.DEEPSEEK) stringResource(R.string.provider_account_deepseek_text_only)
+                else if (kind == AccountProviderKind.DOUBAO) stringResource(R.string.provider_account_doubao_text_only)
                 else if (kind == AccountProviderKind.DUMATE) stringResource(R.string.provider_account_dumate_balance_unsupported)
                 else if (snapshot?.balanceError != null) stringResource(R.string.provider_account_balance_failed)
                 else snapshot?.balance ?: stringResource(R.string.provider_account_unknown),
@@ -370,10 +372,7 @@ private fun AccountLoginDialog(login: AccountLogin, manager: AccountProviderMana
                             data.getString(AccountLoginActivity.LOGIN_STATE).orEmpty(),
                             data.getString(AccountLoginActivity.WEB_COOKIE).orEmpty(),
                             onValidation = { failure ->
-                                if (!disposed) remote?.send(AccountLoginActivity.RESULT_ACK, android.os.Bundle().apply {
-                                    putBoolean(AccountLoginActivity.ACCEPTED, failure == null)
-                                    putBoolean(AccountLoginActivity.RETRY_ALLOWED, failure != null)
-                                })
+                                if (!disposed) remote?.send(AccountLoginActivity.RESULT_ACK, AccountLoginActivity.validationAck(failure))
                             },
                         )
                         data.remove(AccountLoginActivity.WEB_COOKIE)

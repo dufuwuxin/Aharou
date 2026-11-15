@@ -165,3 +165,15 @@ accordance with the respective license terms.
    GPL-2.0-or-later 条款；该条款允许按 GPL-3.0 使用，与本产品的 GPL-3.0
    许可兼容。随行的共享库（libtalloc.so、libandroid-shmem.so）各自遵循其
    上游许可。源码可从上述项目地址获取。
+
+========================================================================
+13. Optional CLI integration references (RTK and Auggie)
+------------------------------------------------------------------------
+   RTK:     https://github.com/rtk-ai/rtk
+   Auggie:  https://docs.augmentcode.com/cli/reference
+            https://docs.augmentcode.com/cli/v0/reference
+
+   The editable command templates acknowledge these projects and their
+   published CLI interfaces. No RTK or Auggie implementation is copied
+   or bundled by these templates. Users install the tools separately;
+   their respective upstream licenses and service terms remain unchanged.
