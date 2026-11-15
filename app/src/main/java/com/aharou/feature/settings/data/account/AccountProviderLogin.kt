@@ -62,9 +62,12 @@ class AccountLogin internal constructor(
             }
             if (pairs.map { it.first }.distinct().size != pairs.size) return false
             val params = pairs.toMap()
-            val stateMatches = params["state"] == state || (kind.isTrae && server != null && params["state"] == null)
-            if (!stateMatches || params.keys.any { it in setOf("error", "error_code", "refreshToken", "refresh_token", "access_token") }) return false
-            val authCode = params["code"] ?: params["authCode"] ?: params["authorization_code"] ?: return false
+            val authCode = if (kind.isTrae) {
+                TraeAccountProtocol.callbackCode(value.toHttpUrl(), state) ?: return false
+            } else {
+                if (params["state"] != state || params.keys.any { it in setOf("error", "error_code", "refreshToken", "refresh_token", "access_token") }) return false
+                params["code"] ?: params["authCode"] ?: params["authorization_code"] ?: return false
+            }
             if (authCode.isBlank() || authCode.length > 8192 || !consumed.compareAndSet(false, true)) return false
             code = authCode
             true
@@ -111,7 +114,7 @@ internal object AccountProviderLogin {
             return AccountLogin(id, kind, DoubaoAccountProtocol.LOGIN, null, state, revision, expiresAt, verifier, DoubaoAccountProtocol.newDeviceId())
         }
         if (kind == AccountProviderKind.DUMATE) {
-            return AccountLogin(id, kind, DumateAccountProtocol.WEB + "/", null, state, revision, expiresAt, verifier, deviceId)
+            return AccountLogin(id, kind, DumateAccountProtocol.LOGIN, null, state, revision, expiresAt, verifier, deviceId)
         }
         if (kind.isWorkBuddy) {
             val cookies = LoginCookies()
@@ -137,15 +140,15 @@ internal object AccountProviderLogin {
             val keyPair = java.security.KeyPairGenerator.getInstance("EC").apply { initialize(java.security.spec.ECGenParameterSpec("secp256r1")) }.generateKeyPair()
             val publicKey = "-----BEGIN PUBLIC KEY-----\n" + Base64.getMimeEncoder(64, byteArrayOf(10)).encodeToString(keyPair.public.encoded) + "\n-----END PUBLIC KEY-----\n"
             val prefix = "http://127.0.0.1:${server.localPort}/authorize"
-            val callback = "$prefix?state=$state"
+            val callback = prefix
             val challenge = Base64.getUrlEncoder().withoutPadding().encodeToString(MessageDigest.getInstance("SHA-256").digest(verifier.toByteArray(Charsets.US_ASCII)))
             val url = (if (kind == AccountProviderKind.TRAE_GLOBAL) "https://www.trae.ai/authorization" else "https://www.trae.cn/authorization").toHttpUrl().newBuilder()
                 .addQueryParameter("login_version", "1").addQueryParameter("auth_from", "trae").addQueryParameter("login_channel", "native_ide")
                 .addQueryParameter("auth_type", "local").addQueryParameter("client_id", AccountProviderManager.traeClientId(kind))
-                .addQueryParameter("redirect", "0").addQueryParameter("login_trace_id", UUID.randomUUID().toString())
+                .addQueryParameter("redirect", "0").addQueryParameter("login_trace_id", state)
                 .addQueryParameter("auth_callback_url", callback).addQueryParameter("machine_id", deviceId).addQueryParameter("device_id", deviceId)
                 .addQueryParameter("code_challenge", challenge).addQueryParameter("code_challenge_method", "S256").build()
-            val authorizationUrl = url.toString().replace(Regex("auth_callback_url=[^&]*"), "auth_callback_url=$prefix") + "&state=$state"
+            val authorizationUrl = url.toString()
             return AccountLogin(id, kind, authorizationUrl, prefix, state, revision, expiresAt, verifier, deviceId, server, publicKey)
         } catch (error: Exception) { server.close(); throw error }
     }

@@ -136,11 +136,24 @@ class DoubaoAccountProtocolTest {
         }
     }
 
+    @Test fun realConversationUrlWithQueryAndDefaultHttpsPortCompletesThroughHttpValidation() = runBlocking {
+        MockWebServer().use { server ->
+            val manager = manager(server)
+            val pending = manager.beginLogin("provider", kind)
+            server.enqueue(MockResponse().setBody(user)); server.enqueue(MockResponse().setBody(catalog))
+            assertTrue(manager.acceptWebLogin(pending, "https://www.doubao.com:443/chat/fixture-conversation?from=login#chat", pending.id, pending.state, cookie))
+            manager.awaitLogin(pending)
+            assertEquals("123456789", manager.credential("provider", kind).userId)
+            assertEquals(DoubaoAccountProtocol.ACCOUNT, server.takeRequest().requestUrl!!.encodedPath)
+            assertEquals(DoubaoAccountProtocol.CATALOG, server.takeRequest().requestUrl!!.encodedPath)
+        }
+    }
+
     @Test fun wrongOriginKindStateRevisionExpiryAndReplayCannotStoreSession() = runBlocking {
         MockWebServer().use { server ->
             val manager = manager(server)
             val pending = manager.beginLogin("provider", kind)
-            for (origin in listOf("https://www.dumate.cn/", "https://www.doubao.com.evil/chat/", "https://user@www.doubao.com/chat/", "https://www.doubao.com:443/chat/", "https://www.doubao.com/chat/#x", "https://www.doubao.com/chat/?x=1")) {
+            for (origin in listOf("https://www.dumate.cn/", "https://www.doubao.com.evil/chat/", "https://user@www.doubao.com/chat/", "https://www.doubao.com:444/chat/", "http://www.doubao.com/chat/", "https://www.doubao.com@evil.example/chat/")) {
                 assertFalse(manager.acceptWebLogin(pending, origin, pending.id, pending.state, cookie))
             }
             assertFalse(manager.acceptWebLogin(pending, pending.url, pending.id, "wrong-state", cookie))

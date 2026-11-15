@@ -182,9 +182,9 @@ Loomy 使用**用户主动导入自己的会话**，不是 OAuth。先在 <https
 
 ### Dumate website account (pending owner validation)
 
-Dumate (`dumate`) uses the user's normal login at <https://www.dumate.cn/> in the existing isolated account-login process (Android 9+). It is not OAuth and does not scan other apps. After logging in, explicitly press “我已完成网页登录”. Only that action sends the website cookie through the private Binder result receiver to the pending login in the main process. Origin, login identity, nonce, revision and expiry are checked before exchanging the cookie for a short-lived gateway ticket. The account is appended to the existing encrypted ordered account pool only after a nonempty gateway model catalog is validated.
+Dumate (`dumate`) uses the user's normal PC website login at <https://dumate.baidu.com/app> in the existing isolated account-login process (Android 9+). It is not OAuth and does not scan other apps. After logging in, explicitly press “我已完成网页登录”. Only that action sends the website cookie through the private Binder result receiver to the pending login in the main process. Origin, login identity, nonce, revision and expiry are checked before exchanging the cookie for a short-lived gateway ticket. The account is appended to the existing encrypted ordered account pool only after a nonempty gateway model catalog is validated.
 
-The website cookie is sent only to the fixed official website token and user-info routes. Gateway Bearer tickets are sent only to the fixed `dumate-svc.baidu.com` model/chat routes. Models come from the gateway directory, not a preset list. Expired tickets refresh using the website cookie; an expired cookie requires the user to log in again, never automatic login replay. The gateway retains native OpenAI JSON/SSE and tools. Stable account identity comes from `user/info` (`uid` or `userId`), never an inferred name.
+The website cookie is sent only to the fixed official website token and user-info routes. Gateway Bearer tickets are sent only to the fixed `dumate-svc.baidu.com` model/chat routes. Models come from the gateway directory, not a preset list. Expired tickets refresh using the website cookie; an expired cookie requires the user to log in again, never automatic login replay. The gateway retains native OpenAI JSON/SSE and tools. Stable account identity comes from the PC website `user/info` field `bceUserId`, never an inferred name.
 
 Balance is unsupported (`null`, with an explicit UI explanation); this integration does not request check-in, tasks or rewards. It does not use a new server or external proxy. Credentials are stored only in the existing encrypted account vault, not in API-key settings or URLs. The account service is selectable through the existing `providers.<id>.account_service` configuration route; login still requires the explicit website UI action. No owner account has been used for upstream validation: the UI intentionally says “网页登录待本人验证”.
 
@@ -198,3 +198,10 @@ Models are discovered from `/alice/slot/action_bar_v3/brief_list` (`coco_deep_th
 Tools, tool results, structured tool history, images, custom temperature/token limits and unverified generation overrides fail explicitly; do not select this provider for tool-driven agent/project execution. No tool calls or usage/token counts are fabricated. Native SSE_ACK, STREAM_CHUNK text/thinking patches and SSE_REPLY_END with end_type=3 drive both OpenAI-compatible JSON and SSE output. Truncation, stream errors, unsupported task handoffs and cancellation cannot produce a successful finish. Cookie-bearing requests are fixed to the official `www.doubao.com` identity/catalog/chat routes; redirects and 401/403 challenges require normal website login again without automated bypass or login replay. Locally generated numeric device metadata persists with the encrypted account credential, rather than copying another user's device ID. Balance, check-in and rewards are unsupported.
 
 This integration follows the frozen public Fullstop000/doubao-cli reference at `62dd0ac1` for HTTP, catalog, native request and SSE fields, not an assumed OpenAI endpoint. Real-account login/chat and Android device acceptance remain pending owner verification. HTTP fixtures are included; their presence alone does not establish runtime success.
+
+
+### 百度搭子与豆包网页登录
+
+百度搭子使用官方 PC 入口 `https://dumate.baidu.com/app`。旧版搭子网址保存的登录态不能跨网站使用，更新后请在官方页面重新登录；不会把旧 Cookie 发送到新网站。豆包完成登录后可以停留在具体会话页，再点完成登录。登录窗口中的密码和验证码仅由本人在官方页面输入；完成后仍须通过服务方账号和模型目录校验，校验失败不会新增账号。
+
+Trae 的「登录并打开 TRAE」授权回调由当前应用登录窗口接收，不需要启动外部 IDE。取消或过期后请重新发起登录，不重复使用旧授权回调。

@@ -86,6 +86,7 @@ internal fun ProviderAccountGroup(
     var login by remember(providerId, kind) { mutableStateOf<AccountLogin?>(null) }
     var operation by remember(providerId, kind) { mutableStateOf<Job?>(null) }
     var busy by remember(providerId, kind) { mutableStateOf(false) }
+    var loginOperation by remember(providerId, kind) { mutableStateOf(false) }
     var error by remember(providerId, kind) { mutableStateOf<String?>(null) }
     var session by remember(providerId, kind) { mutableStateOf("") }
     var checkInStatus by remember(providerId, kind) { mutableStateOf<com.aharou.feature.settings.data.account.AccountCheckInStatus?>(null) }
@@ -109,6 +110,7 @@ internal fun ProviderAccountGroup(
         if (busy) return
         busy = true
         error = null
+        loginOperation = false
         operation = scope.launch {
             try {
                 block()
@@ -170,10 +172,12 @@ internal fun ProviderAccountGroup(
                         if (kind.isWebSession && android.os.Build.VERSION.SDK_INT < 28) {
                             throw com.aharou.feature.settings.data.account.AccountProviderException("isolated_login_requires_api28", "Dumate requires isolated website login", 400)
                         }
+                        loginOperation = true
                         val attempt = manager.beginLogin(providerId, kind)
                         login = attempt
                         try {
                             manager.awaitLogin(attempt)
+                            loginOperation = false
                             loggedIn = true
                             login = null
                             snapshot = null
@@ -268,6 +272,7 @@ internal fun ProviderAccountGroup(
                 )
             }
         }
+        if (busy && login != null) Text(stringResource(R.string.account_login_validating), modifier = Modifier.padding(Spacing.md))
         error?.let { code ->
             Text(
                 text = stringResource(
@@ -280,7 +285,7 @@ internal fun ProviderAccountGroup(
                         "channel_rejected" -> R.string.provider_account_channel_rejected
                         "quota_exhausted" -> R.string.provider_account_exhausted
                         "rate_limited" -> R.string.provider_account_rate_limited
-                        else -> R.string.provider_account_request_failed
+                        else -> if (loginOperation) R.string.account_login_validation_failed else R.string.provider_account_request_failed
                     }
                 ),
                 color = MaterialTheme.colorScheme.error,
@@ -342,10 +347,9 @@ private fun AccountLoginDialog(login: AccountLogin, manager: AccountProviderMana
                     }
                     AccountLoginActivity.WEB_SESSION -> {
                         val data = resultData ?: return
-                        if (disposed || data.getString(AccountLoginActivity.LOGIN_KIND)?.let { it != login.kind.wireId } == true ||
-                            (login.kind == AccountProviderKind.DOUBAO && data.getString(AccountLoginActivity.LOGIN_KIND) != login.kind.wireId)) {
+                        if (disposed || data.getString(AccountLoginActivity.LOGIN_KIND) != login.kind.wireId) {
                             data.remove(AccountLoginActivity.WEB_COOKIE)
-                            if (!disposed) onDismiss()
+                            remote?.send(AccountLoginActivity.RESULT_ACK, android.os.Bundle().apply { putBoolean(AccountLoginActivity.ACCEPTED, false) })
                             return
                         }
                         val accepted = manager.acceptWebLogin(
@@ -355,11 +359,12 @@ private fun AccountLoginDialog(login: AccountLogin, manager: AccountProviderMana
                             data.getString(AccountLoginActivity.WEB_COOKIE).orEmpty(),
                         )
                         data.remove(AccountLoginActivity.WEB_COOKIE)
-                        if (!accepted) onDismiss()
+                        remote?.send(AccountLoginActivity.RESULT_ACK, android.os.Bundle().apply { putBoolean(AccountLoginActivity.ACCEPTED, accepted) })
                     }
                     AccountLoginActivity.CALLBACK -> {
                         val url = resultData?.getString(AccountLoginActivity.URL) ?: return
-                        if (!disposed && !manager.acceptCallback(login, url)) onDismiss()
+                        val accepted = !disposed && manager.acceptCallback(login, url)
+                        remote?.send(AccountLoginActivity.RESULT_ACK, android.os.Bundle().apply { putBoolean(AccountLoginActivity.ACCEPTED, accepted) })
                     }
                     AccountLoginActivity.CANCELLED -> if (!disposed) onDismiss()
                 }

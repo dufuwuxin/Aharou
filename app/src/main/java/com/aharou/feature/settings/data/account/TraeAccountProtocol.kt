@@ -15,6 +15,32 @@ import java.io.EOFException
 import java.util.UUID
 
 internal object TraeAccountProtocol {
+    // The official PC page returns authCodeInfo and echoes login_trace_id as loginTraceID.
+    internal fun callbackCode(uri: okhttp3.HttpUrl, state: String): String? {
+        if (uri.username.isNotEmpty() || uri.password.isNotEmpty() || uri.fragment != null) return null
+        val states = uri.queryParameterValues("state")
+        val traces = uri.queryParameterValues("loginTraceID")
+        if (states.size > 1 || traces.size > 1 || (states.isEmpty() && traces.isEmpty())) return null
+        if (states.any { it != state } || traces.any { it != state }) return null
+        if (uri.queryParameterNames.any { it in setOf("error", "error_code", "error_msg", "error_description", "token", "access_token", "refresh_token", "refreshToken", "userJwt") }) return null
+        val codes = mutableListOf<String>()
+        for (key in listOf("code", "authCode")) {
+            val values = uri.queryParameterValues(key)
+            if (values.size > 1) return null
+            values.firstOrNull()?.let { codes.add(it) }
+        }
+        val info = uri.queryParameterValues("authCodeInfo")
+        if (info.size > 1) return null
+        if (info.isNotEmpty()) {
+            val payload = try { JsonParser.parseString(info.single()).asJsonObject } catch (_: RuntimeException) { return null }
+            val code = payload.text("AuthCode") ?: payload.text("Code") ?: return null
+            codes.add(code)
+        }
+        return codes.firstOrNull()?.takeIf { value ->
+            codes.all { it == value } && value.isNotBlank() && value.length <= 8192 && value.none { it.code < 32 || it.code == 127 }
+        }
+    }
+
     fun balance(payload: JsonObject): String? {
         val data = payload.obj("data") ?: payload.obj("result") ?: payload.obj("Result") ?: payload
         if (!data.has("user_entitlement_pack_list")) return null

@@ -27,7 +27,7 @@ internal object DoubaoAccountProtocol {
     fun isWebOrigin(value: String): Boolean = try {
         val uri = URI(value)
         uri.scheme == "https" && uri.host == "www.doubao.com" && uri.rawUserInfo == null &&
-            uri.port == -1 && uri.rawFragment == null && uri.rawPath == "/chat/" && uri.rawQuery == null
+            uri.port in setOf(-1, 443)
     } catch (_: Exception) { false }
 
     fun requireCookie(cookie: String): String {

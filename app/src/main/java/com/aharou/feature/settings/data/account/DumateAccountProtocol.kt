@@ -6,13 +6,14 @@ import java.time.Instant
 
 /** Website cookies and gateway tickets are intentionally separate credentials. */
 internal object DumateAccountProtocol {
-    const val WEB = "https://www.dumate.cn"
+    const val WEB = "https://dumate.baidu.com"
+    const val LOGIN = "$WEB/app"
     const val GATEWAY = "https://dumate-svc.baidu.com/gateway/apis/v1"
     const val BALANCE_UNSUPPORTED = "balance_unsupported"
 
     fun isWebOrigin(value: String): Boolean {
         val url = value.toHttpUrlOrNull() ?: return false
-        return url.scheme == "https" && url.host == "www.dumate.cn" && url.port == 443 &&
+        return url.scheme == "https" && url.host == "dumate.baidu.com" && url.port == 443 &&
             url.username.isEmpty() && url.password.isEmpty() &&
             try { java.net.URI(value).rawUserInfo == null } catch (_: java.net.URISyntaxException) { false }
     }
@@ -44,6 +45,8 @@ internal object DumateAccountProtocol {
     }
 
     fun restore(value: JsonObject): AccountCredential {
+        val origin = value.text("domain") ?: "https://www.dumate.cn"
+        if (origin !in setOf(WEB, "https://www.dumate.cn")) throw AccountProviderException("account_mismatch", "Unexpected Dumate credential origin", 400)
         if (value.text("kind") != AccountProviderKind.DUMATE.wireId) {
             throw AccountProviderException("account_mismatch", "Dumate credentials require their provider kind", 400)
         }
@@ -53,7 +56,7 @@ internal object DumateAccountProtocol {
         val expiry = value.text("expiresAt")?.toLongOrNull()
             ?: throw AccountProviderException("invalid_credentials", "Dumate ticket expiry is missing", 400)
         val uid = value.text("userId") ?: throw AccountProviderException("invalid_credentials", "Dumate account identity is missing", 400)
-        return AccountCredential(AccountProviderKind.DUMATE, token, null, expiry, value.text("deviceId").orEmpty(), uid, webCookie = cookie)
+        return AccountCredential(AccountProviderKind.DUMATE, token, null, expiry, value.text("deviceId").orEmpty(), uid, domain = origin, webCookie = cookie)
     }
 
     fun exchange(manager: AccountProviderManager, cookie: String, deviceId: String, previousUserId: String? = null): AccountCredential {
@@ -68,10 +71,10 @@ internal object DumateAccountProtocol {
         }
         val account = manager.readJson(manager.request("$WEB/api/dumate/user/info", headers = webHeaders))
         val user = account.obj("result") ?: throw AccountProviderException("invalid_credentials", "Dumate account identity is missing", 401)
-        val uid = user.text("uid") ?: user.text("userId")
+        val uid = user.text("bceUserId")?.takeIf { it.isNotBlank() }
             ?: throw AccountProviderException("invalid_credentials", "Dumate account identity is missing", 401)
         if (previousUserId != null && uid != previousUserId) throw AccountProviderException("account_mismatch", "Dumate website account changed; sign in again", 401)
-        return AccountCredential(AccountProviderKind.DUMATE, token, null, expiry, deviceId, uid, webCookie = cookie)
+        return AccountCredential(AccountProviderKind.DUMATE, token, null, expiry, deviceId, uid, domain = WEB, webCookie = cookie)
     }
 
     fun validateDirectory(manager: AccountProviderManager, credential: AccountCredential) {

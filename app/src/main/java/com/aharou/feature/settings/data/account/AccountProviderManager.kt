@@ -383,6 +383,9 @@ class AccountProviderManager internal constructor(
     internal fun refresh(id: String, kind: AccountProviderKind, failedToken: String? = null): AccountCredential = synchronized(refreshLocks.getOrPut("${kind.wireId}:${scopeId(id)}") { Any() }) {
         checkRevision(id)
         val (old, expected) = synchronized(state) { credential(id, kind) to revision(scopeId(id)) }
+        if (kind == AccountProviderKind.DUMATE && old.domain != DumateAccountProtocol.WEB) {
+            throw AccountProviderException("login_required", "Dumate website changed; sign in again", 401)
+        }
         if (failedToken != null && old.accessToken != failedToken) return@synchronized old
         if (failedToken == null && (old.expiresAt == null || old.expiresAt > System.currentTimeMillis() + 60_000)) return@synchronized old
         if (kind == AccountProviderKind.DUMATE) {

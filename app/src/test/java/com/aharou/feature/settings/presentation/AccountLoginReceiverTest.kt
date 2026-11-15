@@ -89,4 +89,19 @@ class AccountLoginReceiverTest {
         assertEquals(ResultReceiver::class.java, remote.javaClass)
     }
 
+    @Test fun rejectedAcknowledgementContainsNoCredentialsAndKeepsWindowRetryable() {
+        val events = mutableListOf<Pair<Int, Boolean>>()
+        val local = object : ResultReceiver(Handler(Looper.getMainLooper())) {
+            override fun onReceiveResult(resultCode: Int, resultData: Bundle?) {
+                events += resultCode to (resultData?.getBoolean("account_login_accepted") == true)
+                assertFalse(resultData?.containsKey("account_web_cookie") == true)
+            }
+        }
+        val remote = transfer(local)
+        send(remote, 5, Bundle().apply { putBoolean("account_login_accepted", false) })
+        send(remote, 5, Bundle().apply { putBoolean("account_login_accepted", true) })
+        shadowOf(Looper.getMainLooper()).idle()
+        assertEquals(listOf(5 to false, 5 to true), events)
+    }
+
 }

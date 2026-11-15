@@ -4142,4 +4142,13 @@
     <string name="session_workspace_failed">无法切换目录：会话正在运行、归属项目或目录不可用。</string>
 <string name="builtin_skill_edit_title">允许修改内置技能</string>
 <string name="builtin_skill_edit_scope">默认关闭。开启后保存为全局同名覆盖，不修改应用原资产。关闭或重启后禁止继续修改，保留已保存内容。</string>
+    <string name="account_login_loading">登录页面正在加载，请稍候再完成。</string>
+    <string name="account_login_ready">请在官方页面完成登录；网页登录后点击完成。</string>
+    <string name="account_login_validating">正在等待授权并验证账号，请勿重复提交。</string>
+    <string name="account_login_wrong_page">当前不是供应商的官方会话页面，请先完成登录并返回。</string>
+    <string name="account_login_missing_cookie">尚未获得有效登录会话，请在官方页面完成登录后重试。</string>
+    <string name="account_login_rejected">本次登录未被接收或已失效，请关闭后重新发起登录。</string>
+    <string name="account_login_unsupported_link">此链接不能用于当前授权；不会打开外部 IDE，请返回官方登录页面。</string>
+    <string name="account_login_page_failed">登录页面加载失败，请检查网络后重新登录。</string>
+    <string name="account_login_validation_failed">账号验证服务未完成验证，登录未保存，请检查网络或重新登录。</string>
 </resources>

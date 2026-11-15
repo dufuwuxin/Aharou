@@ -26,7 +26,7 @@ class DumateAccountProtocolTest {
     private val cookie = "normalcookie=fixture-user-session"
     private val catalog = """{"object":"list","data":[{"id":"fixture-directory-model"}]}"""
     private fun ticket(token: String = "fixture-short-ticket") = """{"code":0,"result":{"token":"$token","expired_at":"${Instant.now().plusSeconds(3600)}"}}"""
-    private val user = """{"code":0,"result":{"uid":"fixture-stable-user"}}"""
+    private val user = """{"code":0,"result":{"bceUserId":"fixture-stable-user","displayName":"fixture display name"}}"""
 
     // Rewrite only in the test client; production URLs and auth scoping remain fixed.
     private fun newManager(web: MockWebServer, gateway: MockWebServer, vault: Vault = Vault()): AccountProviderManager {
@@ -35,7 +35,7 @@ class DumateAccountProtocolTest {
             .addInterceptor { chain ->
                 val request = chain.request()
                 val server = when (request.url.host) {
-                    "www.dumate.cn" -> {
+                    "dumate.baidu.com" -> {
                         assertNull(request.header("Authorization"))
                         assertEquals(cookie, request.header("Cookie"))
                         web
@@ -58,11 +58,35 @@ class DumateAccountProtocolTest {
     }
     private suspend fun login(manager: AccountProviderManager) {
         val attempt = manager.beginLogin("provider", kind)
-        assertEquals("https://www.dumate.cn/", attempt.url)
+        assertEquals("https://dumate.baidu.com/app", attempt.url)
         assertNull(attempt.callbackPrefix)
         assertTrue(manager.acceptWebLogin(attempt, DumateAccountProtocol.WEB, attempt.id, attempt.state, cookie))
         assertFalse(manager.acceptWebLogin(attempt, DumateAccountProtocol.WEB, attempt.id, attempt.state, cookie))
         manager.awaitLogin(attempt)
+    }
+
+    @Test fun oldOriginCredentialsStayInThePoolButCannotSendCookiesToTheNewDomain() = runBlocking {
+        val old = JsonParser.parseString("""{"kind":"dumate","webCookie":"BDUSS=fixture-only","userId":"fixture-user","accessToken":"fixture-ticket","expiresAt":9999999999999}""").asJsonObject
+        for (origin in listOf<String?>(null, "https://www.dumate.cn")) {
+            if (origin != null) old.addProperty("domain", origin)
+            val restored = DumateAccountProtocol.restore(old)
+            assertEquals("https://www.dumate.cn", restored.domain)
+            val vault = Vault().also { it.values["provider"] = old.toString() }
+            val manager = AccountProviderManager(vault, OkHttpClient.Builder().addInterceptor { throw AssertionError("Old cookie must never be sent") }.build())
+            assertEquals(1, manager.accounts("provider", kind).size)
+            val unchanged = vault.values["provider"]
+            try { manager.refresh("provider", kind); fail("Relogin is required") }
+            catch (error: AccountProviderException) { assertEquals("login_required", error.errorCode) }
+            assertEquals(unchanged, vault.values["provider"])
+        }
+        val web = MockWebServer(); val gateway = MockWebServer(); web.start(); gateway.start()
+        try {
+            val vault = Vault().also { it.values["provider"] = old.toString() }
+            val manager = newManager(web, gateway, vault)
+            enqueueLogin(web, gateway)
+            login(manager)
+            assertEquals(2, manager.accounts("provider", kind).size)
+        } finally { web.shutdown(); gateway.shutdown() }
     }
 
     @Test fun explicitWebsiteSessionValidatesStableIdentityAndGatewayBeforePoolAppend() = runBlocking {
@@ -146,7 +170,7 @@ class DumateAccountProtocolTest {
         MockWebServer().use { web -> MockWebServer().use { gateway ->
             val manager = newManager(web, gateway)
             val attempt = manager.beginLogin("provider", kind)
-            for (origin in listOf("http://www.dumate.cn", "https://www.dumate.cn:444", "https://user@www.dumate.cn", "https://@www.dumate.cn", "https://www.dumate.cn.evil")) {
+            for (origin in listOf("https://www.dumate.cn/", "http://dumate.baidu.com", "https://dumate.baidu.com:444", "https://user@dumate.baidu.com", "https://dumate.baidu.com.evil", "https://www.dumate.cn:444", "https://user@www.dumate.cn", "https://@www.dumate.cn", "https://www.dumate.cn.evil")) {
                 assertFalse(manager.acceptWebLogin(attempt, origin, attempt.id, attempt.state, cookie))
             }
             assertFalse(manager.acceptWebLogin(attempt, DumateAccountProtocol.WEB, "wrong-id", attempt.state, cookie))
