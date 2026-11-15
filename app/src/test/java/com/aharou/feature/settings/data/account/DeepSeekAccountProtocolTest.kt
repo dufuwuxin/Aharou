@@ -62,7 +62,7 @@ data: {"p":"response/status","o":"SET","v":"FINISHED"}
         assertFalse(manager.acceptWebLogin(pending, pending.url, pending.id, pending.state, token))
         manager.awaitLogin(pending)
     }
-    private fun call(manager: AccountProviderManager, streaming: Boolean, extra: String = "") = OkHttpClient.Builder().addInterceptor(manager.interceptor()).build().newCall(
+    private fun call(manager: AccountProviderManager, streaming: Boolean, extra: String = "") = OkHttpClient.Builder().connectionSpecs(listOf(ConnectionSpec.CLEARTEXT)).addInterceptor(manager.interceptor()).build().newCall(
         Request.Builder().url(manager.baseUrl(kind, "provider") + "/chat/completions").post(
             """{"model":"deepseek-search-reasoner","messages":[{"role":"system","content":"Be brief"},{"role":"user","content":"Hello"}],"stream":$streaming$extra}""".toRequestBody(),
         ).build(),
@@ -186,7 +186,7 @@ data: {"p":"response/status","o":"SET","v":"FINISHED"}
     @Test fun actualAssistantAdapterUsesExplicitWebsiteTextModeForBothPaths() = runBlocking {
         MockWebServer().use { server ->
             val manager = manager(server); login(manager, server); server.takeRequest()
-            val client = OkHttpClient.Builder().addInterceptor(manager.interceptor()).build()
+            val client = OkHttpClient.Builder().connectionSpecs(listOf(ConnectionSpec.CLEARTEXT)).addInterceptor(manager.interceptor()).build()
             val api = retrofit2.Retrofit.Builder().baseUrl("https://api.openai.com/").client(client)
                 .addConverterFactory(retrofit2.converter.gson.GsonConverterFactory.create()).build()
                 .create(com.aharou.feature.agent.data.remote.openai.OpenAIApi::class.java)
