@@ -34,8 +34,9 @@ class ProjectCompactLayoutContract(unittest.TestCase):
 
     def assert_header(self, workbench):
         header = region(workbench, "val header:")
-        self.assertEqual(1, header.count('testTag("project_compact_header")'))
-        self.assertIn("IconButton(onClick = onBack, modifier = Modifier.size(48.dp))", header)
+        self.assertNotIn('testTag("project_compact_header")', header)
+        self.assertNotIn("IconButton(onClick = onBack", header)
+        self.assertIn("Popup(alignment = Alignment.TopEnd)", header)
         host = region(header, '            Box ')
         self.assertIn("IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(48.dp))", host)
         self.assertIn("DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false })", host)
@@ -90,12 +91,16 @@ class ProjectCompactLayoutContract(unittest.TestCase):
     def test_single_action_bar_without_duplicate_navigation(self):
         self.assert_header(WORKBENCH)
         for original, replacement in (("mapMenu { menuOpen = false }", ""),
-                                      ("DropdownMenu(expanded = menuOpen,", "RemovedMenu(expanded = menuOpen,")):
+                                      ("DropdownMenu(expanded = menuOpen,", "RemovedMenu(expanded = menuOpen,"),
+                                      ("Popup(alignment = Alignment.TopEnd)", "FloatingMenu(alignment = Alignment.TopEnd)"),
+                                      ("Modifier.size(48.dp)", "Modifier.size(24.dp)"),
+                                      ("Popup(alignment = Alignment.TopEnd)", 'Popup(alignment = Alignment.TopEnd).testTag("project_compact_header")'),
+                                      ("Popup(alignment = Alignment.TopEnd)", "IconButton(onClick = onBack) {}; Popup(alignment = Alignment.TopEnd)")):
             mutant = WORKBENCH.replace(original, replacement, 1)
             self.assertNotEqual(mutant, WORKBENCH)
             with self.assertRaises(AssertionError):
                 self.assert_header(mutant)
-        self.assertEqual(1, WORKBENCH.count('testTag("project_compact_header")'))
+        self.assertNotIn('testTag("project_compact_header")', WORKBENCH)
         self.assertIn("BackHandler(enabled = expandedId != null)", WORKBENCH)
         for old in ("project_action_bar", "project_view_menu", "project_more_menu", "SingleChoiceSegmentedButtonRow", "SegmentedButton("):
             self.assertNotIn(old, WORKBENCH)
@@ -164,13 +169,15 @@ class ProjectCompactLayoutContract(unittest.TestCase):
 
     def test_icon_controls_have_48dp_targets(self):
         header = region(WORKBENCH, "val header:")
-        self.assertIn('heightIn(min = 48.dp).testTag("project_compact_header")', header)
+        self.assertIn("Popup(alignment = Alignment.TopEnd)", header)
         buttons = list(re.finditer(r"\bIconButton(?=\()", header))
-        self.assertEqual(2, len(buttons))
+        self.assertEqual(1, len(buttons))
         for button in buttons:
             self.assertIn("modifier = Modifier.size(48.dp)", region(header[button.start():], "IconButton", "("))
         menu = region(header, "onDismissRequest = { menuOpen = false })")
-        self.assertEqual(5, menu.count("DropdownMenuItem("))
+        self.assertEqual(6, menu.count("DropdownMenuItem("))
+        self.assertIn('modifier = Modifier.testTag("project_main_conversation")', menu)
+        self.assertIn("onClick = { menuOpen = false; onSelectRequirementBranch(null); rootReader = true }", menu)
         for controls in (menu, region(MAP, "        header")):
             self.assertNotRegex(controls, r"\b(?:TextButton|IconButton|Button)\(")
             self.assertNotIn(".clickable", controls)

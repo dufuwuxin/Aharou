@@ -109,8 +109,15 @@ class SettingsNavigationTest(unittest.TestCase):
         sessions = source(SRC / "feature/agent/presentation/component/SessionListScreen.kt")
         projects = source(SRC / "feature/agent/presentation/component/ProjectListScreen.kt")
         self.assertNotIn("R.string.session_list_title", sessions)
-        self.assertIn("FilterChip(selected = !showSessions", projects)
-        self.assertIn("FilterChip(selected = showSessions", projects)
+        self.assertIn("val pager = rememberPagerState { 2 }", projects)
+        for page in (0, 1):
+            self.assertIn(
+                f"FilterChip(selected = pager.currentPage == {page}, "
+                f"onClick = {{ scope.launch {{ pager.animateScrollToPage({page}) }} }}",
+                projects,
+            )
+        self.assertIn("HorizontalPager(state = pager", projects)
+        self.assertIn("if (page == 1) Box(Modifier.fillMaxSize()) { sessionsContent() }", projects)
         self.assertNotRegex(projects, r"Text\(stringResource\(R\.string\.project_home\),\s*style\s*=")
         self.assertIn("onNewSession", sessions)
         self.assertIn('testTag("create_project")', projects)

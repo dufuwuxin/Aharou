@@ -109,7 +109,10 @@ class ProjectChatComposerContract(unittest.TestCase):
                          "ProjectChatBinding(sessionId.takeIf { ready }, rootConversation)",
                          "projectConversation = binding.rootConversation"):
             self.assertIn(contract, screen)
-        for contract in ("toggle(rootId)", "rootConversation()", "if (diagnostics == null) TextButton(",
+        for contract in ("toggle(rootId)", "rootConversation()", 'Modifier.testTag("project_main_conversation")',
+                         "onClick = { menuOpen = false; onSelectRequirementBranch(null); rootReader = true }",
+                         "if (rootReader) Dialog(onDismissRequest = { rootReader = false }",
+                         'Surface(Modifier.fillMaxSize().testTag("project_main_reader"))',
                          "onOpenRoot = { if (diagnostics != null) { onSelectRequirementBranch(null); diagnostics() } else toggle(rootId) }"):
             self.assertIn(contract, workbench)
 
@@ -136,10 +139,15 @@ class ProjectChatComposerContract(unittest.TestCase):
             self.assertNotEqual(mutant, screen)
             with self.assertRaises(AssertionError):
                 self.assert_root_diagnostics_binding(mutant, workbench)
-        mutant = workbench.replace("onSelectRequirementBranch(null); diagnostics()", "diagnostics()")
-        self.assertNotEqual(mutant, workbench)
-        with self.assertRaises(AssertionError):
-            self.assert_root_diagnostics_binding(screen, mutant)
+        for old, new in (("onSelectRequirementBranch(null); diagnostics()", "diagnostics()"),
+                         ("onSelectRequirementBranch(null); rootReader = true", "rootReader = true"),
+                         ("rootReader = true", "rootReader = false"),
+                         ("if (rootReader) Dialog", "if (false) Dialog"),
+                         ("rootConversation()", "DisconnectedRoot()")):
+            mutant = workbench.replace(old, new)
+            self.assertNotEqual(mutant, workbench)
+            with self.assertRaises(AssertionError):
+                self.assert_root_diagnostics_binding(screen, mutant)
 
     def test_read_only_records_retain_validated_acceptance(self):
         process = source("ProjectTaskProcess.kt")
