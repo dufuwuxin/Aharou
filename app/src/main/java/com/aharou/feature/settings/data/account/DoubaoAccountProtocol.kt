@@ -73,6 +73,11 @@ internal object DoubaoAccountProtocol {
             if (!passport) { addQueryParameter("pc_version", VERSION); addQueryParameter("doubao_pc_version", VERSION) }
         }.build()
         val response = manager.request(url.toString(), method, body, headers(credential) + mapOf("Accept" to if (path == CHAT) "text/event-stream" else "application/json"))
+        if (path != CHAT && !response.isSuccessful) {
+            val status = response.code
+            response.close()
+            throw AccountProviderException("doubao_http_$status", "Doubao validation endpoint returned HTTP $status", status)
+        }
         if (response.code in setOf(401, 403) || response.code in 300..399) {
             response.close()
             throw AccountProviderException("login_required", "Doubao session expired or access was challenged; complete the official website login again", 401)
@@ -80,16 +85,43 @@ internal object DoubaoAccountProtocol {
         return response
     }
 
-    fun exchange(manager: AccountProviderManager, cookie: String, deviceId: String): AccountCredential {
-        val provisional = AccountCredential(AccountProviderKind.DOUBAO, "website-session", null, null, deviceId, null, webCookie = requireCookie(cookie))
-        val data = manager.readJson(request(manager, provisional, ACCOUNT)).obj("data")
-            ?: throw AccountProviderException("login_required", "Doubao account identity is missing", 401)
-        val uid = (data.text("user_id_str") ?: data.text("user_id"))?.takeIf { it.matches(Regex("[1-9][0-9]{5,24}")) }
-        if (uid == null || data.text("error_code")?.let { it != "0" } == true || data.text("is_visitor_account") in setOf("true", "1")) {
-            throw AccountProviderException("login_required", "Sign in to a nonvisitor Doubao account", 401)
+    // Only these locally generated codes may cross the login IPC boundary.
+    fun loginFailureCode(value: String?): String? = value?.takeIf {
+        it.length <= 64 && it.matches(Regex("doubao_(cookie_invalid|(identity|catalog)_(invalid|empty|network|http_[345][0-9]{2}))"))
+    }
+
+    private fun <T> loginStage(stage: String, block: () -> T): T = try {
+        block()
+    } catch (failure: java.io.IOException) {
+        val error = failure as? AccountProviderException
+        val reason = when {
+            error == null -> "network"
+            error.errorCode.matches(Regex("doubao_http_[345][0-9]{2}")) -> error.errorCode.removePrefix("doubao_")
+            error.errorCode == "redirect_rejected" && error.httpStatus in 300..399 -> "http_${error.httpStatus}"
+            error.errorCode == "empty_catalog" -> "empty"
+            else -> "invalid"
         }
-        val credential = AccountCredential(AccountProviderKind.DOUBAO, "website-session", null, null, deviceId, uid, webCookie = cookie)
-        if (catalog(manager, credential).isEmpty()) throw AccountProviderException("empty_catalog", "Doubao returned no usable chat models")
+        throw AccountProviderException("doubao_${stage}_$reason", "Doubao $stage validation failed", error?.httpStatus ?: 502)
+    }
+
+    fun exchange(manager: AccountProviderManager, cookie: String, deviceId: String): AccountCredential {
+        val session = try { requireCookie(cookie) } catch (_: AccountProviderException) {
+            throw AccountProviderException("doubao_cookie_invalid", "Invalid Doubao website session", 400)
+        }
+        val provisional = AccountCredential(AccountProviderKind.DOUBAO, "website-session", null, null, deviceId, null, webCookie = session)
+        val uid = loginStage("identity") {
+            val data = manager.readJson(request(manager, provisional, ACCOUNT)).obj("data")
+                ?: throw AccountProviderException("login_required", "Doubao account identity is missing", 401)
+            val identity = (data.text("user_id_str") ?: data.text("user_id"))?.takeIf { it.matches(Regex("[1-9][0-9]{5,24}")) }
+            if (identity == null || data.text("error_code")?.let { it != "0" } == true || data.text("is_visitor_account") in setOf("true", "1")) {
+                throw AccountProviderException("login_required", "Sign in to a nonvisitor Doubao account", 401)
+            }
+            identity
+        }
+        val credential = AccountCredential(AccountProviderKind.DOUBAO, "website-session", null, null, deviceId, uid, webCookie = session)
+        loginStage("catalog") {
+            if (catalog(manager, credential).isEmpty()) throw AccountProviderException("empty_catalog", "Doubao returned no usable chat models")
+        }
         return credential
     }
 

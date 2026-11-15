@@ -4155,6 +4155,15 @@
     <string name="team_task_editor_title">逐项任务</string>
     <string name="team_task_editor_hint">阶段内任务并行；可单独设置成员、指令和可写路径，任务标识保持不变。</string>
     <string name="team_task_agent">执行成员</string>
+    <string name="team_task_role_choose">选择执行角色</string>
+    <string name="team_task_role_unavailable">%1$s（角色不可用，保留原配置）</string>
+    <string name="team_task_role_selector">按部门 / 关键词选角：%1$s / %2$s（选择角色后替换）</string>
+    <string name="team_task_expand">编辑</string>
+    <string name="team_task_collapse">收起</string>
+    <string name="team_task_advanced">高级：可写路径</string>
+    <string name="team_task_summary">%1$s · %2$s</string>
+    <string name="team_topology_show">展开拓扑图</string>
+    <string name="team_topology_hide">收起拓扑图</string>
     <string name="team_task_prompt">任务指令</string>
     <string name="team_task_write_paths">可写路径（逗号分隔）</string>
     <string name="team_task_add">新增任务</string>
@@ -4163,6 +4172,16 @@
     <string name="team_advanced_options">高级选项</string>
     <string name="team_routes_advanced_hint">路由描述任务交接与审核驳回，不是条件判断。留空按阶段顺序执行；仅在明确需要自定义流转时修改。</string>
     <string name="account_login_retry_validation">验证未完成，账号尚未保存。登录页面已保留，请检查网络或确认已登录后再次点击完成。</string>
+    <string name="account_login_stage_cookie">会话读取</string>
+    <string name="account_login_stage_identity">账号身份校验</string>
+    <string name="account_login_stage_catalog">模型目录校验</string>
+    <string name="account_login_http_401">登录会话未获认可，请在官方页面重新登录（HTTP 401）</string>
+    <string name="account_login_http_403">服务拒绝访问，请在官方页面检查访问权限或完成页面要求的验证（HTTP 403）</string>
+    <string name="account_login_http_failed">服务返回 HTTP %1$s，请稍后重试</string>
+    <string name="account_login_network_failed">网络请求未完成，请检查网络后重试</string>
+    <string name="account_login_catalog_empty">未取得可用文本模型，请检查网页账号的模型权限</string>
+    <string name="account_login_stage_invalid">未取得有效结果，请确认已登录本人账号后重试</string>
+    <string name="account_login_stage_failure">%1$s：%2$s（%3$s）。账号尚未保存，页面已保留；处理后再次点击完成。</string>
     <string name="account_login_launch_failed">登录窗口未能启动，请重试。原有账号未更改。</string>
     <string name="account_catalog_failed">账号未返回可用模型目录，未使用旧目录或假数据。请确认账号权限后重试。</string>
     <string name="account_response_failed">账号服务返回了无法识别的当前数据，未使用旧数据替代。</string>
@@ -4170,4 +4189,7 @@
     <string name="account_network_failed">账号请求未完成，请检查网络后重试。未提交成功的登录不会显示为已保存。</string>
     <string name="account_storage_failed">本机账号凭据保存失败。请检查存储空间与设备安全状态，当前登录未保存。</string>
     <string name="account_redirect_failed">账号接口返回了重定向，当前请求未继续。请重新进入官方登录页完成授权。</string>
+    <string name="provider_account_deepseek">DeepSeek 网页账号</string>
+    <string name="provider_account_deepseek_text_only">网页文本模式：支持对话、思考与搜索开关；不支持工具、附件、余额或签到。模式列表不代表实时模型目录；账号实测尚未验证。</string>
+    <string name="account_login_missing_web_token">未读取到网页登录凭据，请完成本人登录后重试</string>
 </resources>

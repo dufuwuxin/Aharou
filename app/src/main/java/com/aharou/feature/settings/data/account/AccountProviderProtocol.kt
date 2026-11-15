@@ -9,9 +9,9 @@ import java.util.Base64
 
 enum class AccountProviderKind(val wireId: String) {
     TRAE("trae"), WORKBUDDY("workbuddy"), RACCOON("raccoon"),
-    TRAE_GLOBAL("trae-global"), WORKBUDDY_GLOBAL("workbuddy-global"), LOOMY("loomy"), DUMATE("dumate"), DOUBAO("doubao");
+    TRAE_GLOBAL("trae-global"), WORKBUDDY_GLOBAL("workbuddy-global"), LOOMY("loomy"), DUMATE("dumate"), DOUBAO("doubao"), DEEPSEEK("deepseek");
 
-    val isWebSession: Boolean get() = this == DUMATE || this == DOUBAO
+    val isWebSession: Boolean get() = this == DUMATE || this == DOUBAO || this == DEEPSEEK
 
     val isTrae: Boolean get() = this == TRAE || this == TRAE_GLOBAL
     val isWorkBuddy: Boolean get() = this == WORKBUDDY || this == WORKBUDDY_GLOBAL
@@ -44,12 +44,14 @@ internal data class AccountEndpoints(
     val traeGlobal: String = "https://trae-api-sg.mchost.guru",
     val traeGlobalAccount: String = "https://api.trae.ai",
     val traeGlobalUsage: String = "https://ug-normal.trae.ai",
+    val traeOAuth: String = "https://api.trae.com.cn",
     val loomy: String = "https://loomyad.xunfei.cn",
 ) {
     fun workbuddy(kind: AccountProviderKind): String = if (kind == AccountProviderKind.WORKBUDDY_GLOBAL) workbuddyGlobal else workbuddy
     fun billing(kind: AccountProviderKind): String = if (kind == AccountProviderKind.WORKBUDDY_GLOBAL) workbuddyGlobal else workbuddyBilling
     fun trae(kind: AccountProviderKind): String = if (kind == AccountProviderKind.TRAE_GLOBAL) traeGlobal else trae
     fun traeAccount(kind: AccountProviderKind): String = if (kind == AccountProviderKind.TRAE_GLOBAL) traeGlobalAccount else traeAccount
+    fun traeOAuth(kind: AccountProviderKind): String = if (kind == AccountProviderKind.TRAE_GLOBAL) traeGlobalAccount else traeOAuth
     fun usage(kind: AccountProviderKind): String = if (kind == AccountProviderKind.TRAE_GLOBAL) traeGlobalUsage else traeAccount
 }
 
@@ -126,7 +128,7 @@ internal object AccountProviderProtocol {
         val data = payload.obj("data") ?: payload
         return when (kind) {
             AccountProviderKind.RACCOON -> (number(data.get("total_chargeable_points")) ?: number(data.get("available_points")))?.let { "$it points" }
-            AccountProviderKind.DUMATE, AccountProviderKind.DOUBAO -> null
+            AccountProviderKind.DUMATE, AccountProviderKind.DOUBAO, AccountProviderKind.DEEPSEEK -> null
             AccountProviderKind.LOOMY -> LoomyAccountProtocol.balance(payload)
             AccountProviderKind.TRAE, AccountProviderKind.TRAE_GLOBAL -> {
                 TraeAccountProtocol.balance(payload)?.let { return it }

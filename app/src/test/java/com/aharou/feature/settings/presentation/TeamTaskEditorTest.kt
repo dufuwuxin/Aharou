@@ -27,6 +27,32 @@ class TeamTaskEditorTest {
         assertEquals(listOf("shared final", "independent"), result.tasks.map { it.prompt })
         assertEquals(duplicated.tasks.map { it.id }, result.tasks.map { it.id })
     }
+    @Test fun historicalRoleAndDepartmentSelectorRoundTripWithoutReplacement() {
+        val missing = AgentTeamTaskForm(agent = "retired", prompt = "legacy", id = "missing", writePaths = "src/old.kt")
+        val selector = AgentTeamTaskForm(department = "engineering", agentQuery = "review", prompt = "review",
+            id = "selector", writePaths = "src/review.kt", interfaces = listOf(TeamInterface("retired", "check")))
+        val form = AgentTeamForm(name = "Legacy", scope = AgentDefinitionScope.PROJECT,
+            admins = listOf(MAIN_AGENT_ADMIN), members = listOf(TeamMemberRef("retired")),
+            stages = listOf(taskEditorStageForSave(AgentTeamStageForm(title = "Legacy", id = "stage",
+                members = listOf("retired"), tasks = listOf(missing, selector)))))
+        val access = io.mockk.mockk<com.aharou.feature.workspace.domain.FileAccessProvider>(relaxed = true)
+        val serialized = mutableMapOf<String, String>()
+        io.mockk.every { access.isDirectory(any()) } returns true
+        io.mockk.every { access.listFiles(any()) } returns emptyList()
+        io.mockk.every { access.isFile(any()) } answers { serialized.containsKey(firstArg()) }
+        io.mockk.every { access.writeFile(any(), any(), any(), any()) } answers { serialized[firstArg()] = arg(1) }
+        assertNull(AgentTeamRepository(access).save(form))
+        val directory = Files.createTempDirectory("legacy-task-editor").toFile()
+        try {
+            val file = java.io.File(directory, "legacy.md")
+            file.writeText(serialized.values.single())
+            val loaded = AgentTeamParser.parse(TestFileAccessProvider(), file.path)!!.toForm(AgentDefinitionScope.PROJECT)
+            assertEquals(form.stages.single().tasks, loaded.stages.single().tasks)
+            assertEquals(form.admins, loaded.admins)
+            assertEquals(form.scope, loaded.scope)
+        } finally { directory.deleteRecursively() }
+    }
+
     @Test fun editedAndReorderedTasksRoundTripWithoutLosingIdsInterfacesOrRoutes() {
         val first = AgentTeamTaskForm(id = "first", agent = "worker", prompt = "first prompt", writePaths = "src/a.kt",
             interfaces = listOf(TeamInterface("reviewer", "contract")))

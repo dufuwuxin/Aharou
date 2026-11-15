@@ -139,13 +139,109 @@ class TeamEditorComposeTest {
         assertTrue(saves.isEmpty())
     }
 
-    private fun open(initial: AgentTeam? = null) {
+    @Test fun selectingRealRoleAddsRosterAndPreservesSavedTaskAndRoutes() {
+        val initial = fixture().let { team -> team.copy(stages = team.stages.mapIndexed { index, stage ->
+            if (index == 0) stage.copy(tasks = stage.tasks.map { it.copy(
+                writePaths = listOf("src/a.kt"), interfaces = listOf(TeamInterface("coordinator", "contract"))
+            ) }) else stage
+        }) }
+        open(initial, available = listOf("worker", "coordinator", "designer"), scope = AgentDefinitionScope.PROJECT)
+        text(R.string.team_flow_organization_legend).assertDoesNotExist()
+        stageCard("Build").performScrollTo().performClick()
+        compose.onNodeWithTag("team_task_task-a").performScrollTo().performClick()
+        field(R.string.team_task_write_paths).assertDoesNotExist()
+        compose.onNodeWithTag("team_task_advanced_task-a").performScrollTo().performClick()
+        field(R.string.team_task_write_paths).performScrollTo().assertTextContains("src/a.kt")
+        compose.onNodeWithTag("team_task_advanced_task-a").performScrollTo().performClick()
+        field(R.string.team_task_write_paths).assertDoesNotExist()
+        compose.onNodeWithTag("team_task_role_task-a").performScrollTo().performClick()
+        compose.onNodeWithTag("team_role_option_designer").performScrollTo().performClick()
+        compose.onNodeWithTag("team_member_picker_confirm").performScrollTo().performClick()
+        save()
+        val saved = saves.single()
+        val task = saved.stages.first().tasks.single()
+        assertEquals("designer", task.agent)
+        assertEquals("task-a", task.id)
+        assertEquals("Do Build", task.prompt)
+        assertEquals("src/a.kt", task.writePaths)
+        assertEquals(initial.stages.first().tasks.single().interfaces, task.interfaces)
+        assertEquals(listOf("designer"), saved.stages.first().members)
+        assertEquals(listOf("worker", "coordinator", "designer"), saved.members.map { it.name })
+        assertEquals(initial.admins, saved.admins)
+        assertEquals(initial.routes, saved.routes)
+        assertEquals(AgentDefinitionScope.PROJECT, saved.scope)
+        assertNull(TeamFlowGraph.validate(asTeam(saved)))
+    }
+
+    @Test fun missingAndSelectorTasksSurviveUnrelatedClicksAndSave() {
+        val missing = TeamTask(agent = "retired", prompt = "keep missing", id = "missing",
+            writePaths = listOf("src/legacy.kt"), interfaces = listOf(TeamInterface("worker", "legacy")))
+        val selector = TeamTask(department = "engineering", agentQuery = "review", prompt = "keep selector",
+            id = "selector", writePaths = listOf("src/review.kt"), interfaces = listOf(TeamInterface("worker", "review")))
+        open(AgentTeam("legacy", "", listOf(TeamStage("Legacy", listOf(missing, selector), id = "legacy-stage")),
+            "", admins = listOf(MAIN_AGENT_ADMIN), members = listOf(TeamMemberRef("retired"), TeamMemberRef("worker"))))
+        stageCard("Legacy").performScrollTo().performClick()
+        // Adding another stage member must not delete historical tasks.
+        compose.onAllNodes(hasText("worker") and isSelectable()).onLast().performScrollTo().performClick()
+        compose.onNodeWithTag("team_task_missing").performScrollTo().assertTextContains(
+            compose.activity.getString(R.string.team_task_role_unavailable, "retired"))
+        compose.onNodeWithTag("team_task_selector").performScrollTo().performClick()
+        compose.onNodeWithTag("team_task_role_selector").performScrollTo().performClick()
+        compose.onNodeWithTag("team_role_option_retired").assertDoesNotExist()
+        compose.onNodeWithTag("team_role_option_$MAIN_AGENT_ADMIN").assertDoesNotExist()
+        text(R.string.common_cancel).performScrollTo().performClick()
+        save()
+        val form = saves.single()
+        val tasks = form.stages.single().tasks
+        assertEquals(listOf("missing", "selector"), tasks.map { it.id })
+        assertEquals("retired", tasks[0].agent)
+        assertEquals("engineering", tasks[1].department)
+        assertEquals("review", tasks[1].agentQuery)
+        assertEquals("", tasks[1].agent)
+        assertEquals(listOf("keep missing", "keep selector"), tasks.map { it.prompt })
+        assertEquals(listOf("src/legacy.kt", "src/review.kt"), tasks.map { it.writePaths })
+        assertEquals(listOf(missing.interfaces, selector.interfaces), tasks.map { it.interfaces })
+        assertEquals(listOf(MAIN_AGENT_ADMIN), form.admins)
+    }
+
+    @Test fun selectorOnlyTeamCanStillBeSavedWithoutPickingNamedRole() {
+        open(AgentTeam("selector-team", "", listOf(TeamStage("Search", listOf(
+            TeamTask(department = "engineering", agentQuery = "review", prompt = "Review", id = "search-task")
+        ), id = "search-stage")), "", admins = listOf(MAIN_AGENT_ADMIN)))
+        save()
+        val form = saves.single()
+        assertTrue(form.members.isEmpty())
+        assertEquals("engineering", form.stages.single().tasks.single().department)
+        assertEquals("review", form.stages.single().tasks.single().agentQuery)
+        assertEquals(listOf(MAIN_AGENT_ADMIN), form.admins)
+    }
+
+    @Test fun foldedTaskButtonsReorderAndDeleteWithoutLosingRemainingRoutes() {
+        val initial = fixture().let { team -> team.copy(stages = team.stages.mapIndexed { index, stage ->
+            if (index == 0) stage.copy(tasks = stage.tasks + TeamTask(agent = "coordinator", prompt = "Extra", id = "extra")) else stage
+        }) }
+        open(initial)
+        stageCard("Build").performScrollTo().performClick()
+        compose.onNodeWithTag("team_task_extra").performScrollTo().performClick()
+        compose.onNodeWithTag("team_task_up_extra").performScrollTo().performClick()
+        save()
+        assertEquals(listOf("extra", "task-a"), saves.last().stages.first().tasks.map { it.id })
+        assertEquals(initial.routes, saves.last().routes)
+        assertEquals(AgentDefinitionScope.GLOBAL, saves.last().scope)
+        compose.onNodeWithTag("team_task_delete_extra").performScrollTo().performClick()
+        save()
+        assertEquals(listOf("task-a"), saves.last().stages.first().tasks.map { it.id })
+        assertEquals(initial.routes, saves.last().routes)
+        assertNull(TeamFlowGraph.validate(asTeam(saves.last())))
+    }
+
+    private fun open(initial: AgentTeam? = null, available: List<String> = listOf("worker", "coordinator"), scope: AgentDefinitionScope = AgentDefinitionScope.GLOBAL) {
         val visible = mutableStateOf(true)
         compose.setContent {
             MaterialTheme {
                 if (visible.value) TeamEditorSheet(
-                    initial = initial?.let { AgentTeamEntry(it, AgentDefinitionScope.GLOBAL) },
-                    availableMembers = listOf("worker", "coordinator"),
+                    initial = initial?.let { AgentTeamEntry(it, scope) },
+                    availableMembers = available,
                     saveState = AgentTeamSaveState.Idle,
                     onSave = { form, _ -> saves += form },
                     onSaved = {},

@@ -5,7 +5,6 @@ import com.google.gson.JsonParser
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.async
 import okhttp3.ConnectionSpec
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -46,7 +45,10 @@ class DoubaoAccountProtocolTest {
                 assertEquals("fixture-csrf", request.header("x-tt-passport-csrf-token"))
                 assertEquals(if (request.url.encodedPath.startsWith("/passport/")) "497858" else "1044603", request.url.queryParameter("aid"))
                 val target = server.url(request.url.encodedPath + "?" + request.url.encodedQuery)
-                chain.proceed(request.newBuilder().url(target).build()).also { afterResponse(request.url.encodedPath) }
+                chain.proceed(request.newBuilder().url(target).build()).also { response ->
+                    try { afterResponse(request.url.encodedPath) }
+                    catch (error: IOException) { response.close(); throw error }
+                }
             }.build())
     private suspend fun login(manager: AccountProviderManager, server: MockWebServer) {
         server.enqueue(MockResponse().setBody(user)); server.enqueue(MockResponse().setBody(catalog))
@@ -174,10 +176,18 @@ class DoubaoAccountProtocolTest {
                     if (error == null) {
                         assertTrue(vault.values.isNotEmpty())
                         outcomes.offer("saved")
-                    } else outcomes.offer("retry")
+                    } else outcomes.offer(error)
                 })
-                assertEquals("retry", kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { outcomes.poll(5, TimeUnit.SECONDS) })
+                assertEquals("doubao_identity_http_503", kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { outcomes.poll(5, TimeUnit.SECONDS) })
                 assertFalse(manager.isLoggedIn("provider"))
+                assertFalse(pending.closed.get())
+                server.enqueue(MockResponse().setBody(user))
+                server.enqueue(MockResponse().setResponseCode(403).setBody("private-response-marker"))
+                assertTrue(manager.acceptWebLogin(pending, pending.url, pending.id, pending.state, cookie) { error ->
+                    outcomes.offer(error ?: "unexpected-success")
+                })
+                assertEquals("doubao_catalog_http_403", kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { outcomes.poll(5, TimeUnit.SECONDS) })
+                assertTrue(vault.values.isEmpty())
                 assertFalse(pending.closed.get())
                 server.enqueue(MockResponse().setBody(user)); server.enqueue(MockResponse().setBody(catalog))
                 assertTrue(manager.acceptWebLogin(pending, pending.url, pending.id, pending.state, cookie) { error ->
@@ -245,9 +255,82 @@ class DoubaoAccountProtocolTest {
             server.enqueue(MockResponse().setResponseCode(403).setBody("private challenge content"))
             assertTrue(manager.acceptWebLogin(challenged, challenged.url, challenged.id, challenged.state, cookie))
             try { manager.awaitLogin(challenged); fail("Challenge accepted") } catch (error: AccountProviderException) {
-                assertEquals("login_required", error.errorCode); assertFalse(error.message!!.contains("private challenge content"))
+                assertEquals("doubao_identity_http_403", error.errorCode)
+                assertEquals(403, error.httpStatus)
+                assertFalse(error.message!!.contains("private challenge content"))
             }
             assertEquals(5, server.requestCount)
+        }
+    }
+
+    @Test fun loginFailuresPreserveStageAndHttpStatusWithoutPersistingOrLeakingBodies() = runBlocking {
+        MockWebServer().use { server ->
+            val vault = Vault()
+            val manager = manager(server, vault)
+            for (stage in listOf("identity", "catalog")) {
+                for (status in listOf(302, 401, 403, 503)) {
+                    val pending = manager.beginLogin("provider", kind)
+                    if (stage == "catalog") server.enqueue(MockResponse().setBody(user))
+                    server.enqueue(MockResponse().setResponseCode(status)
+                        .setHeader("Location", "https://untrusted.example/login")
+                        .setBody("private-response-marker"))
+                    val before = server.requestCount
+                    assertTrue(manager.acceptWebLogin(pending, pending.url, pending.id, pending.state, cookie))
+                    try {
+                        manager.awaitLogin(pending)
+                        fail("HTTP failure accepted")
+                    } catch (error: AccountProviderException) {
+                        assertEquals("doubao_${stage}_http_$status", error.errorCode)
+                        assertEquals(status, error.httpStatus)
+                        assertEquals(error.errorCode, DoubaoAccountProtocol.loginFailureCode(error.errorCode))
+                        assertFalse(error.message.orEmpty().contains("private-response-marker"))
+                        assertFalse(error.message.orEmpty().contains(cookie))
+                    }
+                    assertEquals(if (stage == "catalog") 2 else 1, server.requestCount - before)
+                    assertTrue(vault.values.isEmpty())
+                    assertFalse(manager.isLoggedIn("provider"))
+                }
+            }
+            for ((body, expected) in listOf(
+                """{"code":0,"data":{}}""" to "doubao_identity_invalid",
+                """{"code":0,"data":{"user_id_str":"123456789","is_visitor_account":true}}""" to "doubao_identity_invalid",
+                "not-json" to "doubao_identity_invalid",
+            )) {
+                val pending = manager.beginLogin("provider", kind)
+                server.enqueue(MockResponse().setBody(body))
+                assertTrue(manager.acceptWebLogin(pending, pending.url, pending.id, pending.state, cookie))
+                try { manager.awaitLogin(pending); fail("Invalid identity accepted") }
+                catch (error: AccountProviderException) { assertEquals(expected, error.errorCode) }
+                assertTrue(vault.values.isEmpty())
+            }
+            val pending = manager.beginLogin("provider", kind)
+            server.enqueue(MockResponse().setBody(user))
+            server.enqueue(MockResponse().setBody("""{"code":0,"data":{"entry_list":[]}}"""))
+            assertTrue(manager.acceptWebLogin(pending, pending.url, pending.id, pending.state, cookie))
+            try { manager.awaitLogin(pending); fail("Empty directory accepted") }
+            catch (error: AccountProviderException) { assertEquals("doubao_catalog_empty", error.errorCode) }
+            assertTrue(vault.values.isEmpty())
+        }
+    }
+
+    @Test fun loginTransportFailureNamesTheStageWithoutExposingExceptionText() = runBlocking {
+        for ((stage, path) in listOf("identity" to DoubaoAccountProtocol.ACCOUNT, "catalog" to DoubaoAccountProtocol.CATALOG)) {
+            MockWebServer().use { server ->
+                val vault = Vault()
+                val manager = manager(server, vault) { actualPath ->
+                    if (actualPath == path) throw IOException("private-network-marker")
+                }
+                server.enqueue(MockResponse().setBody(user))
+                if (stage == "catalog") server.enqueue(MockResponse().setBody(catalog))
+                val pending = manager.beginLogin("provider", kind)
+                assertTrue(manager.acceptWebLogin(pending, pending.url, pending.id, pending.state, cookie))
+                try { manager.awaitLogin(pending); fail("Transport failure accepted") }
+                catch (error: AccountProviderException) {
+                    assertEquals("doubao_${stage}_network", error.errorCode)
+                    assertFalse(error.message.orEmpty().contains("private-network-marker"))
+                }
+                assertTrue(vault.values.isEmpty())
+            }
         }
     }
 

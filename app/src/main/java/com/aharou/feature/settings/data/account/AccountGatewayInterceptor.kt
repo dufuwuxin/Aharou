@@ -69,6 +69,8 @@ class AccountGatewayInterceptor internal constructor(private val manager: Accoun
                 }
                 if (completed != null) return completed
             } catch (error: AccountProviderException) {
+                // A website WAF refusal must not trigger account cycling to evade the block.
+                if (kind == AccountProviderKind.DEEPSEEK && error.httpStatus == 403) throw error
                 if (error.httpStatus !in setOf(401, 402, 403, 429)) throw error
                 failure = error
             } catch (error: IOException) {
@@ -83,6 +85,14 @@ class AccountGatewayInterceptor internal constructor(private val manager: Accoun
 
     private fun complete(request: Request, id: String, kind: AccountProviderKind, body: JsonObject, model: AccountProviderModel, streaming: Boolean): Response {
         val modelId = model.id
+        if (kind == AccountProviderKind.DEEPSEEK) {
+            val upstream = DeepSeekAccountProtocol.complete(manager, id, body, model.id)
+            try {
+                val raw = upstream.body ?: throw AccountProviderException("empty_response", "DeepSeek returned no response")
+                val converted = DeepSeekAccountSse.body(raw, model.id)
+                return response(request, if (streaming) converted else aggregate(converted, model.id))
+            } catch (error: Exception) { upstream.close(); throw error }
+        }
         val upstreamBody = when (kind) {
             AccountProviderKind.DOUBAO -> DoubaoAccountProtocol.completion(body, model)
             AccountProviderKind.DUMATE -> body.deepCopy()
@@ -92,6 +102,7 @@ class AccountGatewayInterceptor internal constructor(private val manager: Accoun
             else -> body.deepCopy().apply { remove("reasoning_effort") }
         }
         val upstreamUrl = when (kind) {
+            AccountProviderKind.DEEPSEEK -> throw AccountProviderException("invalid_gateway", "Use DeepSeek native completion", 400)
             AccountProviderKind.DOUBAO -> DoubaoAccountProtocol.WEB + DoubaoAccountProtocol.CHAT
             AccountProviderKind.DUMATE -> DumateAccountProtocol.GATEWAY + "/chat/completions"
             AccountProviderKind.LOOMY -> manager.endpoints.loomy + "/api/v1/chat/completions"

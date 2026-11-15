@@ -276,6 +276,7 @@ class AccountProviderManager internal constructor(
 
     internal fun parseCredential(kind: AccountProviderKind, response: JsonObject, previous: AccountCredential? = null, deviceId: String? = null): AccountCredential {
         AccountProviderProtocol.check(response)
+        if (kind == AccountProviderKind.DEEPSEEK) return DeepSeekAccountProtocol.restore(response)
         if (kind == AccountProviderKind.DOUBAO) return DoubaoAccountProtocol.restore(response)
         if (kind == AccountProviderKind.DUMATE) return DumateAccountProtocol.restore(response)
         val value = response.obj("Result") ?: response.obj("result") ?: response.obj("data") ?: response
@@ -290,6 +291,7 @@ class AccountProviderManager internal constructor(
     }
 
     internal fun headers(credential: AccountCredential): Map<String, String> = when (credential.kind) {
+        AccountProviderKind.DEEPSEEK -> throw AccountProviderException("invalid_gateway", "DeepSeek credentials require fixed native routes", 400)
         AccountProviderKind.DOUBAO -> throw AccountProviderException("invalid_gateway", "Doubao credentials require fixed native routes", 400)
         AccountProviderKind.DUMATE -> mapOf("Authorization" to "Bearer ${credential.accessToken}", "X-Dumate-Client-Type" to "web", "X-Dumate-Account-Id" to "global")
         AccountProviderKind.LOOMY -> LoomyAccountProtocol.headers(credential.accessToken)
@@ -312,12 +314,18 @@ class AccountProviderManager internal constructor(
         )
     }
 
-    internal fun request(url: String, method: String = "GET", body: JsonObject? = null, headers: Map<String, String> = emptyMap()): Response {
+    internal fun checkRequestActive() {
+        operations.get()?.check()
+        if (parentCalls.get()?.isCanceled() == true) throw java.io.IOException("Account request cancelled")
+        accountRevision.get()?.let { requireAccountVersion(it.first, it.second) }
+    }
+
+    internal fun request(url: String, method: String = "GET", body: JsonObject? = null, headers: Map<String, String> = emptyMap(), streaming: Boolean = false): Response {
         operations.get()?.check()
         val builder = Request.Builder().url(url).header("User-Agent", "Aharou-AccountProvider/1.0").header("Accept", "application/json")
         headers.forEach { (name, value) -> builder.header(name, value) }
         builder.method(method, if (method == "GET") null else (body ?: JsonObject()).toString().toRequestBody(JSON))
-        val selectedClient = if (body?.get("stream")?.toString() == "true") streamingClient else client
+        val selectedClient = if (streaming || body?.get("stream")?.toString() == "true") streamingClient else client
         val call = selectedClient.newCall(builder.build())
         val operation = operations.get()
         val parent = parentCalls.get()
@@ -342,7 +350,7 @@ class AccountProviderManager internal constructor(
             val response = call.execute()
             if (response.code in 300..399) {
                 response.close()
-                throw AccountProviderException("redirect_rejected", "Account provider redirects are not permitted")
+                throw AccountProviderException("redirect_rejected", "Account provider redirects are not permitted", response.code)
             }
             val raw = response.body ?: run { finish(); return response }
             val source = object : ForwardingSource(raw.source()) {
@@ -400,14 +408,17 @@ class AccountProviderManager internal constructor(
         val url: String
         val refreshHeaders = headers(old).toMutableMap()
         when (kind) {
+            AccountProviderKind.DEEPSEEK -> throw AccountProviderException("login_required", "Sign in to DeepSeek again", 401)
             AccountProviderKind.DOUBAO -> throw AccountProviderException("login_required", "Sign in to Doubao again", 401)
             AccountProviderKind.DUMATE -> throw AccountProviderException("login_required", "Sign in to Dumate again", 401)
             AccountProviderKind.LOOMY -> throw AccountProviderException("login_required", "Import a new Loomy session", 401)
             AccountProviderKind.RACCOON -> { url = endpoints.raccoon + "/api/electron/auth/v1/refresh"; body.addProperty("refresh_token", refreshToken) }
             AccountProviderKind.WORKBUDDY, AccountProviderKind.WORKBUDDY_GLOBAL -> { url = endpoints.workbuddy(kind) + "/v2/plugin/auth/token/refresh"; refreshHeaders["X-Refresh-Token"] = refreshToken }
             AccountProviderKind.TRAE, AccountProviderKind.TRAE_GLOBAL -> {
-                url = endpoints.traeAccount(kind) + "/cloudide/api/v3/trae/oauth/ExchangeToken"
-                body.addProperty("ClientID", traeClientId(kind)); body.addProperty("RefreshToken", refreshToken); body.addProperty("ClientSecret", "-"); body.addProperty("UserID", "")
+                val solo = old.domain == TraeAccountProtocol.SOLO_DOMAIN
+                url = (if (solo) endpoints.traeOAuth(kind) else endpoints.traeAccount(kind)) + "/cloudide/api/v3/trae/oauth/ExchangeToken"
+                if (solo) { refreshHeaders.clear(); refreshHeaders.putAll(TraeAccountProtocol.oauthHeaders) }
+                body.addProperty("ClientID", if (solo) TraeAccountProtocol.SOLO_CLIENT_ID else traeClientId(kind)); body.addProperty("RefreshToken", refreshToken); body.addProperty("ClientSecret", "-"); body.addProperty("UserID", "")
             }
         }
         val next = parseCredential(kind, readJson(request(url, "POST", body, refreshHeaders)), old)
@@ -442,8 +453,10 @@ class AccountProviderManager internal constructor(
     }
 
     internal fun catalogForAccount(id: String, kind: AccountProviderKind): List<AccountProviderModel> {
+        if (kind == AccountProviderKind.DEEPSEEK) { credential(id, kind); return DeepSeekAccountProtocol.modes() }
         if (kind == AccountProviderKind.DOUBAO) return DoubaoAccountProtocol.models(readJson(authorized(id, kind, DoubaoAccountProtocol.WEB + DoubaoAccountProtocol.CATALOG, "POST", JsonObject().apply { addProperty("language_code", "zh"); addProperty("bot_id", "7338286299411103781") })))
         val (url, method, body) = when (kind) {
+            AccountProviderKind.DEEPSEEK -> return DeepSeekAccountProtocol.modes()
             AccountProviderKind.DOUBAO -> throw AccountProviderException("invalid_gateway", "Use Doubao native catalog", 400)
             AccountProviderKind.DUMATE -> Triple(DumateAccountProtocol.GATEWAY + "/models", "GET", null)
             AccountProviderKind.LOOMY -> Triple(endpoints.loomy + "/api/v1/models", "GET", null)
@@ -484,6 +497,7 @@ class AccountProviderManager internal constructor(
             directory.models, null, System.currentTimeMillis(), DumateAccountProtocol.BALANCE_UNSUPPORTED, directory.issues,
         )
         val (url, method) = when (kind) {
+            AccountProviderKind.DEEPSEEK -> throw AccountProviderException("unsupported_balance", "DeepSeek balance is not supported")
             AccountProviderKind.DOUBAO -> throw AccountProviderException("unsupported_balance", "Doubao balance is not supported")
             AccountProviderKind.DUMATE -> throw AccountProviderException("unsupported_balance", "Dumate balance is not supported")
             AccountProviderKind.LOOMY -> endpoints.loomy + "/api/v1/points/records?pageNo=1&pageSize=20&recordType=all" to "GET"

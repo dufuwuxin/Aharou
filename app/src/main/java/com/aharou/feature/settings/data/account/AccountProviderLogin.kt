@@ -36,6 +36,7 @@ class AccountLogin internal constructor(
         schedule(object : java.util.TimerTask() { override fun run() { close() } }, (expiresAt - System.currentTimeMillis()).coerceAtLeast(1L))
     } else null
     @Volatile internal var code: String? = null
+    @Volatile internal var traeTokens: TraeAccountProtocol.LoginTokens? = null
     private var webCookie: String? = null
     @Volatile internal var validationResult: ((String?) -> Unit)? = null
     internal val saved = AtomicBoolean(false)
@@ -52,8 +53,8 @@ class AccountLogin internal constructor(
 
     @Synchronized internal fun acceptWebCookie(origin: String, loginId: String, loginState: String, cookie: String, now: Long): Boolean {
         if (!kind.isWebSession || closed.get() || now >= expiresAt || loginId != id || loginState != state ||
-            !(if (kind == AccountProviderKind.DOUBAO) DoubaoAccountProtocol.isWebOrigin(origin) else DumateAccountProtocol.isWebOrigin(origin))) return false
-        try { if (kind == AccountProviderKind.DOUBAO) DoubaoAccountProtocol.requireCookie(cookie) else DumateAccountProtocol.requireCookie(cookie) } catch (_: AccountProviderException) { return false }
+            !(if (kind == AccountProviderKind.DEEPSEEK) DeepSeekAccountProtocol.isWebOrigin(origin) else if (kind == AccountProviderKind.DOUBAO) DoubaoAccountProtocol.isWebOrigin(origin) else DumateAccountProtocol.isWebOrigin(origin))) return false
+        try { if (kind == AccountProviderKind.DEEPSEEK) DeepSeekAccountProtocol.requireToken(cookie) else if (kind == AccountProviderKind.DOUBAO) DoubaoAccountProtocol.requireCookie(cookie) else DumateAccountProtocol.requireCookie(cookie) } catch (_: AccountProviderException) { return false }
         if (!consumed.compareAndSet(false, true)) return false
         webCookie = cookie
         return true
@@ -61,7 +62,7 @@ class AccountLogin internal constructor(
 
     @Synchronized internal fun takeWebCookie(): String? = webCookie.also { webCookie = null }
 
-    internal fun accept(value: String, now: Long): Boolean {
+    @Synchronized internal fun accept(value: String, now: Long): Boolean {
         if (closed.get() || consumed.get() || now >= expiresAt || value.length > 16384) return false
         val expected = callbackPrefix ?: return false
         return try {
@@ -74,6 +75,12 @@ class AccountLogin internal constructor(
             }
             if (pairs.map { it.first }.distinct().size != pairs.size) return false
             val params = pairs.toMap()
+            if (kind.isTrae && params.keys.any { it == "refreshToken" || it == "userJwt" }) {
+                val tokens = TraeAccountProtocol.callbackTokens(value.toHttpUrl(), state, now) ?: return false
+                if (!consumed.compareAndSet(false, true)) return false
+                traeTokens = tokens
+                return true
+            }
             val authCode = if (kind.isTrae) {
                 TraeAccountProtocol.callbackCode(value.toHttpUrl(), state) ?: return false
             } else {
@@ -88,6 +95,8 @@ class AccountLogin internal constructor(
 
     @Synchronized internal fun close() {
         closed.set(true)
+        code = null
+        traeTokens = null
         webCookie = null
         validationResult = null
         expiryTimer?.cancel()
@@ -123,6 +132,9 @@ internal object AccountProviderLogin {
         val verifier = nonce()
         val deviceId = UUID.randomUUID().toString()
         val expiresAt = System.currentTimeMillis() + 10 * 60_000
+        if (kind == AccountProviderKind.DEEPSEEK) {
+            return AccountLogin(id, kind, DeepSeekAccountProtocol.LOGIN, null, state, revision, expiresAt, verifier, deviceId)
+        }
         if (kind == AccountProviderKind.DOUBAO) {
             return AccountLogin(id, kind, DoubaoAccountProtocol.LOGIN, null, state, revision, expiresAt, verifier, DoubaoAccountProtocol.newDeviceId())
         }
@@ -156,8 +168,13 @@ internal object AccountProviderLogin {
             val callback = prefix
             val challenge = Base64.getUrlEncoder().withoutPadding().encodeToString(MessageDigest.getInstance("SHA-256").digest(verifier.toByteArray(Charsets.US_ASCII)))
             val url = (if (kind == AccountProviderKind.TRAE_GLOBAL) "https://www.trae.ai/authorization" else "https://www.trae.cn/authorization").toHttpUrl().newBuilder()
-                .addQueryParameter("login_version", "1").addQueryParameter("auth_from", "trae").addQueryParameter("login_channel", "native_ide")
-                .addQueryParameter("auth_type", "local").addQueryParameter("client_id", AccountProviderManager.traeClientId(kind))
+                .addQueryParameter("login_version", "1").addQueryParameter("auth_from", "solo").addQueryParameter("login_channel", "native_ide")
+                .addQueryParameter("plugin_version", "2.3.62834")
+                .addQueryParameter("x_device_id", deviceId).addQueryParameter("x_machine_id", deviceId)
+                .addQueryParameter("x_device_brand", "PC").addQueryParameter("x_device_type", "PC")
+                .addQueryParameter("x_os_version", if (kind == AccountProviderKind.TRAE_GLOBAL) "Windows 11 Pro" else "1.0")
+                .addQueryParameter("x_app_version", "2.3.62834").addQueryParameter("x_app_type", if (kind == AccountProviderKind.TRAE_GLOBAL) "trae" else "stable")
+                .addQueryParameter("auth_type", "local").addQueryParameter("client_id", TraeAccountProtocol.SOLO_CLIENT_ID)
                 .addQueryParameter("redirect", "0").addQueryParameter("login_trace_id", state)
                 .addQueryParameter("auth_callback_url", callback).addQueryParameter("machine_id", deviceId).addQueryParameter("device_id", deviceId)
                 .addQueryParameter("code_challenge", challenge).addQueryParameter("code_challenge_method", "S256").build()
@@ -175,7 +192,8 @@ internal object AccountProviderLogin {
                     try {
                         return manager.network {
                             manager.requireAccountVersion(login.id, login.revision)
-                            val credential = if (login.kind == AccountProviderKind.DOUBAO) DoubaoAccountProtocol.exchange(manager, cookie, login.deviceId)
+                            val credential = if (login.kind == AccountProviderKind.DEEPSEEK) DeepSeekAccountProtocol.exchange(manager, cookie, login.deviceId)
+                                else if (login.kind == AccountProviderKind.DOUBAO) DoubaoAccountProtocol.exchange(manager, cookie, login.deviceId)
                                 else DumateAccountProtocol.exchange(manager, cookie, login.deviceId).also { DumateAccountProtocol.validateDirectory(manager, it) }
                             manager.requireAccountVersion(login.id, login.revision)
                             credential
@@ -208,7 +226,12 @@ internal object AccountProviderLogin {
                     }
                 }
             } else {
-                if (login.server != null && login.code == null) manager.network { readLoopback(login) }
+                if (login.server != null && login.code == null && login.traeTokens == null) manager.network { readLoopback(login) }
+                val tokens = login.traeTokens
+                if (tokens != null) {
+                    login.server?.close()
+                    return manager.network { TraeAccountProtocol.exchangeLogin(manager, login, tokens) }
+                }
                 val code = login.code
                 if (code != null) {
                     login.server?.close()
@@ -220,7 +243,7 @@ internal object AccountProviderLogin {
                                 manager.endpoints.raccoon + "/api/web/auth/v1/login_with_authorization_code"
                             }
                             else -> {
-                                body.addProperty("ClientID", AccountProviderManager.traeClientId(login.kind))
+                                body.addProperty("ClientID", TraeAccountProtocol.SOLO_CLIENT_ID)
                                 body.addProperty("AuthCode", code)
                                 body.addProperty("CodeVerifier", login.verifier)
                                 body.addProperty("IDEVersion", "0.1.69")
@@ -229,10 +252,14 @@ internal object AccountProviderLogin {
                                     addProperty("PlatformCode", "IDE_PC"); addProperty("DeviceType", "PC"); addProperty("DeviceName", "Aharou")
                                     addProperty("ClientVersion", "0.1.69"); addProperty("DevicePublicKey", login.devicePublicKey)
                                 })
-                                manager.endpoints.traeAccount(login.kind) + "/trae/api/v3/oauth/ExchangeToken"
+                                manager.endpoints.traeOAuth(login.kind) + "/trae/api/v3/oauth/ExchangeToken"
                             }
                         }
-                        manager.parseCredential(login.kind, manager.readJson(manager.request(url, "POST", body)), deviceId = login.deviceId)
+                        val headers = if (login.kind.isTrae) TraeAccountProtocol.oauthHeaders else emptyMap()
+                        val credential = manager.parseCredential(login.kind, manager.readJson(manager.request(url, "POST", body, headers)), deviceId = login.deviceId)
+                        if (login.kind.isTrae) AccountCredential(login.kind, credential.accessToken, credential.refreshToken,
+                            credential.expiresAt, credential.deviceId, credential.userId, TraeAccountProtocol.SOLO_DOMAIN, credential.enterpriseId)
+                        else credential
                     }
                 }
             }

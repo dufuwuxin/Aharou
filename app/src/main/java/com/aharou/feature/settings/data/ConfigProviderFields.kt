@@ -299,7 +299,7 @@ class ConfigProviderFields @Inject constructor(
                 str(
                     field = "account_service",
                     name = "账号供应商",
-                    desc = "账号接入：trae / trae-global / workbuddy / workbuddy-global / raccoon / loomy / dumate / doubao。豆包仅文本聊天（历史以有界角色文本发送，非原生多轮），不支持工具/图片/云端任务，待本人登录验收；无签到/余额。度麦由用户显式完成官方网页登录（待本人验证），无签到，余额暂无支持。旧标识为国内版；Loomy由用户主动导入session，其余登录由用户在供应商页完成。",
+                    desc = "账号接入：trae / trae-global / workbuddy / workbuddy-global / raccoon / loomy / dumate / doubao / deepseek。DeepSeek网页账号为文本模式，支持思考/搜索开关，不支持工具/附件/余额/签到，待本人登录验收。豆包仅文本聊天（历史以有界角色文本发送，非原生多轮），不支持工具/图片/云端任务，待本人登录验收；无签到/余额。度麦由用户显式完成官方网页登录（待本人验证），无签到，余额暂无支持。旧标识为国内版；Loomy由用户主动导入session，其余登录由用户在供应商页完成。",
                     revertable = false,
                     read = { accounts.kind(it.baseUrl)?.wireId.orEmpty() },
                     write = { p, s ->

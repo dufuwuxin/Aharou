@@ -15,6 +15,60 @@ import java.io.EOFException
 import java.util.UUID
 
 internal object TraeAccountProtocol {
+    const val SOLO_CLIENT_ID = "en1oxy7wnw8j9n"
+    const val SOLO_DOMAIN = "trae-solo"
+    val oauthHeaders = mapOf("User-Agent" to "Trae/0.1.52", "Accept" to "application/json")
+    internal class LoginTokens(val refreshToken: String?, val accessToken: String?, val expiresAt: Long?) {
+        override fun toString(): String = "TraeLoginTokens(redacted)"
+    }
+
+    internal fun callbackTokens(uri: okhttp3.HttpUrl, state: String, now: Long): LoginTokens? {
+        if (uri.username.isNotEmpty() || uri.password.isNotEmpty() || uri.fragment != null) return null
+        if (uri.queryParameterNames.any { uri.queryParameterValues(it).size != 1 }) return null
+        val bindings = listOfNotNull(uri.queryParameter("state"), uri.queryParameter("loginTraceID"))
+        if (bindings.isEmpty() || bindings.any { it != state }) return null
+        if (uri.queryParameterNames.any { it in setOf("error", "error_code", "error_msg", "error_description", "token", "access_token", "refresh_token") }) return null
+        val rawJwt = uri.queryParameter("userJwt")
+        val jwt = if (rawJwt == null) null else try { JsonParser.parseString(rawJwt).asJsonObject } catch (_: RuntimeException) { return null }
+        val directRefresh = uri.queryParameter("refreshToken")
+        val nestedRefresh = jwt?.text("RefreshToken")
+        if (directRefresh != null && nestedRefresh != null && directRefresh != nestedRefresh) return null
+        val refresh = directRefresh ?: nestedRefresh
+        val access = jwt?.text("Token")
+        if (listOfNotNull(refresh, access).any { it.isBlank() || it.length > 8192 || it.any { char -> char.code < 32 || char.code == 127 } }) return null
+        if (refresh == null && access == null) return null
+        val rawExpiry = jwt?.text("TokenExpireAt")
+        val expiry = rawExpiry?.toLongOrNull()?.takeIf { it > 0 && it <= Long.MAX_VALUE / 1000 }?.let { if (it < 100_000_000_000L) it * 1000 else it }
+        if (rawExpiry != null && expiry == null) return null
+        if (refresh == null && (expiry == null || expiry <= now)) return null
+        return LoginTokens(refresh, access, expiry)
+    }
+
+    internal fun exchangeLogin(manager: AccountProviderManager, login: AccountLogin, tokens: LoginTokens): AccountCredential {
+        manager.requireAccountVersion(login.id, login.revision)
+        val tokenData = if (tokens.refreshToken != null) {
+            val body = JsonObject().apply {
+                addProperty("ClientID", SOLO_CLIENT_ID)
+                addProperty("RefreshToken", tokens.refreshToken)
+                addProperty("ClientSecret", "-")
+                addProperty("UserID", "")
+            }
+            manager.readJson(manager.request(manager.endpoints.traeOAuth(login.kind) + "/cloudide/api/v3/trae/oauth/ExchangeToken", "POST", body, oauthHeaders))
+        } else JsonObject().apply {
+            addProperty("Token", tokens.accessToken)
+            addProperty("TokenExpireAt", tokens.expiresAt)
+        }
+        val credential = manager.parseCredential(login.kind, tokenData, deviceId = login.deviceId)
+        manager.requireAccountVersion(login.id, login.revision)
+        val body = JsonObject().apply { addProperty("ReqSource", "IDE"); addProperty("IDEVersion", "0.1.52") }
+        val identity = manager.readJson(manager.request(manager.endpoints.traeOAuth(login.kind) + "/cloudide/api/v3/trae/GetUserInfo", "POST", body, oauthHeaders + mapOf("X-Cloudide-Token" to credential.accessToken)))
+            .let { it.obj("Result") ?: it.obj("result") ?: it }
+        val uid = identity.text("UserID") ?: throw AccountProviderException("invalid_identity", "TRAE did not return an account identity", 401)
+        manager.requireAccountVersion(login.id, login.revision)
+        return AccountCredential(login.kind, credential.accessToken, credential.refreshToken ?: tokens.refreshToken,
+            credential.expiresAt, login.deviceId, uid, SOLO_DOMAIN, identity.text("EnterpriseID"))
+    }
+
     // The official PC page returns authCodeInfo and echoes login_trace_id as loginTraceID.
     internal fun callbackCode(uri: okhttp3.HttpUrl, state: String): String? {
         if (uri.username.isNotEmpty() || uri.password.isNotEmpty() || uri.fragment != null) return null
