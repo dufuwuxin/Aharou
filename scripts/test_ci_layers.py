@@ -110,6 +110,14 @@ class CiLayersTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "multiple groups"):
             groups.verify_all(self.root, {"editor": ["Example"], "core": ["Example"]})
 
+    def test_combination_dependencies_are_handed_off_and_verified_not_assumed_cached(self):
+        text = (ROOT / ".github/workflows/ci.yml").read_text()
+        self.assertIn("name: combination-jvm-dependencies", text)
+        self.assertIn("Missing resolved JVM dependency", text)
+        self.assertIn("Combination dependency digest mismatch", text)
+        self.assertIn('"com.android.tools/r8/9.1.57"', text)
+        self.assertLess(text.index("Verify and restore combination dependency identity"), text.index("Verify built-in team evidence fixtures"))
+
     def test_workflow_dependencies_and_original_gates(self):
         text = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
         for dependency in ("foundation", "feature-tests", "combination"):

@@ -195,6 +195,36 @@ jobs:
           path: /tmp/unit.log
           retention-days: 7
           if-no-files-found: warn
+      - name: Export exact combination JVM dependencies
+        if: always() && steps.group_manifest.outcome == 'success'
+        run: |
+          python3 - <<'PYDEPS'
+          from pathlib import Path
+          import hashlib, json, shutil
+          cache = Path.home() / ".gradle/caches/modules-2/files-2.1"
+          output = Path("combination-dependencies")
+          required = ["org.jetbrains.kotlin/kotlin-compiler-embeddable/2.3.21", "org.jetbrains.kotlin/kotlin-stdlib/2.3.21", "org.jetbrains.kotlin/kotlin-script-runtime/2.3.21", "org.jetbrains.kotlin/kotlin-reflect/1.6.10", "org.jetbrains.kotlin/kotlin-daemon-embeddable/2.3.21", "org.jetbrains/annotations/13.0", "org.jetbrains.kotlinx/kotlinx-coroutines-core-jvm/1.10.2", "org.yaml/snakeyaml/2.2", "com.android.tools/r8/9.1.57"]
+          manifest = {}
+          for dependency in required:
+              jars = list((cache / dependency).glob("*/*.jar"))
+              if not jars:
+                  raise SystemExit("Missing resolved JVM dependency: " + dependency)
+              for source in jars:
+                  relative = source.relative_to(cache)
+                  target = output / relative
+                  target.parent.mkdir(parents=True, exist_ok=True)
+                  shutil.copy2(source, target)
+                  manifest[str(relative)] = hashlib.sha256(source.read_bytes()).hexdigest()
+          (output / "manifest.json").write_text(json.dumps(manifest, indent=2))
+          PYDEPS
+      - name: Upload combination dependencies
+        if: always() && steps.group_manifest.outcome == 'success'
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: combination-jvm-dependencies
+          path: combination-dependencies/**
+          retention-days: 7
+          if-no-files-found: error
       - name: Upload disjoint feature reports
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
@@ -236,6 +266,32 @@ jobs:
         with:
           name: feature-group-results
           path: app/build/test-results/ciGroups
+      - name: Download exact combination dependencies
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: combination-jvm-dependencies
+          path: combination-dependencies
+      - name: Verify and restore combination dependency identity
+        run: |
+          python3 - <<'PYDEPS'
+          from pathlib import Path
+          import hashlib, json, shutil
+          root = Path("combination-dependencies")
+          manifest = json.loads((root / "manifest.json").read_text())
+          if not manifest:
+              raise SystemExit("Empty combination dependency manifest")
+          cache = Path.home() / ".gradle/caches/modules-2/files-2.1"
+          for name, expected in manifest.items():
+              relative = Path(name)
+              if relative.is_absolute() or ".." in relative.parts:
+                  raise SystemExit("Invalid dependency path")
+              source = root / relative
+              if hashlib.sha256(source.read_bytes()).hexdigest() != expected:
+                  raise SystemExit("Combination dependency digest mismatch: " + name)
+              target = cache / relative
+              target.parent.mkdir(parents=True, exist_ok=True)
+              shutil.copy2(source, target)
+          PYDEPS
       - name: Reconcile complete app regression
         run: python3 scripts/ci_test_groups.py --verify-all
       # 迁移版本号对账：编号连续、SCHEMA_VERSION 一致、已发布迁移未被篡改/复用
