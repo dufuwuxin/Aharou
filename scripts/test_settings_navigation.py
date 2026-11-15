@@ -339,7 +339,9 @@ class SettingsNavigationTest(unittest.TestCase):
         self.assertNotIn("sh.rustup.rs", self.installer)
         bundle = source(SRC / "feature/editor/lsp/VendoredLanguageServers.kt")
         self.assertIn("EXTENSION_HASH_MISMATCH", bundle)
-        self.assertIn("EXTENSION_REQUIRES_UBUNTU_24_04", bundle)
+        self.assertIn("ExtensionRuntimeBootstrap.prepare(commands, ::checkBackend)", bundle)
+        runtime = source(SRC / "feature/editor/lsp/ExtensionRuntimeBootstrap.kt")
+        self.assertIn("EXTENSION_REQUIRES_UBUNTU_24_04", runtime)
 
     def test_language_install_does_not_modify_xbps_or_other_global_packages(self):
         install = function(self.installer, "install")
