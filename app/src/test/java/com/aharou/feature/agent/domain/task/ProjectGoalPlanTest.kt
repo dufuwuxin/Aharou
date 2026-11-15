@@ -18,8 +18,9 @@ class ProjectGoalPlanTest {
     @Test fun emptyProjectGoalRoundTripsWithoutDependingOnTaskIdentity() {
         val project = ProjectPlan(workspace = "w", title = "empty", horizon = "long", overallGoal = "ship",
             goalAcceptance = "verified", goalCheckpoint = "GOAL_ACCEPTANCE_REQUIRED", goalRevision = 3)
-        val encoded = Json.encodeToString(ProjectPlan.serializer(), project)
-        assertEquals(project, Json.decodeFromString(ProjectPlan.serializer(), encoded))
+        val repositoryJson = Json { encodeDefaults = true }
+        val encoded = repositoryJson.encodeToString(ProjectPlan.serializer(), project)
+        assertEquals(project, repositoryJson.decodeFromString(ProjectPlan.serializer(), encoded))
         assertFalse(encoded.contains("taskId"))
     }
 

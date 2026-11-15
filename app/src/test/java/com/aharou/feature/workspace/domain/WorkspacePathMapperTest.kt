@@ -35,7 +35,7 @@ class WorkspacePathMapperTest {
     private val sharedDir = "/data/shared"
     private val home = "/root"
 
-    private fun newMapper(): WorkspacePathMapper {
+    private val mapper: WorkspacePathMapper by lazy {
         every { workspaceRepository.currentPath() } returns wsRoot
         every { containerInstaller.aharouDir } returns File(aicodeDir)
         every { containerInstaller.rootfsDirFor(any()) } returns File(rootfsDir)
@@ -51,8 +51,10 @@ class WorkspacePathMapperTest {
                 else -> p
             }
         }
-        return WorkspacePathMapper(workspaceRepository, containerInstaller, containerSettingsRepository, pathHomeResolver)
+        WorkspacePathMapper(workspaceRepository, containerInstaller, containerSettingsRepository, pathHomeResolver)
     }
+
+    private fun newMapper(): WorkspacePathMapper = mapper
 
     // ---------- toHostFile：容器路径 → 宿主文件 ----------
 
