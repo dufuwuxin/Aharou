@@ -110,6 +110,13 @@ class CiLayersTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "multiple groups"):
             groups.verify_all(self.root, {"editor": ["Example"], "core": ["Example"]})
 
+    def test_combined_same_jvm_regression_runs_before_final_artifact_acceptance(self):
+        text = (ROOT / ".github/workflows/ci.yml").read_text()
+        self.assertIn("./gradlew :app:testArmsoloDebugUnitTest :core-agent:test --console=plain", text)
+        self.assertIn("steps.combined_regression.outcome == 'success'", text)
+        self.assertLess(text.index("Run combined same-JVM app regression"), text.index("Upload test report"))
+        self.assertIn("id: combined_regression", text)
+
     def test_combination_dependencies_are_handed_off_and_verified_not_assumed_cached(self):
         text = (ROOT / ".github/workflows/ci.yml").read_text()
         self.assertIn("name: combination-jvm-dependencies", text)

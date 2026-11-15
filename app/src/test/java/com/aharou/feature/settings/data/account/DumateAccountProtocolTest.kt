@@ -72,7 +72,7 @@ class DumateAccountProtocolTest {
             val restored = DumateAccountProtocol.restore(old)
             assertEquals("https://www.dumate.cn", restored.domain)
             val vault = Vault().also { it.values["provider"] = old.toString() }
-            val manager = AccountProviderManager(vault, OkHttpClient.Builder().addInterceptor { throw AssertionError("Old cookie must never be sent") }.build())
+            val manager = AccountProviderManager(vault, OkHttpClient.Builder().connectionSpecs(listOf(ConnectionSpec.CLEARTEXT)).addInterceptor { throw AssertionError("Old cookie must never be sent") }.build())
             assertEquals(1, manager.accounts("provider", kind).size)
             val unchanged = vault.values["provider"]
             try { manager.refresh("provider", kind); fail("Relogin is required") }

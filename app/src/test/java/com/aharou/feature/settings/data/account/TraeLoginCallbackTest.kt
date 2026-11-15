@@ -14,7 +14,7 @@ class TraeLoginCallbackTest {
     }
 
     @Test fun officialPcCallbackEncodingAndTraceAreBoundToCurrentPending() = runBlocking {
-        val manager = AccountProviderManager(Vault(), OkHttpClient())
+        val manager = AccountProviderManager(Vault(), OkHttpClient.Builder().connectionSpecs(listOf(okhttp3.ConnectionSpec.CLEARTEXT)).build())
         val login = manager.beginLogin("provider", AccountProviderKind.TRAE)
         try {
             val authorization = login.url.toHttpUrl()
@@ -43,7 +43,7 @@ class TraeLoginCallbackTest {
     }
 
     @Test fun actualLoopbackHttpRequestParsesOfficialPcPayload() = runBlocking {
-        val manager = AccountProviderManager(Vault(), OkHttpClient())
+        val manager = AccountProviderManager(Vault(), OkHttpClient.Builder().connectionSpecs(listOf(okhttp3.ConnectionSpec.CLEARTEXT)).build())
         val login = manager.beginLogin("provider", AccountProviderKind.TRAE)
         try {
             val callback = login.callbackPrefix!!.toHttpUrl().newBuilder()

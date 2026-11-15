@@ -187,16 +187,13 @@ jobs:
         with:
           name: foundation-core-agent
           path: core-agent/build/test-results/test
-      - name: Upload unit test log
-        if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-        with:
-          name: unit-test-log
-          path: /tmp/unit.log
-          retention-days: 7
-          if-no-files-found: warn
+      - name: Run combined same-JVM app regression
+        id: combined_regression
+        run: |
+          set -o pipefail
+          ./gradlew :app:testArmsoloDebugUnitTest :core-agent:test --console=plain 2>&1 | tee -a /tmp/unit.log
       - name: Export exact combination JVM dependencies
-        if: always() && steps.group_manifest.outcome == 'success'
+        if: always() && steps.group_manifest.outcome == 'success' && steps.combined_regression.outcome == 'success'
         run: |
           python3 - <<'PYDEPS'
           from pathlib import Path
@@ -218,7 +215,7 @@ jobs:
           (output / "manifest.json").write_text(json.dumps(manifest, indent=2))
           PYDEPS
       - name: Upload combination dependencies
-        if: always() && steps.group_manifest.outcome == 'success'
+        if: always() && steps.group_manifest.outcome == 'success' && steps.combined_regression.outcome == 'success'
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
           name: combination-jvm-dependencies
@@ -234,7 +231,7 @@ jobs:
           retention-days: 7
           if-no-files-found: error
       - name: Upload test report
-        if: always() && steps.group_manifest.outcome == 'success'
+        if: always() && steps.group_manifest.outcome == 'success' && steps.combined_regression.outcome == 'success'
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: unit-test-results
@@ -243,6 +240,14 @@ jobs:
             core-agent/build/test-results/test/**
           retention-days: 7
           if-no-files-found: error
+      - name: Upload unit test log
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: unit-test-log
+          path: /tmp/unit.log
+          retention-days: 7
+          if-no-files-found: warn
 
   combination:
     name: Combined quality gates
