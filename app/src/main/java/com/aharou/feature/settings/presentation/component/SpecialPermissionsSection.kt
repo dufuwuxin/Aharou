@@ -1,6 +1,8 @@
 package com.aharou.feature.settings.presentation.component
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -37,7 +39,7 @@ internal fun SpecialPermissionsSection(onOpen: (SettingsSection) -> Unit, viewMo
     val address by viewModel.address.collectAsStateWithLifecycle()
     val builtinEditing by com.aharou.core.config.BuiltinSkillEditCapability.enabled.collectAsStateWithLifecycle()
     val clipboard = LocalClipboardManager.current
-    Column(Modifier.fillMaxWidth().padding(Spacing.md), verticalArrangement = Arrangement.spacedBy(Spacing.lg)) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(Spacing.md), verticalArrangement = Arrangement.spacedBy(Spacing.lg)) {
         SettingsGroup {
             SettingsRow(title = stringResource(R.string.vd_settings_title), onClick = { onOpen(SettingsSection.ShadowScreen) })
             SettingsDivider()
