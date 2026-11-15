@@ -49,6 +49,7 @@ class ConfigTool @Inject constructor(
     @param:ApplicationContext private val context: Context,
     private val teamFields: com.aharou.feature.agent.data.ConfigTeamControlFields,
     private val sessions: com.aharou.feature.agent.domain.session.SessionUseCase,
+    private val roleFields: com.aharou.feature.agent.data.ConfigTeamRoleFields? = null,
 ) : AgentTool() {
 
     private companion object {
@@ -117,7 +118,10 @@ class ConfigTool @Inject constructor(
             ?: return ToolResult.Error("缺少 action（list / get / set）", "MISSING_ACTION")
         val path = (args["path"] as? JsonPrimitive)?.contentOrNull?.trim().orEmpty()
         if (path.startsWith(com.aharou.core.config.TeamEditCapability.PREFIX)) {
-            return teamCapabilityRequest(context, action, path, (args["value"] as? JsonPrimitive)?.contentOrNull, workspace, teamFields)
+            return teamCapabilityRequest(context, action, path, (args["value"] as? JsonPrimitive)?.contentOrNull, workspace, teamFields, roleFields)
+        }
+        if (path == "roles" || path.startsWith("roles.")) {
+            return ToolResult.Error("Role definitions require the user-enabled scoped team channel", "TEAM_DETAILS_RESTRICTED")
         }
         if ((path == "teams" || path == "team.stages" || path.startsWith("teams.") || path.startsWith("team.stages.") || path == "workflows" || path.startsWith("workflows."))) {
             if (!mainAgent || workspace.isNullOrBlank() || !teamFields.forWorkspace(workspace).mainAgentMayRead(path)) {

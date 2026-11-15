@@ -5,6 +5,7 @@ import com.google.gson.JsonParser
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.async
 import okhttp3.ConnectionSpec
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -33,7 +34,7 @@ class DoubaoAccountProtocolTest {
         override fun read(id: String) = values[id]
         override fun write(id: String, value: String?) { if (value == null) values.remove(id) else values[id] = value }
     }
-    private fun manager(server: MockWebServer, vault: Vault = Vault()): AccountProviderManager = AccountProviderManager(vault,
+    private fun manager(server: MockWebServer, vault: Vault = Vault(), afterResponse: (String) -> Unit = {}): AccountProviderManager = AccountProviderManager(vault,
         OkHttpClient.Builder().followRedirects(false).followSslRedirects(false)
             .connectionSpecs(listOf(ConnectionSpec.CLEARTEXT)).readTimeout(3, TimeUnit.SECONDS)
             .addInterceptor { chain ->
@@ -45,7 +46,7 @@ class DoubaoAccountProtocolTest {
                 assertEquals("fixture-csrf", request.header("x-tt-passport-csrf-token"))
                 assertEquals(if (request.url.encodedPath.startsWith("/passport/")) "497858" else "1044603", request.url.queryParameter("aid"))
                 val target = server.url(request.url.encodedPath + "?" + request.url.encodedQuery)
-                chain.proceed(request.newBuilder().url(target).build())
+                chain.proceed(request.newBuilder().url(target).build()).also { afterResponse(request.url.encodedPath) }
             }.build())
     private suspend fun login(manager: AccountProviderManager, server: MockWebServer) {
         server.enqueue(MockResponse().setBody(user)); server.enqueue(MockResponse().setBody(catalog))
@@ -133,6 +134,62 @@ class DoubaoAccountProtocolTest {
                     } else { assertEquals(502, response.code); assertFalse(response.body!!.string().contains("private upstream details")) }
                 }
             }
+        }
+    }
+
+    @Test fun validationThatCrossesLoginExpiryNeverPersistsOrAcknowledgesSuccess() = runBlocking {
+        MockWebServer().use { server ->
+            val vault = Vault()
+            lateinit var attempt: AccountLogin
+            val manager = manager(server, vault) { path ->
+                if (path == DoubaoAccountProtocol.CATALOG) {
+                    AccountLogin::class.java.getDeclaredField("expiresAt").apply { isAccessible = true }.setLong(attempt, 0L)
+                }
+            }
+            attempt = manager.beginLogin("provider", kind)
+            var acknowledged = false
+            server.enqueue(MockResponse().setBody(user)); server.enqueue(MockResponse().setBody(catalog))
+            assertTrue(manager.acceptWebLogin(attempt, attempt.url, attempt.id, attempt.state, cookie) { error ->
+                if (error == null) acknowledged = true
+            })
+            try { manager.awaitLogin(attempt); fail("Expired validation must not commit") }
+            catch (failure: AccountProviderException) { assertEquals("login_expired", failure.errorCode) }
+            assertFalse(acknowledged)
+            assertTrue(vault.values.isEmpty())
+        }
+    }
+
+    @Test fun validationFailureKeepsAttemptRetryableAndSuccessIsNotifiedOnlyAfterVaultWrite() = runBlocking {
+        MockWebServer().use { server ->
+            val vault = Vault()
+            val manager = manager(server, vault)
+            val pending = manager.beginLogin("provider", kind)
+            val outcomes = java.util.concurrent.LinkedBlockingQueue<String>()
+            val waiting = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default).async {
+                manager.awaitLogin(pending)
+            }
+            try {
+                server.enqueue(MockResponse().setResponseCode(503).setBody("{}"))
+                assertTrue(manager.acceptWebLogin(pending, pending.url, pending.id, pending.state, cookie) { error ->
+                    if (error == null) {
+                        assertTrue(vault.values.isNotEmpty())
+                        outcomes.offer("saved")
+                    } else outcomes.offer("retry")
+                })
+                assertEquals("retry", kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { outcomes.poll(5, TimeUnit.SECONDS) })
+                assertFalse(manager.isLoggedIn("provider"))
+                assertFalse(pending.closed.get())
+                server.enqueue(MockResponse().setBody(user)); server.enqueue(MockResponse().setBody(catalog))
+                assertTrue(manager.acceptWebLogin(pending, pending.url, pending.id, pending.state, cookie) { error ->
+                    assertNull(error)
+                    assertTrue(vault.values.isNotEmpty())
+                    outcomes.offer("saved")
+                })
+                kotlinx.coroutines.withTimeout(5_000) { waiting.await() }
+                assertEquals("saved", outcomes.poll())
+                assertTrue(pending.saved.get())
+                assertTrue(manager.isLoggedIn("provider"))
+            } finally { waiting.cancel(); manager.cancelLogin(pending) }
         }
     }
 

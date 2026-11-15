@@ -59,10 +59,22 @@ internal object TraeAccountProtocol {
         return "${total.subtract(consumed).stripTrailingZeros().toPlainString()} / ${total.stripTrailingZeros().toPlainString()} credits"
     }
 
-    fun models(payload: JsonObject): List<AccountProviderModel> {
+    const val CATALOG_FUNCTION = "solo_work_lite"
+
+    fun catalogRequest() = JsonObject().apply {
+        addProperty("function", CATALOG_FUNCTION)
+        add("config_names", com.google.gson.JsonNull.INSTANCE)
+        addProperty("need_prompt", false)
+        add("current_config_info", com.google.gson.JsonNull.INSTANCE)
+        addProperty("poly_prompt", true)
+        add("mode_type", com.google.gson.JsonNull.INSTANCE)
+        add("agent_type", com.google.gson.JsonNull.INSTANCE)
+    }
+
+    fun models(payload: JsonObject, requestedFunction: String = "chat_v3"): List<AccountProviderModel> {
         val data = payload.obj("data") ?: payload
         val groups = data.array("function_configs").mapNotNull { it.objectOrNull() }.ifEmpty {
-            listOf(JsonObject().apply { addProperty("function", "chat_v3"); add("config_info_list", data.array("config_info_list")) })
+            listOf(JsonObject().apply { addProperty("function", requestedFunction); add("config_info_list", data.array("config_info_list")) })
         }
         return groups.flatMap { group ->
             val function = group.text("function") ?: return@flatMap emptyList()

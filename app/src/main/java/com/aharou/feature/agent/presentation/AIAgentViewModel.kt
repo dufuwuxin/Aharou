@@ -144,6 +144,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
 import java.io.BufferedOutputStream
 import java.io.FileInputStream
 import java.io.IOException
@@ -852,9 +853,12 @@ class AIAgentViewModel @Inject constructor(
 
     val containerInit: StateFlow<ContainerInitState> = containerEngine.initProgress
 
+    private var sessionSelectionEpoch = 0L
+    private val sessionSelectionMutex = kotlinx.coroutines.sync.Mutex()
     private val _currentWorkspace = MutableStateFlow<String>("")
     fun setWorkspace(path: String) {
         if (path.isBlank() || _currentWorkspace.value == path) return
+        sessionSelectionEpoch++
         _currentWorkspace.value = path
         fileMentionController.dismiss()  // 切工作区：@ 候选菜单先收起（清单按工作区惰性失效）
     }
@@ -1374,14 +1378,17 @@ class AIAgentViewModel @Inject constructor(
 
     private fun initWorkspaceSessionBinding() {
         viewModelScope.launch {
-            _currentWorkspace.collectLatest { path ->
+            _currentWorkspace.collectLatest { path -> sessionSelectionMutex.withLock {
                 if (path.isBlank()) return@collectLatest
-                val existing = _currentSessionId.value
+                val epoch = sessionSelectionEpoch
+                val selected = _currentSessionId.value
+                val existing = selected
                     ?.let { sessionUseCase.getSessionById(it) }
                     ?.workspacePath
                 if (existing == path) return@collectLatest
                 val recent = sessionUseCase.getMostRecentSessionOfWorkspace(path)
-                val switchingWorkspace = _currentSessionId.value != null
+                if (sessionSelectionEpoch != epoch || _currentWorkspace.value != path) return@collectLatest
+                val switchingWorkspace = selected != null
                 val targetId = when {
                     recent == null -> createAndUpsertSession(path)
                     switchingWorkspace -> recent.id
@@ -1389,13 +1396,12 @@ class AIAgentViewModel @Inject constructor(
                     sessionUseCase.isSessionEmpty(recent.id) -> recent.id
                     else -> createAndUpsertSession(path)
                 }
+                if (sessionSelectionEpoch != epoch || _currentWorkspace.value != path) return@collectLatest
                 _currentSessionId.value = targetId
-                if (recent != null) {
-                    launch(Dispatchers.IO) {
-                        sessionUseCase.recycleEmptySessions(path, keepId = targetId)
-                    }
+                if (recent != null && sessionSelectionEpoch == epoch) withContext(Dispatchers.IO) {
+                    sessionUseCase.recycleEmptySessions(path, keepId = targetId)
                 }
-            }
+            } }
         }
     }
 
@@ -2528,9 +2534,12 @@ class AIAgentViewModel @Inject constructor(
     // region 会话管理
 
     /** 新建会话；当前会话为空则复用，否则切到工作区里已存在的空会话，都没有才新建。 */
-    fun newSession() = viewModelScope.launch {
-        if (_currentWorkspace.value.isBlank()) return@launch
-        val reusableId = sessionUseCase.getOrdinaryEmptySession(_currentWorkspace.value, _currentSessionId.value)?.id
+    fun newSession() = viewModelScope.launch { sessionSelectionMutex.withLock {
+        val path = _currentWorkspace.value
+        if (path.isBlank()) return@launch
+        val epoch = ++sessionSelectionEpoch
+        val reusableId = sessionUseCase.getOrdinaryEmptySession(path, _currentSessionId.value)?.id
+        if (sessionSelectionEpoch != epoch || _currentWorkspace.value != path) return@launch
         if (reusableId != null) {
             setAgentState(reusableId, AgentUIState.Idle)
             _currentSessionId.value = reusableId
@@ -2538,10 +2547,12 @@ class AIAgentViewModel @Inject constructor(
         }
         // 新会话时异步重连未连接的 MCP server（让 manageMcp 新增的配置真正生效）；不阻塞会话创建，避免卡住「新建会话」。
         mcpManager.reconnectUnconnectedAsync()
-        _currentSessionId.value = createAndUpsertSession(_currentWorkspace.value)
-    }
+        val created = createAndUpsertSession(path)
+        if (sessionSelectionEpoch == epoch && _currentWorkspace.value == path) _currentSessionId.value = created
+    } }
 
     fun setCurrentSessionId(id: String) {
+        sessionSelectionEpoch++
         if (_currentSessionId.value == id) return
         _currentSessionId.value = id
     }
@@ -2754,6 +2765,7 @@ class AIAgentViewModel @Inject constructor(
     }
 
     fun selectSession(id: String) {
+        sessionSelectionEpoch++
         if (_currentSessionId.value == id) return
         _currentSessionId.value = id
         _sessionSwitchEvents.tryEmit(Unit)

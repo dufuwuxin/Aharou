@@ -1,6 +1,11 @@
 package com.aharou.feature.settings.presentation.component
 
-import androidx.compose.material3.Text
+import androidx.compose.material3.*
+import androidx.compose.foundation.layout.Column
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.res.stringResource
@@ -15,13 +20,29 @@ internal fun OfflineTranslationSettings() {
     val translation = translationService()
     val enabled by translation.enabled.collectAsStateWithLifecycle()
     val state by translation.modelState.collectAsStateWithLifecycle()
+    val reverse by translation.reverseModelState.collectAsStateWithLifecycle()
+    var details by rememberSaveable { mutableStateOf(false) }
+    val summary = when {
+        state == TranslationModelState.FAILED || reverse == TranslationModelState.FAILED -> R.string.translation_failed
+        state == TranslationModelState.DOWNLOADING || reverse == TranslationModelState.DOWNLOADING -> R.string.translation_downloading
+        state == TranslationModelState.CHECKING || reverse == TranslationModelState.CHECKING -> R.string.translation_checking
+        state == TranslationModelState.READY && reverse == TranslationModelState.READY -> R.string.translation_ready
+        else -> R.string.translation_missing
+    }
     SettingsGroup {
         SettingsRow(
-            title = stringResource(R.string.translation_title),
-            subtitle = stringResource(R.string.translation_description),
+            title = stringResource(R.string.translation_bilingual_title),
+            subtitle = stringResource(summary),
+            modifier = Modifier.testTag("translation_settings_entry"),
+            onClick = { details = true },
             trailing = { AppSwitch(checked = enabled, onCheckedChange = translation::setEnabled) },
         )
-        SettingsDivider()
+    }
+    if (details) AlertDialog(onDismissRequest = { details = false },
+        title = { Text(stringResource(R.string.translation_title)) },
+        confirmButton = { TextButton(onClick = { details = false }) { Text(stringResource(R.string.common_close)) } },
+        text = { Column {
+        Text(stringResource(R.string.translation_description))
         SettingsRow(
             title = stringResource(R.string.translation_model),
             subtitle = stringResource(when (state) {
@@ -37,7 +58,6 @@ internal fun OfflineTranslationSettings() {
             },
         )
         Text(stringResource(R.string.translation_attribution))
-        val reverse by translation.reverseModelState.collectAsStateWithLifecycle()
         SettingsDivider()
         SettingsRow(
             title = stringResource(R.string.translation_reverse_model),
@@ -53,5 +73,5 @@ internal fun OfflineTranslationSettings() {
             } else null,
         )
 
-    }
+        } })
 }

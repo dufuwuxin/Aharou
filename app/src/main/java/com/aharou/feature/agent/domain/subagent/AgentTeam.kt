@@ -180,7 +180,7 @@ data class AgentTeamStageForm(
     val tasks: List<AgentTeamTaskForm> = listOf(AgentTeamTaskForm()),
     /** 阶段级接口边：本阶段成员「和谁对齐什么」。保存时按 from 落到对应成员的任务上。 */
     val interfaces: List<TeamInterfaceEdgeForm> = emptyList(),
-    val communication: TeamCommunication = TeamCommunication.SAME_STAGE,
+    val communication: TeamCommunication = TeamCommunication.RUN,
     val messageLimit: Int = 8,
     val communicationGuide: String = "",
     val condition: String = "always",

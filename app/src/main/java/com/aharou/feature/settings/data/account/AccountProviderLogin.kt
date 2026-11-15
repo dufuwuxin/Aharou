@@ -37,6 +37,18 @@ class AccountLogin internal constructor(
     } else null
     @Volatile internal var code: String? = null
     private var webCookie: String? = null
+    @Volatile internal var validationResult: ((String?) -> Unit)? = null
+    internal val saved = AtomicBoolean(false)
+    internal val completionNotified = AtomicBoolean(false)
+
+    @Synchronized internal fun retryWebValidation(error: String): Boolean {
+        val notify = validationResult ?: return false
+        if (closed.get()) return false
+        webCookie = null
+        consumed.set(false)
+        notify(error)
+        return true
+    }
 
     @Synchronized internal fun acceptWebCookie(origin: String, loginId: String, loginState: String, cookie: String, now: Long): Boolean {
         if (!kind.isWebSession || closed.get() || now >= expiresAt || loginId != id || loginState != state ||
@@ -77,6 +89,7 @@ class AccountLogin internal constructor(
     @Synchronized internal fun close() {
         closed.set(true)
         webCookie = null
+        validationResult = null
         expiryTimer?.cancel()
         cookies.clear()
         try { server?.close() } catch (_: java.io.IOException) { }
@@ -158,12 +171,19 @@ internal object AccountProviderLogin {
             coroutineContext.ensureActive()
             if (login.kind.isWebSession) {
                 val cookie = login.takeWebCookie()
-                if (cookie != null) return manager.network {
-                    manager.requireAccountVersion(login.id, login.revision)
-                    val credential = if (login.kind == AccountProviderKind.DOUBAO) DoubaoAccountProtocol.exchange(manager, cookie, login.deviceId)
-                        else DumateAccountProtocol.exchange(manager, cookie, login.deviceId).also { DumateAccountProtocol.validateDirectory(manager, it) }
-                    manager.requireAccountVersion(login.id, login.revision)
-                    credential
+                if (cookie != null) {
+                    try {
+                        return manager.network {
+                            manager.requireAccountVersion(login.id, login.revision)
+                            val credential = if (login.kind == AccountProviderKind.DOUBAO) DoubaoAccountProtocol.exchange(manager, cookie, login.deviceId)
+                                else DumateAccountProtocol.exchange(manager, cookie, login.deviceId).also { DumateAccountProtocol.validateDirectory(manager, it) }
+                            manager.requireAccountVersion(login.id, login.revision)
+                            credential
+                        }
+                    } catch (failure: java.io.IOException) {
+                        manager.requireAccountVersion(login.id, login.revision)
+                        if (!login.retryWebValidation((failure as? AccountProviderException)?.errorCode ?: "network_error")) throw failure
+                    }
                 }
             } else if (login.kind.isWorkBuddy) {
                 val response = manager.network {

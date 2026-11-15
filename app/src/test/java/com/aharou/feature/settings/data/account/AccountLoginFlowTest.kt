@@ -24,6 +24,23 @@ class AccountLoginFlowTest {
     }
     private fun json(value: String) = JsonParser.parseString(value).asJsonObject
 
+    @Test fun traeCatalogUsesReferencedSoloRequestAndDoesNotInventRootResponseFunction() = runBlocking {
+        MockWebServer().use { server ->
+            server.enqueue(MockResponse().setBody("""{"config_info_list":[{"config_name":"current","config_switch":true}]}"""))
+            val base = server.url("/").toString().trimEnd('/')
+            val manager = AccountProviderManager(Vault(), OkHttpClient.Builder().connectionSpecs(listOf(okhttp3.ConnectionSpec.CLEARTEXT)).build(), AccountEndpoints(trae = base))
+            manager.importCredentials("trae", AccountProviderKind.TRAE, """{"accessToken":"fixture-token","userId":"fixture-user"}""")
+            val catalog = manager.catalog("trae", AccountProviderKind.TRAE)
+            val request = server.takeRequest(3, TimeUnit.SECONDS)!!
+            val body = json(request.body.readUtf8())
+            assertEquals("solo_work_lite", body.text("function"))
+            assertFalse(body.get("need_prompt").asBoolean)
+            assertTrue(body.get("poly_prompt").asBoolean)
+            assertTrue(body.has("config_names"))
+            assertEquals("solo_work_lite", catalog.single().function)
+        }
+    }
+
     @Test fun loginCookieIsIsolatedAndAccountIdentityIsSaved() = runBlocking {
         MockWebServer().use { server ->
             server.enqueue(MockResponse().setHeader("Set-Cookie", "route=one; Path=/").setBody("""{"code":0,"data":{"state":"fixture-state","authUrl":"https://copilot.tencent.com/login"}}"""))
@@ -105,6 +122,47 @@ class AccountLoginFlowTest {
             assertEquals(listOf("available"), result.models.map { it.id })
             assertNull(result.balance)
             assertEquals("account_restricted", result.balanceError)
+        }
+    }
+
+    @Test fun traeRootCatalogSurvivesBalanceFailureWithoutInventingCredits() = runBlocking {
+        MockWebServer().use { server ->
+            val base = server.url("/").toString().trimEnd('/')
+            val manager = AccountProviderManager(Vault(), OkHttpClient.Builder().connectionSpecs(listOf(okhttp3.ConnectionSpec.CLEARTEXT)).followRedirects(false).build(), AccountEndpoints(trae = base, traeAccount = base))
+            manager.importCredentials("id", AccountProviderKind.TRAE, """{"accessToken":"fixture-access"}""")
+            server.enqueue(MockResponse().setBody("""{"config_info_list":[{"config_name":"fixture-model","display_config":{"display_name":"Fixture model"}}]}"""))
+            server.enqueue(MockResponse().setResponseCode(503).setBody("{}"))
+
+            val result = manager.snapshot("id", AccountProviderKind.TRAE)
+
+            assertEquals(listOf("fixture-model"), result.models.map { it.id })
+            assertNull(result.balance)
+            assertEquals("upstream_http", result.balanceError)
+            assertEquals("/api/ide/v1/get_detail_param", server.takeRequest(1, TimeUnit.SECONDS)!!.path)
+            assertEquals("/trae/api/v2/pay/ide_user_ent_usage", server.takeRequest(1, TimeUnit.SECONDS)!!.path)
+            assertEquals(2, server.requestCount)
+        }
+    }
+
+    @Test fun traeDirectoryFailureDoesNotQueryBalanceOrReturnOldCatalog() = runBlocking {
+        MockWebServer().use { server ->
+            val base = server.url("/").toString().trimEnd('/')
+            val manager = AccountProviderManager(Vault(), OkHttpClient.Builder().connectionSpecs(listOf(okhttp3.ConnectionSpec.CLEARTEXT)).followRedirects(false).build(), AccountEndpoints(trae = base, traeAccount = base))
+            manager.importCredentials("id", AccountProviderKind.TRAE, """{"accessToken":"fixture-access"}""")
+            server.enqueue(MockResponse().setBody("""{"config_info_list":[{"config_name":"fixture-model"}]}"""))
+            server.enqueue(MockResponse().setBody("{}"))
+            assertEquals(listOf("fixture-model"), manager.snapshot("id", AccountProviderKind.TRAE).models.map { it.id })
+            server.enqueue(MockResponse().setResponseCode(503).setBody("{}"))
+
+            try {
+                manager.snapshot("id", AccountProviderKind.TRAE)
+                fail("Directory failure must not return the previous catalog")
+            } catch (error: AccountProviderException) {
+                assertEquals("upstream_http", error.errorCode)
+            }
+
+            assertEquals(3, server.requestCount)
+            assertTrue(manager.isLoggedIn("id"))
         }
     }
 
@@ -196,9 +254,17 @@ class AccountLoginFlowTest {
                 val base = global.url("/").toString().trimEnd('/')
                 val manager = AccountProviderManager(Vault(), OkHttpClient.Builder().connectionSpecs(listOf(okhttp3.ConnectionSpec.CLEARTEXT)).followRedirects(false).build(), AccountEndpoints(traeAccount = domestic.url("/").toString().trimEnd('/'), traeGlobalAccount = base, traeGlobal = base, traeGlobalUsage = base))
                 val login = manager.beginLogin("id", AccountProviderKind.TRAE_GLOBAL)
-                assertTrue(manager.acceptCallback(login, login.callbackPrefix + "?code=fixture-code&state=" + login.state))
+                var confirmed = false
+                assertTrue(manager.acceptCallback(login, login.callbackPrefix + "?code=fixture-code&state=" + login.state) { error ->
+                    assertNull(error)
+                    assertTrue(manager.isLoggedIn("id"))
+                    confirmed = true
+                })
+                assertFalse(confirmed)
                 global.enqueue(MockResponse().setBody("""{"Result":{"Token":"fixture-a","RefreshToken":"fixture-r"}}"""))
                 manager.awaitLogin(login)
+                assertTrue(confirmed)
+                assertTrue(login.completionNotified.get())
                 val exchange = global.takeRequest(1, TimeUnit.SECONDS)!!
                 assertEquals("/trae/api/v3/oauth/ExchangeToken", exchange.path)
                 assertEquals("en1oxy7wnw8j9n", json(exchange.body.readUtf8()).get("ClientID").asString)

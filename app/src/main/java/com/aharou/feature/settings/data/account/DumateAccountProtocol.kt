@@ -60,7 +60,8 @@ internal object DumateAccountProtocol {
     }
 
     fun exchange(manager: AccountProviderManager, cookie: String, deviceId: String, previousUserId: String? = null): AccountCredential {
-        val webHeaders = mapOf("Cookie" to requireCookie(cookie), "Referer" to "$WEB/", "Origin" to WEB)
+        val webHeaders = mapOf("Cookie" to requireCookie(cookie), "Referer" to "$WEB/", "Origin" to WEB,
+            "User-Agent" to AccountProviderProtocol.WEBSITE_USER_AGENT)
         val ticket = manager.readJson(manager.request("$WEB/api/dumate/app/token/get", headers = webHeaders)).obj("result")
             ?: throw AccountProviderException("invalid_credentials", "Dumate did not return a gateway ticket", 401)
         val token = ticket.text("token")?.takeIf { it.length <= 32768 && it.all { char -> char.code in 33..126 } }

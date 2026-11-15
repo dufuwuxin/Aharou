@@ -148,6 +148,7 @@ class ProjectRequirementBranchTest {
         compose.onNodeWithTag("project_mode_toggle").performClick()
         compose.onNodeWithTag("project_tree_body").performScrollToNode(hasTestTag("task_node_child"))
         compose.onNodeWithTag("task_node_child").assertExists()
+        compose.onNodeWithContentDescription(compose.activity.getString(R.string.project_view_actions)).performClick()
         compose.onNodeWithTag("project_main_conversation").performClick()
         compose.waitForIdle()
         compose.runOnIdle { assertEquals("main", binding?.sessionId) }
@@ -189,6 +190,7 @@ class ProjectRequirementBranchTest {
         }
         compose.waitForIdle()
         compose.onNodeWithTag("project_branch_composer").assertTextEquals(compose.activity.getString(R.string.project_branch_composer, "Sibling"))
+        compose.onNodeWithContentDescription(compose.activity.getString(R.string.project_view_actions)).performClick()
         compose.onNodeWithTag("project_main_conversation").performClick()
         compose.waitForIdle()
         compose.onNodeWithTag("project_main_reader").assertExists()
@@ -340,7 +342,9 @@ class ProjectRequirementBranchTest {
         }
         compose.waitForIdle()
         compose.onNodeWithTag("project_main_conversation").assertDoesNotExist()
-        compose.onNodeWithTag("project_context_status").assertExists().performClick()
+        compose.onNodeWithTag("project_context_status").assertDoesNotExist()
+        compose.onNodeWithContentDescription(compose.activity.getString(R.string.project_view_actions)).performClick()
+        compose.onNodeWithText(compose.activity.getString(R.string.session_diagnostics_title)).performClick()
         compose.onNodeWithTag("session_diagnostics").assertExists()
         compose.onNodeWithTag("diagnostics_tab_PLANNING").performClick()
         compose.onNodeWithTag("diagnostics_tab_CONTEXT").performClick()

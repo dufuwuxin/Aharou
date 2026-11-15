@@ -97,6 +97,6 @@ class TeamCommunicationTest {
         assertEquals("Only interface blockers", stage.communicationGuide)
         file.writeText(file.readText().lines().filterNot { it.trimStart().startsWith("communication:") }.joinToString("\n"))
         assertEquals(TeamCommunication.RUN, AgentTeamParser.parse(TestFileAccessProvider(), file.absolutePath)!!.stages.single().communication)
-        assertEquals(TeamCommunication.SAME_STAGE, AgentTeamStageForm().communication)
+        assertEquals(TeamCommunication.RUN, AgentTeamStageForm().communication)
     }
 }

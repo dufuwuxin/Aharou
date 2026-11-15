@@ -66,7 +66,7 @@ class TeamWorkflowRepository @Inject constructor(
      * 团队引用在这里一次性校验：工作流引用了不存在或已禁用的团队，跑起来第一阶段就会
      * `TEAM_NOT_FOUND` 全链失败，放在保存时就挡住。
      */
-    fun save(form: TeamWorkflowForm, originalName: String? = null): TeamWorkflowSaveError? {
+    fun save(form: TeamWorkflowForm, originalName: String? = null): TeamWorkflowSaveError? { return synchronized(com.aharou.feature.agent.domain.skill.SkillParser) {
         val name = form.name.trim()
         if (!AgentDefinitionRepository.isValidName(name)) return TeamWorkflowSaveError.INVALID_NAME
 
@@ -131,7 +131,7 @@ class TeamWorkflowRepository @Inject constructor(
             FileLogger.e(TAG, "保存工作流预设失败: $name", e)
             TeamWorkflowSaveError.IO_FAILED
         }
-    }
+    } }
 
     /**
      * 目录扫描：只取顶层 `*.md`；目录不存在或不可读（远程断连）降级为「没有预设」，

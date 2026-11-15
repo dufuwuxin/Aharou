@@ -318,7 +318,7 @@ internal fun TeamEditorSheet(
                     onChange = { updated ->
                         updateStages(stages.mapIndexed { i, current ->
                             when {
-                                i == index -> updated.withFlowTasks()
+                                i == index -> updated
                                 stage.title.isNotBlank() && current.rejectTo.trim().equals(stage.title.trim(), ignoreCase = true) -> current.copy(rejectTo = updated.title.trim())
                                 else -> current
                             }
@@ -340,7 +340,14 @@ internal fun TeamEditorSheet(
             }
 
             TeamFlowMap(admins, stages, routes)
-            TeamRouteEditor(stages, routes) { routes = it }
+            var routesExpanded by rememberSaveable { mutableStateOf(false) }
+            TextButton(onClick = { routesExpanded = !routesExpanded }, modifier = Modifier.testTag("team_routes_advanced")) {
+                Text(stringResource(R.string.team_advanced_options))
+            }
+            if (routesExpanded) {
+                Text(stringResource(R.string.team_routes_advanced_hint), style = MaterialTheme.typography.bodySmall)
+                TeamRouteEditor(stages, routes) { routes = it }
+            }
             if (routesRemoved) {
                 Text(stringResource(R.string.team_flow_removed_endpoints), color = MaterialTheme.colorScheme.error)
             }
@@ -375,7 +382,7 @@ internal fun TeamEditorSheet(
             evidenceRequired = initial?.team?.evidenceRequired ?: false,
                             admins = admins,
                             members = members,
-                            stages = stages,
+                            stages = stages.map(::taskEditorStageForSave),
                             routes = routes
                         ),
                         initial?.team?.name
@@ -439,7 +446,9 @@ private fun StageEditor(
                         // with 侧有意不清：目标可以是部门/标签，未必是本阶段成员
                         onChange(stage.copy(
                             members = next,
-                            tasks = stage.tasks.filter { it.agent.isBlank() || it.agent in next },
+                            tasks = stage.tasks.filter { it.agent.isBlank() || it.agent in next }.let { tasks ->
+                                if (!picked && stage.prompt.isNotBlank() && tasks.none { it.agent.equals(memberName, true) }) tasks + com.aharou.feature.agent.domain.subagent.AgentTeamTaskForm(agent = memberName, prompt = stage.prompt) else tasks
+                            },
                             interfaces = stage.interfaces.filter { edge -> next.any { it.equals(edge.from, ignoreCase = true) } }
                         ))
                     },
@@ -449,14 +458,32 @@ private fun StageEditor(
         }
         AppTextField(
             value = stage.prompt,
-            onValueChange = { onChange(stage.copy(prompt = it)) },
+            onValueChange = { onChange(editSharedTeamPrompt(stage, it)) },
             label = stringResource(R.string.team_editor_stage_prompt),
             singleLine = false,
             minLines = 2,
             maxLines = 5
         )
+        TeamTaskEditor(tasks = stage.tasks, onChange = { tasks ->
+            onChange(stage.copy(tasks = tasks,
+                members = tasks.map { it.agent }.filter { it.isNotBlank() }.distinct(),
+                interfaces = tasks.flatMap { task -> task.interfaces.map { edge ->
+                    com.aharou.feature.agent.domain.subagent.TeamInterfaceEdgeForm(task.agent, edge.with, edge.about)
+                } }))
+        })
+        AppTextField(value = stage.condition, onValueChange = { onChange(stage.copy(condition = it)) },
+            label = stringResource(R.string.team_task_condition), singleLine = true)
+        Text(stringResource(R.string.team_task_condition_hint), style = MaterialTheme.typography.bodySmall)
         // 对齐只在阶段内选中的成员之间建立；成员勾选产生的空边已在勾选时同步清除
-        InterfaceEdgeEditor(stage = stage, members = stage.members, onChange = onChange)
+        InterfaceEdgeEditor(stage = stage, members = stage.members, onChange = { changed ->
+            val removed = stage.interfaces - changed.interfaces.toSet()
+            val added = changed.interfaces - stage.interfaces.toSet()
+            onChange(changed.copy(tasks = stage.tasks.map { task ->
+                task.copy(interfaces = task.interfaces.filterNot { edge ->
+                    removed.any { it.from.equals(task.agent, true) && it.with == edge.with && it.about == edge.about }
+                } + added.filter { it.from.equals(task.agent, true) }.map { com.aharou.feature.agent.domain.subagent.TeamInterface(it.with, it.about) })
+            }))
+        })
         Text(stringResource(R.string.team_communication_title), style = MaterialTheme.typography.bodyMedium)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
             com.aharou.feature.agent.domain.subagent.TeamCommunication.entries.forEach { policy ->

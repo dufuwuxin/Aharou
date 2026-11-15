@@ -69,6 +69,7 @@ internal fun number(value: JsonElement?): String? {
 }
 
 internal object AccountProviderProtocol {
+    const val WEBSITE_USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
     fun check(value: JsonObject) {
         val code = value.text("code") ?: value.obj("error")?.text("code")
         when (code) {

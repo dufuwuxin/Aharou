@@ -38,6 +38,7 @@ class TeamEditorComposeTest {
         configureStage(1, "Build")
         text(R.string.team_editor_add_stage).performScrollTo().performClick()
         configureStage(2, "Review")
+        compose.onNodeWithTag("team_routes_advanced").performScrollTo().performClick()
         text(R.string.team_flow_from, "").performScrollTo().performClick()
         compose.onNodeWithText("Build · worker").performClick()
         text(R.string.team_flow_to, "").performScrollTo().performClick()
@@ -110,6 +111,7 @@ class TeamEditorComposeTest {
 
     @Test fun emptyRoutePickerExplainsHowToCreateSelectableNodes() {
         open()
+        compose.onNodeWithTag("team_routes_advanced").performScrollTo().performClick()
         text(R.string.team_flow_nodes_required).performScrollTo().assertIsDisplayed()
         text(R.string.team_flow_from, "").performScrollTo().assertIsNotEnabled()
         text(R.string.team_flow_add).performScrollTo().assertIsNotEnabled()
@@ -117,6 +119,7 @@ class TeamEditorComposeTest {
 
     @Test fun clickedForwardCycleCannotBeSaved() {
         open(fixture())
+        compose.onNodeWithTag("team_routes_advanced").performScrollTo().performClick()
         text(R.string.team_flow_from, "").performScrollTo().performClick()
         compose.onNodeWithText("Review · coordinator").performClick()
         text(R.string.team_flow_to, "").performScrollTo().performClick()

@@ -11,17 +11,55 @@ import kotlinx.serialization.json.*
 import java.util.UUID
 
 internal fun teamCapabilityRequest(context: Context, action: String, address: String, raw: String?, workspace: String?,
-    fields: com.aharou.feature.agent.data.ConfigTeamControlFields): ToolResult =
+    fields: com.aharou.feature.agent.data.ConfigTeamControlFields,
+    roles: com.aharou.feature.agent.data.ConfigTeamRoleFields? = null): ToolResult =
     try {
-        TeamEditCapability.use(address, workspace) { path ->
-            val registry = ConfigRegistry.isolated().also { fields.forWorkspace(requireNotNull(workspace)).registerInto(it) }
+        TeamEditCapability.use(address, workspace) { path -> synchronized(com.aharou.feature.agent.domain.skill.SkillParser) {
+            val registry = ConfigRegistry.isolated().also {
+                fields.forWorkspace(requireNotNull(workspace)).registerInto(it)
+                roles?.forWorkspace(workspace)?.registerInto(it)
+            }
+            fun collectionValue(collection: com.aharou.core.config.ConfigCollection): ConfigValue = ConfigValue.Obj(
+                collection.childIds().associateWith { id -> ConfigValue.Obj(collection.fields(id).associate { it.path to it.read() }) })
+            if (path == "roles") {
+                val collection = registry.collection(path) ?: error("Role channel unavailable")
+                val before = collectionValue(collection)
+                val revision = TeamEditCapability.fingerprint(before.jsonString())
+                return@use when (action) {
+                    "get", "list", "schema" -> ToolResult.Success(buildJsonObject {
+                        roles?.let { put("formTemplate", it.creationTemplate()) }
+                        put("collection", path); put("description", collection.description); put("revision", revision)
+                        put("actions", buildJsonArray { listOf("get", "add", "remove").forEach { add(it) } })
+                        put("value", Json.parseToJsonElement(before.jsonString()))
+                    })
+                    "add", "remove" -> {
+                        val input = Json.parseToJsonElement(requireNotNull(raw)).jsonObject
+                        check(input["expectedRevision"]?.jsonPrimitive?.content == revision) { "Stale role collection revision; get roles again" }
+                        val value = ConfigValue.decode(input.getValue("value").toString()) ?: error("Invalid role payload")
+                        val id = if (action == "add") collection.add(value) else {
+                            val id = input.getValue("value").jsonObject.getValue("id").jsonPrimitive.content
+                            collection.remove(id); id
+                        }
+                        val auditRecorded = runCatching { ConfigAuditLog.get().append(ConfigAuditEntry(UUID.randomUUID().toString(), System.currentTimeMillis(),
+                            ConfigAuditActor.AGENT, null, "team-capability", path, before.jsonString(), collectionValue(collection).jsonString(),
+                            System.currentTimeMillis(), ConfigAuditStatus.APPLIED, null, "User-enabled scoped role channel")) }.isSuccess
+                        ToolResult.Success(buildJsonObject { put("applied", true); put("id", id); put("auditRecorded", auditRecorded) })
+                    }
+                    else -> error("Role collection only allows get/list/schema/add/remove")
+                }
+            }
             if (path.isEmpty()) {
                 require(action in setOf("get", "list", "schema")) { "Choose a returned field address first" }
                 ToolResult.Success(buildJsonObject {
                     put("expires", "one hour or immediately when disabled; app restart revokes")
-                    put("usage", "get a field address for revision; set with value={expectedRevision,value}. Only routes, stage conditions and communication are writable. Global changes affect every project using that team.")
+                    put("usage", "get a field address for revision; set with value={expectedRevision,value}. Routes, stage conditions, communication and complete scoped role forms are writable. Roles collection uses add/remove with value={expectedRevision,value}; role forms use set. Global changes affect every project using that team.")
+                    if (roles != null) put("collections", buildJsonArray { add(buildJsonObject {
+                        put("address", TeamEditCapability.childAddress(address, "roles")); put("collection", "roles")
+                        put("description", registry.collection("roles")!!.description)
+                        put("actions", buildJsonArray { listOf("get", "add", "remove").forEach { add(it) } })
+                    }) })
                     put("fields", buildJsonArray {
-                        listOf("teams", "team.stages").flatMap { base ->
+                        listOf("teams", "team.stages", "roles").flatMap { base ->
                             registry.collection(base)?.let { collection -> collection.childIds().flatMap { collection.fields(it).map { field -> field.path } } }.orEmpty()
                         }.filter(TeamEditCapability::allowed).forEach { field ->
                             val definition = registry.resolveField(field) ?: error("Unknown field")
@@ -57,6 +95,10 @@ internal fun teamCapabilityRequest(context: Context, action: String, address: St
                     else -> error("Only get/list/set are allowed; no reveal, logs, add or remove")
                 }
             }
-        }
+        } }
     } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
-    catch (_: Exception) { ToolResult.Error("Team channel rejected the request: disabled, expired, wrong workspace, stale revision or invalid team field/value", "TEAM_CHANNEL_REJECTED") }
+    catch (error: Exception) {
+        val detail = error.message?.takeIf { it.startsWith("Role is referenced; update references first:") }
+            ?: "disabled, expired, wrong workspace, stale revision, unknown scope or invalid field/value"
+        ToolResult.Error("Team channel rejected the request: $detail", "TEAM_CHANNEL_REJECTED")
+    }

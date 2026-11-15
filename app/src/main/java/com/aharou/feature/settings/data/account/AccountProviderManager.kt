@@ -449,9 +449,11 @@ class AccountProviderManager internal constructor(
             AccountProviderKind.LOOMY -> Triple(endpoints.loomy + "/api/v1/models", "GET", null)
             AccountProviderKind.RACCOON -> Triple(endpoints.raccoon + "/api/web/llm/v2/model_catalog", "GET", null)
             AccountProviderKind.WORKBUDDY, AccountProviderKind.WORKBUDDY_GLOBAL -> Triple(endpoints.workbuddy(kind) + "/v3/config", "GET", null)
-            AccountProviderKind.TRAE, AccountProviderKind.TRAE_GLOBAL -> Triple(endpoints.trae(kind) + "/api/ide/v1/get_detail_param", "POST", JsonObject().apply { addProperty("function", "chat_v3") })
+            AccountProviderKind.TRAE, AccountProviderKind.TRAE_GLOBAL -> Triple(endpoints.trae(kind) + "/api/ide/v1/get_detail_param", "POST", TraeAccountProtocol.catalogRequest())
         }
-        return AccountProviderProtocol.models(kind, readJson(authorized(id, kind, url, method, body)))
+        val payload = readJson(authorized(id, kind, url, method, body))
+        return if (kind.isTrae) TraeAccountProtocol.models(payload, TraeAccountProtocol.CATALOG_FUNCTION)
+            else AccountProviderProtocol.models(kind, payload)
     }
 
     internal fun poolCatalog(id: String, kind: AccountProviderKind): AccountCatalog = withAccountRevision(id) {
@@ -561,7 +563,12 @@ class AccountProviderManager internal constructor(
             coroutineContext.ensureActive()
             network { synchronized(state) {
                 if (login.closed.get() || logins[login.id] !== login) throw AccountProviderException("account_changed", "Login cancelled", 409)
+                if (System.currentTimeMillis() >= login.expiresAt) throw AccountProviderException("login_expired", "Login expired before credentials could be saved", 408)
                 appendCredential(login.id, login.revision, credential)
+                login.saved.set(true)
+                login.validationResult?.let { notify ->
+                    runCatching { notify(null) }.onSuccess { login.completionNotified.set(true) }
+                }
             } }
         } finally {
             logins.remove(login.id, login)
@@ -569,12 +576,19 @@ class AccountProviderManager internal constructor(
         }
     }
 
-    internal fun acceptWebLogin(login: AccountLogin, origin: String, loginId: String, state: String, cookie: String): Boolean = synchronized(this.state) {
-        logins[login.id] === login && revision(login.id) == login.revision &&
+    internal fun acceptWebLogin(login: AccountLogin, origin: String, loginId: String, state: String, cookie: String,
+        onValidation: ((String?) -> Unit)? = null): Boolean = synchronized(this.state) {
+        val accepted = logins[login.id] === login && revision(login.id) == login.revision &&
             login.acceptWebCookie(origin, loginId, state, cookie, System.currentTimeMillis())
+        if (accepted) login.validationResult = onValidation
+        accepted
     }
 
-    fun acceptCallback(login: AccountLogin, url: String): Boolean = logins[login.id] === login && login.accept(url, System.currentTimeMillis())
+    fun acceptCallback(login: AccountLogin, url: String, onValidation: ((String?) -> Unit)? = null): Boolean = synchronized(state) {
+        val accepted = logins[login.id] === login && login.accept(url, System.currentTimeMillis())
+        if (accepted) login.validationResult = onValidation
+        accepted
+    }
     fun cancelLogin(login: AccountLogin) {
         synchronized(state) {
             if (logins.remove(login.id, login)) revisions[login.id] = revision(login.id) + 1

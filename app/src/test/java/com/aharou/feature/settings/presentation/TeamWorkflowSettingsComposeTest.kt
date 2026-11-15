@@ -93,6 +93,7 @@ class TeamWorkflowSettingsComposeTest {
         assertTrue(repository.listAll().isEmpty())
 
         chooseTeam(2, "review")
+        compose.onNodeWithTag("workflow_layer_advanced_0").performScrollTo().performClick()
         compose.onAllNodesWithText(compose.activity.getString(R.string.team_workflow_lead))[0]
             .performScrollTo().performClick()
         compose.onNodeWithText("coordinator-role").performClick()

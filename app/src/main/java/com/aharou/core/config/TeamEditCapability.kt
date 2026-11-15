@@ -34,7 +34,7 @@ object TeamEditCapability {
     }
 
     @Synchronized fun revoke() { expiry?.cancel(); expiry = null; grant = null; _address.value = null }
-    fun allowed(path: String) = fields.matches(path)
+    fun allowed(path: String) = fields.matches(path) || path == "roles" || Regex("roles\\.(?:global|project):[0-9a-f]+\\.form").matches(path)
     fun fingerprint(json: String): String = MessageDigest.getInstance("SHA-256").digest(json.toByteArray())
         .joinToString("") { "%02x".format(it.toInt() and 255) }
     fun childAddress(base: String, path: String): String = base + URLEncoder.encode(path, "UTF-8")
@@ -48,7 +48,7 @@ object TeamEditCapability {
         val token = rest.substringBefore('/')
         check(MessageDigest.isEqual(current.token.toByteArray(), token.toByteArray())) { "Invalid team capability" }
         val path = URLDecoder.decode(rest.substringAfter('/', ""), "UTF-8")
-        check(path.isEmpty() || allowed(path)) { "Team capability only allows workflow routes and stage communication" }
+        check(path.isEmpty() || allowed(path)) { "Team capability only allows team controls and scoped role definitions" }
         return action(path)
     }
 }

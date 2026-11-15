@@ -49,7 +49,7 @@ internal fun ProjectChatMenuHost(
         ScheduledTaskPill(sessionId = sessionId)
     }
     CompositionLocalProvider(LocalProjectChatMenu provides menu, LocalProjectDiagnostics provides onDiagnostics.takeIf { unifiedDiagnostics }) {
-        androidx.compose.foundation.layout.Column { contextStatus(); content() }
+        content()
     }
     key(sessionId) {
         if (stewardOpen && sessionId != null) StewardSheet(

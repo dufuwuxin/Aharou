@@ -21,6 +21,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -93,22 +94,16 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
     val sessionMenu = LocalProjectChatMenu.current
     val header: @Composable (@Composable (() -> Unit) -> Unit) -> Unit = { mapMenu ->
         Column(verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
-        Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("project_compact_header"),
-            verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onBack, modifier = Modifier.size(48.dp)) {
-                Icon(FeatherIcons.ChevronLeft, stringResource(R.string.project_back))
-            }
-            Column(Modifier.weight(1f).clickable { overview = true }.padding(vertical = Spacing.xs)) {
-                Text(project?.title.orEmpty(), maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.titleMedium)
-                Text(stringResource(R.string.project_flow_progress, executableTasks.count { ProjectWorkflowPlan.delivered(it) }, executableTasks.size),
-                    style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
+        Box(Modifier.fillMaxWidth().height(0.dp)) {
+            Popup(alignment = Alignment.TopEnd) {
             Box {
                 IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(48.dp)) {
                     Icon(FeatherIcons.MoreVertical, stringResource(R.string.project_view_actions))
                 }
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    DropdownMenuItem(text = { Text(stringResource(R.string.project_main_conversation)) },
+                        modifier = Modifier.testTag("project_main_conversation"),
+                        onClick = { menuOpen = false; onSelectRequirementBranch(null); rootReader = true })
                     if (projectId in state.activeProjectIds) DropdownMenuItem(
                         text = { Text(stringResource(R.string.project_flow_stop)) },
                         leadingIcon = { Icon(FeatherIcons.Square, null) },
@@ -140,8 +135,6 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
                 }
             }
         }
-        if (diagnostics == null) TextButton(onClick = { onSelectRequirementBranch(null); rootReader = true }, modifier = Modifier.fillMaxWidth().testTag("project_main_conversation")) {
-            Text(stringResource(R.string.project_main_conversation))
         }
         tasks.firstOrNull { it.id == requirementBranchId && it.isRequirementBranch }?.let { selected ->
             Text(stringResource(R.string.project_branch_composer, selected.title),

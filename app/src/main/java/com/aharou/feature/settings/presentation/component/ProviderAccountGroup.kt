@@ -277,6 +277,13 @@ internal fun ProviderAccountGroup(
             Text(
                 text = stringResource(
                     when (code) {
+                        "upstream_http" -> R.string.account_http_failed
+                        "network_error" -> R.string.account_network_failed
+                        "storage_failed" -> R.string.account_storage_failed
+                        "redirect_rejected" -> R.string.account_redirect_failed
+                        "login_launch_failed" -> R.string.account_login_launch_failed
+                        "empty_catalog" -> R.string.account_catalog_failed
+                        "invalid_response" -> R.string.account_response_failed
                         "isolated_login_requires_api28" -> R.string.account_provider_isolation_unavailable
                         "login_required", "account_mismatch", "invalid_credentials" -> R.string.provider_account_auth_failed
                         "login_expired", "invalid_login" -> R.string.provider_account_login_failed
@@ -319,7 +326,12 @@ internal fun ProviderAccountGroup(
         }
     }
     login?.let { attempt ->
-        AccountLoginDialog(attempt, manager) {
+        AccountLoginDialog(attempt, manager, onLaunchFailure = {
+            error = "login_launch_failed"
+            operation?.cancel()
+            manager.cancelLogin(attempt)
+            login = null
+        }) {
             operation?.cancel()
             manager.cancelLogin(attempt)
             login = null
@@ -328,7 +340,7 @@ internal fun ProviderAccountGroup(
 }
 
 @Composable
-private fun AccountLoginDialog(login: AccountLogin, manager: AccountProviderManager, onDismiss: () -> Unit) {
+private fun AccountLoginDialog(login: AccountLogin, manager: AccountProviderManager, onLaunchFailure: () -> Unit, onDismiss: () -> Unit) {
     if (android.os.Build.VERSION.SDK_INT < 28) {
         AccountLegacyLoginDialog(login, manager, onDismiss)
         return
@@ -357,20 +369,33 @@ private fun AccountLoginDialog(login: AccountLogin, manager: AccountProviderMana
                             data.getString(AccountLoginActivity.LOGIN_ID).orEmpty(),
                             data.getString(AccountLoginActivity.LOGIN_STATE).orEmpty(),
                             data.getString(AccountLoginActivity.WEB_COOKIE).orEmpty(),
+                            onValidation = { failure ->
+                                if (!disposed) remote?.send(AccountLoginActivity.RESULT_ACK, android.os.Bundle().apply {
+                                    putBoolean(AccountLoginActivity.ACCEPTED, failure == null)
+                                    putBoolean(AccountLoginActivity.RETRY_ALLOWED, failure != null)
+                                })
+                            },
                         )
                         data.remove(AccountLoginActivity.WEB_COOKIE)
-                        remote?.send(AccountLoginActivity.RESULT_ACK, android.os.Bundle().apply { putBoolean(AccountLoginActivity.ACCEPTED, accepted) })
+                        remote?.send(if (accepted) AccountLoginActivity.RESULT_PENDING else AccountLoginActivity.RESULT_ACK,
+                            android.os.Bundle().apply { putBoolean(AccountLoginActivity.ACCEPTED, false) })
                     }
                     AccountLoginActivity.CALLBACK -> {
                         val url = resultData?.getString(AccountLoginActivity.URL) ?: return
-                        val accepted = !disposed && manager.acceptCallback(login, url)
-                        remote?.send(AccountLoginActivity.RESULT_ACK, android.os.Bundle().apply { putBoolean(AccountLoginActivity.ACCEPTED, accepted) })
+                        val accepted = !disposed && manager.acceptCallback(login, url) { failure ->
+                            if (!disposed) remote?.send(AccountLoginActivity.RESULT_ACK, android.os.Bundle().apply {
+                                putBoolean(AccountLoginActivity.ACCEPTED, failure == null)
+                            })
+                        }
+                        remote?.send(if (accepted) AccountLoginActivity.RESULT_PENDING else AccountLoginActivity.RESULT_ACK,
+                            android.os.Bundle().apply { putBoolean(AccountLoginActivity.ACCEPTED, false) })
                     }
                     AccountLoginActivity.CANCELLED -> if (!disposed) onDismiss()
                 }
             }
         }
-        context.startActivity(android.content.Intent(context, AccountLoginActivity::class.java).apply {
+        try { context.startActivity(android.content.Intent(context, AccountLoginActivity::class.java).apply {
+            if (context !is android.app.Activity) addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
             putExtra(AccountLoginActivity.URL, login.url)
             putExtra(AccountLoginActivity.WEB_COOKIE_LOGIN, login.kind.isWebSession)
             putExtra(AccountLoginActivity.LOGIN_KIND, login.kind.wireId)
@@ -378,7 +403,7 @@ private fun AccountLoginDialog(login: AccountLogin, manager: AccountProviderMana
             putExtra(AccountLoginActivity.LOGIN_STATE, login.state)
             putExtra(AccountLoginActivity.CALLBACK_PREFIX, login.callbackPrefix)
             putExtra(AccountLoginActivity.RECEIVER, receiver.forAccountLoginIpc())
-        })
-        onDispose { disposed = true; remote?.send(0, android.os.Bundle.EMPTY) }
+        }) } catch (_: RuntimeException) { onLaunchFailure() }
+        onDispose { disposed = true; if (!login.completionNotified.get()) remote?.send(0, android.os.Bundle.EMPTY) }
     }
 }

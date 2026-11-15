@@ -1,5 +1,19 @@
 # 外部 CLI（rtk / Claude Code / aider / Codex）在 Aharou 里到底是哪一层
 
+## 当前一手核验与实现边界
+
+本轮已直接读取 RTK 官方 README、LICENSE，以及 Auggie 的 README、LICENSE.md 和公开目录。RTK 当前将命令输出压缩与总费用区分，token 计数按 bytes/4 估算，不能直接当成本软件的精确节省率；不同组件包含 Apache-2.0 与 BUSL-1.1，不把单个 LICENSE 文件外推成全仓许可。Auggie 的 CLI 使用自定义专有许可，公开仓库中的文档、示例和插件不等于可复制的完整 CLI。
+
+本软件可在已有 `ToolOutputStore` 模型输出边界借鉴“先存原文、后折叠重复内容、按行补读”，不依赖 RTK 的宿主 hook。当前新增折叠限于 Bash 纯文本，普通终端输出排除，不生成新的退出状态；已有大结果归档继续保留。没有安装 RTK/Auggie、增加第二层 Agent、修改 shell 或改容器镜像。后文关于旧源码和宿主 hook 的限制不能当成这一原生接线不可实现的结论。
+
+这项处理位于应用工具层，可服务 Ubuntu、Void 或 Manjaro 后端；不是三种发行版性能已实测相同。Ubuntu PRoot 不直接采用 Void 的 runit 配置、Manjaro 的 pacman 配置或内核/systemd 调优；无需为输出节流更换发行版。
+
+一手来源：
+- https://github.com/rtk-ai/rtk
+- https://github.com/augmentcode/auggie
+- https://github.com/augmentcode/auggie/blob/main/LICENSE.md
+
+
 > 调研对象：rtk-ai/rtk、Anthropic Claude Code、aider、OpenAI Codex CLI。
 > 对比基线：Aharou 已有的 tool_search + 延迟加载 + MCP + 容器命令。
 > 只读调研，未改任何代码、未安装任何软件。

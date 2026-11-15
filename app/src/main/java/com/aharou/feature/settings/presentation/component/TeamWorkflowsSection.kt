@@ -25,6 +25,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -170,6 +171,14 @@ private fun WorkflowEditorSheet(
                             }
                         }
                     }
+                    var advanced by remember(ref.team, index) { mutableStateOf(false) }
+                    Text(stringResource(R.string.team_workflow_lead) + ": " +
+                        ref.lead.ifBlank { stringResource(R.string.team_workflow_default_lead) } + " · " +
+                        stringResource(R.string.team_workflow_accepts_reject) + ": " +
+                        stringResource(if (ref.acceptsReject) R.string.common_enabled else R.string.common_disabled),
+                        style = MaterialTheme.typography.bodySmall)
+                    TextButton(onClick = { advanced = !advanced }, modifier = Modifier.testTag("workflow_layer_advanced_$index")) { Text(stringResource(R.string.team_advanced_options)) }
+                    if (advanced) {
                     SettingsRow(title = stringResource(R.string.team_workflow_accepts_reject), trailing = {
                         AppSwitch(ref.acceptsReject, { change(ref.copy(acceptsReject = it)) }, enabled = !state.saving)
                     })
@@ -186,6 +195,7 @@ private fun WorkflowEditorSheet(
                                     onClick = { change(ref.copy(lead = member)); choosingLead = false })
                             }
                         }
+                    }
                     }
                     Row {
                         TextButton(enabled = index > 0 && !state.saving, onClick = {

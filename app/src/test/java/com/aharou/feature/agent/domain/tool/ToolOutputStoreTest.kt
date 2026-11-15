@@ -401,6 +401,98 @@ class ToolOutputStoreTest {
         assertOmittedRangeMatchesSlices(wideField, stderr)
     }
 
+    @Test
+    fun commandProgressBelowTransportLimitIsArchivedBeforeFolding() {
+        val text = "compile module\n".repeat(400) + "Tests: 12 passed, 0 failed\n[退出码: 0]"
+        val original = ToolResult.Success(JsonPrimitive(text))
+        assertTrue(original.toTransportString().length < 40_000)
+        val processed = store.process("Bash", "progress", original) as ToolResult.Success
+        assertArchive(original, processed.data)
+        val data = processed.data.jsonObject
+        assertEquals(JsonPrimitive(true), data["output_compressed"])
+        assertEquals(JsonPrimitive(402), data["output_total_lines"])
+        assertFalse(data.containsKey("exit_code"))
+        val preview = data.getValue("output").jsonPrimitive.content
+        assertTrue(preview.contains("lines 1-400; repeated 400 times"))
+        assertTrue(preview.contains("Tests: 12 passed, 0 failed"))
+        assertTrue(preview.endsWith("[退出码: 0]"))
+        assertTrue(processed.toTransportString().length < original.toTransportString().length)
+        println("command fixture transport chars: ${original.toTransportString().length} -> ${processed.toTransportString().length}")
+    }
+
+    @Test
+    fun failedAndUnknownCommandResultsKeepEveryLineAndTheirExitStatus() {
+        val failure = "compile module\n".repeat(400) + "Tests: 11 passed, 1 failed\nstack trace\n[退出码: 7]"
+        for (tool in listOf("Bash", "terminal")) {
+            val original = ToolResult.Success(JsonPrimitive(failure))
+            assertSame(original, store.process(tool, "failed-command", original))
+            val unknown = ToolResult.Success(JsonPrimitive("compile module\n".repeat(400)))
+            assertSame(unknown, store.process(tool, "unknown-command", unknown))
+        }
+        val error = ToolResult.Error(failure, "COMMAND_FAILED")
+        assertSame(error, store.process("Bash", "tool-error", error))
+        assertTrue(archives.isEmpty())
+    }
+
+    @Test
+    fun commandJsonNonCommandAndShortTextKeepIdentity() {
+        val inputs = listOf(
+            ToolResult.Success(JsonPrimitive("{\n" + "  \"progress\": 1,\n".repeat(300) + "}\n[退出码: 0]")),
+            ToolResult.Success(JsonObject(mapOf("output" to JsonPrimitive("progress\n".repeat(400))))),
+            ToolResult.Success(JsonPrimitive("ok\n[退出码: 0]")),
+            ToolResult.Partial(JsonPrimitive("progress\n".repeat(400)), "retry")
+        )
+        inputs.forEach { assertSame(it, store.process("Bash", "excluded", it)) }
+        val text = ToolResult.Success(JsonPrimitive("progress\n".repeat(400) + "[退出码: 0]"))
+        for (tool in listOf("readFile", "mcp_Bash", "auth")) {
+            assertSame(text, store.process(tool, "not-command", text))
+        }
+        assertTrue(archives.isEmpty())
+    }
+
+    @Test
+    fun compactCommandStorageFailureReturnsOriginalWithoutDataLoss() {
+        every { fileAccess.writeFile(any(), any(), any(), any()) } throws IllegalStateException("disk full")
+        val original = ToolResult.Success(JsonPrimitive("progress\n".repeat(400) + "[退出码: 0]"))
+        assertSame(original, store.process("Bash", "save-failed", original))
+        assertTrue(archives.isEmpty())
+    }
+
+    @Test
+    fun commandBlankRunsAndExactRepeatThresholdKeepOriginalArchive() {
+        val text = "keep\n".repeat(3) + "\n".repeat(10) + " ".repeat(2) + "\n" +
+            ("progress " + "x".repeat(1_000) + "\r\n").repeat(4) + "Tests: 4 passed\n[退出码: 0]"
+        val original = ToolResult.Success(JsonPrimitive(text))
+        val processed = store.process("Bash", "blank-runs", original) as ToolResult.Success
+        assertArchive(original, processed.data)
+        val preview = processed.data.jsonObject.getValue("output").jsonPrimitive.content
+        assertTrue(preview.startsWith("keep\nkeep\nkeep\n"))
+        assertTrue(preview.contains("blank lines"))
+        assertTrue(preview.contains("repeated 4 times"))
+        assertTrue(preview.contains("Tests: 4 passed"))
+    }
+
+    @Test
+    fun longCommandOmittedRangeCanBeRecoveredFromRawArchiveByLine() {
+        val text = numberedLines(4_000, 10) + "[退出码: 0]"
+        val original = ToolResult.Success(JsonPrimitive(text))
+        val processed = store.process("Bash", "long-command", original) as ToolResult.Success
+        assertArchive(original, processed.data)
+        assertBounded(processed)
+        val data = processed.data.jsonObject
+        val preview = data.getValue("output").jsonPrimitive.content
+        assertOmittedRangeMatchesSlices(text, preview)
+        val path = data.getValue("output_path").jsonPrimitive.content
+        every { fileAccess.readFile(path) } answers { archives.getValue(firstArg()) }
+        val recovered = fileAccess.readFile(path).reader().readLines()
+        val marker = preview.substringAfter("...[output truncated; ").substringBefore("]...")
+        val start = markerStartLine(marker)
+        val end = markerEndLine(marker)
+        assertEquals(text.reader().readLines().subList(start - 1, end), recovered.subList(start - 1, end))
+        assertEquals(JsonPrimitive(4_001), data["output_total_lines"])
+        assertTrue(preview.endsWith("[退出码: 0]"))
+    }
+
     private fun assertBounded(result: ToolResult) {
         assertTrue("Text transport exceeds 40000 characters", textTransport(result).length <= 40_000)
     }

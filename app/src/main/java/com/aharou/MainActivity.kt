@@ -415,6 +415,7 @@ fun AppNavigation(
     val navController = rememberNavController()
     val scope = rememberCoroutineScope()
     var taskCreateRequested by remember { mutableStateOf(false) }
+    var sessionBrowserWorkspace by rememberSaveable { mutableStateOf<String?>(null) }
 
     val currentBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = currentBackStackEntry?.destination?.route
@@ -746,27 +747,12 @@ fun AppNavigation(
                 )
             }
             composable("projects") {
-                ProjectListScreen(projectTaskViewModel, taskCreateRequested, { taskCreateRequested = false },
+                com.aharou.feature.agent.presentation.component.WorkspaceSessionBrowser(
+                    agentViewModel, projectTaskViewModel, workspaceViewModel, sessionBrowserWorkspace,
+                    { sessionBrowserWorkspace = it }, taskCreateRequested, { taskCreateRequested = false },
                     onOpenProject = { id -> projectTaskViewModel.openProject(id) { navController.navigate("projects/$id") } },
                     onOpenTask = { id -> projectTaskViewModel.select(id); navController.navigate("tasks/$id") },
-                    onNewSession = { scope.launch { agentViewModel.newSession().join(); navController.navigate("chat") { launchSingleTop = true } } },
-                    sessionsContent = {
-                val currentWsPath = currentWorkspace?.path.orEmpty()
-                if (currentWsPath !in projectTaskState.indexedSessionWorkspaces) {
-                    Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
-                        androidx.compose.material3.Text(stringResource(if (currentWsPath in projectTaskState.failedSessionWorkspaces)
-                            R.string.project_session_index_failed else R.string.project_session_index_loading))
-                    }
-                } else SessionListScreen(
-                    sessions = sessionsByWorkspace[currentWsPath].orEmpty().filterNot { it.id in projectTaskState.projectSessionIds },
-                    currentSessionId = currentSessionId, agentStates = agentStates, activeSessionIds = activeAgentSessions,
-                    awaitingPermissionSessionIds = awaitingPermissionSessionIds,
-                    workspaceName = currentWsPath.substringAfterLast('/'),
-                    onSelect = { session -> agentViewModel.selectSession(session.id); navController.navigate("chat") { launchSingleTop = true } },
-                    onDelete = { session -> agentViewModel.deleteSession(session.id) },
-                    onNewSession = {}, showNewSession = false
-                )
-                    })
+                    onOpenChat = { navController.navigate("chat") { launchSingleTop = true } })
             }
             composable("projects/{projectId}") { entry ->
                 ProjectChatScreen(projectId = entry.arguments?.getString("projectId").orEmpty(), agentViewModel, projectTaskViewModel,

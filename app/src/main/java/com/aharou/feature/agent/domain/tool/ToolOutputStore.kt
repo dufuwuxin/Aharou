@@ -59,6 +59,11 @@ class ToolOutputStore @Inject constructor(
     private var measuredCache: Pair<String, TextMeasure>? = null
 
     fun process(toolName: String, callId: String, result: ToolResult): ToolResult {
+        try {
+            compactCommand(toolName, callId, result)?.let { return it }
+        } finally {
+            measuredCache = null
+        }
         if (textTransportString(result).length <= MAX_INLINE_CHARS) return result
 
         try {
@@ -70,6 +75,58 @@ class ToolOutputStore @Inject constructor(
         } finally {
             // 缓存只为一次调用内部复用，别长期攥着几 MB 的正文。
             measuredCache = null
+        }
+    }
+
+    private fun compactCommand(toolName: String, callId: String, result: ToolResult): ToolResult? {
+        if (toolName != "Bash") return null
+        val success = result as? ToolResult.Success ?: return null
+        if (success.images.isNotEmpty()) return null
+        val primitive = success.data as? JsonPrimitive ?: return null
+        if (!primitive.isString) return null
+        val text = primitive.content
+        // Conservatively leave failure/unknown transcripts untouched; never synthesize an exit status.
+        if (!text.endsWith("\n[退出码: 0]")) return null
+        val body = text
+        val first = body.trimStart().firstOrNull()
+        if (first == '{' || first == '[' || first == '"') return null
+        val lines = text.lineSequence().toList().let {
+            if (it.lastOrNull() == "") it.dropLast(1) else it
+        }
+        var folded = false
+        val compact = buildString {
+            var start = 0
+            while (start < lines.size) {
+                var end = start + 1
+                while (end < lines.size && lines[end] == lines[start]) end++
+                if (end - start > 3) {
+                    append(lines[start])
+                    append("\n[output compressed; lines ${start + 1}-$end; ")
+                    if (lines[start].isBlank()) append("blank lines; ")
+                    append("repeated ${end - start} times]\n")
+                    folded = true
+                } else {
+                    for (index in start until end) {
+                        append(lines[index])
+                        if (index < lines.lastIndex) append('\n')
+                    }
+                }
+                start = end
+            }
+        }
+        // Use original offsets for head/tail so omitted line numbers remain valid for readFile.
+        val preview = if (folded) compact else return null
+        if (preview.length >= text.length) return null
+        val stored = writeFullOutput(toolName, callId, text).toStoredOutput(measureText(text))
+        // Never discard recoverable text for a new optimization when archival fails.
+        if (stored.outputPath == null) return null
+        val data = stored.copy(preview = preview).toJsonObject("output").toMutableMap().apply {
+            put("output_compressed", JsonPrimitive(true))
+        }
+        val candidate = success.copy(data = JsonObject(data))
+        val transportChars = textTransportString(candidate).length
+        return candidate.takeIf {
+            transportChars <= MAX_INLINE_CHARS && transportChars < textTransportString(result).length
         }
     }
 

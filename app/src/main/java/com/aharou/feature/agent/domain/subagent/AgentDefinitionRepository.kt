@@ -21,6 +21,15 @@ class AgentDefinitionRepository @Inject constructor(
     private val configRepository: AgentDefinitionConfigRepository,
     private val fileAccess: FileAccessProvider
 ) {
+    fun forWorkspace(workspace: String): AgentDefinitionRepository {
+        val access = fileAccess.forWorkspace(workspace).checked()
+        return AgentDefinitionRepository(GlobalDirectoryAgentSource(access), ProjectDirectoryAgentSource(access), configRepository, access)
+    }
+
+    /** Retain shadowed global definitions for explicit scope-qualified edits. */
+    fun listInScope(scope: AgentDefinitionScope): List<AgentDefinition> =
+        if (scope == AgentDefinitionScope.GLOBAL) globalSource.listDefinitions() else projectSource.listDefinitions()
+
     /** 全部定义（含来源作用域），未过滤禁用，按名称排序。 */
     fun listAll(): List<AgentDefinitionEntry> =
         mergeAll(globalSource.listDefinitions(), projectSource.listDefinitions())
@@ -83,16 +92,12 @@ class AgentDefinitionRepository @Inject constructor(
 
         val overwritingSelf = originalName != null && originalName.equals(name, ignoreCase = true)
         if (!overwritingSelf) {
-            val taken = listAll().any {
-                it.scope == scope && it.definition.name.equals(name, ignoreCase = true)
-            }
+            val taken = listInScope(scope).any { it.name.equals(name, ignoreCase = true) }
             if (taken) return@synchronized AgentSaveError.NAME_CONFLICT
         }
 
         val existingFile = originalName?.let { old ->
-            listAll().firstOrNull {
-                it.scope == scope && it.definition.name.equals(old, ignoreCase = true)
-            }?.definition?.filePath
+            listInScope(scope).firstOrNull { it.name.equals(old, ignoreCase = true) }?.filePath
         }
 
         val provider = fileAccess
@@ -188,13 +193,16 @@ class AgentDefinitionRepository @Inject constructor(
 
     /** 删除指定作用域的定义文件，不可恢复。返回是否成功。 */
     fun delete(name: String, scope: AgentDefinitionScope): Boolean = synchronized(com.aharou.feature.agent.domain.skill.SkillParser) {
-        val entry = listAll().firstOrNull {
-            it.definition.name.equals(name, ignoreCase = true) && it.scope == scope
-        } ?: return@synchronized false
-        val filePath = entry.definition.filePath ?: return@synchronized false
+        val entry = listInScope(scope).firstOrNull { it.name.equals(name, ignoreCase = true) }
+            ?: return@synchronized false
+        val filePath = entry.filePath ?: return@synchronized false
         val provider = fileAccess
         if (!provider.isFile(filePath)) return@synchronized false
-        return@synchronized runCatching { provider.delete(filePath); true }.getOrDefault(false)
+        return@synchronized try {
+            provider.delete(filePath)
+            !provider.exists(filePath)
+        } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+        catch (_: Exception) { false }
     }
 
     /** 指定作用域的定义目录（容器路径）。 */

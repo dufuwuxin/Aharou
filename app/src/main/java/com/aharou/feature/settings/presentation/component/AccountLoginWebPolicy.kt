@@ -15,7 +15,7 @@ import java.net.URI
 
 internal object AccountLoginWebPolicy {
     const val VIEWPORT_WIDTH = 1280
-    const val DESKTOP_USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+    const val DESKTOP_USER_AGENT = com.aharou.feature.settings.data.account.AccountProviderProtocol.WEBSITE_USER_AGENT
     internal val viewportScript = """
         (function(){function apply(){if(!document.documentElement)return;
         var m=document.querySelector('meta[name="viewport"]');
@@ -57,6 +57,7 @@ internal object AccountLoginWebPolicy {
             builtInZoomControls = true
             displayZoomControls = false
             javaScriptEnabled = true
+            javaScriptCanOpenWindowsAutomatically = true
             domStorageEnabled = true
             allowFileAccess = false
             allowContentAccess = false
@@ -81,8 +82,7 @@ internal object AccountLoginWebPolicy {
         }
         view.webChromeClient = object : WebChromeClient() {
             override fun onCreateWindow(owner: WebView, isDialog: Boolean, isUserGesture: Boolean, resultMsg: Message): Boolean {
-                if (!isUserGesture) { failed(); return false }
-                // Route a user-opened authorization tab through the same pending login, never an external IDE.
+                // Async authorization redirects may lose WebView's gesture flag; keep them in the pending login.
                 val popup = WebView(owner.context)
                 configure(popup, navigate, loading, failed)
                 var released = false

@@ -19,6 +19,7 @@ class AccountLoginActivity : Activity() {
     private var status: TextView? = null
     private var loading = true
     private var awaitingReply = false
+    private var receiptConfirmed = false
     private var submission = 0L
     private var receiver: ResultReceiver? = null
     private var callbackSent = false
@@ -75,19 +76,22 @@ class AccountLoginActivity : Activity() {
         receiver?.send(READY, Bundle().apply {
             putParcelable(RECEIVER, object : ResultReceiver(Handler(Looper.getMainLooper())) {
                 override fun onReceiveResult(resultCode: Int, resultData: Bundle?) {
-                    if (resultCode == RESULT_ACK) {
-                        awaitingReply = false
-                        if (resultData?.getBoolean(ACCEPTED) == true) {
-                            callbackSent = true
-                            finish()
-                        } else feedback(R.string.account_login_rejected)
-                    } else {
-                        closingFromOwner = true
-                        finish()
-                    }
+                    receiveOwnerResult(resultCode, resultData)
                 }
             }.forAccountLoginIpc())
         })
+    }
+
+    internal fun receiveOwnerResult(resultCode: Int, resultData: Bundle?) {
+        if (resultCode == RESULT_PENDING) {
+            receiptConfirmed = true
+            feedback(R.string.account_login_validating)
+        } else if (resultCode == RESULT_ACK) {
+            awaitingReply = false
+            receiptConfirmed = false
+            if (resultData?.getBoolean(ACCEPTED) == true) { callbackSent = true; finish() }
+            else feedback(if (resultData?.getBoolean(RETRY_ALLOWED) == true) R.string.account_login_retry_validation else R.string.account_login_rejected)
+        } else { closingFromOwner = true; finish() }
     }
 
     private fun feedback(message: Int) { status?.setText(message) }
@@ -96,6 +100,7 @@ class AccountLoginActivity : Activity() {
         val owner = receiver
         if (owner == null) { feedback(R.string.account_login_rejected); return }
         awaitingReply = true
+        receiptConfirmed = false
         val attempt = ++submission
         feedback(R.string.account_login_validating)
         try { owner.send(code, data) } catch (_: RuntimeException) {
@@ -103,7 +108,7 @@ class AccountLoginActivity : Activity() {
             feedback(R.string.account_login_rejected)
         }
         Handler(Looper.getMainLooper()).postDelayed({
-            if (awaitingReply && submission == attempt && windows.isCurrent(windowToken) && !isFinishing && !isDestroyed) {
+            if (awaitingReply && !receiptConfirmed && submission == attempt && windows.isCurrent(windowToken) && !isFinishing && !isDestroyed) {
                 awaitingReply = false
                 feedback(R.string.account_login_rejected)
             }
@@ -205,6 +210,8 @@ class AccountLoginActivity : Activity() {
         internal const val CANCELLED = 3
         internal const val WEB_SESSION = 4
         internal const val RESULT_ACK = 5
+        internal const val RESULT_PENDING = 6
+        internal const val RETRY_ALLOWED = "account_login_retry_allowed"
         internal const val ACCEPTED = "account_login_accepted"
         internal const val WEB_COOKIE_LOGIN = "account_web_cookie_login"
         internal const val WEB_COOKIE = "account_web_cookie"

@@ -72,7 +72,7 @@ class AgentTeamRepository @Inject constructor(
      * 写入预设文件（新建或编辑）。[originalName] 为编辑前的名称，新建时传 null；
      * 改了名就写新文件再删旧文件，等价于重命名。返回 null 表示成功。
      */
-    fun save(form: AgentTeamForm, originalName: String? = null): AgentTeamSaveError? {
+    fun save(form: AgentTeamForm, originalName: String? = null): AgentTeamSaveError? { return synchronized(com.aharou.feature.agent.domain.skill.SkillParser) {
         val name = form.name.trim()
         if (!AgentDefinitionRepository.isValidName(name)) return AgentTeamSaveError.INVALID_NAME
 
@@ -105,8 +105,6 @@ class AgentTeamRepository @Inject constructor(
             if (targetIndex < 0 || targetIndex >= index) return AgentTeamSaveError.BAD_REJECT_TARGET
         }
 
-        // 成员名单 + 阶段指令 → 一人一条任务；界面只填名单与共享指令，不手写 tasks。
-        // 两边都有时以名单为准（改名单就得真的改执行人），只在没写阶段指令时才回退到旧 tasks。
         // 接口边以阶段级声明为准，按 from 落到对应成员的任务；from 不在本阶段名单里的边随名单一起丢弃。
         // stageEdges 去重：手写脏数据（同一成员多条任务各带边）会回填出重复阶段边，不去重会固化落盘。
         val normalized = form.copy(stages = form.stages.map { stage ->
@@ -116,23 +114,13 @@ class AgentTeamRepository @Inject constructor(
             val stageEdges = stage.interfaces.filter { it.from.isNotBlank() && it.with.isNotBlank() }
                 .distinctBy { it.from.lowercase() to it.with.lowercase() }
             when {
+                keepTasks.isNotEmpty() -> keepTasks
                 prompt.isNotEmpty() && members.isNotEmpty() ->
-                    // 同一成员多条任务只保留第一条：界面口径是一人一条任务，手写重名任务被归并
-                    members.map { member ->
-                        keepTasks.filter { it.agent.equals(member, ignoreCase = true) }
-                            .firstOrNull()
-                            ?.copy(prompt = prompt)
-                            ?: AgentTeamTaskForm(agent = member, prompt = prompt)
-                    } + keepTasks.filter { it.agent.isBlank() }
+                    members.map { member -> AgentTeamTaskForm(agent = member, prompt = prompt,
+                        interfaces = stageEdges.filter { it.from.equals(member, ignoreCase = true) }
+                            .map { TeamInterface(it.with.trim(), it.about.trim()) }) }
                 else -> keepTasks
-            }.let { tasks ->
-                stage.copy(members = members, tasks = tasks.map { task ->
-                    if (task.agent.isBlank()) task else task.copy(
-                        interfaces = stageEdges.filter { it.from.equals(task.agent, ignoreCase = true) }
-                            .map { TeamInterface(it.with.trim(), it.about.trim()) }
-                    )
-                })
-            }
+            }.let { tasks -> stage.copy(members = members, tasks = tasks) }
         })
 
         val validStages = normalized.stages.filter { it.tasks.isNotEmpty() }
@@ -182,7 +170,7 @@ class AgentTeamRepository @Inject constructor(
             FileLogger.e(TAG, "保存团队预设失败: $name", e)
             AgentTeamSaveError.IO_FAILED
         }
-    }
+    } }
 
     /**
      * 目录扫描：只取顶层 `*.md`；目录不存在或不可读（远程断连）降级为「没有预设」，

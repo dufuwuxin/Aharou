@@ -54,6 +54,7 @@ internal object DoubaoAccountProtocol {
     private fun headers(credential: AccountCredential): Map<String, String> = buildMap {
         val cookie = requireCookie(credential.webCookie.orEmpty())
         put("Cookie", cookie); put("Origin", WEB); put("Referer", LOGIN)
+        put("User-Agent", AccountProviderProtocol.WEBSITE_USER_AGENT)
         cookie.split(';').map { it.trim().split('=', limit = 2) }
             .firstOrNull { it.size == 2 && it[0] == "passport_csrf_token" }?.let { put("x-tt-passport-csrf-token", it[1]) }
     }

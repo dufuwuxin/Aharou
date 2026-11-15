@@ -49,8 +49,22 @@ A successful assignment is not execution evidence. Check the subsequent run and 
 
 ### Scoped team editing and stage conditions
 
-Special Permissions provides a workspace-bound address for global and project team routes, nodes, stage conditions and communication fields. Global edits affect every project using that team. Use list/schema/get to inspect field addresses and set with the returned revision. Disabling, restarting or one hour expiration revokes the address.
+Enable the scoped team-editing channel in Special Permissions only when you want the agent to edit team configuration. Its address is bound to the current workspace; it is not general permission to run shell commands or inspect unrelated settings. Global edits affect every project using that team, while project edits apply to the bound workspace. Disabling the channel, restarting the app or reaching its one-hour expiry revokes the address.
 
-Stages accept `condition: always|never|rust|python|kotlin`. Language conditions inspect the bound project files. Nonmatching stages are recorded as skipped without launching agents or creating delivery evidence; successors continue. Unknown conditions or inaccessible workspace files stop execution explicitly.
+Ask the agent to inspect the available fields before proposing an edit. Read the current value and revision, then submit the change with that revision. If another edit has changed the value, read it again and review the new proposal rather than retrying with the old revision. The enabled scoped channel also offers role creation, full role-form editing and deletion. Each operation uses an explicit global or project scope and the current revision. Global edits can affect other projects. Deletion and renaming reject references found in the current workspace and global teams or workflow leads; the check does not claim to inspect every unopened project. Inspectable task nodes do not grant arbitrary file or shell access.
+
+The stage editor supports multiple tasks for the same role, separate task prompts and write paths, and task reordering while preserving task identifiers. Advanced routing stays collapsed by default; an empty route list keeps sequential stage execution. Stage conditions remain stage-wide, not task-level language filters. Communication defaults remain run-wide with a budget of eight; use the guide to require necessary, nonduplicated messages.
+
+Stages accept `condition: always|never|rust|python|kotlin`; the default is `always`. Set a language condition only when every task in that stage may be skipped for projects without that language. For a stage mixing several languages or responsibilities, keep `always` or separate the work into stages. Conditions apply to the whole stage, not individual tasks, and routes are not language conditions.
+
+Language conditions inspect the bound project files. Nonmatching stages are recorded as skipped without launching agents or creating delivery evidence; successors continue. Unknown conditions or inaccessible workspace files stop execution explicitly.
 
 Conditional stages run through the existing team executor and retain its routing, review and delivery-evidence checks. Skipped stages produce an explicit skip record without fabricated member output. Directory read failures and incomplete scans are reported as unknown instead of silently skipping a language stage.
+
+Keep the stage's communication guide alongside its communication policy and message limit. Changing the policy does not replace the guide, and permission to communicate does not expand tool or file-write authority.
+
+## Editing a workflow
+
+In the workflow editor, choose an existing team for each layer. Use the move-up and move-down controls to change layer order, and choose a lead or leave the team's default lead selected. Configure which layers accept rejection and the maximum rejection rounds deliberately; adding a layer does not automatically create a repair path.
+
+Save the workflow before starting it. A saved order or lead selection is configuration, not evidence that those teams have run. Verify the resulting execution and delivery records separately. Global definitions may be shared by several projects, so check the selected scope before saving.

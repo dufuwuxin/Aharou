@@ -121,6 +121,32 @@ class AccountLoginActivityTest {
         }
     }
 
+    @Test
+    @LooperMode(LooperMode.Mode.PAUSED)
+    fun receivedSubmissionWaitsForPersistenceAndFailedValidationAllowsRetryInSameBrowser() {
+        withDoubaoLogin { activity, browser, complete, status, events ->
+            browser.loadUrl(DoubaoAccountProtocol.LOGIN)
+            browser.webViewClient.onPageFinished(browser, browser.url)
+            CookieManager.getInstance().setCookie(DoubaoAccountProtocol.LOGIN, "sessionid=fixture-session; Path=/chat; Secure")
+            complete.performClick()
+            activity.receiveOwnerResult(AccountLoginActivity.RESULT_PENDING, Bundle.EMPTY)
+            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(9))
+            assertEquals(activity.getString(R.string.account_login_validating), status.text.toString())
+            assertFalse(activity.isFinishing)
+            activity.receiveOwnerResult(AccountLoginActivity.RESULT_ACK, Bundle().apply {
+                putBoolean(AccountLoginActivity.ACCEPTED, false)
+                putBoolean(AccountLoginActivity.RETRY_ALLOWED, true)
+            })
+            assertEquals(activity.getString(R.string.account_login_retry_validation), status.text.toString())
+            assertFalse(activity.isFinishing)
+            complete.performClick()
+            assertEquals(2, events.size)
+            activity.receiveOwnerResult(AccountLoginActivity.RESULT_PENDING, Bundle.EMPTY)
+            activity.receiveOwnerResult(AccountLoginActivity.RESULT_ACK, Bundle().apply { putBoolean(AccountLoginActivity.ACCEPTED, true) })
+            assertTrue(activity.isFinishing)
+        }
+    }
+
     // Deliberately bypass onCreate: this exercises production UI submission, not process/profile startup.
     private fun withDoubaoLogin(
         check: (AccountLoginActivity, WebView, Button, TextView, MutableList<Pair<Int, Bundle>>) -> Unit,

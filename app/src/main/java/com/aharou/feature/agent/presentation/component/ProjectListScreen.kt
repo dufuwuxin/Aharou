@@ -1,8 +1,9 @@
 package com.aharou.feature.agent.presentation.component
 
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.lazy.rememberLazyListState
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
@@ -40,8 +41,9 @@ fun ProjectListScreen(viewModel: ProjectTaskViewModel, createRequested: Boolean,
     var deletingProject by remember { mutableStateOf<com.aharou.feature.agent.domain.task.ProjectPlan?>(null) }
     var menuProject by remember { mutableStateOf<ProjectPlan?>(null) }
     var creating by rememberSaveable { mutableStateOf(false) }
-    var showSessions by rememberSaveable { mutableStateOf(false) }
-    val swipeThreshold = with(LocalDensity.current) { 64.dp.toPx() }
+    val pager = rememberPagerState { 2 }
+    val scope = rememberCoroutineScope()
+    val projectListState = rememberLazyListState()
     var createMenu by remember { mutableStateOf(false) }
     var name by rememberSaveable { mutableStateOf("") }
     var purpose by rememberSaveable { mutableStateOf("") }
@@ -49,7 +51,7 @@ fun ProjectListScreen(viewModel: ProjectTaskViewModel, createRequested: Boolean,
     var previousProject by rememberSaveable { mutableStateOf<String?>(null) }
     var continuationId by rememberSaveable { mutableStateOf<String?>(null) }
     var unassigned by rememberSaveable { mutableStateOf(false) }
-    LaunchedEffect(createRequested) { if (createRequested) { creating = true; showSessions = false; onCreateConsumed() } }
+    LaunchedEffect(createRequested) { if (createRequested) { creating = true; pager.scrollToPage(0); onCreateConsumed() } }
     LaunchedEffect(submitted, state.busy, state.creating, state.createdProjectId, state.selectedProjectId, state.error) {
         if (submitted && !state.creating && !state.busy) {
             if (state.createdProjectId != null && state.createdProjectId != previousProject) {
@@ -59,14 +61,7 @@ fun ProjectListScreen(viewModel: ProjectTaskViewModel, createRequested: Boolean,
             submitted = false
         }
     }
-    Box(Modifier.fillMaxSize().pointerInput(swipeThreshold) {
-        var distance = 0f
-        detectHorizontalDragGestures(onDragStart = { distance = 0f },
-            onDragCancel = { distance = 0f }, onDragEnd = {
-                if (kotlin.math.abs(distance) >= swipeThreshold) showSessions = distance < 0f
-                distance = 0f
-            }) { change, delta -> change.consume(); distance += delta }
-    }) {
+    Box(Modifier.fillMaxSize()) {
     Column(Modifier.fillMaxSize()
         .padding(Spacing.lg), verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
         Column(verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
@@ -76,15 +71,17 @@ fun ProjectListScreen(viewModel: ProjectTaskViewModel, createRequested: Boolean,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-            FilterChip(selected = !showSessions, onClick = { showSessions = false },
+            FilterChip(selected = pager.currentPage == 0, onClick = { scope.launch { pager.animateScrollToPage(0) } },
                 modifier = Modifier.heightIn(min = 48.dp), label = { Text(stringResource(R.string.project_home)) })
-            FilterChip(selected = showSessions, onClick = { showSessions = true },
+            FilterChip(selected = pager.currentPage == 1, onClick = { scope.launch { pager.animateScrollToPage(1) } },
                 modifier = Modifier.heightIn(min = 48.dp), label = { Text(stringResource(R.string.project_sessions)) })
         }
-        if (showSessions) Box(Modifier.weight(1f)) { sessionsContent() }
-        else {
+        HorizontalPager(state = pager, beyondViewportPageCount = 1, key = { it },
+            modifier = Modifier.weight(1f).testTag("project_home_pager")) { page ->
+        if (page == 1) Box(Modifier.fillMaxSize()) { sessionsContent() }
+        else Column(Modifier.fillMaxSize()) {
         state.error?.let { Text(stringResource(R.string.project_task_error, projectTaskExecutionReasonLabel(it)), color = MaterialTheme.colorScheme.error) }
-        LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 80.dp), verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
+        LazyColumn(Modifier.weight(1f), state = projectListState, contentPadding = PaddingValues(bottom = 80.dp), verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
             if (state.projects.isEmpty() && !state.loading) item {
                 Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surface,
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
@@ -93,7 +90,7 @@ fun ProjectListScreen(viewModel: ProjectTaskViewModel, createRequested: Boolean,
                         Text(stringResource(R.string.project_empty_title), style = MaterialTheme.typography.titleLarge)
                         Text(stringResource(R.string.project_empty_description), style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Button(onClick = { creating = true; showSessions = false },
+                        Button(onClick = { creating = true; scope.launch { pager.animateScrollToPage(0) } },
                             enabled = !state.busy && state.workspace.isNotBlank(),
                             modifier = Modifier.heightIn(min = 48.dp).testTag("project_empty_create")) {
                             Text(stringResource(R.string.project_create))
@@ -151,6 +148,7 @@ fun ProjectListScreen(viewModel: ProjectTaskViewModel, createRequested: Boolean,
         }
         }
     }
+    }
     val createLabel = stringResource(R.string.project_create_menu)
     Box(Modifier.align(Alignment.BottomEnd).padding(Spacing.lg)) {
         FloatingActionButton(onClick = { createMenu = true }, shape = CircleShape,
@@ -163,7 +161,7 @@ fun ProjectListScreen(viewModel: ProjectTaskViewModel, createRequested: Boolean,
             DropdownMenuItem(text = { Text(stringResource(R.string.project_create)) },
                 enabled = !state.loading && !state.busy && state.workspace.isNotBlank(),
                 modifier = Modifier.testTag("create_project"),
-                onClick = { createMenu = false; creating = true; showSessions = false })
+                onClick = { createMenu = false; creating = true; scope.launch { pager.animateScrollToPage(0) } })
         }
     }
     }
