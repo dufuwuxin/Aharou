@@ -162,7 +162,7 @@ class OfficeAceAccountProtocolTest {
             val directory = server.takeRequest()
             assertEquals("/v2/models", directory.path)
             assertEquals(expectedAuth, directory.getHeader("Authorization"))
-            val client = okhttp3.OkHttpClient.Builder().addInterceptor(restored.interceptor()).build()
+            val client = okhttp3.OkHttpClient.Builder().connectionSpecs(listOf(okhttp3.ConnectionSpec.CLEARTEXT)).addInterceptor(restored.interceptor()).build()
             for (stream in listOf(true, false)) {
                 val bytes = if (stream) "data: {\"choices\":[{\"delta\":{\"content\":\"  x \\n\"}}]}\n\ndata: [DONE]\n\n"
                     else """{"choices":[{"message":{"content":"  x \n"}}]}"""

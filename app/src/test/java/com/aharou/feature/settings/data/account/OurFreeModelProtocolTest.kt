@@ -42,6 +42,7 @@ class OurFreeModelProtocolTest {
             }.build())
 
     private fun gateway(manager: AccountProviderManager) = OkHttpClient.Builder()
+        .connectionSpecs(listOf(ConnectionSpec.CLEARTEXT))
         .addInterceptor(AccountGatewayInterceptor(manager)).build()
 
     private fun completion(manager: AccountProviderManager, streaming: Boolean, model: String = "vendor/free") = Request.Builder()

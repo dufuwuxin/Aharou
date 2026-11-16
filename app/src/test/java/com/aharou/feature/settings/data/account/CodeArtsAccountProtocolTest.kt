@@ -231,7 +231,7 @@ class CodeArtsAccountProtocolTest {
                 server.enqueue(MockResponse().setResponseCode(status).setBody(
                     """{"error_code":"CODEBASE.FIXTURE","error_msg":"private-fixture-cookie"}"""))
                 server.enqueue(MockResponse().setBody(models))
-                val client = OkHttpClient.Builder().addInterceptor(manager.interceptor()).build()
+                val client = OkHttpClient.Builder().connectionSpecs(listOf(ConnectionSpec.CLEARTEXT)).addInterceptor(manager.interceptor()).build()
                 val request = Request.Builder().url(manager.baseUrl(kind, "provider") + "/chat/completions")
                     .post("""{"model":"fixture-model","stream":true,"messages":[{"role":"user","content":"Hello"}]}""".toRequestBody()).build()
                 client.newCall(request).execute().use { response ->

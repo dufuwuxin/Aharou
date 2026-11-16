@@ -7,8 +7,16 @@ import org.junit.Assert.assertSame
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+import org.robolectric.annotation.ConscryptMode
+import org.robolectric.annotation.GraphicsMode
+import org.robolectric.annotation.SQLiteMode
 
 @RunWith(RobolectricTestRunner::class)
+@Config(application = android.app.Application::class)
+@GraphicsMode(GraphicsMode.Mode.LEGACY)
+@SQLiteMode(SQLiteMode.Mode.LEGACY)
+@ConscryptMode(ConscryptMode.Mode.OFF)
 class ActivitySavedStateTest {
     @Test fun coldStartHasNoRestoredState() {
         assertNull(activityStateForVersion(null, 1584))
