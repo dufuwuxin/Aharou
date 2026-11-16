@@ -30,10 +30,13 @@ internal object DoubaoWebsiteCatalog {
             } catch (_: RuntimeException) { failure("format") }
         }
         val layout = router?.obj("loaderData")?.obj("chat_layout")?.obj("chat_layout") ?: failure("missing")
-        val account = layout.obj("accountInfo")?.obj("data") ?: failure("identity")
+        val identity = layout.obj("accountInfo") ?: failure("identity")
+        val account = identity.obj("data") ?: failure("identity")
         val userId = account.text("user_id_str") ?: account.text("user_id")
+        val errorCode = account.text("error_code")
+        val success = if (account.has("error_code")) errorCode == "0" else identity.text("message") == "success"
         if (!expectedUserId.matches(Regex("[1-9][0-9]{5,24}")) || userId != expectedUserId ||
-            account.text("error_code") != "0" || account.text("is_visitor_account") in setOf("true", "1")) failure("identity")
+            !success || account.text("is_visitor_account") in setOf("true", "1")) failure("identity")
         val directory = layout.obj("actionBarBriefList") ?: failure("missing")
         if (directory.obj("request")?.text("bot_id") != expectedBotId) failure("missing")
         val modes = directory.obj("modeSelectData") ?: failure("missing")

@@ -48,6 +48,23 @@ class DoubaoWebsiteCatalogTest {
         assertEquals(listOf("7"), DoubaoAccountProtocol.models(payload).map { it.id })
     }
 
+    @Test fun realWebsiteSuccessEnvelopeMayOmitErrorCodeButExplicitFailureIsRejected() {
+        val value = router()
+        val accountInfo = value.obj("loaderData")!!.obj("chat_layout")!!.obj("chat_layout")!!.obj("accountInfo")!!
+        accountInfo.obj("data")!!.remove("error_code")
+        accountInfo.addProperty("message", "success")
+        assertNotNull(DoubaoWebsiteCatalog.config(html(value), uid, bot).obj("menu_conf_v2"))
+        accountInfo.obj("data")!!.addProperty("error_code", 1)
+        reject("identity", html(value))
+        for (invalid in listOf("null", "{}", "[]", "\"\"", "\" \"")) {
+            accountInfo.obj("data")!!.add("error_code", JsonParser.parseString(invalid))
+            reject("identity", html(value))
+        }
+        accountInfo.obj("data")!!.remove("error_code")
+        accountInfo.addProperty("message", "failed")
+        reject("identity", html(value))
+    }
+
     @Test fun identityAndBotMustMatchWithoutUsingOtherSessionFields() {
         reject("identity", html(router()), "987654321")
         reject("identity", html(router()), "")
