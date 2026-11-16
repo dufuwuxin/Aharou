@@ -199,6 +199,108 @@ class DoubaoAccountProtocolTest {
         }
     }
 
+    @Test fun workModelsKeepNativeRoutingSeparateAndNeverIncludeUpgradeOrDisabledRows() {
+        val payload = JsonParser.parseString(catalog).asJsonObject
+        val mode = payload.obj("data")!!.array("entry_list")[0].asJsonObject.obj("active_switch_conf")!!
+            .obj("menu_conf_v2")!!.obj("mode_list")!!.array("item_list")[1].asJsonObject
+        mode.addProperty("mode_id", "3")
+        mode.obj("model_list")!!.array("item_list").apply {
+            add(JsonParser.parseString("""{"model_item_key":"person-fixture","item_id":10001,"name":"Fixture Work","model_extra_params":{"provider_id":"fixture-provider"}}"""))
+            add(JsonParser.parseString("""{"model_item_key":"paid","item_id":10001,"name":"Paid","subscribe_config":{"need_upgrade":true}}"""))
+            add(JsonParser.parseString("""{"model_item_key":"disabled","item_id":10001,"name":"Disabled","disabled":true}"""))
+        }
+        val models = DoubaoAccountProtocol.models(payload)
+        assertEquals(listOf("7", "work:10", "work:person-fixture"), models.map { it.id })
+        val work = models.last()
+        assertTrue(work.name.contains("Work"))
+        val native = DoubaoAccountProtocol.completion(JsonParser.parseString(json(false)).asJsonObject, work)
+        assertEquals("1", native.obj("option")!!.text("agent_mode"))
+        assertEquals("1", native.obj("ext")!!.text("agent_mode"))
+        assertEquals("3", native.obj("option")!!.obj("conversation_init_ext")!!.text("mode_id"))
+        assertEquals("10001", native.obj("option")!!.text("need_deep_think"))
+        assertEquals("person-fixture", native.obj("option")!!.obj("model_config")!!.text("model_item_key"))
+        assertEquals("fixture-provider", native.obj("option")!!.obj("aggregate_params")!!.text("provider_id"))
+        assertEquals("1", native.obj("option")!!.obj("general_task_param")!!.text("runtime_type"))
+        val chat = DoubaoAccountProtocol.completion(JsonParser.parseString(json(false)).asJsonObject, models.first())
+        assertEquals("2", chat.obj("option")!!.text("agent_mode"))
+        assertEquals("7", chat.obj("option")!!.obj("model_config")!!.text("model_item_key"))
+        mode.obj("model_list")!!.array("item_list").add(JsonParser.parseString("""{"model_item_key":"7","name":"Shared Work"}"""))
+        val shared = DoubaoAccountProtocol.models(payload).filter { it.id in setOf("7", "work:7") }
+        assertEquals(listOf("7", "work:7"), shared.map { it.id })
+        for ((index, model) in shared.withIndex()) {
+            val routed = DoubaoAccountProtocol.completion(JsonParser.parseString(json(false)).asJsonObject, model)
+            assertEquals(if (index == 0) "2" else "1", routed.obj("option")!!.text("agent_mode"))
+            assertEquals("7", routed.obj("option")!!.obj("model_config")!!.text("model_item_key"))
+        }
+    }
+
+    @Test fun workGatewayUsesSelectedModeAndPreservesTextWithoutReplayingUnsupportedTasks() = runBlocking {
+        val payload = JsonParser.parseString(catalog).asJsonObject
+        payload.obj("data")!!.array("entry_list")[0].asJsonObject.obj("active_switch_conf")!!
+            .obj("menu_conf_v2")!!.obj("mode_list")!!.array("item_list")[1].asJsonObject.addProperty("mode_id", "3")
+        MockWebServer().use { server ->
+            val manager = manager(server)
+            val pending = manager.beginLogin("provider", kind)
+            server.enqueue(MockResponse().setBody(user))
+            server.enqueue(MockResponse().setBody(payload.toString()))
+            assertTrue(manager.acceptWebLogin(pending, pending.url, pending.id, pending.state, cookie))
+            manager.awaitLogin(pending)
+            repeat(2) { server.takeRequest(1, TimeUnit.SECONDS)!! }
+            for (stream in listOf(false, true)) {
+                server.enqueue(MockResponse().setBody(payload.toString()))
+                server.enqueue(MockResponse().setHeader("Content-Type", "text/event-stream").setBody(ack + text + end))
+                val body = JsonParser.parseString(json(stream)).asJsonObject.apply { addProperty("model", "work:10") }
+                val client = OkHttpClient.Builder().connectionSpecs(listOf(ConnectionSpec.CLEARTEXT))
+                    .callTimeout(5, TimeUnit.SECONDS).addInterceptor(manager.interceptor()).build()
+                val request = Request.Builder().url(manager.baseUrl(kind, "provider") + "/chat/completions")
+                    .post(body.toString().toRequestBody()).build()
+                client.newCall(request).execute().use { response ->
+                    assertEquals(200, response.code)
+                    val result = response.body!!.string()
+                    assertTrue(result.contains("你好🌏"))
+                    if (stream) assertTrue(result.contains("[DONE]"))
+                }
+                server.takeRequest(1, TimeUnit.SECONDS)!!
+                val sent = JsonParser.parseString(server.takeRequest(1, TimeUnit.SECONDS)!!.body.readUtf8()).asJsonObject
+                assertEquals("1", sent.obj("option")!!.text("agent_mode"))
+                assertEquals("3", sent.obj("option")!!.obj("conversation_init_ext")!!.text("mode_id"))
+                assertEquals("10", sent.obj("option")!!.obj("model_config")!!.text("model_item_key"))
+                assertFalse(sent.toString().contains("work:10"))
+            }
+            val body = JsonParser.parseString(json(false)).asJsonObject.apply { addProperty("model", "work:10") }
+            server.enqueue(MockResponse().setBody(payload.toString()))
+            server.enqueue(MockResponse().setHeader("Content-Type", "text/event-stream").setBody(ack + event("FETCH_STREAM", """{"fetch_type":2,"fetch_key":"private-task"}""")))
+            val client = OkHttpClient.Builder().connectionSpecs(listOf(ConnectionSpec.CLEARTEXT))
+                .callTimeout(5, TimeUnit.SECONDS).addInterceptor(manager.interceptor()).build()
+            val request = Request.Builder().url(manager.baseUrl(kind, "provider") + "/chat/completions")
+                .post(body.toString().toRequestBody()).build()
+            client.newCall(request).execute().use { response ->
+                assertEquals(502, response.code)
+                val rejected = response.body!!.string()
+                assertTrue(rejected.contains("unsupported_capability"))
+                assertFalse(rejected.contains("private-task"))
+            }
+            assertEquals(8, server.requestCount)
+            repeat(2) { server.takeRequest(1, TimeUnit.SECONDS)!! }
+            assertNull(server.takeRequest(100, TimeUnit.MILLISECONDS))
+        }
+    }
+
+    @Test fun modeOwnedListsDoNotLeakGlobalModelsAndDisabledWorkModesStayUnavailable() {
+        val payload = JsonParser.parseString(catalog).asJsonObject
+        val config = payload.obj("data")!!.array("entry_list")[0].asJsonObject.obj("active_switch_conf")!!.obj("menu_conf_v2")!!
+        config.addProperty("use_mode_model_list", true)
+        config.add("model_list", JsonParser.parseString("""{"item_list":[{"model_item_key":"99","name":"Global only"}]}"""))
+        val work = config.obj("mode_list")!!.array("item_list")[1].asJsonObject
+        work.addProperty("mode_id", "3")
+        assertEquals(listOf("7", "work:10"), DoubaoAccountProtocol.models(payload).map { it.id })
+        work.addProperty("disabled", true)
+        assertEquals(listOf("7"), DoubaoAccountProtocol.models(payload).map { it.id })
+        work.remove("disabled")
+        work.add("subscribe_config", JsonParser.parseString("""{"need_upgrade":true}"""))
+        assertEquals(listOf("7"), DoubaoAccountProtocol.models(payload).map { it.id })
+    }
+
     @Test fun typedDeepThinkSwitchDoesNotDependOnLegacyActionBarKey() {
         val payload = JsonParser.parseString(catalog).asJsonObject
         val entries = payload.obj("data")!!.array("entry_list")

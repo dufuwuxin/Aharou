@@ -181,34 +181,52 @@ internal object DoubaoAccountProtocol {
         if (payload.text("code") != "0") throw AccountProviderException("invalid_response", "Doubao model directory has no success status")
         val config = modelSwitch(payload) ?: return emptyList()
         val result = linkedMapOf<String, AccountProviderModel>()
-        fun add(item: JsonObject) {
+        fun add(item: JsonObject, workModeId: String? = null) {
             if (item.text("disabled") in setOf("true", "1") || item.obj("subscribe_config")?.text("need_upgrade") in setOf("true", "1")) return
             val id = item.text("model_item_key") ?: item.text("item_id") ?: return
             val name = item.text("name") ?: return
             val extra = item.obj("model_extra_params")
             val think = if (extra?.text("model_type") == "custom") 10001 else id.toIntOrNull() ?: item.text("item_id")?.toIntOrNull() ?: return
-            result[id] = AccountProviderModel(id, name, function = think.toString(), configName = extra?.text("provider_id").orEmpty())
+            val key = if (workModeId == null) id else "work:$id"
+            result[key] = AccountProviderModel(key, if (workModeId == null) name else "$name · Work",
+                function = if (workModeId == null) think.toString() else "work:$workModeId:$think",
+                configName = extra?.text("provider_id").orEmpty(), modelName = if (workModeId == null) null else id)
         }
         val v2 = config.obj("menu_conf_v2")
         val modes = v2?.obj("mode_list")?.array("item_list") ?: JsonArray()
         for (mode in modes.mapNotNull { it.objectOrNull() }.filter { it.text("agent_mode") == "2" && it.text("disabled") !in setOf("true", "1") && it.obj("subscribe_config")?.text("need_upgrade") !in setOf("true", "1") }) {
-            mode.obj("model_list")?.array("item_list")?.mapNotNull { it.objectOrNull() }?.forEach(::add)
+            mode.obj("model_list")?.array("item_list")?.mapNotNull { it.objectOrNull() }?.forEach { add(it) }
             val supported = mode.array("support_models")
-            v2?.obj("model_list")?.array("item_list")?.mapNotNull { it.objectOrNull() }?.filter { item ->
+            if (v2?.text("use_mode_model_list") !in setOf("true", "1")) v2?.obj("model_list")?.array("item_list")?.mapNotNull { it.objectOrNull() }?.filter { item ->
                 supported.isEmpty || supported.any { support ->
                     val key = support.objectOrNull()?.let { it.text("model_item_key") ?: it.text("item_id") }
                         ?: support.takeIf { it.isJsonPrimitive }?.asString
                     key == (item.text("model_item_key") ?: item.text("item_id"))
                 }
-            }?.forEach(::add)
+            }?.forEach { add(it) }
         }
         if (result.isEmpty()) config.obj("menu_conf")?.array("item_list")?.mapNotNull { it.objectOrNull() }
             ?.filter { it.text("agent_mode") in setOf(null, "2") && it.text("disabled") !in setOf("true", "1") &&
                 it.obj("subscribe_config")?.text("need_upgrade") !in setOf("true", "1") }
             ?.forEach { group ->
                 if (group.has("model_item_key") || group.has("item_id")) add(group)
-                else group.array("item_list").mapNotNull { it.objectOrNull() }.forEach(::add)
+                else group.array("item_list").mapNotNull { it.objectOrNull() }.forEach { add(it) }
             }
+        for (mode in modes.mapNotNull { it.objectOrNull() }.filter { it.text("agent_mode") == "1" &&
+            it.text("disabled") !in setOf("true", "1") && it.obj("subscribe_config")?.text("need_upgrade") !in setOf("true", "1") }) {
+            val modeId = mode.text("mode_id")?.takeIf { it.matches(Regex("[0-9]{1,3}")) } ?: continue
+            mode.obj("model_list")?.array("item_list")?.mapNotNull { it.objectOrNull() }?.forEach { add(it, modeId) }
+            if (v2?.text("use_mode_model_list") !in setOf("true", "1")) {
+                val supported = mode.array("support_models")
+                v2?.obj("model_list")?.array("item_list")?.mapNotNull { it.objectOrNull() }?.filter { item ->
+                    supported.isEmpty || supported.any { support ->
+                        val key = support.objectOrNull()?.let { it.text("model_item_key") ?: it.text("item_id") }
+                            ?: support.takeIf { it.isJsonPrimitive }?.asString
+                        key == (item.text("model_item_key") ?: item.text("item_id"))
+                    }
+                }?.forEach { add(it, modeId) }
+            }
+        }
         return result.values.toList()
     }
 
@@ -233,7 +251,15 @@ internal object DoubaoAccountProtocol {
         val localMessage = UUID.randomUUID().toString()
         val init = JsonObject().apply { addProperty("need_ack_conversation", true) }
         val task = JsonParser.parseString("""{"action":0,"thread_local_message_id":["$localMessage"],"runtime_type":1,"agent_task_param":{"runtime_type":1},"agent_task_param_change":{"runtime_changed":false,"device_changed":false,"sandbox_auth_type_changed":false},"need_modify_conversation":false,"task_input_json":"{\"schema_version\":1,\"project_context\":{}}"}""").asJsonObject
-        val think = model.function?.toIntOrNull() ?: throw AccountProviderException("invalid_model", "Doubao model has no native routing metadata", 400)
+        val workRoute = model.function?.takeIf { it.startsWith("work:") }?.split(':')
+        val work = workRoute != null
+        val modeId = if (work) workRoute!!.getOrNull(1)?.takeIf { it.matches(Regex("[0-9]{1,3}")) }
+            ?: throw AccountProviderException("invalid_model", "Doubao Work model has no mode", 400) else "1"
+        val nativeModel = if (work) model.modelName?.takeIf { model.id == "work:$it" }
+            ?: throw AccountProviderException("invalid_model", "Doubao Work model has no native identity", 400) else model.id
+        val think = (if (work) workRoute!!.getOrNull(2) else model.function)?.toIntOrNull()
+            ?: throw AccountProviderException("invalid_model", "Doubao model has no native routing metadata", 400)
+        val agentMode = if (work) 1 else 2
         return JsonObject().apply {
             add("client_meta", JsonObject().apply {
                 addProperty("local_conversation_id", "local_${now}_${UUID.randomUUID()}"); addProperty("conversation_id", "")
@@ -247,16 +273,16 @@ internal object DoubaoAccountProtocol {
                 }) })
             }) })
             add("option", JsonObject().apply {
-                addProperty("create_time_ms", now); addProperty("agent_mode", 2); addProperty("need_deep_think", think); addProperty("unique_key", UUID.randomUUID().toString())
+                addProperty("create_time_ms", now); addProperty("agent_mode", agentMode); addProperty("need_deep_think", think); addProperty("unique_key", UUID.randomUUID().toString())
                 add("recovery_option", JsonObject().apply { addProperty("is_recovery", false); addProperty("req_create_time_sec", now / 1000); addProperty("append_sse_event_scene", 0) })
                 addProperty("need_create_conversation", true); addProperty("is_old_user", true); addProperty("message_from", 0)
                 add("sse_recv_event_options", JsonObject().apply { addProperty("support_chunk_delta", true) }); add("general_task_param", task)
-                add("conversation_init_option", init); add("conversation_init_ext", JsonObject().apply { addProperty("mode_id", "1"); addProperty("model_item_key", model.id) })
-                add("model_config", JsonObject().apply { addProperty("model_item_key", model.id) })
+                add("conversation_init_option", init); add("conversation_init_ext", JsonObject().apply { addProperty("mode_id", modeId); addProperty("model_item_key", nativeModel) })
+                add("model_config", JsonObject().apply { addProperty("model_item_key", nativeModel) })
                 add("aggregate_params", JsonObject().apply { addProperty("provider_id", model.configName.orEmpty()) })
             })
             add("ext", JsonObject().apply {
-                addProperty("general_task_param", task.toString()); addProperty("use_deep_think", think.toString()); addProperty("agent_mode", "2")
+                addProperty("general_task_param", task.toString()); addProperty("use_deep_think", think.toString()); addProperty("agent_mode", agentMode.toString())
                 addProperty("sub_conv_firstmet_type", "1"); addProperty("collection_id", ""); addProperty("is_finish", "1")
                 addProperty("conversation_init_option", init.toString()); addProperty("commerce_credit_config_enable", "0")
             })
@@ -326,7 +352,7 @@ internal object DoubaoAccountProtocol {
             when (event) {
                 "SSE_ACK" -> ack = true
                 "STREAM_ERROR" -> throw AccountProviderException("upstream_error", "Doubao returned a stream error")
-                "FETCH_STREAM" -> throw AccountProviderException("unsupported_capability", "Doubao chat requested a task handoff; work mode is not supported")
+                "FETCH_STREAM" -> throw AccountProviderException("unsupported_capability", "Doubao requested an unsupported task handoff; local tasks and tool execution are not supported")
                 "STREAM_CHUNK" -> {
                     if (!ack) throw AccountProviderException("invalid_stream", "Doubao stream is missing its acknowledgement")
                     for (op in payload.array("patch_op")) for (entry in (op.objectOrNull()?.obj("patch_value")?.array("content_block") ?: JsonArray())) {
