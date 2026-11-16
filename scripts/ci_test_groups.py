@@ -17,9 +17,9 @@ RESULTS = Path("app/build/test-results/testArmsoloDebugUnitTest")
 ARCHIVE = Path("app/build/test-results/ciGroups")
 
 
-def discover(root: Path) -> dict[str, list[str]]:
+def discover(root: Path, test_root: str = "app/src/test") -> dict[str, list[str]]:
     groups: dict[str, list[str]] = {group: [] for group in GROUPS}
-    for path in sorted((root / "app/src/test").rglob("*")):
+    for path in sorted((root / test_root).rglob("*")):
         if path.suffix not in {".kt", ".java"}:
             continue
         text = path.read_text(encoding="utf-8")
@@ -58,7 +58,15 @@ def report_classes(directory: Path) -> set[str]:
         raise ValueError(f"No test reports: {directory}")
     for path in files:
         suite = ET.parse(path).getroot()
-        for case in suite.iter("testcase"):
+        testcases = list(suite.iter("testcase"))
+        if suite.tag != "testsuite" or not testcases:
+            raise ValueError(f"Empty or invalid test suite: {path.name}")
+        for field in ("failures", "errors", "skipped"):
+            if int(suite.get(field, "0")) != 0:
+                raise ValueError(f"Nonzero suite {field}: {path.name}")
+        if "tests" in suite.attrib and int(suite.attrib["tests"]) != len(testcases):
+            raise ValueError(f"Test count mismatch: {path.name}")
+        for case in testcases:
             if case.find("failure") is not None or case.find("error") is not None:
                 raise ValueError(f"Failed test: {path.name}: {case.get('name')}")
             if case.find("skipped") is not None:
@@ -129,12 +137,25 @@ def verify_all(root: Path, groups: dict[str, list[str]]) -> None:
     print(f"Complete app regression: {len(seen)} classes in {len(groups)} disjoint domains")
 
 
+def verify_combined(root: Path, groups: dict[str, list[str]]) -> None:
+    expected_app = [name for members in groups.values() for name in members]
+    verify_report(root / RESULTS, expected_app)
+    core_groups = discover(root, "core-agent/src/test")
+    expected_core = [name for members in core_groups.values() for name in members]
+    verify_report(root / "core-agent/build/test-results/test", expected_core)
+    print(f"Combined regression verified: {len(expected_app)} app and {len(expected_core)} core-agent classes")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--group", choices=GROUPS)
     parser.add_argument("--verify-all", action="store_true")
+    parser.add_argument("--verify-combined", action="store_true")
     args = parser.parse_args()
     groups = discover(ROOT)
+    if args.verify_combined:
+        verify_combined(ROOT, groups)
+        return 0
     if args.verify_all:
         verify_all(ROOT, groups)
         return 0

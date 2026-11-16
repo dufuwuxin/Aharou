@@ -192,6 +192,7 @@ jobs:
         run: |
           set -o pipefail
           ./gradlew :app:testArmsoloDebugUnitTest :core-agent:test --console=plain 2>&1 | tee -a /tmp/unit.log
+          python3 scripts/ci_test_groups.py --verify-combined
       - name: Export exact combination JVM dependencies
         if: always() && steps.group_manifest.outcome == 'success' && steps.combined_regression.outcome == 'success'
         run: |
