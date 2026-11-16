@@ -70,7 +70,8 @@ class BuiltinContextEntries internal constructor(
             "archive-execution-supplement", "crosscheck-system-request", "steward-judge-system-request",
             "steward-judge-input-request", "mobile-operator-system-request",
             "mobile-operator-format-retry-request", "mobile-operator-input-request",
-            "project-task-context-rules-request", "project-task-context-slot")
+            "project-task-context-rules-request", "project-task-context-slot",
+            "aharou-public-asset-review", "aharou-asset-relations")
         val done = if (ledger.exists()) {
             val lines = try { ledger.readLines() } catch (e: Exception) {
                 FileLogger.w("BuiltinContextEntries", "读取默认收据失败", e)

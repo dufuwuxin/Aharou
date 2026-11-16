@@ -31,6 +31,8 @@ class BuiltinContextEntriesTest {
 
     private val asset: File get() = listOf(File("src/main/assets/context-library/builtin.json"),
         File("app/src/main/assets/context-library/builtin.json")).first { it.isFile }
+    private val auditIds = setOf("aharou-public-asset-review", "aharou-asset-relations")
+    private val auditTitles = setOf("Aharou 公开资产核对", "Aharou 资产关系整理")
     private val executionIds = setOf("main-execution-contract", "member-execution-contract", "execution-source-map",
         "archive-execution-supplement", "crosscheck-system-request", "steward-judge-system-request",
         "steward-judge-input-request", "mobile-operator-system-request",
@@ -40,7 +42,7 @@ class BuiltinContextEntriesTest {
         "steward-judge-input-request", "mobile-operator-system-request",
         "mobile-operator-format-retry-request", "mobile-operator-input-request")
     private val changedSeedOrder = listOf("archive-execution-supplement") + auxiliaryPromptIds + listOf(
-        "project-task-context-rules-request", "project-task-context-slot")
+        "project-task-context-rules-request", "project-task-context-slot") + auditIds
     private val legacyRecordedIds = setOf("main-foundation", "member-foundation", "title-request",
         "main-tool-directory", "member-tool-directory")
     private fun seeds() = BuiltinContextEntries(File(temp.root, ".context-defaults-v1")) { asset.readText() }
@@ -182,11 +184,11 @@ class BuiltinContextEntriesTest {
             contextCategory = injection.category, contextLoad = ContextLoad.OFF, contextFolder = "内置默认"))
         val entries = ContextLibraryRepository(memory, seeds()).list(null)
         assertFalse(entries.any { it.title == request.title || it.title == injection.title || it.title == removed.title })
-        assertEquals(executionIds.size + 4, entries.size)
+        assertEquals(executionIds.size + auditIds.size + 4, entries.size)
         assertEquals(request.requestKey, entries.single { it.title == "改名请求" }.requestKey)
         assertEquals("辅助请求", entries.single { it.title == "改名请求" }.folder)
         assertEquals(ContextLoad.OFF, entries.single { it.title == "改名注入" }.loading)
-        assertEquals(setOf(request.id, injection.id, removed.id, "main-tool-directory", "member-tool-directory") + executionIds,
+        assertEquals(setOf(request.id, injection.id, removed.id, "main-tool-directory", "member-tool-directory") + executionIds + auditIds,
             File(temp.root, ".context-defaults-v1").readLines().drop(1).toSet())
         val bytes = File(temp.root, "renamed-request.md").readText()
         ContextLibraryRepository(memory, seeds()).list(null)
@@ -200,13 +202,13 @@ class BuiltinContextEntriesTest {
             contextCategory = ContextCategory.RULE, contextLoad = ContextLoad.OFF,
             contextFolder = "requests/${request.requestKey}"))
         val first = ContextLibraryRepository(memory, seeds()).list(null)
-        val addedTitles = seeds().defaults().filter { it.id in executionIds }.map { it.title }.toSet()
+        val addedTitles = seeds().defaults().filter { it.id in executionIds || it.id in auditIds }.map { it.title }.toSet()
         assertEquals(setOf("仅存规则", "主代理工具目录", "成员工具目录") + addedTitles, first.map { it.title }.toSet())
         assertEquals(5, first.count { it.category.isInjection })
         val second = ContextLibraryRepository(memory, seeds()).list(null)
         assertEquals(first.map { it.title }, second.map { it.title })
         assertEquals(5, second.count { it.category.isInjection })
-        assertEquals(legacyRecordedIds + executionIds,
+        assertEquals(legacyRecordedIds + executionIds + auditIds,
             File(temp.root, ".context-defaults-v1").readLines().drop(1).toSet())
     }
 
@@ -256,7 +258,7 @@ class BuiltinContextEntriesTest {
         File(temp.root, ".context-defaults-v1").writeText("version=1-legacy\nmain-foundation\nmember-foundation\ntitle-request\n")
         val library = ContextLibraryRepository(memory, seeds())
         val first = library.list(null)
-        val addedTitles = seeds().defaults().filter { it.id in executionIds }.map { it.title }.toSet()
+        val addedTitles = seeds().defaults().filter { it.id in executionIds || it.id in auditIds }.map { it.title }.toSet()
         assertEquals(setOf("主代理工具目录", "成员工具目录") + addedTitles, first.map { it.title }.toSet())
         val entry = first.single { it.title == "主代理工具目录" }
         assertTrue(library.save(entry.copy(content = "用户目录", loading = ContextLoad.OFF), null))
@@ -281,7 +283,7 @@ class BuiltinContextEntriesTest {
         val bytes = file.readText()
         val receipt = legacyReceipt()
         val first = ContextLibraryRepository(memory, seeds()).list(null)
-        val additions = defaults.filter { it.id in executionIds }
+        val additions = defaults.filter { it.id in executionIds || it.id in auditIds }
         assertEquals(setOf(old.title) + additions.map { it.title }, first.map { it.title }.toSet())
         assertEquals(bytes, file.readText())
         assertEquals(ContextLoad.OFF, first.single { it.title == old.title }.loading)
@@ -305,7 +307,7 @@ class BuiltinContextEntriesTest {
         assertEquals(ContextCategory.MAIN_INJECTED, additions.single { it.id == "project-task-context-slot" }.category)
         assertEquals(ContextLoad.FULL, additions.single { it.id == "project-task-context-slot" }.loading)
         assertEquals("version=1-legacy", receipt.readLines().first())
-        assertEquals(legacyRecordedIds + executionIds, receipt.readLines().drop(1).toSet())
+        assertEquals(legacyRecordedIds + executionIds + auditIds, receipt.readLines().drop(1).toSet())
         val recorded = receipt.readText()
         assertEquals(first, ContextLibraryRepository(memory, seeds()).list(null))
         assertEquals(recorded, receipt.readText())
@@ -330,7 +332,7 @@ class BuiltinContextEntriesTest {
         val library = ContextLibraryRepository(memory, seeds())
         val first = library.list(null)
         val auxiliaryTitles = defaults.filter { it.id in auxiliaryPromptIds }.map { it.title }.toSet()
-        assertEquals(setOf(main.title, member.title, sourceMap.title, archiveSource.title) + projectPromptTitles + auxiliaryTitles,
+        assertEquals(setOf(main.title, member.title, sourceMap.title, archiveSource.title) + projectPromptTitles + auxiliaryTitles + auditTitles,
             first.map { it.title }.toSet())
         assertEquals(bytes, File(existing.sourceLabel).readText())
         assertEquals(existing, first.single { it.title == main.title })
@@ -340,14 +342,14 @@ class BuiltinContextEntriesTest {
         assertTrue(library.delete(first.single { it.title == mobilePrompt.title }, null))
         val recorded = receipt.readText()
         val next = ContextLibraryRepository(memory, seeds()).list(null)
-        assertEquals(setOf(main.title, "用户改名契约", archiveSource.title) + projectPromptTitles + auxiliaryTitles - mobilePrompt.title,
+        assertEquals(setOf(main.title, "用户改名契约", archiveSource.title) + projectPromptTitles + auxiliaryTitles + auditTitles - mobilePrompt.title,
             next.map { it.title }.toSet())
         assertEquals("用户已有契约", next.single { it.title == main.title }.content)
         assertEquals("用户改写正文", next.single { it.title == "用户改名契约" }.content)
         assertEquals(ContextLoad.OFF, next.single { it.title == main.title }.loading)
         assertEquals(ContextLoad.OFF, next.single { it.title == "用户改名契约" }.loading)
         assertEquals(ContextLoad.SEARCH, next.single { it.title == archiveSource.title }.loading)
-        assertEquals(legacyRecordedIds + executionIds, receipt.readLines().drop(1).toSet())
+        assertEquals(legacyRecordedIds + executionIds + auditIds, receipt.readLines().drop(1).toSet())
         assertEquals(recorded, receipt.readText())
     }
 
@@ -479,6 +481,138 @@ class BuiltinContextEntriesTest {
         assertFalse(roleText.contains(main.content))
         assertFalse(roleText.contains("{{AICODE_"))
         verify(exactly = 1) { store.record(null, roleText) }
+    }
+
+    @Test fun realManifestAuditEntriesStaySearchOnlyAndUserOwnedOnFreshInstall() {
+        assertAuditLifecycle(legacy = false)
+    }
+
+    @Test fun realManifestAuditEntriesStaySearchOnlyAndUserOwnedAfterLegacyUpgrade() {
+        assertAuditLifecycle(legacy = true)
+    }
+
+    private fun assertAuditLifecycle(legacy: Boolean) {
+        val memory = memories()
+        if (legacy) legacyReceipt()
+        val library = ContextLibraryRepository(memory, seeds())
+        val defaults = seeds().defaults().filter { it.id in auditIds }
+        assertEquals(auditIds, defaults.map { it.id }.toSet())
+        assertEquals(auditTitles, defaults.map { it.title }.toSet())
+        val initial = library.list(null)
+        for (expected in defaults) {
+            val actual = initial.single { it.title == expected.title }
+            assertEquals(ContextCategory.RULE, actual.category)
+            assertEquals(ContextLoad.SEARCH, actual.loading)
+            assertEquals("Aharou 资产审计", actual.folder)
+            assertEquals(-1, actual.worldbook.priority)
+            assertNull(actual.requestKey)
+            assertTrue(actual.editable)
+            assertEquals(actual.id, library.search(expected.title, null).single { it.title == expected.title }.id)
+            assertEquals(expected.content, memory.loadContent(expected.title, null, MemoryScope.GLOBAL))
+        }
+        for (role in listOf<String?>(null, "fixture-member")) {
+            val preview = library.preview(null, auditTitles.joinToString(" "), "audit", roleName = role)
+            for (expected in defaults) {
+                assertFalse(preview.full.any { it.title == expected.title })
+                assertFalse(preview.indexed.any { it.title == expected.title })
+                assertFalse(preview.rendered.contains(expected.content))
+                assertTrue(preview.omitted.any { it.first.title == expected.title &&
+                    it.second == "search only: explicit retrieval required" })
+            }
+        }
+        for (expected in defaults) {
+            val entry = library.list(null).single { it.title == expected.title }
+            val body = "user-edited-${expected.id}"
+            assertTrue(library.save(entry.copy(content = body, loading = ContextLoad.OFF), null))
+            assertFalse(library.save(entry.copy(content = "stale overwrite"), null))
+            val recreated = ContextLibraryRepository(memory, seeds())
+            val edited = recreated.list(null).single { it.title == expected.title }
+            assertEquals(body, edited.content)
+            assertEquals(ContextLoad.OFF, edited.loading)
+            val renamedTitle = "user-renamed-${expected.id}"
+            assertTrue(recreated.save(edited.copy(title = renamedTitle), null))
+            val afterRename = ContextLibraryRepository(memory, seeds())
+            val renamed = afterRename.list(null).single { it.title == renamedTitle }
+            assertEquals(body, renamed.content)
+            assertEquals(ContextLoad.OFF, renamed.loading)
+            assertFalse(afterRename.list(null).any { it.title == expected.title })
+            assertTrue(afterRename.delete(renamed, null))
+        }
+        val receipt = File(temp.root, ".context-defaults-v1").readText()
+        assertTrue(File(temp.root, ".context-defaults-v1").readLines().drop(1).containsAll(auditIds))
+        repeat(3) {
+            val recreated = ContextLibraryRepository(memory, seeds())
+            val entries = recreated.list(null)
+            for (expected in defaults) {
+                assertFalse(entries.any { it.title == expected.title || it.title == "user-renamed-${expected.id}" })
+                assertTrue(recreated.search(expected.title, null).none { it.title == expected.title })
+                assertNull(memory.loadContent(expected.title, null, MemoryScope.GLOBAL))
+                assertNull(memory.loadContent("user-renamed-${expected.id}", null, MemoryScope.GLOBAL))
+            }
+            assertEquals(receipt, File(temp.root, ".context-defaults-v1").readText())
+        }
+    }
+
+    @Test fun realManifestAuditEntriesUpgradeCompleteReceiptAndDirectDeletionSurvivesNewRepositories() {
+        val defaults = seeds().defaults()
+        val oldIds = defaults.filter { it.id !in auditIds }.map { it.id }
+        assertEquals(44, oldIds.size)
+        val receipt = File(temp.root, ".context-defaults-v1")
+        receipt.writeText("version=1\n" + oldIds.joinToString("\n") + "\n")
+        val library = ContextLibraryRepository(memories(), seeds())
+        val additions = library.list(null)
+        assertEquals(auditTitles, additions.map { it.title }.toSet())
+        assertTrue(additions.all { it.loading == ContextLoad.SEARCH && it.category == ContextCategory.RULE })
+        assertEquals(oldIds.toSet() + auditIds, receipt.readLines().drop(1).toSet())
+        for (entry in additions) assertTrue(library.delete(entry, null))
+        val recorded = receipt.readText()
+        repeat(3) {
+            val memory = memories()
+            val recreated = ContextLibraryRepository(memory, seeds())
+            assertTrue(recreated.list(null).isEmpty())
+            for (title in auditTitles) {
+                assertTrue(recreated.search(title, null).isEmpty())
+                assertNull(memory.loadContent(title, null, MemoryScope.GLOBAL))
+            }
+            assertEquals(recorded, receipt.readText())
+        }
+    }
+
+    @Test fun realManifestAuditEntriesPreserveExistingOffBodiesOnFreshInstall() {
+        assertAuditUserEntriesWin(legacy = false)
+    }
+
+    @Test fun realManifestAuditEntriesPreserveExistingOffBodiesAfterLegacyUpgrade() {
+        assertAuditUserEntriesWin(legacy = true)
+    }
+
+    private fun assertAuditUserEntriesWin(legacy: Boolean) {
+        val memory = memories()
+        val plain = ContextLibraryRepository(memory)
+        for (title in auditTitles) {
+            assertTrue(plain.create(title, "user description", "user body: $title", MemoryScope.GLOBAL,
+                ContextKind.INSTRUCTION, ContextLoad.OFF, null, category = ContextCategory.RULE,
+                folder = "user-folder"))
+        }
+        val existing = plain.list(null)
+        val bytes = existing.associate { it.sourceLabel to File(it.sourceLabel).readText() }
+        if (legacy) legacyReceipt()
+        repeat(2) {
+            val recreated = ContextLibraryRepository(memory, seeds())
+            for (entry in existing) {
+                assertEquals(entry, recreated.list(null).single { it.title == entry.title })
+                assertEquals(bytes.getValue(entry.sourceLabel), File(entry.sourceLabel).readText())
+            }
+        }
+        val library = ContextLibraryRepository(memory, seeds())
+        for (entry in existing) {
+            assertTrue(library.save(entry.copy(content = "updated: ${entry.title}"), null))
+            assertFalse(library.save(entry.copy(content = "stale overwrite"), null))
+            val current = ContextLibraryRepository(memory, seeds()).list(null).single { it.title == entry.title }
+            assertEquals("updated: ${entry.title}", current.content)
+            assertEquals(ContextLoad.OFF, current.loading)
+            assertEquals("user-folder", current.folder)
+        }
     }
 
     @Test fun corruptLegacyReceiptPreservesLibraryAndDoesNotInstallExecutionContracts() {
