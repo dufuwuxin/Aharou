@@ -133,7 +133,9 @@ internal object DoubaoAccountProtocol {
         AccountProviderProtocol.check(payload)
         if (payload.text("code") != "0") throw AccountProviderException("invalid_response", "Doubao model directory has no success status")
         val config = payload.obj("data")?.array("entry_list")?.mapNotNull { it.objectOrNull() }
-            ?.firstOrNull { it.text("action_bar_key") == "coco_deep_thinking" }?.obj("active_switch_conf") ?: return emptyList()
+            ?.firstOrNull { it.text("action_bar_key") == "coco_deep_thinking" ||
+                (it.text("action_type") == "11" && it.obj("active_switch_conf")?.text("switch_type") == "1")
+            }?.obj("active_switch_conf") ?: return emptyList()
         val result = linkedMapOf<String, AccountProviderModel>()
         fun add(item: JsonObject) {
             if (item.text("disabled") in setOf("true", "1") || item.obj("subscribe_config")?.text("need_upgrade") in setOf("true", "1")) return

@@ -66,6 +66,26 @@ class DoubaoAccountProtocolTest {
         try { block(); fail("Expected $code") } catch (error: AccountProviderException) { assertEquals(code, error.errorCode) }
     }
 
+    @Test fun typedDeepThinkSwitchDoesNotDependOnLegacyActionBarKey() {
+        val payload = JsonParser.parseString(catalog).asJsonObject
+        val entries = payload.obj("data")!!.array("entry_list")
+        val chatSwitch = entries[0].asJsonObject
+        chatSwitch.addProperty("action_bar_key", "current_chat_selector")
+        chatSwitch.addProperty("action_type", 11)
+        chatSwitch.obj("active_switch_conf")!!.addProperty("switch_type", 1)
+        val unrelated = chatSwitch.deepCopy().apply {
+            addProperty("action_bar_key", "network_search")
+            obj("active_switch_conf")!!.addProperty("switch_type", 2)
+        }
+        entries.add(unrelated)
+        assertEquals(listOf("7"), DoubaoAccountProtocol.models(payload).map { it.id })
+        chatSwitch.addProperty("action_type", 7)
+        assertTrue(DoubaoAccountProtocol.models(payload).isEmpty())
+        chatSwitch.addProperty("action_type", 11)
+        chatSwitch.obj("active_switch_conf")!!.addProperty("switch_type", 2)
+        assertTrue(DoubaoAccountProtocol.models(payload).isEmpty())
+    }
+
     @Test fun cookieIdentityCatalogPoolRestoreAndUnsupportedBalance() = runBlocking {
         MockWebServer().use { server ->
             val vault = Vault(); val manager = manager(server, vault)
