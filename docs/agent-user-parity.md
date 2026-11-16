@@ -8,11 +8,14 @@
 
 ## 本轮新增能力
 
+- Our Free Model：用户可免密连接 Kilo 公开免费目录、选择模型并使用原 OpenAI 工具与流式对话；仅接纳目录中 isFree=true 的模型，不静态兜底、不切付费。连接标记保存到既有账号池，不代表远端账号身份，且不作为认证头发送；config 复用 provider_accounts 的读取、移除及免密 add 连接入口。Zen 客户端指纹/伪会话未移植。受控协议测试源码已提供，真实设备和线上回复不由目录成功推定。
+
 - SDKv1 宿主插件：用户可导入/启用/停用 JS 与 DEX 包、查看编译输出并打开 DEX 提供的原生 View。Agent 的 config `plugins.<key>.enabled` 与 `plugins.<key>.compile` 复用同一管理器，`compile_output` 可读；id 中点号在配置键中转为 `~`。原生 View 仍是界面专属，未宣称 Agent 可以渲染 View。插件注册到真实 ToolRegistry，host.call 的 tool/config 分支沿真实会话工具快照与 PermissionGate 执行；模型 HTTP 请求、JSON 响应与逐帧 SSE 真实消费插件钩子。旧容器包保留；不宣称 Root、类热替换、Manifest 权限或原生 ABI 扩展。停止即撤销新入口，在途回调退出后清理；插件可经真实config字段自停用/重载/编译而不等自身执行锁。View绑定运行代，外部停止/升级会关闭并detach旧面板，设置页传当前页面Context；日志消费有界且先脱敏的message。当前源码交付不等于真机 DEX/JNI 验证。
 
 
 - 账号池：同一账号供应商追加登录，有序密文槽位兼容旧单凭据；模型目录并集去重、部分失败明确，最早支持所选模型的可用账号优先，明确故障才顺序切换且流开始后不重放。Android9+使用专用进程/网页目录，Android8保留不承诺隔离的兼容登录；`provider_accounts` 集合与页面共用增删，Loomy配置导入同步模型目录。无痕仅指本地会话隔离，不承诺对供应商匿名，也不将纯状态夹具当作设备实测。
 - DeepSeek 网页账号：用户主动在隔离窗口登录并点击完成，读取网页 token 后验证稳定 UID，使用既有加密账号池与配置供应商入口；Agent 不代登录。网页模式只支持文本和思考/搜索开关，WebsiteTextProvider 明确按文本模式调用，网关拒绝工具历史、附件及未支持参数。模型列表是协议模式列表，非远端实时目录；余额、签到、原生工具调用均不承诺支持。受控消费者测试源码覆盖登录 IPC、HTTP 三段顺序、PoW、SSE 和取消；真实账号及设备行为未验证。
+- 码道 CodeArts 网页账号：用户主动在隔离窗口登录华为云账号并点击完成，读取官网会话后验证远端稳定账号身份与 AgentCenter 模型目录，使用既有加密账号池；Agent 不代登录。网页文本模式不支持工具、附件、余额或签到；接口协议基于公开页面逆向，未用真实华为云账号验证。果办 OfficeAce 个人账号入口已接入官方 OAuth、PKCE、DPoP、权限校验、动态模型目录及 Basic 推理网关，复用既有账号池与配置入口；受控协议测试通过，真实账号授权与对话仍待本人验证。
 - 账号接入：保留国内 `trae/workbuddy`，新增 `trae-global/workbuddy-global/loomy`，地区绑定独立凭据类型和请求端点。供应商页及 `providers.<id>.account_service` 使用同一接入；Loomy通过用户主动导入会话并验证模型目录后保存，不提供未经核实的OAuth。敏感只写字段 `account_session` 与页面共用导入，`account_check_in=run` 共用签到；国际/企业等不支持账号不发送签到，不合成积分。受控协议测试不代表用户账号的真实线上登录或到账。
 - 会话浏览：普通会话页记忆自己的工作区筛选，不随项目运行工作区激活而被替换；选择旧会话仍恢复其原绑定。项目/会话通过真实分页切换，导图保留悬浮菜单，双向翻译通过紧凑入口展开模型管理。
 - 工具输出：Bash重复行先归档再折叠，模型可按路径和原行号取回；不从终端正文生成新的退出状态，不把字符数当精确token。原执行权限、原始输出与UI进度不改变。
@@ -382,3 +385,5 @@ The unified tool browser and six-action creation sheet reuse existing execution 
 - User-initiated Dumate and Doubao website sign-in uses the existing isolated login and ordered encrypted account pool. Real-user account availability remains unverified; Doubao is explicitly text-only.
 - Main-agent administrators can query their team details and reassign an existing task to a roster member through `task team_assign`; other teams expose only basic identity and charter.
 - Projects invoke the existing team executor and require a run-bound delivery before review. Opt-in built-in evidence gates reject missing or inconsistent completion receipts, without claiming to certify external facts.
+
+- 果办个人账号：设置页走本人华为云授权，复用 `provider_accounts` 与加密账号池；agent 通过既有 config 通道选择供应商与模型，不暴露临时 IAM 凭据或 DPoP 私钥。企业登录、订阅购买不在此入口范围；真实账号调用待验证。

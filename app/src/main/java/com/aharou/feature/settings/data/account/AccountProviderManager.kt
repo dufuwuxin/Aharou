@@ -95,6 +95,12 @@ class AccountProviderManager internal constructor(
         } finally { selectedAccount.set(previous) }
     }
 
+    internal fun <T> withWebsiteCookieLock(kind: AccountProviderKind, block: () -> T): T {
+        val selected = selectedAccount.get() ?: return block()
+        val key = "website-cookie:${kind.wireId}:${selected.first}:${selected.second}"
+        return synchronized(refreshLocks.getOrPut(key) { Any() }) { block() }
+    }
+
     fun removeAccount(id: String, kind: AccountProviderKind, accountId: String) {
         val cancelled = synchronized(state) {
             val old = pool(id, kind)
@@ -225,6 +231,23 @@ class AccountProviderManager internal constructor(
             ?: throw AccountProviderException("login_required", "Sign in to the account provider", 401)
     }
 
+    internal fun persistRotatedWebsiteCookie(credential: AccountCredential, cookie: String) = synchronized(state) {
+        val selected = selectedAccount.get() ?: return@synchronized
+        val accountScope = "${selected.first}:${selected.second}"
+        val pin = accountRevision.get()?.takeIf { it.first == accountScope } ?: return@synchronized
+        if (revision(accountScope) != pin.second) return@synchronized
+        val current = pool(selected.first, credential.kind)
+        val slot = current.accounts.firstOrNull { it.accountId == selected.second } ?: return@synchronized
+        if (slot.credential.userId != credential.userId || slot.credential.webCookie != credential.webCookie) return@synchronized
+        val updated = AccountPool(credential.kind, current.accounts.map { account ->
+            if (account.accountId == slot.accountId) PoolAccount(account.accountId, account.credential.let {
+                AccountCredential(it.kind, it.accessToken, it.refreshToken, it.expiresAt, it.deviceId, it.userId, it.domain,
+                    it.enterpriseId, webCookie = cookie, officeAceState = it.officeAceState)
+            }) else account
+        })
+        vault.write(selected.first, updated.json().toString())
+    }
+
     internal fun save(id: String, expectedRevision: Long, credential: AccountCredential) = synchronized(state) {
         operations.get()?.check()
         val key = scopeId(id)
@@ -276,9 +299,12 @@ class AccountProviderManager internal constructor(
 
     internal fun parseCredential(kind: AccountProviderKind, response: JsonObject, previous: AccountCredential? = null, deviceId: String? = null): AccountCredential {
         AccountProviderProtocol.check(response)
+        if (kind == AccountProviderKind.OFFICEACE) return OfficeAceAccountProtocol.restore(response)
         if (kind == AccountProviderKind.DEEPSEEK) return DeepSeekAccountProtocol.restore(response)
         if (kind == AccountProviderKind.DOUBAO) return DoubaoAccountProtocol.restore(response)
         if (kind == AccountProviderKind.DUMATE) return DumateAccountProtocol.restore(response)
+        if (kind == AccountProviderKind.CODEARTS) return CodeArtsAccountProtocol.restore(response)
+        if (kind == AccountProviderKind.OUR_FREE_MODEL) return OurFreeModelProtocol.restore(response)
         val value = response.obj("Result") ?: response.obj("result") ?: response.obj("data") ?: response
         val token = value.text("accessToken") ?: value.text("access_token") ?: value.text("Token") ?: value.text("token") ?: value.text("AccessToken")
             ?: throw AccountProviderException("invalid_credentials", "Provider response has no access token", 401)
@@ -291,8 +317,11 @@ class AccountProviderManager internal constructor(
     }
 
     internal fun headers(credential: AccountCredential): Map<String, String> = when (credential.kind) {
+        AccountProviderKind.OUR_FREE_MODEL -> emptyMap()
+        AccountProviderKind.OFFICEACE -> throw AccountProviderException("invalid_gateway", "OfficeAce credentials require native routes", 400)
         AccountProviderKind.DEEPSEEK -> throw AccountProviderException("invalid_gateway", "DeepSeek credentials require fixed native routes", 400)
         AccountProviderKind.DOUBAO -> throw AccountProviderException("invalid_gateway", "Doubao credentials require fixed native routes", 400)
+        AccountProviderKind.CODEARTS -> throw AccountProviderException("invalid_gateway", "CodeArts credentials require fixed native routes", 400)
         AccountProviderKind.DUMATE -> mapOf("Authorization" to "Bearer ${credential.accessToken}", "X-Dumate-Client-Type" to "web", "X-Dumate-Account-Id" to "global")
         AccountProviderKind.LOOMY -> LoomyAccountProtocol.headers(credential.accessToken)
         AccountProviderKind.RACCOON -> mapOf("Authorization" to "Bearer ${credential.accessToken}")
@@ -320,11 +349,11 @@ class AccountProviderManager internal constructor(
         accountRevision.get()?.let { requireAccountVersion(it.first, it.second) }
     }
 
-    internal fun request(url: String, method: String = "GET", body: JsonObject? = null, headers: Map<String, String> = emptyMap(), streaming: Boolean = false): Response {
+    internal fun request(url: String, method: String = "GET", body: JsonObject? = null, headers: Map<String, String> = emptyMap(), streaming: Boolean = false, form: okhttp3.FormBody? = null): Response {
         operations.get()?.check()
         val builder = Request.Builder().url(url).header("User-Agent", "Aharou-AccountProvider/1.0").header("Accept", "application/json")
         headers.forEach { (name, value) -> builder.header(name, value) }
-        builder.method(method, if (method == "GET") null else (body ?: JsonObject()).toString().toRequestBody(JSON))
+        builder.method(method, if (method == "GET") null else form ?: (body ?: JsonObject()).toString().toRequestBody(JSON))
         val selectedClient = if (streaming || body?.get("stream")?.toString() == "true") streamingClient else client
         val call = selectedClient.newCall(builder.build())
         val operation = operations.get()
@@ -403,13 +432,22 @@ class AccountProviderManager internal constructor(
             save(id, expected, next)
             return@synchronized next
         }
+        if (kind == AccountProviderKind.OFFICEACE) {
+            val next = OfficeAceAccountProtocol.refresh(this, old)
+            checkRevision(id)
+            save(id, expected, next)
+            return@synchronized next
+        }
         val refreshToken = old.refreshToken ?: throw AccountProviderException("login_required", "Account token expired; sign in again", 401)
         val body = JsonObject()
         val url: String
         val refreshHeaders = headers(old).toMutableMap()
         when (kind) {
+            AccountProviderKind.OUR_FREE_MODEL -> throw AccountProviderException("unsupported_refresh", "Anonymous connections do not have refresh tokens", 400)
+            AccountProviderKind.OFFICEACE -> throw AccountProviderException("invalid_gateway", "Use OfficeAce refresh", 400)
             AccountProviderKind.DEEPSEEK -> throw AccountProviderException("login_required", "Sign in to DeepSeek again", 401)
             AccountProviderKind.DOUBAO -> throw AccountProviderException("login_required", "Sign in to Doubao again", 401)
+            AccountProviderKind.CODEARTS -> throw AccountProviderException("login_required", "Sign in to CodeArts again", 401)
             AccountProviderKind.DUMATE -> throw AccountProviderException("login_required", "Sign in to Dumate again", 401)
             AccountProviderKind.LOOMY -> throw AccountProviderException("login_required", "Import a new Loomy session", 401)
             AccountProviderKind.RACCOON -> { url = endpoints.raccoon + "/api/electron/auth/v1/refresh"; body.addProperty("refresh_token", refreshToken) }
@@ -427,12 +465,31 @@ class AccountProviderManager internal constructor(
     }
 
     internal fun authorized(id: String, kind: AccountProviderKind, url: String, method: String = "GET", body: JsonObject? = null, extraHeaders: Map<String, String> = emptyMap()): Response {
+        if (kind == AccountProviderKind.OUR_FREE_MODEL) {
+            checkRevision(id)
+            credential(id, kind)
+            val path = url.removePrefix(OurFreeModelProtocol.BASE)
+            if ((path == "/models" && method != "GET") || (path == "/chat/completions" && method != "POST")) {
+                throw AccountProviderException("invalid_gateway", "Unsupported anonymous request method", 400)
+            }
+            return OurFreeModelProtocol.request(this, path, body)
+        }
         if (kind == AccountProviderKind.DOUBAO) {
             checkRevision(id)
             val current = credential(id, kind)
             if (url !in setOf(DoubaoAccountProtocol.WEB + DoubaoAccountProtocol.CATALOG, DoubaoAccountProtocol.WEB + DoubaoAccountProtocol.CHAT)) throw AccountProviderException("invalid_gateway", "Unexpected Doubao endpoint", 400)
             checkRevision(id)
             return DoubaoAccountProtocol.request(this, current, url.removePrefix(DoubaoAccountProtocol.WEB), method, body)
+        }
+        if (kind == AccountProviderKind.CODEARTS) {
+            checkRevision(id)
+            val path = url.removePrefix(CodeArtsAccountProtocol.WEB)
+            if (path == url || !path.startsWith("/")) throw AccountProviderException("invalid_gateway", "Unexpected CodeArts endpoint", 400)
+            return withWebsiteCookieLock(kind) {
+                checkRevision(id)
+                val current = credential(id, kind)
+                CodeArtsAccountProtocol.request(this, current, path, method, body, streaming = false)
+            }
         }
         if (kind == AccountProviderKind.DUMATE) DumateAccountProtocol.requireGateway(url)
         checkRevision(id)
@@ -453,11 +510,16 @@ class AccountProviderManager internal constructor(
     }
 
     internal fun catalogForAccount(id: String, kind: AccountProviderKind): List<AccountProviderModel> {
+        if (kind == AccountProviderKind.OFFICEACE) return OfficeAceAccountProtocol.catalog(this, id)
+        if (kind == AccountProviderKind.OUR_FREE_MODEL) { credential(id, kind); return OurFreeModelProtocol.catalog(this) }
         if (kind == AccountProviderKind.DEEPSEEK) { credential(id, kind); return DeepSeekAccountProtocol.modes() }
         if (kind == AccountProviderKind.DOUBAO) return DoubaoAccountProtocol.models(readJson(authorized(id, kind, DoubaoAccountProtocol.WEB + DoubaoAccountProtocol.CATALOG, "POST", JsonObject().apply { addProperty("language_code", "zh"); addProperty("bot_id", "7338286299411103781") })))
         val (url, method, body) = when (kind) {
+            AccountProviderKind.OUR_FREE_MODEL -> throw AccountProviderException("invalid_gateway", "Use the public free catalog", 400)
+            AccountProviderKind.OFFICEACE -> throw AccountProviderException("invalid_gateway", "Use OfficeAce catalog", 400)
             AccountProviderKind.DEEPSEEK -> return DeepSeekAccountProtocol.modes()
             AccountProviderKind.DOUBAO -> throw AccountProviderException("invalid_gateway", "Use Doubao native catalog", 400)
+            AccountProviderKind.CODEARTS -> Triple(CodeArtsAccountProtocol.WEB + CodeArtsAccountProtocol.MODELS, "GET", null)
             AccountProviderKind.DUMATE -> Triple(DumateAccountProtocol.GATEWAY + "/models", "GET", null)
             AccountProviderKind.LOOMY -> Triple(endpoints.loomy + "/api/v1/models", "GET", null)
             AccountProviderKind.RACCOON -> Triple(endpoints.raccoon + "/api/web/llm/v2/model_catalog", "GET", null)
@@ -493,12 +555,15 @@ class AccountProviderManager internal constructor(
 
     suspend fun snapshot(id: String, kind: AccountProviderKind): AccountSnapshot = network { withAccountRevision(id) {
         val directory = poolCatalog(id, kind)
-        if (kind.isWebSession) return@withAccountRevision AccountSnapshot(
+        if (kind.isWebSession || kind == AccountProviderKind.OFFICEACE || kind == AccountProviderKind.OUR_FREE_MODEL) return@withAccountRevision AccountSnapshot(
             directory.models, null, System.currentTimeMillis(), DumateAccountProtocol.BALANCE_UNSUPPORTED, directory.issues,
         )
         val (url, method) = when (kind) {
+            AccountProviderKind.OUR_FREE_MODEL -> throw AccountProviderException("unsupported_balance", "Anonymous services have no account balance")
+            AccountProviderKind.OFFICEACE -> throw AccountProviderException("unsupported_balance", "OfficeAce balance is not supported")
             AccountProviderKind.DEEPSEEK -> throw AccountProviderException("unsupported_balance", "DeepSeek balance is not supported")
             AccountProviderKind.DOUBAO -> throw AccountProviderException("unsupported_balance", "Doubao balance is not supported")
+            AccountProviderKind.CODEARTS -> throw AccountProviderException("unsupported_balance", "CodeArts balance is not supported")
             AccountProviderKind.DUMATE -> throw AccountProviderException("unsupported_balance", "Dumate balance is not supported")
             AccountProviderKind.LOOMY -> endpoints.loomy + "/api/v1/points/records?pageNo=1&pageSize=20&recordType=all" to "GET"
             AccountProviderKind.RACCOON -> endpoints.raccoon + "/api/web/points/v1/balance" to "GET"
@@ -557,6 +622,14 @@ class AccountProviderManager internal constructor(
             val payload = readJson(request(endpoints.loomy + "/api/v1/models", headers = headers(credential)))
             if (LoomyAccountProtocol.models(payload).isEmpty()) throw AccountProviderException("empty_catalog", "Loomy session returned no usable models")
             appendCredential(id, expected, credential)
+        }
+    }
+
+    suspend fun connectFreeModels(id: String) {
+        val expected = nextRevision(id)
+        network {
+            withAccountRevision(id) { OurFreeModelProtocol.catalog(this) }
+            appendCredential(id, expected, OurFreeModelProtocol.connection())
         }
     }
 

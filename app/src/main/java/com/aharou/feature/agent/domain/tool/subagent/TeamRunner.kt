@@ -312,18 +312,11 @@ object TeamRunner {
             if (team.admins.size > 1) append("（并行思考，结论由主代理汇总成策略建议）")
         }
         if (team.members.isNotEmpty()) {
-            append("\n成员名单：")
-            team.levels.forEach { level ->
-                val names = team.members.filter { it.level == level }.map { it.name }
-                if (names.isNotEmpty()) {
-                    append("\n  ").append(levelLabel(level)).append("：").append(names.joinToString("、"))
-                }
-            }
+            append("\n成员名单：").append(team.members.joinToString("、") { it.name })
         }
         append("\n共 ").append(team.stages.size).append(" 个阶段、").append(team.taskCount).append(" 个任务：\n")
         team.stages.forEachIndexed { index, stage ->
-            append(index + 1).append(". ").append(stage.title)
-                .append("（").append(levelLabel(stage.level))
+            append(index + 1).append(". ").append(stage.title).append("（第").append(index + 1).append("阶段")
                 .append(if (stage.tasks.size > 1) "，并行 ${stage.tasks.size} 个" else "，1 个")
                 .append(if (stage.isReview) "，审核" else "，执行").append("）：")
             append(stage.tasks.joinToString("、") { it.memberLabel() })
@@ -333,13 +326,6 @@ object TeamRunner {
         if (team.mainAgentAdmin) append("\n团队公约：\n").append(team.charter).append("\n")
         append("文件：").append(team.filePath ?: "-").append("\n")
         append("执行：task(action=\"team_run\", team=\"").append(team.name).append("\", goal=\"<本次目标>\")")
-    }
-
-    fun levelLabel(level: Int): String = when (level) {
-        1 -> "一级成员组"
-        2 -> "二级成员组"
-        3 -> "三级成员组"
-        else -> "${level}级成员组"
     }
 
     fun scopeLabel(scope: AgentDefinitionScope): String =
@@ -371,6 +357,7 @@ object TeamRunner {
                 if (stage.title.equals(needle, ignoreCase = true)) return idOf[stageIndex].firstOrNull()
                 stage.tasks.forEachIndexed { taskIndex, candidate ->
                     if (idOf[stageIndex][taskIndex] == needle ||
+                        "${stage.id}/${candidate.id}" == needle ||
                         candidate.agent.equals(needle, ignoreCase = true) ||
                         candidate.memberLabel().equals(needle, ignoreCase = true)) {
                         return idOf[stageIndex][taskIndex]

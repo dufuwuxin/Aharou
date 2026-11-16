@@ -206,10 +206,10 @@ internal object TraeAccountProtocol {
         fun content(element: JsonElement?): String? = when {
             element == null || element.isJsonNull -> null
             element.isJsonPrimitive && element.asJsonPrimitive.isString -> element.asString
-            element.isJsonArray -> element.asJsonArray.mapNotNull { it.objectOrNull()?.text("text") }.joinToString("").takeIf { it.isNotEmpty() }
+            element.isJsonArray -> element.asJsonArray.mapNotNull { it.objectOrNull()?.rawText("text") }.joinToString("").takeIf { it.isNotEmpty() }
             else -> null
         }
-        val text = content(deltaValue.get("content")) ?: content(value.get("delta")) ?: value.text("text") ?: value.text("response")
+        val text = content(deltaValue.get("content")) ?: content(value.get("delta")) ?: value.rawText("text") ?: value.rawText("response")
         val reasoning = content(deltaValue.get("reasoning_content")) ?: content(deltaValue.get("reasoning")) ?: content(value.get("reasoning_content")) ?: content(value.get("reasoning"))
         text?.let { delta.addProperty("content", it) }
         reasoning?.let { delta.addProperty("reasoning_content", it) }
@@ -261,8 +261,8 @@ internal object TraeAccountProtocol {
                 val value = JsonParser.parseString(line.substring(6)).asJsonObject
                 val choice = value.array("choices").firstOrNull()?.asJsonObject ?: continue
                 val delta = choice.obj("delta") ?: JsonObject()
-                delta.text("content")?.let { content.append(it) }
-                delta.text("reasoning_content")?.let { reasoning.append(it) }
+                delta.rawText("content")?.let { content.append(it) }
+                delta.rawText("reasoning_content")?.let { reasoning.append(it) }
                 choice.text("finish_reason")?.let { reason = it }
                 value.obj("usage")?.let { usage = it }
                 delta.array("tool_calls").forEach { toolElement ->
@@ -271,7 +271,7 @@ internal object TraeAccountProtocol {
                     val call = calls.getOrPut(index) { JsonObject().apply { addProperty("type", "function"); add("function", JsonObject()) } }
                     incoming.text("id")?.let { call.addProperty("id", it) }
                     val fn = call.obj("function")!!
-                    incoming.obj("function")?.let { incomingFn -> listOf("name", "arguments").forEach { key -> incomingFn.text(key)?.let { fn.addProperty(key, (fn.text(key) ?: "") + it) } } }
+                    incoming.obj("function")?.let { incomingFn -> listOf("name", "arguments").forEach { key -> incomingFn.rawText(key)?.let { fn.addProperty(key, (fn.rawText(key) ?: "") + it) } } }
                 }
             }
             val message = JsonObject().apply { addProperty("role", "assistant"); addProperty("content", content.toString()) }

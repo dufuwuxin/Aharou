@@ -51,6 +51,7 @@ class AccountLoginActivity : Activity() {
                 com.aharou.feature.settings.data.account.AccountProviderKind.DEEPSEEK -> com.aharou.feature.settings.data.account.DeepSeekAccountProtocol.LOGIN
                 com.aharou.feature.settings.data.account.AccountProviderKind.DUMATE -> com.aharou.feature.settings.data.account.DumateAccountProtocol.LOGIN
                 com.aharou.feature.settings.data.account.AccountProviderKind.DOUBAO -> com.aharou.feature.settings.data.account.DoubaoAccountProtocol.LOGIN
+                com.aharou.feature.settings.data.account.AccountProviderKind.CODEARTS -> com.aharou.feature.settings.data.account.CodeArtsAccountProtocol.LOGIN
                 else -> null
             }
             if (expected == null || url != expected) { finish(); return }
@@ -173,15 +174,21 @@ class AccountLoginActivity : Activity() {
                     return@setOnClickListener
                 }
                 val doubao = webKind == com.aharou.feature.settings.data.account.AccountProviderKind.DOUBAO
+                val codearts = webKind == com.aharou.feature.settings.data.account.AccountProviderKind.CODEARTS
                 val origin = if (doubao) com.aharou.feature.settings.data.account.DoubaoAccountProtocol.WEB
+                    else if (codearts) com.aharou.feature.settings.data.account.CodeArtsAccountProtocol.WEB
                     else com.aharou.feature.settings.data.account.DumateAccountProtocol.WEB
                 val valid = if (doubao) com.aharou.feature.settings.data.account.DoubaoAccountProtocol.isWebOrigin(current)
+                    else if (codearts) com.aharou.feature.settings.data.account.CodeArtsAccountProtocol.isWebOrigin(current)
                     else com.aharou.feature.settings.data.account.DumateAccountProtocol.isWebOrigin(current)
                 if (!valid) { feedback(R.string.account_login_wrong_page); return@setOnClickListener }
-                val cookieUrl = if (doubao) com.aharou.feature.settings.data.account.DoubaoAccountProtocol.LOGIN else com.aharou.feature.settings.data.account.DumateAccountProtocol.LOGIN
+                val cookieUrl = if (doubao) com.aharou.feature.settings.data.account.DoubaoAccountProtocol.LOGIN
+                    else if (codearts) com.aharou.feature.settings.data.account.CodeArtsAccountProtocol.LOGIN
+                    else com.aharou.feature.settings.data.account.DumateAccountProtocol.LOGIN
                 val cookie = CookieManager.getInstance().getCookie(cookieUrl).orEmpty()
                 try {
                     if (doubao) com.aharou.feature.settings.data.account.DoubaoAccountProtocol.requireCookie(cookie)
+                    else if (codearts) com.aharou.feature.settings.data.account.CodeArtsAccountProtocol.requireCookie(cookie)
                     else com.aharou.feature.settings.data.account.DumateAccountProtocol.requireCookie(cookie)
                 } catch (_: com.aharou.feature.settings.data.account.AccountProviderException) {
                     feedback(R.string.account_login_missing_cookie); return@setOnClickListener

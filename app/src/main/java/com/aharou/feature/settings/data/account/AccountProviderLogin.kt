@@ -29,6 +29,8 @@ class AccountLogin internal constructor(
     internal val server: ServerSocket? = null,
     internal val devicePublicKey: String? = null,
     internal val cookies: LoginCookies = LoginCookies(),
+    internal val officeAceDpop: OfficeAceDpop? = null,
+    internal val officeAceClockOffset: Long = 0L,
 ) {
     private val consumed = AtomicBoolean(false)
     internal val closed = AtomicBoolean(false)
@@ -53,8 +55,8 @@ class AccountLogin internal constructor(
 
     @Synchronized internal fun acceptWebCookie(origin: String, loginId: String, loginState: String, cookie: String, now: Long): Boolean {
         if (!kind.isWebSession || closed.get() || now >= expiresAt || loginId != id || loginState != state ||
-            !(if (kind == AccountProviderKind.DEEPSEEK) DeepSeekAccountProtocol.isWebOrigin(origin) else if (kind == AccountProviderKind.DOUBAO) DoubaoAccountProtocol.isWebOrigin(origin) else DumateAccountProtocol.isWebOrigin(origin))) return false
-        try { if (kind == AccountProviderKind.DEEPSEEK) DeepSeekAccountProtocol.requireToken(cookie) else if (kind == AccountProviderKind.DOUBAO) DoubaoAccountProtocol.requireCookie(cookie) else DumateAccountProtocol.requireCookie(cookie) } catch (_: AccountProviderException) { return false }
+            !(if (kind == AccountProviderKind.DEEPSEEK) DeepSeekAccountProtocol.isWebOrigin(origin) else if (kind == AccountProviderKind.DOUBAO) DoubaoAccountProtocol.isWebOrigin(origin) else if (kind == AccountProviderKind.CODEARTS) CodeArtsAccountProtocol.isWebOrigin(origin) else DumateAccountProtocol.isWebOrigin(origin))) return false
+        try { if (kind == AccountProviderKind.DEEPSEEK) DeepSeekAccountProtocol.requireToken(cookie) else if (kind == AccountProviderKind.DOUBAO) DoubaoAccountProtocol.requireCookie(cookie) else if (kind == AccountProviderKind.CODEARTS) CodeArtsAccountProtocol.requireCookie(cookie) else DumateAccountProtocol.requireCookie(cookie) } catch (_: AccountProviderException) { return false }
         if (!consumed.compareAndSet(false, true)) return false
         webCookie = cookie
         return true
@@ -127,6 +129,8 @@ internal object AccountProviderLogin {
     private fun nonce(): String = ByteArray(32).also { SecureRandom().nextBytes(it) }.let { Base64.getUrlEncoder().withoutPadding().encodeToString(it) }
 
     suspend fun begin(manager: AccountProviderManager, id: String, kind: AccountProviderKind, revision: Long): AccountLogin {
+        if (kind == AccountProviderKind.OUR_FREE_MODEL) throw AccountProviderException("anonymous_connection_required", "Use the anonymous connection action", 400)
+        if (kind == AccountProviderKind.OFFICEACE) return OfficeAceAccountProtocol.begin(manager, id, revision)
         if (kind == AccountProviderKind.LOOMY) throw AccountProviderException("session_import_required", "Loomy requires a user-provided session", 400)
         val state = nonce()
         val verifier = nonce()
@@ -140,6 +144,9 @@ internal object AccountProviderLogin {
         }
         if (kind == AccountProviderKind.DUMATE) {
             return AccountLogin(id, kind, DumateAccountProtocol.LOGIN, null, state, revision, expiresAt, verifier, deviceId)
+        }
+        if (kind == AccountProviderKind.CODEARTS) {
+            return AccountLogin(id, kind, CodeArtsAccountProtocol.LOGIN, null, state, revision, expiresAt, verifier, deviceId)
         }
         if (kind.isWorkBuddy) {
             val cookies = LoginCookies()
@@ -184,6 +191,7 @@ internal object AccountProviderLogin {
     }
 
     suspend fun await(manager: AccountProviderManager, login: AccountLogin): AccountCredential {
+        if (login.kind == AccountProviderKind.OFFICEACE) return OfficeAceAccountProtocol.await(manager, login)
         while (System.currentTimeMillis() < login.expiresAt && !login.closed.get()) {
             coroutineContext.ensureActive()
             if (login.kind.isWebSession) {
@@ -194,6 +202,7 @@ internal object AccountProviderLogin {
                             manager.requireAccountVersion(login.id, login.revision)
                             val credential = if (login.kind == AccountProviderKind.DEEPSEEK) DeepSeekAccountProtocol.exchange(manager, cookie, login.deviceId)
                                 else if (login.kind == AccountProviderKind.DOUBAO) DoubaoAccountProtocol.exchange(manager, cookie, login.deviceId)
+                                else if (login.kind == AccountProviderKind.CODEARTS) CodeArtsAccountProtocol.exchange(manager, cookie, login.deviceId)
                                 else DumateAccountProtocol.exchange(manager, cookie, login.deviceId).also { DumateAccountProtocol.validateDirectory(manager, it) }
                             manager.requireAccountVersion(login.id, login.revision)
                             credential

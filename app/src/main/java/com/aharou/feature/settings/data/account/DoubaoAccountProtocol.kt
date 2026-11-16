@@ -156,8 +156,13 @@ internal object DoubaoAccountProtocol {
                 }
             }?.forEach(::add)
         }
-        if (v2 == null) config.obj("menu_conf")?.array("item_list")?.mapNotNull { it.objectOrNull() }
-            ?.filter { it.text("agent_mode") == "2" }?.forEach(::add)
+        if (result.isEmpty()) config.obj("menu_conf")?.array("item_list")?.mapNotNull { it.objectOrNull() }
+            ?.filter { it.text("agent_mode") in setOf(null, "2") && it.text("disabled") !in setOf("true", "1") &&
+                it.obj("subscribe_config")?.text("need_upgrade") !in setOf("true", "1") }
+            ?.forEach { group ->
+                if (group.has("model_item_key") || group.has("item_id")) add(group)
+                else group.array("item_list").mapNotNull { it.objectOrNull() }.forEach(::add)
+            }
         return result.values.toList()
     }
 
@@ -235,7 +240,7 @@ internal object DoubaoAccountProtocol {
                 val line = input.readUtf8Line() ?: break
                 if (!line.startsWith("data: ") || line == "data: [DONE]") continue
                 val delta = JsonParser.parseString(line.removePrefix("data: ")).asJsonObject.array("choices").first().asJsonObject.obj("delta") ?: continue
-                delta.text("content")?.let(answer::append); delta.text("reasoning_content")?.let(thinking::append)
+                delta.rawText("content")?.let(answer::append); delta.rawText("reasoning_content")?.let(thinking::append)
             }
             val json = JsonObject().apply {
                 addProperty("object", "chat.completion"); addProperty("model", model)
@@ -283,8 +288,8 @@ internal object DoubaoAccountProtocol {
                         val content = block.obj("content") ?: continue
                         val delta = JsonObject()
                         when (block.text("block_type")) {
-                            "10000" -> content.obj("text_block")?.text("text")?.let { delta.addProperty("content", it); answer = true }
-                            "10040" -> content.obj("thinking_block")?.text("content")?.let { delta.addProperty("reasoning_content", it) }
+                            "10000" -> content.obj("text_block")?.rawText("text")?.let { delta.addProperty("content", it); answer = true }
+                            "10040" -> content.obj("thinking_block")?.rawText("content")?.let { delta.addProperty("reasoning_content", it) }
                             else -> throw AccountProviderException("unsupported_capability", "Doubao returned unsupported nontext content")
                         }
                         if (delta.size() > 0) pending.writeUtf8("data: ${chunk(model, delta)}\n\n")

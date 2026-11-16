@@ -56,7 +56,7 @@ internal object DeepSeekAccountSse {
             values.forEach { value ->
                 val fragment = value.objectOrNull() ?: throw AccountProviderException("invalid_stream", "Invalid DeepSeek fragment")
                 type = fragment.text("type") ?: throw AccountProviderException("invalid_stream", "Missing DeepSeek fragment type")
-                fragment.text("content")?.let(::text)
+                fragment.rawText("content")?.let(::text)
             }
         }
 

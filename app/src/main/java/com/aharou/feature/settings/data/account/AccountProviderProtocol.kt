@@ -9,9 +9,9 @@ import java.util.Base64
 
 enum class AccountProviderKind(val wireId: String) {
     TRAE("trae"), WORKBUDDY("workbuddy"), RACCOON("raccoon"),
-    TRAE_GLOBAL("trae-global"), WORKBUDDY_GLOBAL("workbuddy-global"), LOOMY("loomy"), DUMATE("dumate"), DOUBAO("doubao"), DEEPSEEK("deepseek");
+    TRAE_GLOBAL("trae-global"), WORKBUDDY_GLOBAL("workbuddy-global"), LOOMY("loomy"), DUMATE("dumate"), DOUBAO("doubao"), DEEPSEEK("deepseek"), CODEARTS("codearts"), OUR_FREE_MODEL("our-free-model"), OFFICEACE("officeace");
 
-    val isWebSession: Boolean get() = this == DUMATE || this == DOUBAO || this == DEEPSEEK
+    val isWebSession: Boolean get() = this == DUMATE || this == DOUBAO || this == DEEPSEEK || this == CODEARTS
 
     val isTrae: Boolean get() = this == TRAE || this == TRAE_GLOBAL
     val isWorkBuddy: Boolean get() = this == WORKBUDDY || this == WORKBUDDY_GLOBAL
@@ -46,6 +46,9 @@ internal data class AccountEndpoints(
     val traeGlobalUsage: String = "https://ug-normal.trae.ai",
     val traeOAuth: String = "https://api.trae.com.cn",
     val loomy: String = "https://loomyad.xunfei.cn",
+    val officeAce: String = "https://agentarts.cn-southwest-2.myhuaweicloud.com",
+    val officeAceIam: String = "https://sts.cn-north-4.myhuaweicloud.com",
+    val officeAceAuth: String = "https://auth.huaweicloud.com",
 ) {
     fun workbuddy(kind: AccountProviderKind): String = if (kind == AccountProviderKind.WORKBUDDY_GLOBAL) workbuddyGlobal else workbuddy
     fun billing(kind: AccountProviderKind): String = if (kind == AccountProviderKind.WORKBUDDY_GLOBAL) workbuddyGlobal else workbuddyBilling
@@ -56,6 +59,7 @@ internal data class AccountEndpoints(
 }
 
 internal fun JsonObject.text(key: String): String? = get(key)?.takeIf { it.isJsonPrimitive }?.asString?.takeIf { it.isNotBlank() }
+internal fun JsonObject.rawText(key: String): String? = get(key)?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isString }?.asString
 internal fun JsonObject.obj(key: String): JsonObject? = get(key)?.takeIf { it.isJsonObject }?.asJsonObject
 internal fun JsonObject.array(key: String): JsonArray = get(key)?.takeIf { it.isJsonArray }?.asJsonArray ?: JsonArray()
 internal fun JsonElement.objectOrNull(): JsonObject? = takeIf { isJsonObject }?.asJsonObject
@@ -96,6 +100,8 @@ internal object AccountProviderProtocol {
         if (kind == AccountProviderKind.LOOMY) return LoomyAccountProtocol.models(payload)
         if (kind == AccountProviderKind.DOUBAO) return DoubaoAccountProtocol.models(payload)
         if (kind == AccountProviderKind.DUMATE) return DumateAccountProtocol.models(payload)
+        if (kind == AccountProviderKind.CODEARTS) return CodeArtsAccountProtocol.models(payload)
+        if (kind == AccountProviderKind.OUR_FREE_MODEL) return OurFreeModelProtocol.models(payload)
         val data = payload.obj("data") ?: payload
         val rows = when (kind) {
             AccountProviderKind.RACCOON -> data.array("categories").flatMap { category ->
@@ -128,7 +134,7 @@ internal object AccountProviderProtocol {
         val data = payload.obj("data") ?: payload
         return when (kind) {
             AccountProviderKind.RACCOON -> (number(data.get("total_chargeable_points")) ?: number(data.get("available_points")))?.let { "$it points" }
-            AccountProviderKind.DUMATE, AccountProviderKind.DOUBAO, AccountProviderKind.DEEPSEEK -> null
+            AccountProviderKind.DUMATE, AccountProviderKind.DOUBAO, AccountProviderKind.DEEPSEEK, AccountProviderKind.CODEARTS, AccountProviderKind.OUR_FREE_MODEL, AccountProviderKind.OFFICEACE -> null
             AccountProviderKind.LOOMY -> LoomyAccountProtocol.balance(payload)
             AccountProviderKind.TRAE, AccountProviderKind.TRAE_GLOBAL -> {
                 TraeAccountProtocol.balance(payload)?.let { return it }
@@ -172,6 +178,7 @@ internal class AccountCredential(
     val domain: String? = null,
     val enterpriseId: String? = null,
     internal val webCookie: String? = null,
+    internal val officeAceState: JsonObject? = null,
 ) {
     fun json(): JsonObject = JsonObject().apply {
         addProperty("kind", kind.wireId)
@@ -183,6 +190,7 @@ internal class AccountCredential(
         addProperty("domain", domain)
         addProperty("enterpriseId", enterpriseId)
         if (kind.isWebSession) addProperty("webCookie", webCookie)
+        if (kind == AccountProviderKind.OFFICEACE) add("officeAceState", officeAceState?.deepCopy())
     }
 
     override fun toString(): String = "AccountCredential(${kind.wireId}, redacted)"

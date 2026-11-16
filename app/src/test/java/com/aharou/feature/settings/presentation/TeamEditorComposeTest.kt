@@ -73,6 +73,24 @@ class TeamEditorComposeTest {
         assertNull(TeamFlowGraph.validate(asTeam(form)))
     }
 
+    @Test fun deletingStageDropsOnlyItsStableInterfaceEdgesAndKeepsLegacyMemberTargets() {
+        val initial = fixture().let { team ->
+            team.copy(stages = team.stages.map { stage ->
+                stage.copy(tasks = stage.tasks.map { task ->
+                    if (task.id == "task-b") task.copy(interfaces = listOf(
+                        TeamInterface("a/task-a", "removed node"), TeamInterface("worker", "legacy member")
+                    )) else task
+                })
+            })
+        }
+        open(initial)
+        compose.onAllNodesWithText(compose.activity.getString(R.string.team_editor_remove_stage))[0]
+            .performScrollTo().performClick()
+        save()
+        val surviving = saves.single().stages.first().tasks.single().interfaces
+        assertEquals(listOf(TeamInterface("worker", "legacy member")), surviving)
+    }
+
     @Test fun renamingStageKeepsStableRoutesAndUpdatesLegacyRejectTarget() {
         val initial = fixture()
         open(initial)
@@ -100,7 +118,7 @@ class TeamEditorComposeTest {
     @Test fun deselectingStageMemberDropsTheirTaskAndIncidentRoutes() {
         open(fixture())
         stageCard("Build").performScrollTo().performClick()
-        compose.onAllNodes(hasText("worker") and isSelectable())[1]
+        compose.onAllNodes(hasText("worker") and isSelectable()).onLast()
             .performScrollTo().performClick()
         save()
         val form = saves.single()
@@ -235,6 +253,38 @@ class TeamEditorComposeTest {
         assertNull(TeamFlowGraph.validate(asTeam(saves.last())))
     }
 
+    @Test fun graphSelectionEditsAndRemovesBidirectionalCollaborationThroughTheDialog() {
+        open(fixture())
+        compose.onNodeWithTag("team_graph_node_a/task-a").performScrollTo().performClick()
+        compose.onNodeWithTag("team_graph_node_b/task-b").performScrollTo().performClick()
+        text(R.string.team_relationship_collaboration).performScrollTo().performClick()
+        text(R.string.team_relationship_bidirectional).performScrollTo().performClick()
+        field(R.string.team_relationship_about).performScrollTo().performTextInput("contract")
+        compose.onNodeWithTag("team_relation_apply").performClick()
+        save()
+        val added = saves.last()
+        assertEquals(listOf(TeamInterface("b/task-b", "contract")), added.stages[0].tasks.single().interfaces)
+        assertEquals(listOf(TeamInterface("a/task-a", "contract")), added.stages[1].tasks.single().interfaces)
+        assertEquals(fixture().routes, added.routes)
+        compose.onNodeWithTag("team_graph_node_a/task-a").performScrollTo().performClick()
+        compose.onNodeWithTag("team_graph_node_b/task-b").performScrollTo().performClick()
+        text(R.string.team_relationship_bidirectional).performScrollTo().performClick()
+        compose.onNodeWithTag("team_relation_remove").performScrollTo().performClick()
+        save()
+        assertTrue(saves.last().stages.take(2).all { stage -> stage.tasks.all { it.interfaces.isEmpty() } })
+    }
+
+    @Test fun cancellingGraphRelationshipChangesLeavesSavedTeamUnchanged() {
+        val original = fixture()
+        open(original)
+        compose.onNodeWithTag("team_graph_node_a/task-a").performScrollTo().performClick()
+        compose.onNodeWithTag("team_graph_node_b/task-b").performScrollTo().performClick()
+        text(R.string.common_cancel).performClick()
+        save()
+        assertEquals(original.routes, saves.single().routes)
+        assertTrue(saves.single().stages.all { stage -> stage.tasks.all { it.interfaces.isEmpty() } })
+    }
+
     private fun open(initial: AgentTeam? = null, available: List<String> = listOf("worker", "coordinator"), scope: AgentDefinitionScope = AgentDefinitionScope.GLOBAL) {
         val visible = mutableStateOf(true)
         compose.setContent {
@@ -250,20 +300,20 @@ class TeamEditorComposeTest {
             }
         }
         compose.waitForIdle()
+        compose.onNodeWithTag("team_stage_settings").performScrollTo().performClick()
     }
 
     private fun configureStage(index: Int, title: String) {
-        stageCard(compose.activity.getString(R.string.team_editor_stage_title_hint, index))
-            .performScrollTo().performClick()
+        compose.onNodeWithTag("team_stage_card_$index").performScrollTo().performClick()
         field(R.string.team_editor_stage_title).performScrollTo().performTextInput(title)
-        compose.onAllNodes(hasText("worker") and isSelectable())[1]
+        compose.onAllNodes(hasText("worker") and isSelectable()).onLast()
             .performScrollTo().performClick()
         field(R.string.team_editor_stage_prompt).performScrollTo().performTextInput("Do $title")
         stageCard(title).performScrollTo().performClick()
     }
 
-    private fun stageCard(title: String) = compose.onNode(hasText(title) and hasClickAction() and !hasSetTextAction())
-    private fun chip(name: String) = compose.onNode(hasText(name) and isSelectable())
+    private fun stageCard(title: String) = compose.onNodeWithTag("team_stage_card_$title")
+    private fun chip(name: String) = compose.onNodeWithTag("team_admin_$name")
     private fun field(label: Int) = compose.onNode(hasSetTextAction() and hasText(compose.activity.getString(label)))
     private fun text(id: Int, vararg args: Any) = compose.onNodeWithText(compose.activity.getString(id, *args))
     private fun save() {

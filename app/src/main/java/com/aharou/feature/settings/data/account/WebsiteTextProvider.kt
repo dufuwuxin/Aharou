@@ -38,7 +38,7 @@ internal class WebsiteTextProvider(private val delegate: AIProvider) : AIProvide
             val url = runCatching { URI(provider.baseUrl) }.getOrNull()
             return if (url?.scheme == "https" && url.host == AccountProviderManager.SENTINEL &&
                 url.rawUserInfo == null && url.port in setOf(-1, 443) && url.rawQuery == null && url.rawFragment == null &&
-                url.rawPath.split('/').let { it.size == 4 && it[1] in setOf(AccountProviderKind.DOUBAO.wireId, AccountProviderKind.DEEPSEEK.wireId) && it[2].isNotBlank() && it[3] == "v1" }) WebsiteTextProvider(provider) else provider
+                url.rawPath.split('/').let { it.size == 4 && it[1] in setOf(AccountProviderKind.DOUBAO.wireId, AccountProviderKind.DEEPSEEK.wireId, AccountProviderKind.CODEARTS.wireId) && it[2].isNotBlank() && it[3] == "v1" }) WebsiteTextProvider(provider) else provider
         }
     }
 }

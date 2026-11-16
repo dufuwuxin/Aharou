@@ -62,6 +62,9 @@ internal fun accountProviderName(kind: AccountProviderKind): String = stringReso
         AccountProviderKind.WORKBUDDY_GLOBAL -> R.string.provider_account_workbuddy_global
         AccountProviderKind.DEEPSEEK -> R.string.provider_account_deepseek
         AccountProviderKind.DOUBAO -> R.string.provider_account_doubao
+        AccountProviderKind.CODEARTS -> R.string.provider_account_codearts
+        AccountProviderKind.OUR_FREE_MODEL -> R.string.provider_account_our_free_model
+        AccountProviderKind.OFFICEACE -> R.string.provider_account_officeace
         AccountProviderKind.DUMATE -> R.string.provider_account_dumate
         AccountProviderKind.LOOMY -> R.string.provider_account_loomy
         AccountProviderKind.WORKBUDDY -> R.string.provider_account_workbuddy
@@ -161,6 +164,13 @@ internal fun ProviderAccountGroup(
                 TextButton(enabled = !busy, onClick = {
                     launchOperation {
                         repository.saveProvider(providerState.value)
+                        if (kind == AccountProviderKind.OUR_FREE_MODEL) {
+                            manager.connectFreeModels(providerId)
+                            loggedIn = true
+                            snapshot = null
+                            refresh()
+                            return@launchOperation
+                        }
                         if (kind == AccountProviderKind.LOOMY) {
                             val imported = session
                             session = ""
@@ -188,14 +198,17 @@ internal fun ProviderAccountGroup(
                             login = null
                         }
                     }
-                }) { Text(stringResource(if (kind == AccountProviderKind.LOOMY) R.string.provider_account_import_session else if (android.os.Build.VERSION.SDK_INT >= 28) R.string.account_provider_add_account else R.string.account_provider_add_account_legacy)) }
+                }) { Text(stringResource(if (kind == AccountProviderKind.OUR_FREE_MODEL) R.string.provider_account_connect_free else if (kind == AccountProviderKind.LOOMY) R.string.provider_account_import_session else if (android.os.Build.VERSION.SDK_INT >= 28) R.string.account_provider_add_account else R.string.account_provider_add_account_legacy)) }
             },
         )
         SettingsDivider()
         SettingsRow(
             title = stringResource(R.string.provider_account_points),
-            subtitle = if (kind == AccountProviderKind.DEEPSEEK) stringResource(R.string.provider_account_deepseek_text_only)
+            subtitle = if (kind == AccountProviderKind.OUR_FREE_MODEL) stringResource(R.string.provider_account_free_notice)
+                else if (kind == AccountProviderKind.DEEPSEEK) stringResource(R.string.provider_account_deepseek_text_only)
                 else if (kind == AccountProviderKind.DOUBAO) stringResource(R.string.provider_account_doubao_text_only)
+                else if (kind == AccountProviderKind.OFFICEACE) stringResource(R.string.provider_account_officeace_notice)
+                else if (kind == AccountProviderKind.CODEARTS) stringResource(R.string.provider_account_codearts_pending_verification)
                 else if (kind == AccountProviderKind.DUMATE) stringResource(R.string.provider_account_dumate_balance_unsupported)
                 else if (snapshot?.balanceError != null) stringResource(R.string.provider_account_balance_failed)
                 else snapshot?.balance ?: stringResource(R.string.provider_account_unknown),

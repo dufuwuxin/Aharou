@@ -422,6 +422,18 @@ class DoubaoAccountProtocolTest {
         }
     }
 
+    @Test fun legacyChatCatalogIsUsedWhenV2ExistsButHasNoUsableChatModels() {
+        val payload = JsonParser.parseString("""{"code":0,"data":{"entry_list":[{"action_bar_key":"coco_deep_thinking","active_switch_conf":{"menu_conf_v2":{},"menu_conf":{"item_list":[{"item_list":[{"item_id":"12","name":"Legacy chat","model_extra_params":{"model_type":"normal"}}]}]}}}]}}""").asJsonObject
+        val models = DoubaoAccountProtocol.models(payload)
+        assertEquals("12", models.single().id)
+        assertEquals("12", models.single().function)
+    }
+
+    @Test fun legacyFallbackStillRejectsWorkOnlyDisabledAndUpgradeModels() {
+        val payload = JsonParser.parseString("""{"code":0,"data":{"entry_list":[{"action_bar_key":"coco_deep_thinking","active_switch_conf":{"menu_conf_v2":{"mode_list":{"item_list":[{"agent_mode":1,"model_list":{"item_list":[{"model_item_key":"1","name":"Work only"}]}}]}},"menu_conf":{"item_list":[{"agent_mode":"2","item_list":[{"item_id":"2","name":"Disabled","disabled":true},{"item_id":"3","name":"Upgrade","subscribe_config":{"need_upgrade":true}}]}]}}}]}}""").asJsonObject
+        assertTrue(DoubaoAccountProtocol.models(payload).isEmpty())
+    }
+
     @Test fun catalogChatEntitlementsAndUnsupportedStructuredCapabilitiesFailClosed() {
         val models = DoubaoAccountProtocol.models(JsonParser.parseString(catalog).asJsonObject)
         assertEquals(listOf("7"), models.map { it.id })

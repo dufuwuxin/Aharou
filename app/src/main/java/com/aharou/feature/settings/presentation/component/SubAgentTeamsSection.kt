@@ -8,6 +8,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -54,12 +56,11 @@ import compose.icons.feathericons.Users
 /**
  * 设置 → 团队：入口只有两条（创建团队 / 创建成员）+ 已创建团队列表。
  *
- * 团队 = 成员名单 + 管理员组 + 流程（阶段与驳回边）+ 公约。成员只是名单，
- * 没被任何团队引用的成员不会进主代理的视野，所以「建人」和「建队」是两件分开的事。
+ * 团队公开能力与成员清单分离；普通团队由管理员内部调度，主代理只读取名称、简介和公约。
  *
  * 表单保存后写回 teams 目录下的 .md，与手写完全等价；文件路径在详情里给出，方便直接改文本。
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 internal fun SubAgentTeamsSection(
     onCreateRoleCard: () -> Unit,
@@ -301,12 +302,9 @@ private fun TeamDetailSheet(
 
             if (team.members.isNotEmpty()) {
                 SettingsGroupHeader(text = stringResource(R.string.team_detail_members))
-                team.levels.forEach { level ->
-                    val names = team.members.filter { it.level == level }.map { it.name }
-                    if (names.isEmpty()) return@forEach
-                    Text(teamRoleLabel(level), style = MaterialTheme.typography.labelLarge)
-                    names.forEach { name ->
-                        TextButton(onClick = { onOpenRoleCard(name) }) { Text(name) }
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+                    team.members.forEach { member ->
+                        TextButton(onClick = { onOpenRoleCard(member.name) }) { Text(member.name) }
                     }
                 }
             }
@@ -450,6 +448,3 @@ private fun TopologyRow(from: String, target: String, about: String) {
 @Composable
 private fun stageTitleLabel(stage: TeamStage, index: Int): String =
     stringResource(R.string.team_stage_index_label, index + 1)
-
-@Composable
-private fun teamRoleLabel(level: Int): String = stringResource(R.string.team_level_label, level)

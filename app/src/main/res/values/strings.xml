@@ -1618,7 +1618,6 @@
     <string name="team_editor_name">团队名称</string>
     <string name="team_editor_description">团队简介</string>
     <string name="team_editor_members">成员名单</string>
-    <string name="team_editor_members_hint">只在这里的成员会进主代理视野；没入团的成员主代理看不到</string>
     <string name="team_editor_members_empty">还没有可选角色卡，先去「创建角色卡」定义一个</string>
     <string name="team_editor_admins">团队管理员（唯一）</string>
     <string name="team_editor_admins_hint">从团队成员中选择一位管理员；连线表示工作流，不表示权限继承。</string>
@@ -4164,6 +4163,20 @@
     <string name="team_task_summary">%1$s · %2$s</string>
     <string name="team_topology_show">展开拓扑图</string>
     <string name="team_topology_hide">收起拓扑图</string>
+    <string name="team_relationships">成员关系图</string>
+    <string name="team_relationship_hint">点选两个成员可快速编辑关系；执行连线表示任务交接，协作关系不改变执行顺序。</string>
+    <string name="team_relationship_title">编辑成员关系</string>
+    <string name="team_relationship_edit">编辑关系</string>
+    <string name="team_relationship_collaboration">协作关系</string>
+    <string name="team_relationship_flow">执行流转</string>
+    <string name="team_relationship_sources">来源成员（可多选）</string>
+    <string name="team_relationship_targets">目标成员（可多选）</string>
+    <string name="team_relationship_bidirectional">双向协作</string>
+    <string name="team_relationship_about">协作内容</string>
+    <string name="team_relationship_apply">应用关系</string>
+    <string name="team_relationship_remove">删除所选关系</string>
+    <string name="team_relationship_invalid">所选关系无效；检查来源、目标及执行流是否构成环。</string>
+    <string name="team_routes_advanced">高级执行路由</string>
     <string name="team_task_prompt">任务指令</string>
     <string name="team_task_write_paths">可写路径（逗号分隔）</string>
     <string name="team_task_add">新增任务</string>
@@ -4191,5 +4204,12 @@
     <string name="account_redirect_failed">账号接口返回了重定向，当前请求未继续。请重新进入官方登录页完成授权。</string>
     <string name="provider_account_deepseek">DeepSeek 网页账号</string>
     <string name="provider_account_deepseek_text_only">网页文本模式：支持对话、思考与搜索开关；不支持工具、附件、余额或签到。模式列表不代表实时模型目录；账号实测尚未验证。</string>
+    <string name="provider_account_codearts">码道 CodeArts（网页登录待本人验证）</string>
+    <string name="provider_account_codearts_pending_verification">网页文本模式；不支持工具、附件、余额或签到。接口协议基于公开页面逆向，未用真实华为云账号验证。</string>
     <string name="account_login_missing_web_token">未读取到网页登录凭据，请完成本人登录后重试</string>
+    <string name="provider_account_our_free_model">Our Free Model（公开免费模型）</string>
+    <string name="provider_account_connect_free">连接免费模型</string>
+    <string name="provider_account_free_notice">无需账号或密钥；动态显示 Kilo 明确标记免费的模型。免费服务可能记录对话、限流或下架模型，请勿发送敏感信息。Zen 暂未接入。</string>
+    <string name="provider_account_officeace">果办（华为云个人账号）</string>
+    <string name="provider_account_officeace_notice">通过华为云官方页面授权；模型以账号实时目录为准，余额暂不支持。真实账号调用尚待验证。</string>
 </resources>

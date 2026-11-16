@@ -109,7 +109,7 @@ class ConfigProviderFields @Inject constructor(
     private inner class AccountCollection : ConfigCollection {
         override val basePath = "provider_accounts"
         override val displayName = "供应商账号池"
-        override val description = "按首次登录顺序列出账号；remove仅移除一个账号。add仅支持用户导入Loomy会话，网页登录仍由用户主动完成。"
+        override val description = "按首次登录顺序列出账号；remove仅移除一个账号。add支持连接免费模型或导入Loomy会话，网页登录由用户主动完成。"
         private fun slots(): List<Triple<String, String, com.aharou.feature.settings.data.account.AccountPoolEntry>> =
             runBlocking { providers.getAllProviders().first() }.flatMap { provider ->
                 val kind = accounts.kind(provider.baseUrl) ?: return@flatMap emptyList()
@@ -129,10 +129,18 @@ class ConfigProviderFields @Inject constructor(
         override fun add(payload: ConfigValue): String {
             val obj = (payload as? ConfigValue.Obj)?.value ?: throw ConfigError.TypeMismatch("object")
             val id = (obj["provider_id"] as? ConfigValue.Str)?.value ?: throw ConfigError.InvalidValue("缺少provider_id")
+            val provider = snapshot(id) ?: throw ConfigError.InvalidValue("供应商不存在")
+            val kind = accounts.kind(provider.baseUrl)
+            if (kind == com.aharou.feature.settings.data.account.AccountProviderKind.OUR_FREE_MODEL) {
+                runBlocking {
+                    accounts.connectFreeModels(id)
+                    refreshAccountModels(id)
+                }
+                return slots().first { it.second == id }.first
+            }
+            if (kind != com.aharou.feature.settings.data.account.AccountProviderKind.LOOMY) throw ConfigError.InvalidValue("网页登录请在供应商页面添加账号")
             // `apiKey` is an existing redacted add-payload key; never use an unredacted session key.
             val session = (obj["apiKey"] as? ConfigValue.Str)?.value ?: throw ConfigError.InvalidValue("缺少用户提供的会话")
-            val provider = snapshot(id) ?: throw ConfigError.InvalidValue("供应商不存在")
-            if (accounts.kind(provider.baseUrl) != com.aharou.feature.settings.data.account.AccountProviderKind.LOOMY) throw ConfigError.InvalidValue("网页登录请在供应商页面添加账号")
             val old = childIds().toSet()
             importAccountSession(id, session)
             return childIds().first { it !in old }

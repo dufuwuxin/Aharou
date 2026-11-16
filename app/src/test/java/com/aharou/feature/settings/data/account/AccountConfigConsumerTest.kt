@@ -24,6 +24,37 @@ class AccountConfigConsumerTest {
         override fun write(id: String, value: String?) { if (value == null) values.remove(id) else values[id] = value }
     }
 
+    @Test fun freeConnectionThroughConfigNeedsNoKeyAndIsIdempotent() {
+        MockWebServer().use { server ->
+            val client = OkHttpClient.Builder().connectionSpecs(listOf(okhttp3.ConnectionSpec.CLEARTEXT))
+                .addInterceptor { chain ->
+                    val request = chain.request()
+                    assertEquals("ai-gateway.kilo.ai", request.url.host)
+                    assertEquals(null, request.header("Authorization"))
+                    chain.proceed(request.newBuilder().url(server.url(request.url.encodedPath)).build())
+                }.build()
+            val manager = AccountProviderManager(Vault(), client)
+            var provider = AIProviderConfig("provider", "Free", ProviderType.OPENAI, "",
+                baseUrl = manager.baseUrl(AccountProviderKind.OUR_FREE_MODEL, "provider"), defaultModel = "")
+            val repository = mockk<AIProviderRepository>()
+            coEvery { repository.getProviderById("provider") } answers { provider }
+            coEvery { repository.saveProvider(any()) } answers { provider = firstArg() }
+            every { repository.getAllProviders() } answers { flowOf(listOf(provider)) }
+            val registry = ConfigRegistry::class.java.getDeclaredConstructor().apply { isAccessible = true }.newInstance()
+            ConfigProviderFields(mockk(), mockk(), repository, manager).registerInto(registry)
+            repeat(4) { server.enqueue(MockResponse().setBody("""{"data":[{"id":"free-model","isFree":true},{"id":"paid-model","isFree":false}]}""")) }
+            val collection = registry.collection("provider_accounts")!!
+            val input = ConfigValue.Obj(mapOf("provider_id" to ConfigValue.Str("provider")))
+            val first = collection.add(input)
+            assertEquals(first, collection.add(input))
+            assertEquals(1, collection.childIds().size)
+            assertEquals(listOf("free-model"), provider.models)
+            assertEquals("free-model", provider.defaultModel)
+            assertEquals("free-model", provider.selectedModel)
+            assertEquals(4, server.requestCount)
+        }
+    }
+
     @Test fun bothConfigImportsPersistMergedModelsAndDefaultsWithoutOpeningEditor() {
         for (collectionImport in listOf(false, true)) MockWebServer().use { server ->
             val manager = AccountProviderManager(Vault(), OkHttpClient.Builder().connectionSpecs(listOf(okhttp3.ConnectionSpec.CLEARTEXT)).build(), AccountEndpoints(loomy = server.url("/").toString().trimEnd('/')))

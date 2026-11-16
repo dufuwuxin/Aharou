@@ -95,14 +95,17 @@ class ProjectRequirementBranchTest {
             }
         }
         var binding: ProjectChatBinding? = null
+        var diagnosticsOpened = false
         compose.setContent {
             MaterialTheme {
                 binding = rememberProjectChatBinding(agent, projects, {}, {}, "p")
                 Column {
                     Text(binding?.sessionId.orEmpty(), Modifier.testTag("actual_binding_session"))
                     CompositionLocalProvider(LocalViewModelStoreOwner provides panelOwner) {
-                        com.aharou.feature.agent.presentation.component.ProjectChatMenuHost(binding?.sessionId,
-                            {}, {}, {}, {}, {}, {}, null, 0, 0) { binding?.body?.invoke({}) }
+                        com.aharou.feature.agent.presentation.component.ProjectChatMenuHost(sessionId = binding?.sessionId,
+                            onTerminal = {}, onGit = {}, onBrowser = {}, onSandbox = {}, onShared = {},
+                            onDiagnostics = { diagnosticsOpened = true }, connectionState = null, inputTokens = 0, outputTokens = 0,
+                            unifiedDiagnostics = true) { binding?.body?.invoke({}) }
                     }
                 }
             }
@@ -149,13 +152,14 @@ class ProjectRequirementBranchTest {
         compose.onNodeWithTag("project_tree_body").performScrollToNode(hasTestTag("task_node_child"))
         compose.onNodeWithTag("task_node_child").assertExists()
         compose.onNodeWithContentDescription(compose.activity.getString(R.string.project_view_actions)).performClick()
-        compose.onNodeWithTag("project_main_conversation").performClick()
+        compose.onNodeWithTag("project_session_diagnostics").assertExists().performClick()
+        compose.runOnIdle { assertTrue(diagnosticsOpened) }
+        compose.onNodeWithTag("project_tree_body").performScrollToNode(hasTestTag("task_node_root"))
+        compose.onNodeWithTag("task_node_root").performClick()
         compose.waitForIdle()
         compose.runOnIdle { assertEquals("main", binding?.sessionId) }
-        compose.onNodeWithTag("project_main_reader").assertExists()
+        compose.onNodeWithTag("project_root_conversation").assertExists()
         verify(atLeast = 1) { agent.processMessages("main", any()) }
-        compose.onNodeWithText(compose.activity.getString(R.string.project_back)).performClick()
-        compose.onNodeWithTag("project_main_reader").assertDoesNotExist()
         // Re-enter a branch, then open the root through the real tree callback.
         compose.onNodeWithTag("project_tree_body").performScrollToNode(hasTestTag("task_node_branch"))
         compose.onNodeWithTag("task_node_branch").performClick()
@@ -190,11 +194,9 @@ class ProjectRequirementBranchTest {
         }
         compose.waitForIdle()
         compose.onNodeWithTag("project_branch_composer").assertTextEquals(compose.activity.getString(R.string.project_branch_composer, "Sibling"))
-        compose.onNodeWithContentDescription(compose.activity.getString(R.string.project_view_actions)).performClick()
-        compose.onNodeWithTag("project_main_conversation").performClick()
+        compose.onNodeWithTag("project_tree_body").performScrollToNode(hasTestTag("task_node_root"))
+        compose.onNodeWithTag("task_node_root").performClick()
         compose.waitForIdle()
-        compose.onNodeWithTag("project_main_reader").assertExists()
-        compose.onNodeWithText(compose.activity.getString(R.string.project_back)).performClick()
         compose.onNodeWithTag("actual_binding_session").assertTextEquals("main")
         compose.runOnIdle { assertEquals(listOf("sibling"), state.value.tasks.map { it.id }) }
         verify(exactly = 1) { projects.deleteRequirementBranch("p", "branch", any()) }

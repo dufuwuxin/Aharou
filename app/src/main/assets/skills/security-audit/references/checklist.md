@@ -7,8 +7,8 @@
 | 意图组 | 常见同义表达 | 本轮路线 | 不能声称 |
 | --- | --- | --- | --- |
 | 样本识别 | 文件鉴定、哈希、格式识别、元数据 | inventory，固定 SHA-256 | 已证明文件可信/完整 |
-| 原生逆向 | 反汇编、反编译、二进制分析、静态逆向 | ELF/PE 头信息；发现 readelf/objdump/rizin/ghidra 后另行人工分析 | CLI 已运行反汇编或恢复源码 |
-| Android 逆向 | APK 分析、DEX 分析、清单、权限分析 | ZIP/APK 候选与 DEX 头；人工用已具备的 jadx/apktool 阅读隔离副本 | 已解码二进制清单/验证签名 |
+| 原生逆向 | 反汇编、反编译、二进制分析、静态逆向；审计自有软件的许可/校验控制流 | ELF/PE 头信息；对明确授权的本地样本，可用已安装工具人工追踪校验入口、分支与已知测试向量，并记录工具版本和样本哈希 | CLI 已运行反汇编或恢复源码；不修改字节、绕过许可/访问控制或重签名后冒称原样本 |
+| Android 逆向 | APK 分析、DEX 分析、清单、权限分析 | ZIP/APK 候选与 DEX 头；对明确授权的 APK，可人工用已安装的 jadx/apktool 阅读隔离副本并记录输入哈希与工具版本 | 已解码二进制清单/验证签名；不修改校验逻辑、绕过许可证或重新签名分发 |
 | Web/服务端审计 | SQL 注入、XSS、CSRF、SSRF、XML/XXE | source 规则组与数据流人工核验 | 正则命中即漏洞 |
 | 本地边界审计 | 命令执行、路径穿越、解包越界、链接 | command/path 分组；中央目录危险路径统计 | 已执行利用或完整污点分析 |
 | 隐私与密钥治理 | PII、敏感信息、日志泄露、凭据保护 | 仅字段线索，不回显值；排除凭据路径 | 已读取用户密钥或证明无隐私泄露 |
@@ -98,6 +98,7 @@
 | --- | --- | --- | --- |
 | [MoJin 2.0.0 Windows](用户提供的 `mojin-2.0.0-Windows-x64.zip`, SHA-256 `d2d7b35a4946519e38ef56f0909e56199ddfb0302995b06244d13cef5611c07b`) | Windows 工作台；README 说明模型通过可配置 OpenAI-compatible endpoint；无 Android 运行时 | 只适配 APK 目录名格式提示和静态 triage 次序；未复制提示词、工具配置或攻击技能 | 不因“数据本地保存”推断推理完全离线；Windows 二进制/MCP/插件未移植或运行。主提示中压制拒绝/安全限制内容不合入 |
 | [reverse-skills collection](用户提供的 `逆向大神技能合集.zip`, SHA-256 `0adadcb539b2ab1e9248b7246493d95f9a3cc25ef858786a75d99f2b300b8436`) / `malware-analysis-claude-skills/pe_info.py` (SHA-256 `0d145b591e9c56e7646e5bf44ebda5ec5b7cf9b1e8f22c93ad16ea243c2c90ea`) | 嵌套仓库 LICENSE 为 MIT | 只将 Shannon 熵函数改写为有界流式算法，见相邻 `entropy-MIT-LICENSE.txt`；PE 头字段与 APK 目录线索按格式字段另行实现 | 上游 PE 报告、其余 PE 解析器、技能合集与全部工具未移植 |
+| [sqfcyily/deva@2b2602d](https://github.com/sqfcyily/deva/tree/2b2602d381cff41da8088a0efeec3faa8d5565b0) | 仓库 LICENSE 为 MIT；README 描述桌面 Agent、按需专家协作与“小码酱”提示安全/逆向能力 | 新增防御性提示安全评测流程，使用合成用例兼顾边界检查与正常任务可用性；继续使用 Aharou 现有管理员主导团队路由及离线逆向审计技能 | 未复制源码或角色提示词；排除要求忽略安全规则、默认目标均获授权、秘密提取、第三方模型越权及许可绕过流程；未运行 Deva 程序或验证其模型行为 |
 
 | [DSH plugin hub](https://github.com/dshplugin/dsh-plugin-hub) | 已核对公开 LICENSE 为 MIT；依赖 DSH 宿主 | 仅借鉴能力分类，使用现有 Aharou 工具；不盲装依赖、不运行第三方脚本 | 未复制源码；Aharou 未实现 DSH 宿主 API，不声称插件二进制兼容 |
 | [VCPToolBox](https://github.com/lioensky/VCPToolBox) | 已核对公开 LICENSE 为 CC BY-NC-SA 4.0 | 只复述需求与兼容性边界，原创实现；不复制到 GPLv3 工程，不把来源许可改称 GPL | 精确提交未固定；未做 VCP 协议兼容或算法性能复现 |

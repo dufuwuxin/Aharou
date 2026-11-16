@@ -122,12 +122,14 @@ internal fun TeamEditorSheet(
     var routesRemoved by remember(initial) { mutableStateOf(false) }
 
     fun updateStages(updated: List<AgentTeamStageForm>) {
+        val previousStages = stages
         stages = updated.mapIndexed { index, stage ->
             if (stage.rejectTo.isNotBlank() && updated.take(index).none { it.title.trim().equals(stage.rejectTo.trim(), ignoreCase = true) }) {
                 stage.copy(rejectTo = "")
             } else stage
         }
         val nodes = stages.flatMap { stage -> stage.tasks.filter { it.prompt.isNotBlank() }.map { TeamFlowNode(stage.id, it.id) } }.toSet()
+        stages = removeDeletedTeamNodeReferences(previousStages, stages)
         val kept = routes.filter { it.from in nodes && it.to in nodes }
         if (kept.size != routes.size) routesRemoved = true
         routes = kept
@@ -207,14 +209,8 @@ internal fun TeamEditorSheet(
             )
             ScopeSelector(scopeIsGlobal = scopeIsGlobal, enabled = initial == null) { scopeIsGlobal = it }
 
-            // 2. 成员名单：只有在这里的成员会进主代理视野
             var showPicker by remember { mutableStateOf(false) }
             SettingsGroupHeader(text = stringResource(R.string.team_editor_members))
-            Text(
-                text = stringResource(R.string.team_editor_members_hint),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
             if (availableMembers.isEmpty() && members.isEmpty()) {
                 Text(
                     text = stringResource(R.string.team_editor_members_empty),
@@ -224,23 +220,19 @@ internal fun TeamEditorSheet(
             } else {
                 // 已选成员以卡片行展示；右侧点选择器挑人，而不是把全量名单一次性摊开
                 if (members.isNotEmpty()) {
-                    SettingsGroupHeader(text = stringResource(R.string.team_editor_selected_members))
-                    members.forEach { ref ->
-                        MemberRow(
-                            ref = ref,
-                            onLevelChange = { level ->
-                                members = members.map { if (it.name == ref.name) it.copy(level = level) else it }
-                            },
-                            onRemove = {
-                                members = members.filterNot { it.name == ref.name }
-                                admins = admins.filterNot { it == ref.name }
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+                        members.forEach { member ->
+                            FilterChip(selected = true, onClick = {
+                                members = members.filterNot { it.name == member.name }
+                                admins = admins.filterNot { it == member.name }
                                 updateStages(stages.map { stage -> stage.copy(
-                                    members = stage.members.filterNot { it.equals(ref.name, ignoreCase = true) },
-                                    tasks = stage.tasks.filterNot { it.agent.equals(ref.name, ignoreCase = true) },
-                                    interfaces = stage.interfaces.filterNot { it.from.equals(ref.name, ignoreCase = true) }
+                                    members = stage.members.filterNot { it.equals(member.name, ignoreCase = true) },
+                                    tasks = stage.tasks.filterNot { it.agent.equals(member.name, ignoreCase = true) },
+                                    interfaces = stage.interfaces.filterNot { it.from.equals(member.name, ignoreCase = true) }
                                 ) })
-                            }
-                        )
+                            }, label = { Text(member.name) }, trailingIcon = { Icon(Icons.Default.Close, stringResource(R.string.common_remove), Modifier.size(16.dp)) },
+                                modifier = Modifier.testTag("team-member-remove-${member.name}"))
+                        }
                     }
                 }
                 // 选择器按钮：打开二级勾选页，把已选的人加进来
@@ -294,13 +286,45 @@ internal fun TeamEditorSheet(
                                 if (memberName != com.aharou.feature.agent.domain.subagent.MAIN_AGENT_ADMIN && members.none { it.name == memberName }) members = members + TeamMemberRef(memberName)
                                 admins = listOf(memberName)
                             },
-                            label = { Text(if (memberName == com.aharou.feature.agent.domain.subagent.MAIN_AGENT_ADMIN) stringResource(R.string.team_main_agent) else memberName) }
+                            label = { Text(if (memberName == com.aharou.feature.agent.domain.subagent.MAIN_AGENT_ADMIN) stringResource(R.string.team_main_agent) else memberName) },
+                            modifier = Modifier.testTag("team_admin_$memberName")
                         )
                     }
                 }
             }
-            // 4. 团队流程：阶段 + 关卡 + 驳回回边
-            SettingsGroupHeader(text = stringResource(R.string.team_editor_process))
+            SettingsGroupHeader(text = stringResource(R.string.team_relationships))
+            var relationshipDialog by remember { mutableStateOf(false) }
+            var selectedNodes by remember { mutableStateOf(emptySet<TeamFlowNode>()) }
+            val visibleRoutes = remember(stages, routes) { routes.ifEmpty { teamDefaultRoutes(stages) } }
+            TeamFlowMap(stages, visibleRoutes, selectedNodes) { node ->
+                if (node in selectedNodes) selectedNodes = selectedNodes - node
+                else {
+                    val hadSource = selectedNodes.isNotEmpty()
+                    selectedNodes = selectedNodes + node
+                    if (hadSource) relationshipDialog = true
+                }
+            }
+            TextButton(onClick = { relationshipDialog = true }, modifier = Modifier.fillMaxWidth().testTag("team_relationship_edit")) {
+                Text(stringResource(R.string.team_relationship_edit))
+            }
+            if (relationshipDialog) TeamRelationshipDialog(stages, routes, selectedNodes, onDismiss = {
+                relationshipDialog = false
+                selectedNodes = emptySet()
+            },
+                onCollaboration = { sources, targets, both, about, remove ->
+                    stages = editTeamCollaboration(stages, sources, targets, both, about, remove)
+                    selectedNodes = emptySet()
+                },
+                onRoute = { sources, targets, action, remove ->
+                    val updated = editTeamRoutes(stages, routes, sources, targets, action, remove)
+                    if (updated == null) false else { routes = updated; selectedNodes = emptySet(); true }
+                })
+
+            var stageSettingsExpanded by remember { mutableStateOf(false) }
+            TextButton(onClick = { stageSettingsExpanded = !stageSettingsExpanded }, modifier = Modifier.testTag("team_stage_settings")) {
+                Text(stringResource(R.string.team_editor_process))
+            }
+            if (stageSettingsExpanded) {
             Text(
                 text = stringResource(R.string.team_editor_process_hint),
                 style = MaterialTheme.typography.bodySmall,
@@ -316,7 +340,7 @@ internal fun TeamEditorSheet(
                 ProcessNodeCard(
                     index = index + 1,
                     stage = stage,
-                    roleLabel = stageRoleLabel(stage.level),
+                    roleLabel = stageRoleLabel(index + 1),
                     isReview = stage.isReview,
                     rejectToTitle = stage.rejectTo,
                     rejectTargets = stages.take(index).map { it.title.trim() }.filter { it.isNotEmpty() },
@@ -353,19 +377,12 @@ internal fun TeamEditorSheet(
                 Text(stringResource(R.string.team_editor_add_stage))
             }
 
-            var mapExpanded by rememberSaveable { mutableStateOf(false) }
-            TextButton(onClick = { mapExpanded = !mapExpanded }, modifier = Modifier.testTag("team_topology_toggle")) {
-                Text(stringResource(if (mapExpanded) R.string.team_topology_hide else R.string.team_topology_show))
             }
-            if (mapExpanded) TeamFlowMap(admins, stages, routes)
             var routesExpanded by rememberSaveable { mutableStateOf(false) }
             TextButton(onClick = { routesExpanded = !routesExpanded }, modifier = Modifier.testTag("team_routes_advanced")) {
-                Text(stringResource(R.string.team_advanced_options))
+                Text(stringResource(R.string.team_routes_advanced))
             }
-            if (routesExpanded) {
-                Text(stringResource(R.string.team_routes_advanced_hint), style = MaterialTheme.typography.bodySmall)
-                TeamRouteEditor(stages, routes) { routes = it }
-            }
+            if (routesExpanded) TeamRouteEditor(stages, routes) { routes = it }
             if (routesRemoved) {
                 Text(stringResource(R.string.team_flow_removed_endpoints), color = MaterialTheme.colorScheme.error)
             }
@@ -562,60 +579,6 @@ private fun StageEditor(
 }
 
 
-/** 层级步进器：1~5 级够表达「一级高管组 / 二级组长 / 三级组员」这类结构，再多就该拆团队了。
- * 文案按角色定位展示：一级=高管、二级=组长、三级=组员，n级保留数字占位。
- */
-@Composable
-private fun LevelStepper(level: Int, onChange: (Int) -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        TextButton(onClick = { onChange((level - 1).coerceAtLeast(1)) }, enabled = level > 1) {
-            Text("−")
-        }
-        Text(
-            text = stringResource(R.string.team_level_label, level),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface
-        )
-        TextButton(onClick = { onChange((level + 1).coerceAtMost(5)) }, enabled = level < 5) {
-            Text("+")
-        }
-    }
-}
-
-/** 已选成员行：左侧名字 + 层级步进 + 右侧移除。 */
-@Composable
-private fun MemberRow(ref: TeamMemberRef, onLevelChange: (Int) -> Unit, onRemove: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = Spacing.xs),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = ref.name,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-                fontWeight = FontWeight.Medium
-            )
-            Text(
-                text = stringResource(R.string.team_level_label, ref.level),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-        LevelStepper(level = ref.level, onChange = onLevelChange)
-        IconButton(onClick = onRemove, modifier = Modifier.size(24.dp).testTag("team-member-remove-${ref.name}")) {
-            Icon(
-                imageVector = Icons.Default.Close,
-                contentDescription = stringResource(R.string.common_remove),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(18.dp)
-            )
-        }
-    }
-}
-
 /** 二级选择页：列出可用成员供勾选，确认后回写已选集合。 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -786,6 +749,7 @@ private fun ProcessNodeCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(MaterialTheme.semanticColors.cardSurface, RoundedCornerShape(Radius.mdLarge))
+                .testTag("team_stage_card_${stage.title.ifBlank { index.toString() }}")
                 .clickable { onToggleExpand(!expanded) }
                 .padding(horizontal = Spacing.md, vertical = Spacing.sm),
             verticalAlignment = Alignment.CenterVertically

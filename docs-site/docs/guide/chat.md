@@ -207,7 +207,7 @@ AI 生成回复时以**打字机效果**逐字显示，速度跟随模型的吐�
 
 ### 会话诊断：上下文、地图、活动和上下级
 
-普通聊天顶部的诊断按钮、项目页面的「会话诊断」状态栏和项目更多菜单进入同一面板。项目的「主会话 / 规划过程」也收进这里，不再另设一个重复的阅读入口；点导图根节点同样可以进入。普通聊天包含下面四个页签，项目额外显示「主会话 / 规划过程」，可选择历史主会话记录：
+普通聊天可通过顶部诊断按钮打开面板；项目工作台右上角更多菜单中的「会话诊断」打开同一面板。项目主记录仍可从导图根节点查看，不再占用更多菜单入口。普通聊天包含下面四个页签，项目额外显示「主会话 / 规划过程」，可选择历史主会话记录：
 
 - **上下文**：显示最近请求的输入占用、对应预算与剩余量；估算值明确标注，不是累计费用。当前选择模型的输入预算另列，切模型后不会与上一请求占用混算。
 - **对话地图**：按轮次查看当前会话已加载的消息；未加载的历史会明确提示。普通聊天可定位实际消息，项目专用正文只能查看地图，不能跳到不存在的列表位置。
@@ -434,7 +434,7 @@ AI 回复正文下面那一行：**统计按「本轮合计」算，只挂在每
 
 项目中若提示“模型未返回有效规划”，看到的是规则草稿，不代表 AI 已完成规划；请重试 AI 规划，或编辑并确认草稿后执行。
 
-The **主会话 / 规划过程** entry outside the task map opens the main conversation in a full-screen reader. Its history selector preserves a manually selected record; otherwise a genuinely active root takes precedence, followed by an existing root with returned assistant or tool output. 发送目标由当前选中的主会话或需求分支决定，选中分支时仍使用现有输入栏；切回主会话后使用有效项目根会话。阅读器中的历史选择不改变发送目标，关闭阅读器也不停止执行。 Task-member records remain separate and never borrow reasoning from the main conversation.
+The main project record remains available from the root node in the task map; it no longer occupies an item in the top-right menu, which opens session diagnostics. Selecting the root or a requirement branch continues to select that conversation for the existing composer. Task-member records remain separate and never borrow reasoning from the main conversation.
 
 The latest loaded round and complete summary start expanded. Returned reasoning and tool output start expanded too, and can still be collapsed. Only an active session is labeled live; stale stream text or an old member status alone is not proof of execution. Rule-fallback planning keeps shared introductory and trailing requirements as each listed task’s background rather than inventing extra tasks; previously saved tasks are not deleted.
 

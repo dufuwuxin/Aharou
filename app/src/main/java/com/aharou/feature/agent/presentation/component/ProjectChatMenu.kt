@@ -38,7 +38,8 @@ internal fun ProjectChatMenuHost(
             R.string.chat_open_git to onGit,
             R.string.chat_open_terminal to onTerminal,
             R.string.chat_open_browser to onBrowser
-        ).forEach { (label, action) ->
+        ).filterNot { unifiedDiagnostics && it.first == R.string.session_diagnostics_title }
+            .forEach { (label, action) ->
             DropdownMenuItem(text = { Text(stringResource(label)) }, onClick = { dismiss(); action() })
         }
         if (connectionState != null) {

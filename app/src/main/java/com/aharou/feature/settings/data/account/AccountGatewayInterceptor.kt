@@ -69,8 +69,9 @@ class AccountGatewayInterceptor internal constructor(private val manager: Accoun
                 }
                 if (completed != null) return completed
             } catch (error: AccountProviderException) {
+                if (kind == AccountProviderKind.OUR_FREE_MODEL) throw error
                 // A website WAF refusal must not trigger account cycling to evade the block.
-                if (kind == AccountProviderKind.DEEPSEEK && error.httpStatus == 403) throw error
+                if (kind in setOf(AccountProviderKind.DEEPSEEK, AccountProviderKind.CODEARTS) && error.httpStatus == 403) throw error
                 if (error.httpStatus !in setOf(401, 402, 403, 429)) throw error
                 failure = error
             } catch (error: IOException) {
@@ -85,6 +86,10 @@ class AccountGatewayInterceptor internal constructor(private val manager: Accoun
 
     private fun complete(request: Request, id: String, kind: AccountProviderKind, body: JsonObject, model: AccountProviderModel, streaming: Boolean): Response {
         val modelId = model.id
+        if (kind == AccountProviderKind.OFFICEACE) {
+            val upstream = OfficeAceAccountProtocol.complete(manager, id, body, model, streaming)
+            return upstream.newBuilder().request(request).build()
+        }
         if (kind == AccountProviderKind.DEEPSEEK) {
             val upstream = DeepSeekAccountProtocol.complete(manager, id, body, model.id)
             try {
@@ -93,7 +98,16 @@ class AccountGatewayInterceptor internal constructor(private val manager: Accoun
                 return response(request, if (streaming) converted else aggregate(converted, model.id))
             } catch (error: Exception) { upstream.close(); throw error }
         }
+        if (kind == AccountProviderKind.CODEARTS) {
+            val upstream = CodeArtsAccountProtocol.complete(manager, id, body, model.id)
+            try {
+                val raw = upstream.body ?: throw AccountProviderException("empty_response", "CodeArts returned no response")
+                val converted = CodeArtsAccountProtocol.sseBody(raw, model.id)
+                return response(request, if (streaming) converted else aggregate(converted, model.id))
+            } catch (error: Exception) { upstream.close(); throw error }
+        }
         val upstreamBody = when (kind) {
+            AccountProviderKind.OUR_FREE_MODEL -> body.deepCopy()
             AccountProviderKind.DOUBAO -> DoubaoAccountProtocol.completion(body, model)
             AccountProviderKind.DUMATE -> body.deepCopy()
             AccountProviderKind.LOOMY -> LoomyAccountProtocol.request(body)
@@ -102,6 +116,9 @@ class AccountGatewayInterceptor internal constructor(private val manager: Accoun
             else -> body.deepCopy().apply { remove("reasoning_effort") }
         }
         val upstreamUrl = when (kind) {
+            AccountProviderKind.OUR_FREE_MODEL -> OurFreeModelProtocol.BASE + "/chat/completions"
+            AccountProviderKind.CODEARTS -> throw AccountProviderException("invalid_gateway", "Use CodeArts native completion", 400)
+            AccountProviderKind.OFFICEACE -> throw AccountProviderException("invalid_gateway", "Use OfficeAce native completion", 400)
             AccountProviderKind.DEEPSEEK -> throw AccountProviderException("invalid_gateway", "Use DeepSeek native completion", 400)
             AccountProviderKind.DOUBAO -> DoubaoAccountProtocol.WEB + DoubaoAccountProtocol.CHAT
             AccountProviderKind.DUMATE -> DumateAccountProtocol.GATEWAY + "/chat/completions"
@@ -151,8 +168,8 @@ class AccountGatewayInterceptor internal constructor(private val manager: Accoun
             val choice = chunk.array("choices").firstOrNull()?.objectOrNull() ?: continue
             choice.text("finish_reason")?.let { value -> reason = value }
             val delta = choice.obj("delta") ?: continue
-            delta.text("content")?.let(text::append)
-            delta.text("reasoning_content")?.let(reasoning::append)
+            delta.rawText("content")?.let(text::append)
+            delta.rawText("reasoning_content")?.let(reasoning::append)
             delta.array("tool_calls").forEach { element ->
                 val incoming = element.asJsonObject
                 val index = incoming.get("index")?.asInt ?: throw AccountProviderException("invalid_stream", "Tool fragment has no index")
@@ -160,7 +177,7 @@ class AccountGatewayInterceptor internal constructor(private val manager: Accoun
                 incoming.text("id")?.let { id -> call.addProperty("id", id) }
                 incoming.obj("function")?.let { function ->
                     val target = call.obj("function")!!
-                    listOf("name", "arguments").forEach { key -> function.text(key)?.let { value -> target.addProperty(key, target.text(key).orEmpty() + value) } }
+                    listOf("name", "arguments").forEach { key -> function.rawText(key)?.let { value -> target.addProperty(key, target.rawText(key).orEmpty() + value) } }
                 }
             }
         }
@@ -226,7 +243,7 @@ class AccountGatewayInterceptor internal constructor(private val manager: Accoun
                             AccountProviderProtocol.check(json)
                             if (json.array("choices").any { value ->
                                     val delta = value.objectOrNull()?.obj("delta")
-                                    delta?.text("content") != null || delta?.text("reasoning_content") != null || delta?.array("tool_calls")?.isEmpty == false
+                                    delta?.rawText("content")?.isNotEmpty() == true || delta?.rawText("reasoning_content")?.isNotEmpty() == true || delta?.array("tool_calls")?.isEmpty == false
                                 }) sawAnswer = true
                         }
                     }

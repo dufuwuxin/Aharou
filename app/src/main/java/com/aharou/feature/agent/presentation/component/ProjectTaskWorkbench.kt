@@ -64,7 +64,6 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
     var expandedId by rememberSaveable(projectId) { mutableStateOf<String?>(null) }
     var collapsed by remember(projectId) { mutableStateOf(emptySet<String>()) }
     var overview by remember { mutableStateOf(false) }
-    var rootReader by rememberSaveable(projectId) { mutableStateOf(false) }
     var readerId by rememberSaveable(projectId) { mutableStateOf<String?>(null) }
     var readerSession by rememberSaveable(projectId) { mutableStateOf<String?>(null) }
     var selectedRecords by remember(projectId) { mutableStateOf(emptyMap<String, String?>()) }
@@ -101,9 +100,10 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
                     Icon(FeatherIcons.MoreVertical, stringResource(R.string.project_view_actions))
                 }
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                    DropdownMenuItem(text = { Text(stringResource(R.string.project_main_conversation)) },
-                        modifier = Modifier.testTag("project_main_conversation"),
-                        onClick = { menuOpen = false; onSelectRequirementBranch(null); rootReader = true })
+                    DropdownMenuItem(text = { Text(stringResource(R.string.session_diagnostics_title)) },
+                        enabled = diagnostics != null,
+                        modifier = Modifier.testTag("project_session_diagnostics"),
+                        onClick = { menuOpen = false; diagnostics?.invoke() })
                     if (projectId in state.activeProjectIds) DropdownMenuItem(
                         text = { Text(stringResource(R.string.project_flow_stop)) },
                         leadingIcon = { Icon(FeatherIcons.Square, null) },
@@ -167,16 +167,6 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
         approvals()
         }
     }
-    if (rootReader) Dialog(onDismissRequest = { rootReader = false },
-        properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Surface(Modifier.fillMaxSize().testTag("project_main_reader")) {
-            Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(Spacing.sm)) {
-                TextButton(onClick = { rootReader = false }) { Text(stringResource(R.string.project_back)) }
-                Text(stringResource(R.string.project_main_conversation), style = MaterialTheme.typography.titleMedium)
-                Box(Modifier.weight(1f).fillMaxWidth()) { rootConversation() }
-            }
-        }
-    }
     val dragConnection = rememberContentDragConnection(onContentDrag)
     BoxWithConstraints(Modifier.fillMaxSize().statusBarsPadding().nestedScroll(dragConnection).padding(horizontal = Spacing.sm)) {
             val processHeight = (maxHeight * 0.9f).coerceIn(240.dp, 640.dp)
@@ -186,7 +176,7 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
                 onOpenProcess = { id -> expandedId = id; viewModel.select(id)
                     if (tasks.any { it.id == id && it.isRequirementBranch }) onSelectRequirementBranch(id) }, onDismissProcess = { expandedId = null },
                 onSupplement = {}, onAddChild = { task -> addingParentId = task?.id; adding = true }, onContentDrag = onContentDrag,
-                onOpenRoot = { if (diagnostics != null) { onSelectRequirementBranch(null); diagnostics() } else toggle(rootId) }, rootConversation = rootConversation,
+                onOpenRoot = { toggle(rootId) }, rootConversation = rootConversation,
                 modifier = Modifier.fillMaxSize().testTag("project_map_body"), header = header, process = process)
                 }
                 tasks.firstOrNull { it.id == requirementBranchId && it.isRequirementBranch }?.let { branch ->
@@ -210,7 +200,7 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
                 item(key = "project-root") {
                     Surface(shape = RoundedCornerShape(Radius.mdLarge), color = MaterialTheme.colorScheme.primaryContainer,
                         modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
-                            .clickable { if (diagnostics != null) { onSelectRequirementBranch(null); diagnostics() } else toggle(rootId) }
+                            .clickable { toggle(rootId) }
                             .testTag("task_node_root")) {
                         Column(Modifier.padding(Spacing.sm)) {
                             Text(stringResource(R.string.project_main_conversation), maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall)

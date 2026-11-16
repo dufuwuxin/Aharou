@@ -2,7 +2,9 @@ package com.aharou.feature.agent.domain.tool.subagent
 
 import com.aharou.feature.agent.domain.subagent.AgentDefinition
 import com.aharou.feature.agent.domain.subagent.AgentTeam
+import com.aharou.feature.agent.domain.subagent.MAIN_AGENT_ADMIN
 import com.aharou.feature.agent.domain.subagent.TeamInterface
+import com.aharou.feature.agent.domain.subagent.TeamMemberRef
 import com.aharou.feature.agent.domain.subagent.TeamStage
 import com.aharou.feature.agent.domain.subagent.TeamTask
 import kotlinx.serialization.json.JsonArray
@@ -75,6 +77,27 @@ class TeamInterfaceEdgeTest {
     @Test fun unresolvedTargetIsKeptVisibleInsteadOfDropped() {
         val prompts = build(team(listOf(TeamInterface("不存在的成员"))))
         assertTrue(prompts.getValue("s1-b1-t1").contains("「不存在的成员」（未解析"))
+    }
+
+    @Test fun stableStageTaskReferenceResolvesEvenWhenSeveralTasksShareMemberNames() {
+        val source = AgentTeam(
+            name = "交付", description = "",
+            stages = listOf(
+                TeamStage("并行", listOf(
+                    TeamTask(agent = "后端工程专家", prompt = "first", id = "first"),
+                    TeamTask(agent = "后端工程专家", prompt = "second", id = "second")
+                ), id = "stage"),
+                TeamStage("验收", listOf(TeamTask(agent = "验收员", prompt = "review", id = "review")), id = "review-stage")
+            ), charter = "", members = listOf(TeamMemberRef("后端工程专家"), TeamMemberRef("验收员")),
+            admins = listOf(MAIN_AGENT_ADMIN)
+        ).let { team -> team.copy(stages = team.stages.mapIndexed { index, stage ->
+            if (index == 0) stage.copy(tasks = stage.tasks.mapIndexed { taskIndex, task ->
+                if (taskIndex == 0) task.copy(interfaces = listOf(TeamInterface("stage/second", "pairing"))) else task
+            }) else stage
+        }) }
+        val prompts = build(source)
+        assertTrue(prompts.getValue("s1-b1-t1").contains("→ 任务 s1-b1-t2"))
+        assertTrue(prompts.getValue("s1-b1-t1").contains("pairing"))
     }
 
     @Test fun teamWithoutInterfacesInjectsNoEdgeSection() {
