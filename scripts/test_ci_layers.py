@@ -198,6 +198,17 @@ class CiLayersTest(unittest.TestCase):
                 self.assertEqual(result.returncode, expected, result.stderr)
                 self.assertEqual(event_file.read_text(), events)
 
+    def test_release_checks_raw_reports_before_packaging(self):
+        text = (ROOT / ".github/workflows/android-release.yml").read_text()
+        step = text[text.index("      - name: Run unit tests\n"):
+                    text.index("      - name: Verify built-in team evidence fixtures\n")]
+        self.assertNotIn("continue-on-error:", step)
+        self.assertEqual(step.count("      - name:"), 1)
+        self.assertLess(step.index("./gradlew :core-agent:test :app:testArmsoloDebugUnitTest"),
+                        step.index("python3 scripts/ci_test_groups.py --verify-combined"))
+        self.assertLess(text.index("python3 scripts/ci_test_groups.py --verify-combined"),
+                        text.index("      - name: Build ARM64 Release APK\n"))
+
     def test_combination_dependencies_are_handed_off_and_verified_not_assumed_cached(self):
         text = (ROOT / ".github/workflows/ci.yml").read_text()
         self.assertIn("name: combination-jvm-dependencies", text)
