@@ -71,7 +71,7 @@ class DoubaoAccountProtocolTest {
         val config = JsonParser.parseString(catalog).asJsonObject.obj("data")!!.array("entry_list")[0]
             .asJsonObject.obj("active_switch_conf")!!.obj("menu_conf_v2")!!
         val layout = JsonObject().apply {
-            add("accountInfo", JsonParser.parseString("""{"data":{"user_id":"$uid","error_code":0,"is_visitor_account":$visitor}}"""))
+            add("accountInfo", JsonParser.parseString("""{"data":{"user_id":"$uid","is_visitor_account":$visitor},"message":"success"}"""))
             add("actionBarBriefList", JsonObject().apply {
                 add("request", JsonParser.parseString("""{"bot_id":"7338286299411103781","language_code":"zh"}"""))
                 add("modeSelectData", JsonObject().apply { add("menuConfV2", config) })
