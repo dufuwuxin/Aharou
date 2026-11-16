@@ -87,7 +87,7 @@ internal object DoubaoAccountProtocol {
 
     // Only these locally generated codes may cross the login IPC boundary.
     fun loginFailureCode(value: String?): String? = value?.takeIf {
-        it.length <= 64 && it.matches(Regex("doubao_(cookie_invalid|(identity|catalog)_(invalid|empty|network|http_[345][0-9]{2})|catalog_empty_shape(?:_[0-9]{1,3}){5})"))
+        it.length <= 64 && it.matches(Regex("doubao_(cookie_invalid|(identity|catalog)_(invalid|empty|network|http_[345][0-9]{2})|catalog_empty_shape(?:_[0-9]{1,3}){5}|catalog_web_(identity|missing|format|empty|http_[345][0-9]{2}))"))
     }
 
     private fun <T> loginStage(stage: String, block: () -> T): T = try {
@@ -98,6 +98,7 @@ internal object DoubaoAccountProtocol {
             error == null -> "network"
             error.errorCode.matches(Regex("doubao_http_[345][0-9]{2}")) -> error.errorCode.removePrefix("doubao_")
             error.errorCode == "redirect_rejected" && error.httpStatus in 300..399 -> "http_${error.httpStatus}"
+            error.errorCode.matches(Regex("web_catalog_(identity|missing|format|empty|http_[345][0-9]{2})")) -> "web_" + error.errorCode.removePrefix("web_catalog_")
             error.errorCode == "empty_catalog" -> "empty"
             error.errorCode.matches(Regex("empty_catalog_shape(?:_[0-9]{1,3}){5}")) -> "empty_" + error.errorCode.removePrefix("empty_catalog_")
             else -> "invalid"
@@ -140,9 +141,33 @@ internal object DoubaoAccountProtocol {
         return credential
     }
 
-    private fun catalogPayload(manager: AccountProviderManager, credential: AccountCredential): JsonObject = manager.readJson(
-        request(manager, credential, CATALOG, "POST", JsonObject().apply { addProperty("language_code", "zh"); addProperty("bot_id", BOT) }),
-    )
+    private fun catalogPayload(manager: AccountProviderManager, credential: AccountCredential): JsonObject {
+        val payload = manager.readJson(request(manager, credential, CATALOG, "POST", JsonObject().apply {
+            addProperty("language_code", "zh"); addProperty("bot_id", BOT)
+        }))
+        if (payload.text("code") != "0" || modelSwitch(payload) != null) return payload
+        val webpage = try { manager.request(LOGIN, headers = headers(credential) + ("Accept" to "text/html")) }
+        catch (error: AccountProviderException) {
+            if (error.errorCode != "redirect_rejected" || error.httpStatus !in 300..399) throw error
+            throw AccountProviderException("web_catalog_http_${error.httpStatus}",
+                "Doubao website directory redirect was rejected", error.httpStatus)
+        }
+        val html = webpage.use { response ->
+            if (!response.isSuccessful) throw AccountProviderException("web_catalog_http_${response.code}",
+                "Doubao website directory returned HTTP ${response.code}", response.code)
+            if (response.body?.contentType()?.subtype != "html") throw AccountProviderException("web_catalog_format", "Doubao website directory is not HTML")
+            val source = response.body?.source() ?: throw AccountProviderException("web_catalog_format", "Doubao website directory is missing")
+            if (source.request(AccountProviderManager.MAX_JSON.toLong() + 1)) throw AccountProviderException("response_too_large", "Doubao website directory exceeds the size limit")
+            source.readUtf8()
+        }
+        val config = DoubaoWebsiteCatalog.config(html, credential.userId.orEmpty(), BOT)
+        val data = payload.obj("data") ?: JsonObject().also { payload.add("data", it) }
+        data.add("entry_list", JsonArray().apply { add(JsonObject().apply {
+            addProperty("action_bar_key", "coco_deep_thinking")
+            add("active_switch_conf", config)
+        }) })
+        return payload
+    }
 
     fun catalog(manager: AccountProviderManager, credential: AccountCredential): List<AccountProviderModel> = models(catalogPayload(manager, credential))
 

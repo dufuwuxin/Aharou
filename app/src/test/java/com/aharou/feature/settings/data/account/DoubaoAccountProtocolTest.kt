@@ -43,7 +43,8 @@ class DoubaoAccountProtocolTest {
                 assertEquals(cookie, request.header("Cookie"))
                 assertNull(request.header("Authorization"))
                 assertEquals("fixture-csrf", request.header("x-tt-passport-csrf-token"))
-                assertEquals("497858", request.url.queryParameter("aid"))
+                if (request.url.encodedPath == "/chat/") assertNull(request.url.queryParameter("aid"))
+                else assertEquals("497858", request.url.queryParameter("aid"))
                 val target = server.url(request.url.encodedPath + "?" + request.url.encodedQuery)
                 chain.proceed(request.newBuilder().url(target).build()).also { response ->
                     try { afterResponse(request.url.encodedPath) }
@@ -64,6 +65,75 @@ class DoubaoAccountProtocolTest {
     )
     private fun failure(code: String, block: () -> Unit) {
         try { block(); fail("Expected $code") } catch (error: AccountProviderException) { assertEquals(code, error.errorCode) }
+    }
+
+    private fun websitePage(uid: String = "123456789", visitor: Boolean = false): String {
+        val config = JsonParser.parseString(catalog).asJsonObject.obj("data")!!.array("entry_list")[0]
+            .asJsonObject.obj("active_switch_conf")!!.obj("menu_conf_v2")!!
+        val layout = JsonObject().apply {
+            add("accountInfo", JsonParser.parseString("""{"data":{"user_id":"$uid","error_code":0,"is_visitor_account":$visitor}}"""))
+            add("actionBarBriefList", JsonObject().apply {
+                add("request", JsonParser.parseString("""{"bot_id":"7338286299411103781","language_code":"zh"}"""))
+                add("modeSelectData", JsonObject().apply { add("menuConfV2", config) })
+            })
+        }
+        val router = JsonObject().apply { add("loaderData", JsonObject().apply {
+            add("chat_layout", JsonObject().apply { add("chat_layout", layout) })
+        }) }
+        return "<html><script>window._ROUTER_DATA = $router;</script></html>"
+    }
+
+    @Test fun authenticatedWebsiteDirectoryRepairsMissingLegacyModelSwitchWithoutDefaults() = runBlocking {
+        MockWebServer().use { server ->
+            val vault = Vault()
+            val manager = manager(server, vault)
+            val pending = manager.beginLogin("provider", kind)
+            server.enqueue(MockResponse().setBody(user))
+            server.enqueue(MockResponse().setBody("""{"code":0,"data":{"entry_list":[{"action_bar_key":"unrelated"}]}}"""))
+            server.enqueue(MockResponse().setHeader("Content-Type", "text/html").setBody(websitePage()))
+            assertTrue(manager.acceptWebLogin(pending, pending.url, pending.id, pending.state, cookie))
+            manager.awaitLogin(pending)
+            assertTrue(manager.isLoggedIn("provider"))
+            assertEquals("123456789", manager.credential("provider", kind).userId)
+            repeat(2) { server.takeRequest(1, TimeUnit.SECONDS)!! }
+            val page = server.takeRequest(1, TimeUnit.SECONDS)!!
+            assertEquals("GET", page.method)
+            assertEquals("/chat/", page.requestUrl!!.encodedPath)
+            assertEquals(cookie, page.getHeader("Cookie"))
+            server.enqueue(MockResponse().setBody("""{"code":0,"data":{"entry_list":[]}}"""))
+            server.enqueue(MockResponse().setHeader("Content-Type", "text/html").setBody(websitePage()))
+            assertEquals(listOf("7"), manager.snapshot("provider", kind).models.map { it.id })
+            server.enqueue(MockResponse().setBody("""{"code":0,"data":{"entry_list":[]}}"""))
+            server.enqueue(MockResponse().setHeader("Content-Type", "text/html").setBody(websitePage()))
+            server.enqueue(MockResponse().setHeader("Content-Type", "text/event-stream").setBody(ack + text + end))
+            call(manager, false).execute().use { response ->
+                assertEquals(200, response.code)
+                assertTrue(response.body!!.string().contains("你好🌏"))
+            }
+            assertEquals(8, server.requestCount)
+        }
+    }
+
+    @Test fun websiteDirectoryRejectsOtherUserVisitorAndRedirectWithoutSavingOrSendingCookieElsewhere() = runBlocking {
+        for ((pageResponse, expected) in listOf(
+            MockResponse().setHeader("Content-Type", "text/html").setBody(websitePage("987654321")) to "identity",
+            MockResponse().setHeader("Content-Type", "text/html").setBody(websitePage(visitor = true)) to "identity",
+            MockResponse().setHeader("Content-Type", "text/html").setBody("<script>window.defaultModels = [];</script>") to "missing",
+            MockResponse().setResponseCode(302).setHeader("Location", "https://untrusted.example/chat/") to "http_302",
+        )) MockWebServer().use { server ->
+            val vault = Vault()
+            val manager = manager(server, vault)
+            val pending = manager.beginLogin("provider", kind)
+            server.enqueue(MockResponse().setBody(user))
+            server.enqueue(MockResponse().setBody("""{"code":0,"data":{"entry_list":[]}}"""))
+            server.enqueue(pageResponse)
+            assertTrue(manager.acceptWebLogin(pending, pending.url, pending.id, pending.state, cookie))
+            try { manager.awaitLogin(pending); fail("Unverified website directory accepted") }
+            catch (error: AccountProviderException) { assertEquals("doubao_catalog_web_$expected", error.errorCode) }
+            assertTrue(vault.values.isEmpty())
+            assertEquals(3, server.requestCount)
+            manager.cancelLogin(pending)
+        }
     }
 
     @Test fun websiteLoginCatalogUsesWebAppIdentityInsteadOfWorkClient() = runBlocking {
@@ -91,11 +161,11 @@ class DoubaoAccountProtocolTest {
             val manager = manager(server, vault)
             val pending = manager.beginLogin("provider", kind)
             server.enqueue(MockResponse().setBody(user))
-            server.enqueue(MockResponse().setBody("""{"code":0,"data":{"entry_list":[{"action_bar_key":"private-response-marker"}]}}"""))
+            server.enqueue(MockResponse().setBody("""{"code":0,"data":{"entry_list":[{"action_bar_key":"coco_deep_thinking","active_switch_conf":{},"private":"private-response-marker"}]}}"""))
             assertTrue(manager.acceptWebLogin(pending, pending.url, pending.id, pending.state, cookie))
             try { manager.awaitLogin(pending); fail("Empty directory accepted") }
             catch (error: AccountProviderException) {
-                assertEquals("doubao_catalog_empty_shape_1_0_0_0_0", error.errorCode)
+                assertEquals("doubao_catalog_empty_shape_1_1_0_0_0", error.errorCode)
                 assertEquals(error.errorCode, DoubaoAccountProtocol.loginFailureCode(error.errorCode))
                 assertFalse(error.message!!.contains("private-response-marker"))
                 assertFalse(error.message!!.contains(cookie))
@@ -108,10 +178,10 @@ class DoubaoAccountProtocolTest {
             restricted.obj("data")!!.array("entry_list")[0].asJsonObject.obj("active_switch_conf")!!
                 .obj("menu_conf_v2")!!.obj("mode_list")!!.array("item_list")[0].asJsonObject
                 .obj("model_list")!!.array("item_list").remove(0)
-            val oversized = JsonParser.parseString("""{"code":0,"data":{"entry_list":[]}}""").asJsonObject.apply {
-                repeat(1000) { obj("data")!!.array("entry_list").add(JsonObject()) }
+            val oversized = JsonParser.parseString("""{"code":0,"data":{"entry_list":[{"action_bar_key":"coco_deep_thinking","active_switch_conf":{}}]}}""").asJsonObject.apply {
+                repeat(999) { obj("data")!!.array("entry_list").add(JsonObject()) }
             }
-            for ((payload, expected) in listOf(restricted to "1_1_2_1_3", oversized to "999_0_0_0_0")) {
+            for ((payload, expected) in listOf(restricted to "1_1_2_1_3", oversized to "999_1_0_0_0")) {
                 val attempt = manager.beginLogin("provider", kind)
                 server.enqueue(MockResponse().setBody(user))
                 server.enqueue(MockResponse().setBody(payload.toString()))
@@ -330,7 +400,7 @@ class DoubaoAccountProtocolTest {
                 assertFalse(manager.isLoggedIn("provider"))
             }
             val empty = manager.beginLogin("provider", kind)
-            server.enqueue(MockResponse().setBody(user)); server.enqueue(MockResponse().setBody("""{"code":0,"data":{"entry_list":[]}}"""))
+            server.enqueue(MockResponse().setBody(user)); server.enqueue(MockResponse().setBody("""{"code":0,"data":{"entry_list":[{"action_bar_key":"coco_deep_thinking","active_switch_conf":{"menu_conf":{"item_list":[]}}}]}}"""))
             assertTrue(manager.acceptWebLogin(empty, empty.url, empty.id, empty.state, cookie))
             try { manager.awaitLogin(empty); fail("Empty catalog accepted") } catch (_: AccountProviderException) { }
             assertFalse(manager.isLoggedIn("provider"))
@@ -388,10 +458,10 @@ class DoubaoAccountProtocolTest {
             }
             val pending = manager.beginLogin("provider", kind)
             server.enqueue(MockResponse().setBody(user))
-            server.enqueue(MockResponse().setBody("""{"code":0,"data":{"entry_list":[]}}"""))
+            server.enqueue(MockResponse().setBody("""{"code":0,"data":{"entry_list":[{"action_bar_key":"coco_deep_thinking","active_switch_conf":{"menu_conf":{"item_list":[]}}}]}}"""))
             assertTrue(manager.acceptWebLogin(pending, pending.url, pending.id, pending.state, cookie))
             try { manager.awaitLogin(pending); fail("Empty directory accepted") }
-            catch (error: AccountProviderException) { assertEquals("doubao_catalog_empty", error.errorCode) }
+            catch (error: AccountProviderException) { assertEquals("doubao_catalog_empty_shape_1_1_0_0_0", error.errorCode) }
             assertTrue(vault.values.isEmpty())
         }
     }

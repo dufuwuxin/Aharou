@@ -513,7 +513,12 @@ class AccountProviderManager internal constructor(
         if (kind == AccountProviderKind.OFFICEACE) return OfficeAceAccountProtocol.catalog(this, id)
         if (kind == AccountProviderKind.OUR_FREE_MODEL) { credential(id, kind); return OurFreeModelProtocol.catalog(this) }
         if (kind == AccountProviderKind.DEEPSEEK) { credential(id, kind); return DeepSeekAccountProtocol.modes() }
-        if (kind == AccountProviderKind.DOUBAO) return DoubaoAccountProtocol.models(readJson(authorized(id, kind, DoubaoAccountProtocol.WEB + DoubaoAccountProtocol.CATALOG, "POST", JsonObject().apply { addProperty("language_code", "zh"); addProperty("bot_id", "7338286299411103781") })))
+        if (kind == AccountProviderKind.DOUBAO) {
+            checkRevision(id)
+            val current = credential(id, kind)
+            checkRevision(id)
+            return DoubaoAccountProtocol.catalog(this, current).also { checkRevision(id) }
+        }
         val (url, method, body) = when (kind) {
             AccountProviderKind.OUR_FREE_MODEL -> throw AccountProviderException("invalid_gateway", "Use the public free catalog", 400)
             AccountProviderKind.OFFICEACE -> throw AccountProviderException("invalid_gateway", "Use OfficeAce catalog", 400)
