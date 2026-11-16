@@ -109,11 +109,11 @@ class ProjectChatComposerContract(unittest.TestCase):
                          "ProjectChatBinding(sessionId.takeIf { ready }, rootConversation)",
                          "projectConversation = binding.rootConversation"):
             self.assertIn(contract, screen)
-        for contract in ("toggle(rootId)", "rootConversation()", 'Modifier.testTag("project_main_conversation")',
-                         "onClick = { menuOpen = false; onSelectRequirementBranch(null); rootReader = true }",
-                         "if (rootReader) Dialog(onDismissRequest = { rootReader = false }",
-                         'Surface(Modifier.fillMaxSize().testTag("project_main_reader"))',
-                         "onOpenRoot = { if (diagnostics != null) { onSelectRequirementBranch(null); diagnostics() } else toggle(rootId) }"):
+        for contract in ("if (id == rootId) onSelectRequirementBranch(null)", "rootConversation()",
+                         'Modifier.testTag("project_session_diagnostics")', "enabled = diagnostics != null",
+                         "onClick = { menuOpen = false; diagnostics?.invoke() }",
+                         'if (expandedId == rootId) item(key = "project-root-conversation")',
+                         '.clickable { toggle(rootId) }', "onOpenRoot = { toggle(rootId) }"):
             self.assertIn(contract, workbench)
 
     def test_root_node_opens_bound_conversation_with_live_streams(self):
@@ -139,10 +139,12 @@ class ProjectChatComposerContract(unittest.TestCase):
             self.assertNotEqual(mutant, screen)
             with self.assertRaises(AssertionError):
                 self.assert_root_diagnostics_binding(mutant, workbench)
-        for old, new in (("onSelectRequirementBranch(null); diagnostics()", "diagnostics()"),
-                         ("onSelectRequirementBranch(null); rootReader = true", "rootReader = true"),
-                         ("rootReader = true", "rootReader = false"),
-                         ("if (rootReader) Dialog", "if (false) Dialog"),
+        for old, new in (("if (id == rootId) onSelectRequirementBranch(null)", "if (false) onSelectRequirementBranch(null)"),
+                         ("onOpenRoot = { toggle(rootId) }", "onOpenRoot = {}"),
+                         (".clickable { toggle(rootId) }", ".clickable {}"),
+                         ("if (expandedId == rootId) item", "if (false) item"),
+                         ("enabled = diagnostics != null", "enabled = true"),
+                         ("diagnostics?.invoke()", "Unit"),
                          ("rootConversation()", "DisconnectedRoot()")):
             mutant = workbench.replace(old, new)
             self.assertNotEqual(mutant, workbench)
@@ -172,7 +174,8 @@ class ProjectChatComposerContract(unittest.TestCase):
         workbench = source("ProjectTaskWorkbench.kt")
         toggle = workbench.split("val toggle:", 1)[1].split("val process:", 1)[0]
         self.assertIn("if (id == rootId) onSelectRequirementBranch(null)", toggle)
-        self.assertIn("onSelectRequirementBranch(null); rootReader = true", workbench)
+        self.assertIn("onOpenRoot = { toggle(rootId) }", workbench)
+        self.assertIn(".clickable { toggle(rootId) }", workbench)
         self.assertNotIn("[Selected requirement branch:", screen)
         self.assertIn('"PROJECT_TASK_CONTEXT" -> projectTaskContext.build(ctx.sessionId, ctx.projectRoot)',
                       (JAVA / "feature/agent/domain/prompt/SystemPromptProvider.kt").read_text())
