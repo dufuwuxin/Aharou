@@ -160,6 +160,7 @@ class AccountLoginActivityTest {
                 Triple("doubao_catalog_http_401", R.string.account_login_stage_catalog, R.string.account_login_http_401),
                 Triple("doubao_catalog_http_403", R.string.account_login_stage_catalog, R.string.account_login_http_403),
                 Triple("doubao_catalog_empty", R.string.account_login_stage_catalog, R.string.account_login_catalog_empty),
+                Triple("doubao_catalog_empty_shape_1_0_0_0_0", R.string.account_login_stage_catalog, R.string.account_login_catalog_empty),
                 Triple("doubao_catalog_network", R.string.account_login_stage_catalog, R.string.account_login_network_failed),
             )
             for ((index, failure) in failures.withIndex()) {

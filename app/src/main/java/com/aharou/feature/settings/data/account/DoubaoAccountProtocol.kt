@@ -67,7 +67,7 @@ internal object DoubaoAccountProtocol {
         if (device.toLongOrNull()?.let { it in 1L..9007199254740991L } != true) throw AccountProviderException("invalid_credentials", "Invalid Doubao device metadata", 400)
         val passport = path == ACCOUNT
         val url = (WEB + path).toHttpUrl().newBuilder().apply {
-            mapOf("aid" to if (passport) "497858" else "1044603", "device_platform" to "web", "samantha_web" to "1",
+            mapOf("aid" to "497858", "device_platform" to "web", "samantha_web" to "1",
                 "version_code" to "20800", "language" to "zh", "region" to "CN", "sys_region" to "CN",
                 "web_id" to device, "device_id" to device).forEach { (key, value) -> addQueryParameter(key, value) }
             if (!passport) { addQueryParameter("pc_version", VERSION); addQueryParameter("doubao_pc_version", VERSION) }
@@ -87,7 +87,7 @@ internal object DoubaoAccountProtocol {
 
     // Only these locally generated codes may cross the login IPC boundary.
     fun loginFailureCode(value: String?): String? = value?.takeIf {
-        it.length <= 64 && it.matches(Regex("doubao_(cookie_invalid|(identity|catalog)_(invalid|empty|network|http_[345][0-9]{2}))"))
+        it.length <= 64 && it.matches(Regex("doubao_(cookie_invalid|(identity|catalog)_(invalid|empty|network|http_[345][0-9]{2})|catalog_empty_shape(?:_[0-9]{1,3}){5})"))
     }
 
     private fun <T> loginStage(stage: String, block: () -> T): T = try {
@@ -99,6 +99,7 @@ internal object DoubaoAccountProtocol {
             error.errorCode.matches(Regex("doubao_http_[345][0-9]{2}")) -> error.errorCode.removePrefix("doubao_")
             error.errorCode == "redirect_rejected" && error.httpStatus in 300..399 -> "http_${error.httpStatus}"
             error.errorCode == "empty_catalog" -> "empty"
+            error.errorCode.matches(Regex("empty_catalog_shape(?:_[0-9]{1,3}){5}")) -> "empty_" + error.errorCode.removePrefix("empty_catalog_")
             else -> "invalid"
         }
         throw AccountProviderException("doubao_${stage}_$reason", "Doubao $stage validation failed", error?.httpStatus ?: 502)
@@ -120,22 +121,40 @@ internal object DoubaoAccountProtocol {
         }
         val credential = AccountCredential(AccountProviderKind.DOUBAO, "website-session", null, null, deviceId, uid, webCookie = session)
         loginStage("catalog") {
-            if (catalog(manager, credential).isEmpty()) throw AccountProviderException("empty_catalog", "Doubao returned no usable chat models")
+            val payload = catalogPayload(manager, credential)
+            if (models(payload).isEmpty()) {
+                val entries = payload.obj("data")?.array("entry_list") ?: JsonArray()
+                val config = modelSwitch(payload)
+                val v2 = config?.obj("menu_conf_v2")
+                val modes = v2?.obj("mode_list")?.array("item_list")?.mapNotNull { it.objectOrNull() }.orEmpty()
+                val candidates = (v2?.obj("model_list")?.array("item_list")?.size() ?: 0) +
+                    modes.sumOf { it.obj("model_list")?.array("item_list")?.size() ?: 0 } +
+                    (config?.obj("menu_conf")?.array("item_list")?.size() ?: 0)
+                val counts = listOf(entries.size(), if (config == null) 0 else 1, modes.size,
+                    modes.count { it.text("agent_mode") == "2" }, candidates)
+                    .joinToString("_") { it.coerceIn(0, 999).toString() }
+                val code = if (entries.isEmpty) "empty_catalog" else "empty_catalog_shape_$counts"
+                throw AccountProviderException(code, "Doubao returned no usable chat models")
+            }
         }
         return credential
     }
 
-    fun catalog(manager: AccountProviderManager, credential: AccountCredential): List<AccountProviderModel> = models(manager.readJson(
+    private fun catalogPayload(manager: AccountProviderManager, credential: AccountCredential): JsonObject = manager.readJson(
         request(manager, credential, CATALOG, "POST", JsonObject().apply { addProperty("language_code", "zh"); addProperty("bot_id", BOT) }),
-    ))
+    )
+
+    fun catalog(manager: AccountProviderManager, credential: AccountCredential): List<AccountProviderModel> = models(catalogPayload(manager, credential))
+
+    private fun modelSwitch(payload: JsonObject): JsonObject? = payload.obj("data")?.array("entry_list")?.mapNotNull { it.objectOrNull() }
+        ?.firstOrNull { it.text("action_bar_key") == "coco_deep_thinking" ||
+            (it.text("action_type") == "11" && it.obj("active_switch_conf")?.text("switch_type") == "1")
+        }?.obj("active_switch_conf")
 
     fun models(payload: JsonObject): List<AccountProviderModel> {
         AccountProviderProtocol.check(payload)
         if (payload.text("code") != "0") throw AccountProviderException("invalid_response", "Doubao model directory has no success status")
-        val config = payload.obj("data")?.array("entry_list")?.mapNotNull { it.objectOrNull() }
-            ?.firstOrNull { it.text("action_bar_key") == "coco_deep_thinking" ||
-                (it.text("action_type") == "11" && it.obj("active_switch_conf")?.text("switch_type") == "1")
-            }?.obj("active_switch_conf") ?: return emptyList()
+        val config = modelSwitch(payload) ?: return emptyList()
         val result = linkedMapOf<String, AccountProviderModel>()
         fun add(item: JsonObject) {
             if (item.text("disabled") in setOf("true", "1") || item.obj("subscribe_config")?.text("need_upgrade") in setOf("true", "1")) return

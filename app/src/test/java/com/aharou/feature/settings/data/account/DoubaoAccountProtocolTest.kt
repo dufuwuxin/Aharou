@@ -43,7 +43,7 @@ class DoubaoAccountProtocolTest {
                 assertEquals(cookie, request.header("Cookie"))
                 assertNull(request.header("Authorization"))
                 assertEquals("fixture-csrf", request.header("x-tt-passport-csrf-token"))
-                assertEquals(if (request.url.encodedPath.startsWith("/passport/")) "497858" else "1044603", request.url.queryParameter("aid"))
+                assertEquals("497858", request.url.queryParameter("aid"))
                 val target = server.url(request.url.encodedPath + "?" + request.url.encodedQuery)
                 chain.proceed(request.newBuilder().url(target).build()).also { response ->
                     try { afterResponse(request.url.encodedPath) }
@@ -64,6 +64,69 @@ class DoubaoAccountProtocolTest {
     )
     private fun failure(code: String, block: () -> Unit) {
         try { block(); fail("Expected $code") } catch (error: AccountProviderException) { assertEquals(code, error.errorCode) }
+    }
+
+    @Test fun websiteLoginCatalogUsesWebAppIdentityInsteadOfWorkClient() = runBlocking {
+        MockWebServer().use { server ->
+            val client = OkHttpClient.Builder().connectionSpecs(listOf(ConnectionSpec.CLEARTEXT))
+                .callTimeout(5, TimeUnit.SECONDS).addInterceptor { chain ->
+                    val request = chain.request()
+                    val url = server.url(request.url.encodedPath).newBuilder().encodedQuery(request.url.encodedQuery).build()
+                    chain.proceed(request.newBuilder().url(url).build())
+                }.build()
+            val manager = AccountProviderManager(Vault(), client)
+            login(manager, server)
+            val identity = server.takeRequest(1, TimeUnit.SECONDS)!!
+            val directory = server.takeRequest(1, TimeUnit.SECONDS)!!
+            assertEquals("497858", identity.requestUrl!!.queryParameter("aid"))
+            assertEquals("497858", directory.requestUrl!!.queryParameter("aid"))
+            assertEquals(DoubaoAccountProtocol.CATALOG, directory.requestUrl!!.encodedPath)
+            assertEquals(2, server.requestCount)
+        }
+    }
+
+    @Test fun emptyLoginDirectoryReportsOnlyBoundedStructuralCounts() = runBlocking {
+        MockWebServer().use { server ->
+            val vault = Vault()
+            val manager = manager(server, vault)
+            val pending = manager.beginLogin("provider", kind)
+            server.enqueue(MockResponse().setBody(user))
+            server.enqueue(MockResponse().setBody("""{"code":0,"data":{"entry_list":[{"action_bar_key":"private-response-marker"}]}}"""))
+            assertTrue(manager.acceptWebLogin(pending, pending.url, pending.id, pending.state, cookie))
+            try { manager.awaitLogin(pending); fail("Empty directory accepted") }
+            catch (error: AccountProviderException) {
+                assertEquals("doubao_catalog_empty_shape_1_0_0_0_0", error.errorCode)
+                assertEquals(error.errorCode, DoubaoAccountProtocol.loginFailureCode(error.errorCode))
+                assertFalse(error.message!!.contains("private-response-marker"))
+                assertFalse(error.message!!.contains(cookie))
+            }
+            assertTrue(vault.values.isEmpty())
+            assertEquals(2, server.requestCount)
+            assertNull(DoubaoAccountProtocol.loginFailureCode("doubao_catalog_empty_shape_1_0_0_0_private"))
+            manager.cancelLogin(pending)
+            val restricted = JsonParser.parseString(catalog).asJsonObject
+            restricted.obj("data")!!.array("entry_list")[0].asJsonObject.obj("active_switch_conf")!!
+                .obj("menu_conf_v2")!!.obj("mode_list")!!.array("item_list")[0].asJsonObject
+                .obj("model_list")!!.array("item_list").remove(0)
+            val oversized = JsonParser.parseString("""{"code":0,"data":{"entry_list":[]}}""").asJsonObject.apply {
+                repeat(1000) { obj("data")!!.array("entry_list").add(JsonObject()) }
+            }
+            for ((payload, expected) in listOf(restricted to "1_1_2_1_3", oversized to "999_0_0_0_0")) {
+                val attempt = manager.beginLogin("provider", kind)
+                server.enqueue(MockResponse().setBody(user))
+                server.enqueue(MockResponse().setBody(payload.toString()))
+                assertTrue(manager.acceptWebLogin(attempt, attempt.url, attempt.id, attempt.state, cookie))
+                try { manager.awaitLogin(attempt); fail("Empty directory accepted") }
+                catch (error: AccountProviderException) {
+                    assertEquals("doubao_catalog_empty_shape_$expected", error.errorCode)
+                    assertEquals(error.errorCode, DoubaoAccountProtocol.loginFailureCode(error.errorCode))
+                }
+                assertTrue(vault.values.isEmpty())
+                manager.cancelLogin(attempt)
+            }
+            assertEquals(6, server.requestCount)
+            assertNull(DoubaoAccountProtocol.loginFailureCode("doubao_catalog_empty_shape_1000_0_0_0_0"))
+        }
     }
 
     @Test fun typedDeepThinkSwitchDoesNotDependOnLegacyActionBarKey() {

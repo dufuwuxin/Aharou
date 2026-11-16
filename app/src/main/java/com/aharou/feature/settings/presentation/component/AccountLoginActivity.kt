@@ -115,7 +115,7 @@ class AccountLoginActivity : Activity() {
             code.endsWith("_http_403") -> getString(R.string.account_login_http_403)
             code.contains("_http_") -> getString(R.string.account_login_http_failed, code.substringAfterLast('_'))
             code.endsWith("_network") -> getString(R.string.account_login_network_failed)
-            code.endsWith("_empty") -> getString(R.string.account_login_catalog_empty)
+            (code.endsWith("_empty") || code.startsWith("doubao_catalog_empty_shape_")) -> getString(R.string.account_login_catalog_empty)
             else -> getString(R.string.account_login_stage_invalid)
         }
         status?.text = getString(R.string.account_login_stage_failure, getString(stage), reason, code)
