@@ -17,6 +17,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
 class CodeArtsAccountProtocolTest {
+    @get:org.junit.Rule val timeout = org.junit.rules.Timeout.seconds(20)
     private class Vault : AccountCredentialVault {
         private val values = ConcurrentHashMap<String, String>()
         override fun read(id: String) = values[id]
@@ -82,9 +83,11 @@ class CodeArtsAccountProtocolTest {
 
     @Test fun rotatingCookieKeepsStableRemoteAccountIdentity() = runBlocking {
         MockWebServer().use { server ->
-            val manager = manager(server)
+            var expectedCookie = cookie
+            val manager = manager(server) { expectedCookie }
             login(manager, server)
-            login(manager, server, "devclouddevuibjtcftk=fixture-rotated")
+            expectedCookie = "devclouddevuibjtcftk=fixture-rotated"
+            login(manager, server, expectedCookie)
             assertEquals(1, manager.accounts("provider", kind).size)
         }
     }
@@ -210,14 +213,17 @@ class CodeArtsAccountProtocolTest {
     @Test fun gatewayNeverReplaysCreateOrSend400And403AcrossAccounts() = runBlocking {
         for (status in listOf(400, 403)) for (stage in listOf("create_session", "send_message")) {
             MockWebServer().use { server ->
-                val manager = manager(server)
+                var expectedCookie = cookie
+                val manager = manager(server) { expectedCookie }
                 login(manager, server)
+                expectedCookie = "devclouddevuibjtcftk=second-session"
                 server.enqueue(MockResponse().setBody("""{"userId":"second-user","domainId":"fixture-domain"}"""))
                 server.enqueue(MockResponse().setBody(models))
                 val pending = manager.beginLogin("provider", kind)
                 assertTrue(manager.acceptWebLogin(pending, pending.url, pending.id, pending.state,
                     "devclouddevuibjtcftk=second-session"))
                 manager.awaitLogin(pending)
+                expectedCookie = cookie
                 assertEquals(2, manager.accounts("provider", kind).size)
                 repeat(4) { assertNotNull(server.takeRequest(1, TimeUnit.SECONDS)) }
                 server.enqueue(MockResponse().setBody(models))
