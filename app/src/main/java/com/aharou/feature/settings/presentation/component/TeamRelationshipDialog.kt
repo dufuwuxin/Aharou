@@ -21,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.DialogProperties
 import com.aharou.R
 import com.aharou.core.theme.Spacing
 import com.aharou.core.ui.AppTextField
@@ -67,6 +68,7 @@ internal fun TeamRelationshipDialog(
         } else if (onRoute(sources, targets, action, remove)) onDismiss() else error = true
     }
     AlertDialog(
+        properties = DialogProperties(usePlatformDefaultWidth = false),
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.team_relationship_title)) },
         text = {
