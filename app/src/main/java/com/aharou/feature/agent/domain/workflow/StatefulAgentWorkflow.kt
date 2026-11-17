@@ -442,7 +442,8 @@ class StatefulAgentWorkflow @Inject constructor(
                 currentContext.history + AgentMessage.UserMessage(
                     id = currentContext.inputMessageId,
                     content = if (modeReminder == null) userRequest else "$userRequest\n\n$modeReminder",
-                    images = currentContext.inputImages
+                    images = currentContext.inputImages,
+                    countsAsRound = currentContext.currentInputCountsAsRound
                 )
             )
         )
@@ -596,8 +597,9 @@ class StatefulAgentWorkflow @Inject constructor(
         val providerInUse = workspaceModelChain.current(currentContext.sessionId)?.let { createStandaloneProvider(it, currentContext.sessionId) } ?: aiProvider
         budget.selectProvider("${providerInUse.providerId.length}:${providerInUse.providerId}:${providerInUse.model}")
         val callMetadata = modelMetadataService.configureChatModel(providerInUse)
+        val contextPreferences = generalSettingsRepository.contextPreferences()
         val inputBudget = ContextWatermarks.from(ModelContextPolicy.effectiveInputBudget(callMetadata),
-            generalSettingsRepository.softCompactionThresholdPercent(), generalSettingsRepository.compactionThresholdPercent()).maxTokens
+            contextPreferences.soft, contextPreferences.hard).maxTokens
         val requestVersion = injectedContexts.beginRequest(currentContext.sessionId)
         val baseRequestPrompt = appendMiddlewarePrompt(providerInUse.providerId, systemPrompt)
         var requestSystemPrompt = baseRequestPrompt
@@ -606,19 +608,17 @@ class StatefulAgentWorkflow @Inject constructor(
         val reuseMainPrefix = compactionProvider.providerId == providerInUse.providerId && compactionProvider.model == providerInUse.model  // 前缀缓存只同 provider 同 model 内生效，配了独立压缩模型就不复用主前缀
         var compactedMessages = state.messages
         // 送模型前的图片投影只算这一次：压缩触发估算、超预算判定与实际发送共用同一份结果。
-        // 算两遍迟早因视觉能力解析或占位文案不同而漂移，那会反向低估、真撞窗口。
         val supportsVision = callMetadata.supportsVision
-        val trimRounds = generalSettingsRepository.contextTrimRounds()
-        var history = com.aharou.feature.agent.domain.tool.projectFileHistory(foldStoredToolResults(keepNewestImages(sanitizeImagesForModel(state.messages, supportsVision)).trimToRecentRounds(trimRounds)))
+        var history = com.aharou.feature.agent.domain.tool.projectFileHistory(foldStoredToolResults(keepNewestImages(sanitizeImagesForModel(state.messages, supportsVision)).trimToRecentRounds(contextPreferences.rounds, contextPreferences.preserveSummary), contextPreferences.keepTools))
         var sendProjection = history.messages
-        requestSystemPrompt = baseRequestPrompt + history.index
+        requestSystemPrompt = baseRequestPrompt + com.aharou.feature.agent.domain.context.ContextLibraryPlanner.safe(history.index)
         if (!budget.compactionAttemptFailed) {
             telemetry.compactionStart()
             val estimate = withContext(Dispatchers.Default) { ContextTokenEstimator.estimate(requestSystemPrompt, sendProjection, promptTools) }
             val predictedInput = ContextTokenEstimator.calibrated(estimate, budget.baselineEstimate, budget.baselineUsage)
             val compaction = contextCompactor.compactIfNeeded(state.messages, compactionProvider, currentContext.sessionId,
                 windowProvider = providerInUse, systemPrompt = if (reuseMainPrefix) requestSystemPrompt else "", tools = if (reuseMainPrefix) promptTools else emptyList(),
-                currentInputTokens = ContextTokenEstimator.forCompactionTrigger(estimate, budget.baselineEstimate, budget.baselineUsage)) { event ->
+                currentInputTokens = ContextTokenEstimator.forCompactionTrigger(estimate, budget.baselineEstimate, budget.baselineUsage), settingsSnapshot = contextPreferences) { event ->
                 if (event is AgentEvent.CompactionFailed) budget.compactionAttemptFailed = true
                 emit(event)
             }
@@ -632,9 +632,9 @@ class StatefulAgentWorkflow @Inject constructor(
         }
         // 压缩真的改写过消息时内容变了，投影得按新的那份重算；源没变就沿用上面那份（同一个对象）。
         if (compactedMessages !== initialState.messages) {
-            history = com.aharou.feature.agent.domain.tool.projectFileHistory(foldStoredToolResults(keepNewestImages(sanitizeImagesForModel(compactedMessages, supportsVision)).trimToRecentRounds(trimRounds)))
+            history = com.aharou.feature.agent.domain.tool.projectFileHistory(foldStoredToolResults(keepNewestImages(sanitizeImagesForModel(compactedMessages, supportsVision)).trimToRecentRounds(contextPreferences.rounds, contextPreferences.preserveSummary), contextPreferences.keepTools))
             sendProjection = history.messages
-            requestSystemPrompt = baseRequestPrompt + history.index
+            requestSystemPrompt = baseRequestPrompt + com.aharou.feature.agent.domain.context.ContextLibraryPlanner.safe(history.index)
         }
         val requestEstimate = withContext(Dispatchers.Default) { ContextTokenEstimator.estimate(requestSystemPrompt, sendProjection, promptTools) }
         val predictedInput = ContextTokenEstimator.calibrated(requestEstimate, budget.baselineEstimate, budget.baselineUsage)
@@ -797,7 +797,7 @@ class StatefulAgentWorkflow @Inject constructor(
                 budget.overflowRecoveryAttempted = true
                 val recovery = contextCompactor.compactIfNeeded(state.messages, compactionProvider,
                     currentContext.sessionId, force = true, windowProvider = providerInUse,
-                    systemPrompt = if (reuseMainPrefix) requestSystemPrompt else "", tools = if (reuseMainPrefix) promptTools else emptyList(), currentInputTokens = predictedInput) { emit(it) }
+                    systemPrompt = if (reuseMainPrefix) requestSystemPrompt else "", tools = if (reuseMainPrefix) promptTools else emptyList(), currentInputTokens = predictedInput, settingsSnapshot = contextPreferences) { emit(it) }
                 if (recovery.compacted) {
                     state = state.copy(messages = recovery.messages)
                     budget.baselineUsage = 0
@@ -842,7 +842,7 @@ class StatefulAgentWorkflow @Inject constructor(
                 budget.overflowRecoveryAttempted = true
                 val recovery = contextCompactor.compactIfNeeded(state.messages, compactionProvider,
                     currentContext.sessionId, force = true, windowProvider = providerInUse,
-                    systemPrompt = if (reuseMainPrefix) requestSystemPrompt else "", tools = if (reuseMainPrefix) promptTools else emptyList(), currentInputTokens = predictedInput) { emit(it) }
+                    systemPrompt = if (reuseMainPrefix) requestSystemPrompt else "", tools = if (reuseMainPrefix) promptTools else emptyList(), currentInputTokens = predictedInput, settingsSnapshot = contextPreferences) { emit(it) }
                 if (recovery.compacted) {
                     state = state.copy(messages = recovery.messages)
                     budget.baselineUsage = 0

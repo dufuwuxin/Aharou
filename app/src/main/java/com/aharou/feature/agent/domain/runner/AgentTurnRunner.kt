@@ -293,6 +293,7 @@ class AgentTurnRunner @Inject constructor(
             language = turn.currentFile?.let { detectLanguage(it) },
             history = history,
             currentUserText = turn.text,
+            currentInputCountsAsRound = !(turn.isAutoTrigger && !turn.persistUserMessage),
             inputImages = turn.inputImages,
             sessionId = sessionId,
             inputMessageId = userMsgId,

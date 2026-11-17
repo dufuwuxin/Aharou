@@ -77,6 +77,42 @@ class ToolSettingsStore @Inject constructor(
     fun snapshotCustomTool(name: String): CustomToolDefinition? =
         snapshot.tools.firstOrNull { it.name == name }
 
+    fun matchesCurrentProject(projectRoot: String): Boolean =
+        locator.projectToolsDir(projectRoot)?.canonicalPath == locator.projectToolsDir()?.canonicalPath
+
+    suspend fun updateOverrideForProject(name: String, projectRoot: String?, update: (ToolOverride) -> ToolOverride): Boolean {
+        val projectDir = if (projectRoot == null) locator.projectToolsDir() else locator.projectToolsDir(projectRoot)
+        return mutex.withLock {
+            withContext(Dispatchers.IO) {
+                val file = File(projectDir ?: globalToolsDir(), OVERRIDES_FILE)
+                val local = if (file.exists()) readOverridesFile(file) ?: return@withContext false else emptyMap()
+                val effective = loadSnapshot(projectDir).overrides[name] ?: ToolOverride()
+                val normalized = update(effective).normalized()
+                val updated = if (normalized.isEmpty) local - name else local + (name to normalized)
+                val saved = writeOverridesFile(file, updated)
+                if (saved) snapshot = loadSnapshot()
+                saved
+            }
+        }
+    }
+
+    suspend fun editPrompt(key: String, content: String?, version: String, projectRoot: String,
+                           original: () -> String): String? = mutex.withLock {
+        withContext(Dispatchers.IO) {
+            val projectDir = locator.projectToolsDir(projectRoot)
+            val current = loadSnapshot(projectDir)
+            if (ToolPromptMetadata.version(current, key, original()) != version) return@withContext "PROMPT_VERSION_CONFLICT"
+            val file = File(projectDir ?: globalToolsDir(), OVERRIDES_FILE)
+            val local = if (file.exists()) readOverridesFile(file)
+                ?: return@withContext "PROMPT_READ_FAILED" else emptyMap()
+            // A reset masks an inherited global description only in this workspace.
+            val replacement = (current.overrides[key] ?: ToolOverride()).copy(description = content?.trim()?.takeIf { it.isNotEmpty() }, promptReset = content.isNullOrBlank())
+            if (!writeOverridesFile(file, local + (key to replacement))) return@withContext "PROMPT_WRITE_FAILED"
+            snapshot = loadSnapshot()
+            null
+        }
+    }
+
     /** 从磁盘重读快照。与写操作串行：读盘期间不会有写操作插进来。 */
     suspend fun refresh() {
         mutex.withLock {

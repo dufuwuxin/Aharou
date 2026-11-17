@@ -91,4 +91,27 @@ class SkillParserTest {
 
         assertTrue(!text.contains("required_tools"))
     }
+    @Test
+    fun metadata_legacyDefaultsRemainUnclassified() {
+        val skill = SkillParser.parseText("---\nname: legacy\n---\nbody", "legacy")
+        assertEquals(emptyList<String>(), skill.tags)
+        assertEquals(null, skill.typeId)
+        val form = SkillForm("legacy", "", "body")
+        assertEquals(emptyList<String>(), form.tags)
+        assertEquals(null, form.typeId)
+    }
+
+    @Test
+    fun metadata_roundTripPreservesSpecialCharactersWithoutChangingKeywords() {
+        val tags = listOf("中文: 标签 #1", "quote \" and \\ slash", "line\nbreak", "true", "[brackets], comma")
+        val type = "type: \"quoted\" \\ path\n下一行"
+        val serialized = SkillParser.serialize("meta", "desc", emptyList(), "specialty", true, listOf("Kotlin"), tags, type)
+        val parsed = SkillParser.parseText(serialized, "meta")
+        assertEquals(tags, parsed.tags)
+        assertEquals(type, parsed.typeId)
+        assertEquals(listOf("Kotlin"), parsed.keywords)
+        assertTrue(parsed.keywordEnabled)
+        assertEquals("specialty", parsed.instructions)
+    }
+
 }

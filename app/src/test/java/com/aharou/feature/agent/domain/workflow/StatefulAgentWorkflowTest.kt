@@ -99,9 +99,13 @@ class StatefulAgentWorkflowTest {
         cachedInputTokens = 40, images = listOf(image))
     private val eventInjector = mockk<com.aharou.feature.agent.domain.notification.AgentEventInjector>()
     private val approvals = mockk<PlanApprovalManager>()
-    private val generalSettings = mockk<com.aharou.feature.settings.data.repository.GeneralSettingsRepository>(relaxed = true).also {
-        coEvery { it.softCompactionThresholdPercent() } returns 60
-        coEvery { it.compactionThresholdPercent() } returns 100
+    private val generalSettings = mockk<com.aharou.feature.settings.data.repository.GeneralSettingsRepository>(relaxed = true).also { repository ->
+        coEvery { repository.softCompactionThresholdPercent() } returns 60
+        coEvery { repository.compactionThresholdPercent() } returns 100
+        coEvery { repository.contextPreferences() } coAnswers {
+            com.aharou.feature.settings.data.repository.ContextPreferences(
+                soft = repository.softCompactionThresholdPercent(), hard = repository.compactionThresholdPercent())
+        }
     }
 
 
@@ -211,7 +215,7 @@ class StatefulAgentWorkflowTest {
         workflow.executeEvents("request", context, emptyList()).collect { events += it }
         assertTrue(events.any { it is AgentEvent.Failed })
         verify(exactly = 0) { provider.completeStream(any(), any(), any(), any()) }
-        coVerify { compactor.compactIfNeeded(any(), any(), any(), any(), any(), any(), any(), any(), any()) }
+        coVerify { compactor.compactIfNeeded(any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) }
     }
 
     @Test
@@ -280,6 +284,59 @@ class StatefulAgentWorkflowTest {
         assertTrue(job.isCancelled)
         coVerify { persistence.persist("session", MessageRole.ASSISTANT, "literal {{", id = any(),
             reasoning = "", signature = "", thinkingBlocksJson = "") }
+    }
+
+    @Test
+    fun contextSnapshotControlsBothReprojectionsAndTheActualProviderRequest() = runTest {
+        verifyContextProjection(reproject = true)
+    }
+
+    @Test fun contextSnapshotControlsUncompactedProviderRequest() = runTest {
+        verifyContextProjection(reproject = false)
+    }
+
+    private suspend fun verifyContextProjection(reproject: Boolean) {
+        prepare(flow { emit(AIStreamChunk.Final(AIResponse("done"))) })
+        val preferences = com.aharou.feature.settings.data.repository.ContextPreferences(rounds = 2, keepTools = 0)
+        coEvery { generalSettings.contextPreferences() } returns preferences
+        val trigger = slot<Int>()
+        val compactionSettings = slot<com.aharou.feature.settings.data.repository.ContextPreferences>()
+        coEvery { compactor.compactIfNeeded(any(), any(), any(), any(), any(), any(), any(), capture(trigger), capture(compactionSettings), any()) } answers {
+            val original = firstArg<List<AgentMessage>>()
+            CompactionResult(if (reproject) original.toMutableList() else original, reproject)
+        }
+        val summary = listOf(
+            AgentMessage.UserMessage(content = com.aharou.feature.agent.domain.model.CONTEXT_COMPACTION_MARKER),
+            AgentMessage.AssistantMessage(content = "saved goal and constraints"))
+        val archived = AgentMessage.ToolResultMessage(id = "archived-call", toolName = "Bash",
+            result = "{\"output_path\":\"/workspace/original.log\",\"total_chars\":9000,\"preview\":\"RAW_PREVIEW\"}")
+        val history = summary + listOf(AgentMessage.UserMessage(content = "old round"),
+            AgentMessage.AssistantMessage(content = "old answer"), AgentMessage.UserMessage(content = "active round"),
+            AgentMessage.AssistantMessage(content = "", toolCalls = listOf(ToolCall("archived-call", "Bash", emptyMap()))), archived)
+        val sent = slot<List<AgentMessage>>()
+        val sentPrompt = slot<String>()
+        val sentTools = slot<List<AgentTool>>()
+        every { provider.completeStream(capture(sentPrompt), capture(sent), capture(sentTools), any()) } returns flow {
+            emit(AIStreamChunk.Final(AIResponse("done")))
+        }
+        val events = mutableListOf<AgentEvent>()
+        workflow.executeEvents("request", context.copy(history = history), emptyList()).collect {
+            events += it
+            if (it is AgentEvent.AssistantText) it.persisted?.complete(Unit)
+        }
+        assertEquals(summary, sent.captured.take(2))
+        assertFalse(sent.captured.any { (it as? AgentMessage.UserMessage)?.content == "old round" })
+        val folded = sent.captured.filterIsInstance<AgentMessage.ToolResultMessage>().single()
+        assertEquals("archived-call", folded.id)
+        assertTrue(folded.modelResult!!.contains("/workspace/original.log"))
+        assertFalse(folded.modelResult!!.contains("RAW_PREVIEW"))
+        assertTrue(archived.result.contains("RAW_PREVIEW"))
+        val usage = events.filterIsInstance<AgentEvent.ContextUsage>().first()
+        val estimate = ContextTokenEstimator.estimate(sentPrompt.captured, sent.captured, sentTools.captured)
+        assertEquals(estimate, usage.inputTokens)
+        assertEquals(ContextTokenEstimator.forCompactionTrigger(estimate, 0, 0), trigger.captured)
+        assertEquals(preferences, compactionSettings.captured)
+        coVerify(exactly = 1) { generalSettings.contextPreferences() }
     }
 
     @Test
@@ -399,10 +456,10 @@ class StatefulAgentWorkflowTest {
             listOf(ToolCall("exit-plan", tool.name, mapOf("action" to JsonPrimitive("exit")))),
             runContext = context.copy(mode = AgentMode.PLAN, modeBeforePlan = AgentMode.AUTO), configure = {
                 coEvery { approvals.awaitApproval(any(), any()) } returns PlanApprovalChoice.APPROVE
-                coEvery { compactor.compactIfNeeded(any(), any(), any(), any(), any(), any(), any(), any(), any()) } coAnswers {
+                coEvery { compactor.compactIfNeeded(any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) } coAnswers {
                     if (executing) executionAttempts++ else {
                         planningAttempts++
-                        arg<suspend (AgentEvent) -> Unit>(8)(AgentEvent.CompactionFailed("planning fixture failure"))
+                        arg<suspend (AgentEvent) -> Unit>(9)(AgentEvent.CompactionFailed("planning fixture failure"))
                     }
                     CompactionResult(firstArg(), false)
                 }
@@ -427,7 +484,7 @@ class StatefulAgentWorkflowTest {
         // 卡死提示改为文件驱动后，workflow 首次用到时会 resolvePrompt；不打桩会抛 MockKException。
         every { prompts.resolvePrompt(any()) } returns "（测试）你在重复同一个动作"
         coEvery { metadata.resolve(any(), any(), any()) } returns ModelMetadata("model", contextTokens = 100_000, supportsVision = true)
-        coEvery { compactor.compactIfNeeded(any(), any(), any(), any(), any(), any(), any(), any(), any()) } answers {
+        coEvery { compactor.compactIfNeeded(any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) } answers {
             CompactionResult(firstArg(), false)
         }
         coEvery { imagePersister.persist(listOf(image)) } returns (listOf(image.copy(path = "/image.png")) to listOf(attachment))
@@ -751,10 +808,10 @@ class StatefulAgentWorkflowTest {
         registry.activate(allTools.map { it.name }, context)
         val expectedTools = allTools.filter { it.name in expectedNames }.sortedBy { it.name }
         coEvery { compactor.compactIfNeeded(any(), provider, "session", true, provider,
-            "system", expectedTools, 0, any()) } answers { CompactionResult(firstArg(), true) }
+            "system", expectedTools, 0, null, any()) } answers { CompactionResult(firstArg(), true) }
         assertTrue(workflow.compactSession("session") {})
         coVerify(exactly = 1) { compactor.compactIfNeeded(any(), provider, "session", true, provider,
-            "system", expectedTools, 0, any()) }
+            "system", expectedTools, 0, null, any()) }
     }
 
     @Test
@@ -783,13 +840,13 @@ class StatefulAgentWorkflowTest {
         val promptContext = slot<AgentContext>()
         every { prompts.build(capture(promptContext), any()) } returns "subagent system"
         coEvery { compactor.compactIfNeeded(any(), provider, "session", true, provider,
-            "subagent system", listOf(readTool), 0, any()) } answers { CompactionResult(firstArg(), true) }
+            "subagent system", listOf(readTool), 0, null, any()) } answers { CompactionResult(firstArg(), true) }
         assertTrue(workflow.compactSession("session") {})
         assertEquals(AgentMode.AUTO, promptContext.captured.mode)
         assertEquals("/workspace", promptContext.captured.projectRoot)
         assertSame(definition, promptContext.captured.agentDefinition)
         coVerify(exactly = 1) { compactor.compactIfNeeded(any(), provider, "session", true, provider,
-            "subagent system", listOf(readTool), 0, any()) }
+            "subagent system", listOf(readTool), 0, null, any()) }
     }
 
     // ───────────────────────── 批内去重（executeToolBatchEffect） ─────────────────────────
@@ -1041,6 +1098,20 @@ class StatefulAgentWorkflowTest {
      * 跑一轮「LLM 返回一批工具调用 → 执行 → 再问一次 LLM」的真实循环。
      * 首轮响应带 [calls]，次轮收尾成普通文本；返回的工具完成事件与第二轮请求消息可供断言。
      */
+    @Test fun transientResumeFlagReachesActualProviderMessages() = runTest {
+        val tool = object : AgentTool() {
+            override val name = "fixture"
+            override val description = "fixture"
+            override val parameters: Map<String, ToolParameter> = emptyMap()
+            override suspend fun executeWithContext(args: Map<String, JsonElement>, context: AgentContext) =
+                ToolResult.Success(JsonPrimitive("ok"))
+        }
+        val turn = runToolBatchTurn(tool, listOf(ToolCall("c", tool.name, emptyMap())),
+            context.copy(currentInputCountsAsRound = false))
+        val request = turn.secondRoundMessages.filterIsInstance<AgentMessage.UserMessage>().first { it.content.startsWith("request") }
+        assertFalse(request.countsAsRound)
+    }
+
     private suspend fun runToolBatchTurn(tool: AgentTool, calls: List<ToolCall>, runContext: AgentContext = context, additionalTools: List<AgentTool> = emptyList(), configure: () -> Unit = {}): ToolBatchTurn {
         val sentMessages = mutableListOf<List<AgentMessage>>()
         val schemas = mutableListOf<List<AgentTool>>()

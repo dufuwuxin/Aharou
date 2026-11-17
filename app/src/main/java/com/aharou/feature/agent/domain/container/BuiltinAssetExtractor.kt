@@ -21,12 +21,13 @@ internal fun collectBuiltinAssets(assets: AssetManager, directory: String): Map<
     return files
 }
 
-internal class BuiltinAssetExtractor {
+internal class BuiltinAssetExtractor(private val allowUpgrade: () -> Boolean = { true }) {
     private val extractedDocs = mutableSetOf<String>()
 
     @Synchronized
     fun extract(assets: AssetManager, configDir: File, directory: String): Int {
         require(directory in setOf("docs", "prompts", "agents", "teams", "skills"))
+        if (!allowUpgrade()) return 0
         val root = File(configDir, if (directory == "skills") "builtin-skills" else directory)
         check(!Files.isSymbolicLink(root.toPath())) { "Builtin asset directory is a symbolic link" }
         val key = root.canonicalPath

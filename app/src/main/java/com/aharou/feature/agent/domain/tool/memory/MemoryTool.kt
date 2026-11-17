@@ -174,6 +174,9 @@ class MemoryTool @Inject constructor(
             enum = listOf("identity", "preference", "workflow", "fact", "event"),
             required = false
         ),
+        "tags" to ToolParameter(name = "tags", type = ParameterType.ARRAY,
+            description = "分类标签；save/library_save 显式传入替换，省略保留旧标签。query 支持 tag:完整标签。",
+            required = false, itemsSchema = mapOf("type" to "string")),
         "query" to ToolParameter(
             name = "query",
             type = ParameterType.STRING,
@@ -243,6 +246,12 @@ class MemoryTool @Inject constructor(
         }
     }
 
+    private fun readTags(args: Map<String, JsonElement>): List<String>? {
+        val values = args["tags"] as? kotlinx.serialization.json.JsonArray ?: return null
+        if (values.any { it !is JsonPrimitive || !it.isString }) return null
+        return values.map { it.jsonPrimitive.content.trim() }.filter { it.isNotEmpty() }.distinct()
+    }
+
     private fun handleLibrary(action: String, args: Map<String, JsonElement>, ctx: AgentContext): ToolResult {
         fun value(key: String) = args[key]?.jsonPrimitive?.contentOrNull
         val all = contextLibrary.list(ctx.projectRoot, ctx.sessionId).filter {
@@ -265,7 +274,8 @@ class MemoryTool @Inject constructor(
         val kind = value("context_kind")?.let { runCatching { ContextKind.valueOf(it.uppercase()) }.getOrNull() } ?: entry.kind
         val loading = value("context_load")?.let { runCatching { ContextLoad.valueOf(it.uppercase()) }.getOrNull() } ?: entry.loading
         val category = value("category")?.let { runCatching { ContextCategory.from(it) }.getOrNull() } ?: entry.category
-        val updated = entry.copy(title = value("title") ?: entry.title, content = value("content") ?: entry.content, description = value("description") ?: entry.description,
+        val tags = readTags(args) ?: if (args.containsKey("tags")) return ToolResult.Error("tags must be a string array", "INVALID_TAGS") else entry.worldbook.tags
+        val updated = entry.copy(worldbook = entry.worldbook.copy(tags = tags), title = value("title") ?: entry.title, content = value("content") ?: entry.content, description = value("description") ?: entry.description,
             kind = kind, loading = loading, category = category, folder = value("folder") ?: entry.folder,
             sessionId = if (category == ContextCategory.TEMPORARY) ctx.sessionId else entry.sessionId)
         return if (contextLibrary.save(updated, ctx.projectRoot)) ToolResult.Success(JsonPrimitive("Context saved; use library_list to refresh the entry ID after renaming"))
@@ -384,7 +394,7 @@ class MemoryTool @Inject constructor(
         // 候选取全量后交给仓储层排序：IDF 加权 + 时间衰减，噪声（只有 bigram 碎片命中）在那边被挡掉。
         val candidates = memoryRepository.listMemories(projectRoot, scope).filter { visibleToSession(it, sessionId) }
         var matched = memoryRepository.searchMemories(query, candidates, limit)
-        if (matched.isEmpty()) {
+        if (matched.isEmpty() && ContextSearch.tagQuery(query).first.isEmpty()) {
             // 一次不中就减词重试，不要直接向模型报「没有」——用户用的词往往比记忆里的长。
             val relaxed = relaxedQueryOf(query)
             if (relaxed.isNotBlank()) {
@@ -613,7 +623,10 @@ class MemoryTool @Inject constructor(
             }
         val requestedKind = args["context_kind"]?.jsonPrimitive?.contentOrNull?.let { ContextKind.valueOf(it.uppercase()) }
             ?: existing?.contextKind ?: if (requestedCategory == ContextCategory.RULE) ContextKind.INSTRUCTION else null
+        val tags = readTags(args)
+        if (args.containsKey("tags") && tags == null) return ToolResult.Error("tags must be a string array", "INVALID_TAGS")
         val result = memoryRepository.writeMemory(
+            worldbook = tags?.let { (existing?.worldbook ?: com.aharou.feature.agent.domain.context.WorldbookRules()).copy(tags = it) },
             name = name,
             description = description,
             content = content,

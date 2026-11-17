@@ -263,4 +263,22 @@ class MessagePersistenceSearchTest {
         verify { sessionDao wasNot Called }
         verify(exactly = 0) { database.chatSessionDao() }
     }
+    @Test fun compactedArchiveTailRequiresExplicitOptInAndExcludedNeverLeaks() = runTest {
+        val archived = store.prepareForStorage(entity("compacted", "p".repeat(200_000) + "COMPACTED_TAIL"))
+            .copy(isCompacted = true)
+        pages(listOf(archived, archived.copy(id = "excluded", isContextExcluded = true),
+            archived.copy(id = "summary", isContextSummary = true),
+            archived.copy(id = "marker", isCompactionMarker = true),
+            archived.copy(id = "foreign", sessionId = "other")))
+        assertTrue(useCase.searchInWorkspace("workspace", "COMPACTED_TAIL", 10).isEmpty())
+        assertEquals(listOf("compacted"),
+            useCase.searchInWorkspace("workspace", "COMPACTED_TAIL", 10, includeCompacted = true).map { it.messageId })
+    }
+    @Test fun excludedInlineMessagesAndForeignWorkspaceSessionsAreNeverSearched() = runTest {
+        pages(listOf(entity("excluded").copy(isContextExcluded = true), entity("allowed"),
+            entity("foreign", sessionId = "other")), listOf(session(), session("other", "foreign-workspace")))
+        assertEquals(listOf("allowed"), useCase.searchInWorkspace("workspace", "keyword", 10).map { it.messageId })
+        assertEquals(listOf("allowed"), useCase.searchInWorkspace("workspace", "keyword", 10, true).map { it.messageId })
+        coVerify(exactly = 0) { dao.getPageBySessionAfter("other", any(), any(), any()) }
+    }
 }

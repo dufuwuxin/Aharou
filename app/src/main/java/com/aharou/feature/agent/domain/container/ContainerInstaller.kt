@@ -97,8 +97,6 @@ class ContainerInstaller @Inject constructor(
             }
         }
 
-        private val builtinAssets = BuiltinAssetExtractor()
-
         /**
          * 从 assets 提取文档到 ~/.aharou/docs (内置使用指导)，支持 guide/ advanced/ 等分类子目录。
          *
@@ -128,8 +126,26 @@ class ContainerInstaller @Inject constructor(
             extractBuiltinAssets(context, "teams")
         }
 
+        /** Interactive upgrades must propagate extraction failures instead of reporting success. */
+        internal fun updateBuiltinAssets(context: Context) {
+            val upgrade = BuiltinAssetUpgradeCoordinator.initialize(context)
+            upgrade.extractIfAllowed {
+                val extractor = BuiltinAssetExtractor { upgrade.canUpgrade }
+                for (directory in listOf("docs", "skills", "agents", "teams")) {
+                    upgrade.extractDirectory(directory) {
+                        extractor.extract(context.assets, migrateLegacyDir(context), directory)
+                    }
+                }
+            }
+        }
+
         private fun extractBuiltinAssets(context: Context, directory: String) {
-            runCatching { builtinAssets.extract(context.assets, migrateLegacyDir(context), directory) }
+            runCatching {
+                val upgrade = BuiltinAssetUpgradeCoordinator.initialize(context)
+                upgrade.extractDirectory(directory) {
+                    BuiltinAssetExtractor { upgrade.canUpgrade }.extract(context.assets, migrateLegacyDir(context), directory)
+                }
+            }
                 .onFailure { FileLogger.w(TAG, "提取内置资源失败: $directory", it) }
         }
 

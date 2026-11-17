@@ -55,7 +55,14 @@ class ToolInjectionGate @Inject constructor(
                 // 关键词为空时按「每轮注入」处理：否则工具永远不出现，用户只会以为工具坏了。
                 mode == ToolInjectionMode.KEYWORD && keywords.isNotEmpty() &&
                     userText != null && !matchesAny(keywords, userText) -> null
-                else -> withDescriptionOverride(tool, override?.description, override?.schemaJson)
+                else -> {
+                    val common = ToolPromptMetadata.pluginKeyForTool(tool.name)?.let { overrides[it]?.description }
+                    val base = override?.description
+                        ?: ToolSchemaOverride.apply(tool.toJsonSchema(), override?.schemaJson)["description"] as? String
+                        ?: tool.description
+                    val description = listOfNotNull(base, common).filter { it.isNotBlank() }.joinToString("\n\n")
+                    withDescriptionOverride(tool, description, override?.schemaJson)
+                }
             }
         }
     }

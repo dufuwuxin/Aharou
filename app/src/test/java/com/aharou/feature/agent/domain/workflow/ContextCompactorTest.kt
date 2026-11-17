@@ -55,6 +55,10 @@ class ContextCompactorTest {
         coEvery { settings.privacyMaskingEnabled() } returns false
         // 设成 100%：这些用例只验证硬摘要路径，软分支不该被意外触发
         coEvery { settings.softCompactionThresholdPercent() } returns 100
+        coEvery { settings.contextPreferences() } coAnswers {
+            com.aharou.feature.settings.data.repository.ContextPreferences(
+                soft = settings.softCompactionThresholdPercent(), hard = settings.compactionThresholdPercent())
+        }
         every { prompts.resolvePrompt(any()) } returns "{{INSTRUCTION}}"
         coEvery { provider.complete(any(), any(), any(), any()) } returns AIResponse("Concise handoff", stopReason = "stop")
     }
@@ -64,6 +68,23 @@ class ContextCompactorTest {
         AgentMessage.AssistantMessage(id = "answer", content = "done"),
         AgentMessage.UserMessage(id = "goal", content = "continue the task")
     )
+
+    @Test fun providedRequestSnapshotIsNotReplacedByLaterPresetChanges() = runTest {
+        prepare()
+        compactor.backgroundDispatcher = StandardTestDispatcher(testScheduler)
+        compactor.trimDispatcher = StandardTestDispatcher(testScheduler)
+        val original = history(200)
+        coEvery { settings.contextPreferences() } returns com.aharou.feature.settings.data.repository.ContextPreset.ECONOMY.preferences!!
+        val snapshot = com.aharou.feature.settings.data.repository.ContextPreferences(soft = 100, hard = 100)
+        val tokens = ModelContextPolicy.effectiveInputBudget(ModelMetadata(id = "summary", contextTokens = 16_000)) * 80 / 100
+        val result = compactor.compactIfNeeded(original, provider, currentInputTokens = tokens, settingsSnapshot = snapshot)
+        assertFalse(result.compacted)
+        assertSame(original, result.messages)
+        coVerify(exactly = 0) { settings.contextPreferences() }
+        coVerify(exactly = 0) { settings.compactionThresholdPercent() }
+        coVerify(exactly = 0) { settings.softCompactionThresholdPercent() }
+        coVerify(exactly = 0) { provider.complete(any(), any(), any(), any()) }
+    }
 
     @Test
     fun projectionUsesModelResultAndPreservesBothEnds() {

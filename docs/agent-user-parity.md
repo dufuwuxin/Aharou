@@ -8,6 +8,9 @@
 
 ## 本轮新增能力
 
+- 上下文分层管理：用户在偏好设置中选均衡/节省/更多细节，或展开高级参数；Agent 通过 config `app.context_trim_rounds`、`app.soft_compaction_threshold_percent`、`app.compaction_threshold_percent`、`app.context_preserve_summary`、`app.context_tool_result_keep_recent` 与 `app.context_preset` 读取/修改同一仓库。预设一次写入五项，名称从实际数值推导，自定义不自动覆盖。参数只改变真实发送投影，不删除聊天；成功压缩仍沿用 MemoryDigestWriter 的 DIGEST 留档、按需检索而不常驻，不将摘要或检索命中自动提升为长期偏好；WARN/MAX 关系沿用原口径。`app.context_preset` 接受预设名称，读取返回名称及五项完整参数快照；审计保留并可原样回写该快照，自定义参数也能在重建配置入口后恢复。
+- 压缩原文检索：`sessions action=search` 新增严格布尔可选参数 `include_compacted`（默认 false）；显式 true 才搜索当前工作区压缩归档原文，命中带 `messageId`。摘要、marker、被排除消息和外工作区不返回；`read` 仍可分页恢复原文，检索结果只作普通工具结果。原生工具目录动态提供参数，默认原生条目无需新增或覆盖用户正文。
+
 - Our Free Model：用户可免密连接 Kilo 公开免费目录、选择模型并使用原 OpenAI 工具与流式对话；仅接纳目录中 isFree=true 的模型，不静态兜底、不切付费。连接标记保存到既有账号池，不代表远端账号身份，且不作为认证头发送；config 复用 provider_accounts 的读取、移除及免密 add 连接入口。Zen 客户端指纹/伪会话未移植。受控协议测试源码已提供，真实设备和线上回复不由目录成功推定。
 
 - SDKv1 宿主插件：用户可导入/启用/停用 JS 与 DEX 包、查看编译输出并打开 DEX 提供的原生 View。Agent 的 config `plugins.<key>.enabled` 与 `plugins.<key>.compile` 复用同一管理器，`compile_output` 可读；id 中点号在配置键中转为 `~`。原生 View 仍是界面专属，未宣称 Agent 可以渲染 View。插件注册到真实 ToolRegistry，host.call 的 tool/config 分支沿真实会话工具快照与 PermissionGate 执行；模型 HTTP 请求、JSON 响应与逐帧 SSE 真实消费插件钩子。旧容器包保留；不宣称 Root、类热替换、Manifest 权限或原生 ABI 扩展。停止即撤销新入口，在途回调退出后清理；插件可经真实config字段自停用/重载/编译而不等自身执行锁。View绑定运行代，外部停止/升级会关闭并detach旧面板，设置页传当前页面Context；日志消费有界且先脱敏的message。当前源码交付不等于真机 DEX/JNI 验证。
@@ -50,6 +53,19 @@
 - 创建项目只需名称和项目存在的意义：本地保存独立工作区中的空项目，无需 AI 供应商；创建期间防重复提交，成功后立即更新列表并进入项目，若已切换页面则不抢回选择。项目意义与需求分开展示，旧项目原有需求保留。创建后可直接在主会话提问，普通问答不规划。用户先在更多菜单或现有任务／分支下添加命名空需求分支，创建不调模型、不执行；选中后在既有完整输入栏讨论或提出需求，AI 只在该分支下生成若干执行任务，失败的规则拆分也固定父级。需求分支不计任务数、无负责人／执行状态／验收，旧普通任务和历史结果不转换、不删除。成员可用 `project_tasks` 分出研究分支或追加子任务，分支和补充让当前任务回到待执行，流程续跑而不中止；项目意义仅作背景，不作为执行需求。
 - 项目完整树图/导图：节点内展开过程，负责人和成员逐个真实执行，同名角色有独立记录；修改参与者使本任务及下游交付失效。用户验收与成员交付仍区分。
 - 构建日志：`aharou-build android <task> / rust / python / logs` 与四个需用户保存才启用的工具模板共用现有执行授权；本地默认日志挂载、显式覆盖及私有回退，不自动收集第三方日志或保证脱敏。Void 的 Python/Rust 已在独立rootfs实跑，Android工具链及手机挂载仍不得宣称验证通过。
+
+## 资产定制契约补齐（本轮源码，未发布）
+
+| 用户能力 | Agent 对应通道 | 约束与验收口径 |
+|---|---|---|
+| 已安装技能标签、类型筛选与编辑 | `skill.skills` 配置集合读写技能元数据；技能文件保留标签与类型引用 | `tag:` 按完整标签，`type:` 按类型；旧技能默认空标签、未分类；市场搜索不等同于已安装列表筛选 |
+| 新建、编辑可复用技能类型 | 技能类型配置集合，与界面共用类型仓库 | 名称、通用语义、功能指导与标签独立持久化；同作用域优先；全局不借项目；加载时共通指导先于特色正文 |
+| 记忆标签精准查找 | `memory` 搜索文字支持 `tag:`，复用世界书标签 | 不把正文命中冒充标签；不改变停用、共享或项目/会话边界 |
+| 首次调用前编辑工具、插件注入文字 | `prompt_edit(action=list/get/set/reset,target=tool/plugin,id,content,version)` | 先读版本再写；工具说明不改变真实 schema 结构和执行权限；内置保护不由 Agent 自行开启 |
+| 新增命令 | 现有自定义命令界面与工具配置通道 | 保存不执行；编辑注入文字不是创建执行器 |
+| 每次升级先选是／否 | 用户确认入口，不向 Agent 开放代答授权 | 在配置写入前确认；否、取消、未回应均不覆盖旧配置；是才进入更新 |
+
+本节描述代码目标与静态契约，不作为发布、安装、Kotlin 编译或真机结果。定向脚本 `scripts/test_asset_customization_contract.py` 只检查源码字段与调用结构，并以隔离正负控防止注释、缺实现或无调用消费者冒充实现；运行与权限并发语义仍需另验。
 
 ## 0. 工具集合与事实来源
 
@@ -387,3 +403,11 @@ The unified tool browser and six-action creation sheet reuse existing execution 
 - Projects invoke the existing team executor and require a run-bound delivery before review. Opt-in built-in evidence gates reject missing or inconsistent completion receipts, without claiming to certify external facts.
 
 - 果办个人账号：设置页走本人华为云授权，复用 `provider_accounts` 与加密账号池；agent 通过既有 config 通道选择供应商与模型，不暴露临时 IAM 凭据或 DPoP 私钥。企业登录、订阅购买不在此入口范围；真实账号调用待验证。
+
+### Continuation and shared execution history
+
+- The latest ordinary message menu can continue an inactive stored turn without deleting/replaying records, adding a synthetic user bubble, changing its title, or consuming a real-user round. The backend rechecks session, latest-message identity and busy state, and reserves before database suspension.
+- Session diagnostics exposes a default-collapsed, searchable file/tool tree from the same core event projection used by the request index. Reads, writes, edits, pending calls and non-file categories retain user/assistant/receipt anchors. Unknown or failed receipts are not successful modifications; shell output never implies a file change.
+- The tree is paged and session-scoped, not an archive-wide/current-diff viewer. Source buttons open exact restored original records even with a collapsed tool group or project workbench body; missing targets are reported. Project task/team relationship views retain their actual existing relations.
+- Native memory settings provides an expandable scope/category/folder/entry directory tree with search retaining ancestors and links to the existing editor. The tree does not change OFF/search-only/full loading or duplicate storage.
+- Native input headers expose admitted scope/category/folder/retrieval identity within unchanged budgets. Skills use real type IDs, tools stable categories, rules their nodes, and teams public name/description/charter only. Metadata remains untrusted; existing filters and native OFF/deletion semantics remain authoritative.

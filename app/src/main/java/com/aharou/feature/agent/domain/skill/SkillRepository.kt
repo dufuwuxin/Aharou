@@ -21,7 +21,8 @@ class SkillRepository @Inject constructor(
     private val projectDirectorySkillSource: ProjectDirectorySkillSource,
     private val skillConfigRepository: SkillConfigRepository,
     private val fileAccess: FileAccessProvider,
-    private val agents: com.aharou.feature.agent.domain.subagent.AgentDefinitionRepository
+    private val agents: com.aharou.feature.agent.domain.subagent.AgentDefinitionRepository,
+    val skillTypes: SkillTypeRepository = SkillTypeRepository(fileAccess)
 ) {
     /** 全部技能（含来源作用域），未过滤禁用；同名按 内置 < 全局 < 项目 逐级覆盖。 */
     fun isBuiltinName(name: String): Boolean = builtinSkillSource.listSkills().any { it.name.equals(name.trim(), true) }
@@ -113,9 +114,20 @@ class SkillRepository @Inject constructor(
     /** 读取指定 skill 的完整指令正文；不存在 / 解析失败 / 已被禁用时返回 null。 */
     fun loadInstructions(name: String): String? {
         if (name.lowercase() in skillConfigRepository.disabledNames()) return null
-        return projectDirectorySkillSource.loadInstructions(name)
-            ?: globalDirectorySkillSource.loadInstructions(name)
-            ?: if (name.lowercase() in deletedBuiltinNames()) null else builtinSkillSource.loadInstructions(name)
+        val projectBody = projectDirectorySkillSource.loadInstructions(name)
+        val globalBody = if (projectBody == null) globalDirectorySkillSource.loadInstructions(name) else null
+        val body = (projectBody ?: globalBody
+            ?: if (name.lowercase() in deletedBuiltinNames()) null else builtinSkillSource.loadInstructions(name))
+            ?: return null
+        val scope = when {
+            projectBody != null -> SkillScope.PROJECT
+            globalBody != null -> SkillScope.GLOBAL
+            else -> SkillScope.BUILTIN
+        }
+        val skill = entriesIn(scope).firstOrNull { it.name.equals(name, true) }
+        val typeId = skill?.typeId ?: return body
+        val type = skillTypes.get(typeId, scope) ?: return null
+        return listOf(type.semantics, type.functions, body).filter { it.isNotBlank() }.joinToString("\n\n")
     }
 
     /** 技能是否在任一作用域中被禁用。 */
@@ -143,6 +155,9 @@ class SkillRepository @Inject constructor(
         val name = form.name.trim()
         if (!isValidName(name)) return@save SkillSaveError.INVALID_NAME
         if (form.instructions.isBlank()) return@save SkillSaveError.EMPTY_INSTRUCTIONS
+        val typeId = form.typeId?.trim()?.takeIf { it.isNotEmpty() }
+        if (typeId != null && skillTypes.get(typeId, scope) == null) return@save SkillSaveError.UNKNOWN_TYPE
+        val tags = form.tags.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
         val scopeSkills = entriesIn(scope)
         val keywordEnabled = form.keywordEnabled
         val keywords = form.keywords.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
@@ -168,7 +183,9 @@ class SkillRepository @Inject constructor(
             requiredTools = form.requiredTools,
             instructions = form.instructions,
             keywordEnabled = keywordEnabled,
-            keywords = keywords
+            keywords = keywords,
+            tags = tags,
+            typeId = typeId
         )
 
         val provider = fileAccess
@@ -190,6 +207,8 @@ class SkillRepository @Inject constructor(
                 fields["required_tools"] = form.requiredTools
                 fields["keyword_enabled"] = keywordEnabled
                 fields["keywords"] = keywords
+                fields["tags"] = tags
+                if (typeId == null) fields.remove("type_id") else fields["type_id"] = typeId
                 "---\n${yaml.dump(fields)}---\n${form.instructions.trim()}\n"
             }
             try {
@@ -254,7 +273,9 @@ class SkillRepository @Inject constructor(
             entriesIn(scope).filter { it.dirPath != null && path.startsWith(it.dirPath!!.trimEnd('/') + "/") }
                 .forEach { check(mayModify(it.name)) { "Builtin skill editing is disabled" } }
             if (content != null && path.substringAfterLast('/') in setOf("SKILL.md", "CLAUDE.md")) {
-                check(mayModify(SkillParser.parseText(content, name).name)) { "Builtin skill editing is disabled" }
+                val parsed = SkillParser.parseText(content, name)
+                check(mayModify(parsed.name)) { "Builtin skill editing is disabled" }
+                check(parsed.typeId == null || skillTypes.get(parsed.typeId, scope) != null) { "Unknown skill type" }
             }
         }
         override fun writeFile(path: String, content: String, overwrite: Boolean, encoding: java.nio.charset.Charset) {
@@ -298,7 +319,11 @@ class SkillRepository @Inject constructor(
             name = skill.name,
             description = skill.description,
             requiredTools = skill.requiredTools,
-            instructions = skill.instructions
+            instructions = skill.instructions,
+            keywordEnabled = skill.keywordEnabled,
+            keywords = skill.keywords,
+            tags = skill.tags,
+            typeId = skill.typeId
         )
         return SkillExporter.zipOf(
             skill.name,
@@ -354,7 +379,9 @@ class SkillRepository @Inject constructor(
         if (fromScope == toScope) return SkillMoveResult.FAILED
         if (name.lowercase() in existingNamesIn(toScope)) return SkillMoveResult.NAME_CONFLICT
 
-        val source = entriesIn(fromScope).firstOrNull { it.name.equals(name, ignoreCase = true) }?.dirPath
+        val sourceSkill = entriesIn(fromScope).firstOrNull { it.name.equals(name, ignoreCase = true) }
+        if (sourceSkill?.typeId?.let { skillTypes.get(it, toScope) == null } == true) return SkillMoveResult.FAILED
+        val source = sourceSkill?.dirPath
         if (source.isNullOrBlank()) {
             FileLogger.w(TAG, "移动技能失败（找不到源目录）：$name ($fromScope)")
             return SkillMoveResult.FAILED

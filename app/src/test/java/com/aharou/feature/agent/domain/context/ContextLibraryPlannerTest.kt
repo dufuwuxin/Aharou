@@ -7,6 +7,18 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 
 class ContextLibraryPlannerTest {
+    @Test fun headersExposeOnlyAdmittedHierarchyAndRetrievalIdentity() {
+        val admitted = entry("visible", ContextLoad.INDEX).copy(folder = "Research/Files", requestKey = "ref.md")
+        val hidden = admitted.copy(id = "hidden", enabled = false, folder = "Hidden")
+        val preview = ContextLibraryPlanner.plan(listOf(admitted, hidden))
+        assertTrue(preview.rendered, preview.rendered.contains("scope=GLOBAL"))
+        assertTrue(preview.rendered.contains("category=LONG_TERM"))
+        assertTrue(preview.rendered.contains("Research/Files"))
+        assertTrue(preview.rendered.contains("ref.md"))
+        assertFalse(preview.rendered.contains("Hidden"))
+        assertEquals(preview.rendered, preview.renderedEntries.getValue("visible"))
+    }
+
     @get:Rule val temp = TemporaryFolder()
     private fun entry(id: String, load: ContextLoad, scope: MemoryScope = MemoryScope.GLOBAL) = ContextEntry(
         id, id, "summary", "body", scope, ContextKind.REFERENCE, load, ContextOrigin.MEMORY, id

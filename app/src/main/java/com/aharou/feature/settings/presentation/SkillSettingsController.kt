@@ -137,6 +137,17 @@ class SkillSettingsController @Inject constructor(
         refreshSkills()
     }
 
+    val skillTypeWorkspaceChanges get() = skillRepository.skillTypes.workspaceChanges
+    fun skillTypeWorkspaceKey(): String? = skillRepository.skillTypes.workspaceKey()
+
+    suspend fun loadSkillTypes(skillScope: SkillScope): List<com.aharou.feature.agent.domain.skill.SkillType> =
+        withContext(Dispatchers.IO) { skillRepository.skillTypes.list(skillScope) }
+
+    suspend fun saveSkillType(type: com.aharou.feature.agent.domain.skill.SkillType, skillScope: SkillScope, expectedWorkspace: String?) {
+        withContext(Dispatchers.IO) { skillRepository.skillTypes.save(type, skillScope, expectedWorkspace) }
+        refreshSkills()
+    }
+
     // ── 本地技能 ──
 
     /** 重新扫描技能（进入设置页 / 启停切换后调用，反映磁盘上增删改）。 */
@@ -154,6 +165,9 @@ class SkillSettingsController @Inject constructor(
                         requiredTools = entry.skill.requiredTools,
                     keywordEnabled = entry.skill.keywordEnabled,
                     keywords = entry.skill.keywords,
+                        tags = entry.skill.tags,
+                        typeId = entry.skill.typeId,
+                        typeName = entry.skill.typeId?.let { skillRepository.skillTypes.get(it, entry.scope)?.name },
                         builtin = entry.scope == SkillScope.BUILTIN
                     )
                 }

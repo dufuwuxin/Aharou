@@ -50,6 +50,9 @@ class ConfigTool @Inject constructor(
     private val teamFields: com.aharou.feature.agent.data.ConfigTeamControlFields,
     private val sessions: com.aharou.feature.agent.domain.session.SessionUseCase,
     private val roleFields: com.aharou.feature.agent.data.ConfigTeamRoleFields? = null,
+    private val skillFields: dagger.Lazy<com.aharou.feature.agent.data.ConfigSkillFields>? = null,
+    private val toolFields: dagger.Lazy<com.aharou.feature.agent.data.ConfigToolControlFields>? = null,
+    private val pluginFields: dagger.Lazy<com.aharou.feature.plugin.data.ConfigPluginFields>? = null,
 ) : AgentTool() {
 
     private companion object {
@@ -129,7 +132,13 @@ class ConfigTool @Inject constructor(
             }
         }
         return try {
-            val registry = if (path.startsWith("teams.") || path.startsWith("team.stages."))
+            val boundRegistry = when {
+                path.startsWith("skill.") && workspace != null && skillFields != null -> ConfigRegistry.isolated().also { skillFields.get().forWorkspace(workspace).registerInto(it) }
+                path.startsWith("tool.overrides.") && workspace != null && toolFields != null -> ConfigRegistry.isolated().also { toolFields.get().forWorkspace(workspace).registerInto(it) }
+                path.startsWith("plugins.") && workspace != null && pluginFields != null -> ConfigRegistry.isolated().also { pluginFields.get().forWorkspace(workspace).registerInto(it) }
+                else -> null
+            }
+            val registry = boundRegistry ?: if (path.startsWith("teams.") || path.startsWith("team.stages."))
                 ConfigRegistry.isolated().also { teamFields.forWorkspace(requireNotNull(workspace)).registerInto(it) }
                 else ConfigRegistry.get()
             when (action) {

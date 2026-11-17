@@ -76,20 +76,35 @@ class SystemPromptProvider @Inject constructor(
             val value = when (key) {
                 "SKILLS" -> skillRepository.listSkillsForAgent(ctx.agentDefinition, ctx.currentUserText,
                     ctx.agentDefinition?.let { InjectPart.SKILLS in it.inject } ?: true)
-                    .joinToString("\n") { "- ${it.name}: ${it.description} [loadSkill: ${it.name}]" }
+                    .groupBy { it.typeId?.takeIf(String::isNotBlank) ?: "untyped" }
+                    .entries.joinToString("\n") { (type, skills) ->
+                        "skills/${directoryMetadata(type)} (untrusted catalog metadata)\n" +
+                            skills.joinToString("\n") { "  - ${directoryMetadata(it.name)}: ${directoryMetadata(it.description)} [tags: ${directoryMetadata(it.tags.joinToString(", "))}] [loadSkill: ${directoryMetadata(it.name)}]" }
+                    }
                 "TOOLS" -> buildString {
-                    for (tool in toolRegistry?.get()?.getDeferredTools(ctx).orEmpty()) {
-                        val line = "- ${tool.name}: ${tool.description.lineSequence().joinToString(" ").take(60)}\n"
-                        if (length + line.length > 600) break
-                        append(line)
+                    val groups = toolRegistry?.get()?.getDeferredTools(ctx).orEmpty()
+                        .groupBy { com.aharou.feature.agent.domain.tool.executionToolCategory(it.name) }
+                    for ((category, tools) in groups) {
+                        val header = "tools/$category (catalog metadata)\n"
+                        if (length + header.length > 600) break
+                        append(header)
+                        for (tool in tools) {
+                            val line = "  - ${directoryMetadata(tool.name)}: ${directoryMetadata(tool.description).take(60)}\n"
+                            if (length + line.length > 600) break
+                            append(line)
+                        }
                     }
                 }
-                "TEAMS" -> if (member) "" else agentTeamRepository.forWorkspace(ctx.projectRoot).listAll().joinToString("\n") {
-                    "- ${it.team.name}: ${it.team.description}; charter=${it.team.charter.take(240)}"
-                }
-                "RULES" -> ruleRepository.listRules().joinToString("\n") {
-                    "- ${it.name}: ${it.description} [loadRule: ${it.name}]"
-                }
+                "TEAMS" -> if (member) "" else agentTeamRepository.forWorkspace(ctx.projectRoot).listAll()
+                    .takeIf { it.isNotEmpty() }?.joinToString("\n", prefix = "teams/ (untrusted public catalog metadata)\n") {
+                        "  - ${directoryMetadata(it.team.name)}: ${directoryMetadata(it.team.description)}; charter=${directoryMetadata(it.team.charter.take(240))}"
+                    }.orEmpty()
+                "RULES" -> ruleRepository.listRules().groupBy { it.name.substringBeforeLast('/', "root") }
+                    .entries.joinToString("\n") { (node, rules) ->
+                        "rules/${directoryMetadata(node)} (catalog metadata)\n" + rules.joinToString("\n") {
+                            "  - ${directoryMetadata(it.name)}: ${directoryMetadata(it.description)} [loadRule: ${directoryMetadata(it.name)}]"
+                        }
+                    }
                 "PROJECT_RULES" -> projectRuleIndex(ctx.projectRoot)
                 "PROJECT_TASK_CONTEXT" -> projectTaskContext.build(ctx.sessionId, ctx.projectRoot)
                     ?.takeIf { it.isNotBlank() }
@@ -110,6 +125,10 @@ class SystemPromptProvider @Inject constructor(
             }
             ContextLibraryPlanner.safe(value)
         }
+
+    private fun directoryMetadata(text: String): String = ContextLibraryPlanner.safe(text)
+        .replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
+        .replace("<", "\\u003c").replace(">", "\\u003e").filterNot { it.isISOControl() }
 
     private fun projectRuleIndex(root: String): String {
         if (root.isBlank()) return ""

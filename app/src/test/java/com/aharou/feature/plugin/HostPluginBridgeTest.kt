@@ -99,7 +99,7 @@ class HostPluginBridgeTest {
                 lateinit var hostBridge: HostPluginBridge
                 val runtime = HostPluginRuntime(loader, Lazy { hostBridge }, Lazy { tools })
                 val manager = PluginManager(mockk<LinuxContainerEngine>(), installer, records, mockk(), runtime, compiler)
-                val configFields = ConfigPluginFields(app, manager, records)
+                val configFields = ConfigPluginFields(app, manager, records, mockk(relaxed = true))
                 val collection = slot<ConfigCollection>()
                 val configRegistry = mockk<ConfigRegistry>()
                 every { configRegistry.register(capture(collection)) } just Runs

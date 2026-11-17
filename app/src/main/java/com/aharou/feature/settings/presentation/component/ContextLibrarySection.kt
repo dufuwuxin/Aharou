@@ -147,9 +147,12 @@ internal fun ContextLibrarySection(viewModel: ContextLibraryViewModel = hiltView
     LazyColumn(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(Spacing.md),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(Spacing.lg)) {
         item { ContextOverview(state.entries) }
-        item { SegmentedTabs(tab, listOf(stringResource(R.string.context_tab_library), stringResource(R.string.context_tab_preview), stringResource(R.string.context_graph_title)), { tab = it }) }
+        item { SegmentedTabs(tab, listOf(stringResource(R.string.context_tab_library), stringResource(R.string.context_tab_preview), stringResource(R.string.context_graph_title), stringResource(R.string.context_resource_tree)), { tab = it }) }
         if (state.error) item { ContextNotice(stringResource(R.string.context_operation_error), error = true) }
         if (tab == 1) item { ContextLibraryPreview(state, viewModel::preview, viewModel::clearPreview) }
+        else if (tab == 3) item {
+            ContextResourceTree(state.entries) { editorRoot = state.workspaceRoot; editor = it }
+        }
         else if (tab == 2) item {
             ContextMemoryGraph(state.entries,
                 onSelect = { editorRoot = state.workspaceRoot; editor = it },

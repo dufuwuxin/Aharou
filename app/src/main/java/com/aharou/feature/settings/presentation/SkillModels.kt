@@ -19,7 +19,10 @@ data class SkillUiEntry(
     val keywords: List<String> = emptyList(),
     val requiredTools: List<String> = emptyList(),
     /** 内置技能：随 App 打包，不可编辑、删除或停用。 */
-    val builtin: Boolean = false
+    val builtin: Boolean = false,
+    val tags: List<String> = emptyList(),
+    val typeId: String? = null,
+    val typeName: String? = null
 )
 
 /** 技能编辑页的保存结果：UI 据此决定是退回列表还是就地报错。 */
@@ -88,3 +91,15 @@ internal fun String.hasExtension(exts: Set<String>): Boolean {
     if (dot <= 0 || dot == lastIndex) return false
     return substring(dot + 1).lowercase() in exts
 }
+
+/** Explicit tag/type terms are exact; ordinary terms retain name/description/keyword search. */
+internal fun SkillUiEntry.matchesSkillQuery(query: String): Boolean =
+    Regex("(?:[^\\s\"]+|\"[^\"]*\")+").findAll(query).all { match ->
+        val term = match.value
+        val value = term.substringAfter(':', "").removeSurrounding("\"")
+        when {
+            term.startsWith("tag:", true) -> value.isNotBlank() && tags.any { it.equals(value, true) }
+            term.startsWith("type:", true) -> value.isNotBlank() && (typeId?.equals(value, true) == true || typeName?.equals(value, true) == true)
+            else -> listOf(name, description).plus(keywords).any { it.contains(term.removeSurrounding("\""), true) }
+        }
+    }

@@ -3,6 +3,7 @@ package com.aharou.feature.agent.domain.context
 import android.content.Context
 import com.aharou.core.memory.AharouMemoryStore
 import com.aharou.core.util.FileLogger
+import com.aharou.feature.agent.domain.container.BuiltinAssetUpgradeCoordinator
 import com.aharou.feature.agent.domain.memory.Memory
 import com.aharou.feature.agent.domain.memory.MemoryFileStorage
 import com.aharou.feature.agent.domain.memory.MemoryRepository
@@ -25,10 +26,12 @@ import kotlinx.serialization.json.jsonPrimitive
 @Singleton
 class BuiltinContextEntries internal constructor(
     private val ledger: File,
+    private val upgradeChoice: () -> BuiltinAssetUpgradeCoordinator.Choice = { BuiltinAssetUpgradeCoordinator.Choice.FRESH },
     private val loadAsset: () -> String,
 ) {
     @Inject constructor(@ApplicationContext context: Context, store: AharouMemoryStore) : this(
         File(store.dir, ".context-defaults-v1"),
+        { BuiltinAssetUpgradeCoordinator.initialize(context).state.value.choice },
         { context.assets.open("context-library/builtin.json").bufferedReader().use { it.readText() } },
     )
 
@@ -60,7 +63,30 @@ class BuiltinContextEntries internal constructor(
         return entries
     }
 
+    internal fun rememberSkippedDefaults() = synchronized(MemoryFileStorage.lock) {
+        val lines = try { if (ledger.exists()) ledger.readLines() else emptyList() } catch (error: Exception) {
+            FileLogger.w("BuiltinContextEntries", "Cannot read retained native-default receipt", error)
+            return@synchronized
+        }
+        if (ledger.exists() && lines.firstOrNull() !in setOf("version=1", "version=1-legacy")) {
+            FileLogger.w("BuiltinContextEntries", "Invalid native-default receipt retained without resetting it")
+            return@synchronized
+        }
+        check(writeReceipt((lines.drop(1) + defaults().map(Default::id)).distinct(),
+            legacyAdoption = lines.firstOrNull() != "version=1")) { "Cannot record skipped native defaults" }
+    }
+
     internal fun ensureSeeded(memories: MemoryRepository) = synchronized(MemoryFileStorage.lock) {
+        when (upgradeChoice()) {
+            BuiltinAssetUpgradeCoordinator.Choice.PENDING -> return@synchronized
+            BuiltinAssetUpgradeCoordinator.Choice.KEEP -> { rememberSkippedDefaults(); return@synchronized }
+            BuiltinAssetUpgradeCoordinator.Choice.APPLY -> if (!ledger.exists()) {
+                // Without a receipt we cannot distinguish a legacy deletion from an uninstalled default.
+                rememberSkippedDefaults()
+                return@synchronized
+            }
+            BuiltinAssetUpgradeCoordinator.Choice.FRESH -> Unit
+        }
         // A separate durable receipt survives user rename/delete/OFF; a missing memory is not a migration request.
         val defaults = defaults()
         var legacyAdoption = false

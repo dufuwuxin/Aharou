@@ -16,7 +16,9 @@ data class Skill(
     val dirPath: String? = null,
     val instructions: String,
     val keywordEnabled: Boolean = false,
-    val keywords: List<String> = emptyList()
+    val keywords: List<String> = emptyList(),
+    val tags: List<String> = emptyList(),
+    val typeId: String? = null
 )
 
 /** 设置页新建/编辑技能时提交的表单快照。 */
@@ -27,7 +29,9 @@ data class SkillForm(
     /** 手写技能里的 `required_tools`，编辑页不暴露但原样写回，避免保存后丢字段。 */
     val requiredTools: List<String> = emptyList(),
     val keywordEnabled: Boolean = false,
-    val keywords: List<String> = emptyList()
+    val keywords: List<String> = emptyList(),
+    val tags: List<String> = emptyList(),
+    val typeId: String? = null
 )
 
 /** 保存技能失败的原因。 */
@@ -37,6 +41,9 @@ enum class SkillSaveError {
 
     /** 指令正文为空：这种技能加载出来对 AI 没有任何指导价值。 */
     EMPTY_INSTRUCTIONS,
+
+    /** Referenced type is missing from the skill scope. */
+    UNKNOWN_TYPE,
 
     /** 同作用域已有同名技能。 */
     NAME_CONFLICT,

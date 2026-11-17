@@ -37,6 +37,55 @@ class ToolSettingsStoreTest {
         )
 
     @Test
+    fun promptEditPinsProjectRejectsStaleVersionAndResetsInheritedText() = runBlocking {
+        val root = tempDir("prompt-version")
+        val global = File(root, "global")
+        val a = File(root, "a")
+        val b = File(root, "b")
+        val locator = object : ToolStorageLocator {
+            override fun globalToolsDir() = global
+            override fun projectToolsDir() = b
+            override fun projectToolsDir(projectRoot: String): File? = when (projectRoot) { "A" -> a; "B" -> b; else -> null }
+        }
+        val store = ToolSettingsStore(locator)
+        global.mkdirs()
+        File(global, "overrides.json").writeText("""{"readFile":{"description":"inherited","injectionMode":"keyword","keywords":["keep"]}}""")
+        val before = store.snapshotForProject("A")
+        val version = ToolPromptMetadata.version(before, "readFile", "original")
+        assertNull(store.editPrompt("readFile", "edited", version, "A") { "original" })
+        assertFalse(b.exists())
+        assertEquals("edited", store.snapshotForProject("A").overrides["readFile"]?.description)
+        assertEquals("inherited", store.snapshotForProject("B").overrides["readFile"]?.description)
+        assertEquals("PROMPT_VERSION_CONFLICT", store.editPrompt("readFile", "stale", version, "A") { "original" })
+        val latest = store.snapshotForProject("A")
+        assertNull(store.editPrompt("readFile", null, ToolPromptMetadata.version(latest, "readFile", "original"), "A") { "original" })
+        val reset = store.snapshotForProject("A").overrides.getValue("readFile")
+        assertNull(reset.description)
+        assertTrue(reset.promptReset)
+        assertEquals(ToolInjectionMode.KEYWORD, reset.injectionMode)
+        assertEquals(listOf("keep"), reset.keywords)
+        assertEquals("inherited", store.snapshotForProject("B").overrides["readFile"]?.description)
+    }
+
+    @Test
+    fun scopedConfigMutationNeverResolvesTargetFromCurrentUiProject() = runBlocking {
+        val root = tempDir("scoped-config")
+        var selected = "A"
+        val locator = object : ToolStorageLocator {
+            override fun globalToolsDir() = File(root, "global")
+            override fun projectToolsDir() = File(root, selected)
+            override fun projectToolsDir(projectRoot: String) = File(root, projectRoot)
+        }
+        val store = ToolSettingsStore(locator)
+        assertTrue(store.updateOverrideForProject("readFile", "A") { selected = "B"; it.copy(description = "A wording") })
+        assertEquals("A wording", store.snapshotForProject("A").overrides["readFile"]?.description)
+        assertFalse(File(root, "B/overrides.json").exists())
+        assertTrue(store.updateOverrideForProject("readFile", "A") { it.copy(keywords = listOf("preserved")) })
+        assertEquals("A wording", store.snapshotForProject("A").overrides["readFile"]?.description)
+        assertEquals(listOf("preserved"), store.snapshotForProject("A").overrides["readFile"]?.keywords)
+    }
+
+    @Test
     fun schemaOverride_survivesReloadAndClearsWithoutLosingPolicy() = runBlocking {
         val global = tempDir("schema-override")
         val locator = FakeLocator(global)

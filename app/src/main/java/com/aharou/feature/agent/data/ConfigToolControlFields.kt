@@ -22,6 +22,11 @@ class ConfigToolControlFields @Inject constructor(
     private val store: ToolSettingsStore,
     private val tools: ToolRegistry
 ) {
+    private var sessionWorkspace: String? = null
+    fun forWorkspace(root: String): ConfigToolControlFields = ConfigToolControlFields(store, tools).also { it.sessionWorkspace = root }
+    private fun checkWorkspace() {
+        sessionWorkspace?.let { if (!store.matchesCurrentProject(it)) throw ConfigError.InvalidValue("Workspace changed; reopen this session's project") }
+    }
     fun registerInto(registry: ConfigRegistry) { registry.register(Overrides()) }
 
     private inner class Overrides : ConfigCollection {
@@ -31,18 +36,33 @@ class ConfigToolControlFields @Inject constructor(
         override val addable = false
         override val removable = false
         override fun childIds(): List<String> {
+            checkWorkspace()
             val customNames = store.snapshotCustomTools().map { it.name }.toSet()
             return tools.getToolNames().filterNot { it in customNames }.sorted()
         }
         override fun fields(forId: String): List<ConfigField> {
             if (forId !in childIds()) return emptyList()
             return listOf(ClosureField(
+                path = "$basePath.$forId.description", displayName = "Model-visible tool description",
+                description = "Edit ahead of injection; execution permissions and parameter structure are unchanged. Empty restores default.",
+                valueSchema = ConfigSchema.Str(maxLength = 40000), risk = com.aharou.core.config.ConfigRisk.SENSITIVE,
+                reader = { ConfigValue.Str(store.snapshotOverrides()[forId]?.description ?: tools.getTool(forId)?.description.orEmpty()) },
+                writer = { value ->
+                    checkWorkspace()
+                    val text = (value as? ConfigValue.Str)?.value ?: throw ConfigError.TypeMismatch("string")
+                    if (!runBlocking(Dispatchers.IO) { store.updateOverrideForProject(forId, sessionWorkspace) {
+                        it.copy(description = text, promptReset = text.isBlank())
+                    } })
+                        throw ConfigError.InvalidValue("Failed to persist description")
+                }
+            ), ClosureField(
                 path = "$basePath.$forId.schema_json",
                 displayName = "Schema metadata override",
                 description = "Full original schema with edits limited to description/title/examples/\$comment. Empty resets. Structural edits require a custom tool.",
                 valueSchema = ConfigSchema.Str(),
                 reader = { ConfigValue.Str(store.snapshotOverrides()[forId]?.schemaJson.orEmpty()) },
                 writer = { value ->
+                    checkWorkspace()
                     val text = (value as? ConfigValue.Str)?.value?.trim()
                         ?: throw ConfigError.TypeMismatch("string")
                     val original = tools.getTool(forId)?.toJsonSchema()
@@ -51,9 +71,8 @@ class ConfigToolControlFields @Inject constructor(
                     if (text.isNotEmpty() && !ToolSchemaOverride.isCompatible(original, text)) {
                         throw ConfigError.InvalidValue("Only schema metadata may change")
                     }
-                    val previous = store.snapshotOverrides()[forId] ?: ToolOverride()
                     val saved = runBlocking(Dispatchers.IO) {
-                        store.saveOverride(forId, previous.copy(schemaJson = text.takeIf { it.isNotEmpty() }))
+                        store.updateOverrideForProject(forId, sessionWorkspace) { it.copy(schemaJson = text.takeIf { it.isNotEmpty() }) }
                     }
                     if (!saved) throw ConfigError.InvalidValue("Failed to persist schema override")
                 }

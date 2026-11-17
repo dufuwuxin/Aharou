@@ -28,6 +28,8 @@ class NativeMemoryPromptTest {
     private lateinit var library: ContextLibraryRepository
     private lateinit var memories: MemoryRepository
     private lateinit var provider: SystemPromptProvider
+    private val skills = mockk<com.aharou.feature.agent.domain.skill.SkillRepository>()
+    private val rules = mockk<com.aharou.feature.agent.domain.rule.RuleRepository>()
     private val teams = mockk<AgentTeamRepository>()
     private val dao = mockk<ChatSessionDao>()
     private val context = AgentContext(null, null, "", null)
@@ -43,8 +45,8 @@ class NativeMemoryPromptTest {
             mockk<ContainerInstaller>(), mockk<ProjectAharouRoot>(relaxed = true), mockk<MemoryUsageStore>(relaxed = true))
         library = ContextLibraryRepository(memories)
         every { projectTaskContext.build(any(), any()) } returns null
-        provider = SystemPromptProvider(mockk(), mockk(), PromptFileResolver(mockk(), mockk(), library),
-            mockk(), mockk(), teams, mockk(), dao, mockk(), mockk(), mockk(), projectTaskContext,
+        provider = SystemPromptProvider(mockk(), skills, PromptFileResolver(mockk(), mockk(), library),
+            mockk(), mockk(), teams, rules, dao, mockk(), mockk(), mockk(), projectTaskContext,
             InjectedContextStore(), library, dagger.Lazy { registry })
     }
 
@@ -52,6 +54,21 @@ class NativeMemoryPromptTest {
                     loading: ContextLoad = ContextLoad.FULL) {
         assertTrue(library.create(title, "摘要", body, MemoryScope.GLOBAL, ContextKind.INSTRUCTION,
             loading, null, category = category, folder = folder))
+    }
+
+    @Test fun skillsAndRulesAreGroupedByTheirActualAdmittedIdentity() {
+        add("catalogs", "{{AICODE_SKILLS}}\n{{AICODE_RULES}}", ContextCategory.MAIN_INJECTED)
+        val skill = com.aharou.feature.agent.domain.skill.Skill("visible", "public summary", instructions = "private body", typeId = "engineering")
+        every { skills.listSkillsForAgent(null, "", true) } returns listOf(skill)
+        every { rules.listRules() } returns listOf(com.aharou.feature.agent.domain.rule.RuleRepository.RuleEntry(
+            "quality/review", "public rule", "private rule body"))
+        val rendered = provider.build(context)
+        assertTrue(rendered.contains("skills/engineering"))
+        assertTrue(rendered.contains("loadSkill: visible"))
+        assertTrue(rendered.contains("rules/quality"))
+        assertTrue(rendered.contains("loadRule: quality/review"))
+        assertFalse(rendered.contains("private body"))
+        assertFalse(rendered.contains("private rule body"))
     }
 
     @Test fun emptyAndDisabledLibraryHaveNoLegacyOrImplicitTailFallback() {
@@ -173,6 +190,7 @@ class NativeMemoryPromptTest {
         val rendered = provider.build(context)
         assertTrue(rendered.contains("public team: public description {{AICODE_DATE}}"))
         assertTrue(rendered.contains("charter=hidden charter"))
+        assertTrue(rendered.contains("teams/"))
         assertFalse(rendered.contains("hidden member"))
     }
 
@@ -200,6 +218,7 @@ class NativeMemoryPromptTest {
         assertTrue(rendered.contains("先选工具再发现真实参数"))
         assertTrue(rendered.contains("tool_search(query=工具名)"))
         assertTrue(rendered.contains("tool-0: tool description"))
+        assertTrue(rendered.contains("tools/other"))
         assertTrue(rendered.length <= ContextLibraryPlanner.FULL_ENTRY_CHARS)
         val entry = library.list(null).single()
         assertTrue(library.save(entry.copy(loading = ContextLoad.OFF), null))

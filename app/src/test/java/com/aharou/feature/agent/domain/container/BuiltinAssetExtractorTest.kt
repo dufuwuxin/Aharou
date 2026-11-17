@@ -273,4 +273,22 @@ class BuiltinAssetExtractorTest {
         assertEquals("old", old.readText())
         assertEquals(1, BuiltinAssetExtractor().extract(seedAssets(mapOf("teams/a.md" to "new"), mapOf("teams/a.md" to "old")), root, "teams"))
     }
+    @Test fun pendingOrDeclinedUpgradeDoesNotReadApkOrTouchAnySeed() {
+        val source = mockk<AssetManager>()
+        val existing = put("builtin-skills/security-audit/SKILL.md", "old instructions")
+        val custom = put("skills/custom/SKILL.md", "user instructions")
+        val docs = put("docs/old.md", "old guide")
+        val disabled = put("agents/disabled.json", "user disabled state")
+        val extractor = BuiltinAssetExtractor { false }
+        for (directory in listOf("skills", "docs", "agents", "teams")) {
+            assertEquals(0, extractor.extract(source, root, directory))
+        }
+        io.mockk.verify { source wasNot io.mockk.Called }
+        assertEquals("old instructions", existing.readText())
+        assertEquals("user instructions", custom.readText())
+        assertEquals("old guide", docs.readText())
+        assertEquals("user disabled state", disabled.readText())
+        assertFalse(File(root, "teams").exists())
+    }
+
 }

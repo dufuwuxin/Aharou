@@ -13,6 +13,8 @@ import com.aharou.core.config.fields.DataStoreEnumField
 import com.aharou.core.config.fields.DataStoreIntField
 import com.aharou.feature.agent.domain.skill.PromptLanguageSettings
 import com.aharou.feature.settings.data.repository.GeneralSettingsRepository
+import com.aharou.feature.settings.data.repository.ContextPreset
+import com.aharou.feature.settings.data.repository.ContextPreferences
 import com.aharou.feature.settings.data.repository.StartupSessionMode
 import com.aharou.feature.settings.data.repository.ToolSafetySettingsRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -66,6 +68,74 @@ class ConfigAppFields @Inject constructor(
                 description = "拉取模型列表后，自动移除远端已不存在的本地模型。默认开启。",
                 flow = generalSettings.autoRemoveStaleModelsFlow,
                 setter = { generalSettings.setAutoRemoveStaleModels(it) },
+            ),
+        )
+
+        registry.register(
+            ClosureField(
+                path = "app.context_preset",
+                displayName = context.getString(R.string.settings_context_preset),
+                description = context.getString(R.string.settings_context_preset_desc),
+                valueSchema = ConfigSchema.Json,
+                revertable = true,
+                reader = {
+                    val current = runBlocking { generalSettings.contextPreferences() }
+                    ConfigValue.Obj(mapOf(
+                        "preset" to ConfigValue.Str(current.preset.id),
+                        "rounds" to ConfigValue.Int(current.rounds),
+                        "soft" to ConfigValue.Int(current.soft),
+                        "hard" to ConfigValue.Int(current.hard),
+                        "preserveSummary" to ConfigValue.Bool(current.preserveSummary),
+                        "keepTools" to ConfigValue.Int(current.keepTools),
+                    ))
+                },
+                writer = { value ->
+                    when (value) {
+                        is ConfigValue.Str -> {
+                            val preset = ContextPreset.entries.firstOrNull { it.id == value.value }
+                                ?: throw ConfigError.InvalidValue("Unknown context preset")
+                            runBlocking { generalSettings.applyContextPreset(preset) }
+                        }
+                        is ConfigValue.Obj -> {
+                            val fields = value.value
+                            val required = setOf("rounds", "soft", "hard", "preserveSummary", "keepTools")
+                            if (!fields.keys.containsAll(required) || (fields.keys - required - "preset").isNotEmpty())
+                                throw ConfigError.InvalidValue("A complete context parameter snapshot is required")
+                            fun number(key: String, min: Int): Int {
+                                val number = (fields[key] as? ConfigValue.Int)?.value ?: throw ConfigError.TypeMismatch("int: $key")
+                                if (number !in min..100) throw ConfigError.OutOfRange(min.toDouble(), 100.0)
+                                return number
+                            }
+                            val snapshot = ContextPreferences(number("rounds", 0), number("soft", 1), number("hard", 1),
+                                (fields["preserveSummary"] as? ConfigValue.Bool)?.value
+                                    ?: throw ConfigError.TypeMismatch("bool: preserveSummary"), number("keepTools", 0))
+                            if (fields.containsKey("preset") && fields["preset"] != ConfigValue.Str(snapshot.preset.id))
+                                throw ConfigError.InvalidValue("Preset label does not match the context parameters")
+                            runBlocking { generalSettings.setContextPreferences(snapshot) }
+                        }
+                        else -> throw ConfigError.TypeMismatch("preset name or context parameter snapshot")
+                    }
+                },
+            ),
+        )
+
+        registry.register(
+            DataStoreBoolField(
+                path = "app.context_preserve_summary",
+                displayName = context.getString(R.string.settings_context_preserve_summary),
+                description = context.getString(R.string.settings_context_preserve_summary_desc),
+                flow = generalSettings.contextPreserveSummaryFlow,
+                setter = { generalSettings.setContextPreserveSummary(it) },
+            ),
+        )
+        registry.register(
+            DataStoreIntField(
+                path = "app.context_tool_result_keep_recent",
+                displayName = context.getString(R.string.settings_context_keep_tools),
+                description = context.getString(R.string.settings_context_keep_tools_desc),
+                flow = generalSettings.contextToolResultKeepRecentFlow,
+                setter = { generalSettings.setContextToolResultKeepRecent(it) },
+                minValue = 0, maxValue = 100,
             ),
         )
 

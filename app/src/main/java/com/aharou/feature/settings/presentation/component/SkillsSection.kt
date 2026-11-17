@@ -51,6 +51,8 @@ import com.aharou.core.theme.Spacing
 import com.aharou.core.theme.semanticColors
 import com.aharou.core.ui.AdaptiveModalBottomSheet
 import com.aharou.feature.agent.domain.skill.SkillScope
+import com.aharou.core.ui.AppTextField
+import com.aharou.feature.settings.presentation.matchesSkillQuery
 import com.aharou.feature.settings.presentation.SkillUiEntry
 import compose.icons.FeatherIcons
 import compose.icons.feathericons.Archive
@@ -69,6 +71,33 @@ import compose.icons.feathericons.Trash2
  */
 @Composable
 internal fun SkillsSection(
+    projectName: String?,
+    entries: List<SkillUiEntry>,
+    onDelete: (SkillUiEntry) -> Unit,
+    onMove: (String, SkillScope, SkillScope) -> Unit,
+    onExport: (SkillUiEntry) -> Unit,
+    onOpenDetail: (SkillUiEntry) -> Unit
+) {
+    var query by rememberSaveable { mutableStateOf("") }
+    Column(modifier = Modifier.fillMaxSize()) {
+        AppTextField(value = query, onValueChange = { query = it },
+            placeholder = stringResource(R.string.skills_search_hint),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.lg), singleLine = true)
+        SkillTypeManager()
+        val filtered = entries.filter { it.matchesSkillQuery(query) }
+        if (entries.isNotEmpty() && filtered.isEmpty()) {
+            Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                Text(stringResource(R.string.skills_search_empty), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        } else Box(Modifier.weight(1f)) {
+            SkillsListContent(projectName = projectName, entries = filtered, onDelete = onDelete,
+                onMove = onMove, onExport = onExport, onOpenDetail = onOpenDetail)
+        }
+    }
+}
+
+@Composable
+private fun SkillsListContent(
     projectName: String?,
     entries: List<SkillUiEntry>,
     onDelete: (SkillUiEntry) -> Unit,
@@ -508,6 +537,10 @@ private fun SkillRowContent(
                     )
                 }
             }
+            val metadata = listOfNotNull(entry.typeName ?: entry.typeId,
+                entry.tags.takeIf { it.isNotEmpty() }?.joinToString(" · "))
+            if (metadata.isNotEmpty()) Text(metadata.joinToString(" · "),
+                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(
                 text = com.aharou.core.translation.rememberTranslatedText(entry.description.ifBlank { stringResource(R.string.mcp_no_description) }),
                 style = MaterialTheme.typography.bodyMedium,

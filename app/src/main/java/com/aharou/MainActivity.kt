@@ -319,7 +319,6 @@ class MainActivity : ComponentActivity() {
                 controller.isAppearanceLightStatusBars = !appearance.darkTheme
                 controller.isAppearanceLightNavigationBars = !appearance.darkTheme
             }
-
             AppThemeHost(appearance) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
@@ -366,11 +365,11 @@ class MainActivity : ComponentActivity() {
                         }
                         // beta 包全局水印，置于最上层，不拦截触摸。
                         BetaWatermark()
+                        com.aharou.feature.settings.presentation.component.BuiltinAssetUpgradeDialog()
                     }
                 }
             }
         }
-
         // 此时处于前台，启动前台服务一定被允许：若用户曾开启常驻保活，补上通知。
         lifecycleScope.launch {
             if (keepaliveSettings.isEnabled()) {

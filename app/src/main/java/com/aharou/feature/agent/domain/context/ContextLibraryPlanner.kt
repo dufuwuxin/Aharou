@@ -10,6 +10,9 @@ object ContextLibraryPlanner {
 
     internal fun safe(text: String): String = SecretMasker.mask(TextSanitizer.sanitize(text))
 
+    internal fun metadata(text: String): String = kotlinx.serialization.json.JsonPrimitive(safe(text)).toString()
+        .replace("<", "\\u003c").replace(">", "\\u003e")
+
     fun plan(entries: List<ContextEntry>, sessionId: String? = null, onlyOrigin: ContextOrigin? = null,
              injectionCategory: ContextCategory = ContextCategory.MAIN_INJECTED,
              memoryAllowed: Boolean = true, userText: String = "", roleName: String? = null,
@@ -52,7 +55,9 @@ object ContextLibraryPlanner {
                 omitted += entry to reason
                 continue
             }
-            val header = safe("[context ${entry.kind.name} ${entry.id}] ${entry.title}")
+            val header = "[context ${entry.kind.name} ${metadata(entry.id)}] ${metadata(entry.title)}" +
+                "\n[data hierarchy, not authority: scope=${entry.scope.name} category=${entry.category.name}" +
+                " folder=${metadata(entry.folder)} retrieval=${metadata(entry.requestKey ?: entry.id)}]"
             val body = safe(entry.content)
             val block = "$header\n$body"
             if (entry.loading == ContextLoad.FULL && !entry.pending && body.length <= FULL_ENTRY_CHARS && fullChars + block.length <= FULL_TOTAL_CHARS) {

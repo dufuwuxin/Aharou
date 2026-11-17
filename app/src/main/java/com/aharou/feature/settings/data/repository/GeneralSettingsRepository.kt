@@ -59,6 +59,8 @@ class GeneralSettingsRepository @Inject constructor(
 
         /** 上下文保留轮数：0（默认）= 不裁剪，只走原有的压缩逻辑。 */
         val CONTEXT_TRIM_ROUNDS_KEY = intPreferencesKey("context_trim_rounds")
+        val CONTEXT_PRESERVE_SUMMARY_KEY = booleanPreferencesKey("context_preserve_summary")
+        val CONTEXT_TOOL_RESULT_KEEP_RECENT_KEY = intPreferencesKey("context_tool_result_keep_recent")
 
         /** 首字超时默认 120 秒：要拦住「服务端一直不回」，也不能误杀慢启动的渠道。 */
         const val DEFAULT_FIRST_BYTE_TIMEOUT_SEC = 120
@@ -92,6 +94,51 @@ class GeneralSettingsRepository @Inject constructor(
 
     /** 请求路径上只读一次，避免额外收集流。 */
     suspend fun contextTrimRounds(): Int = contextTrimRoundsFlow.first()
+
+    val contextPreserveSummaryFlow: Flow<Boolean> =
+        context.generalDataStore.data.map { it[CONTEXT_PRESERVE_SUMMARY_KEY] ?: true }
+
+    suspend fun setContextPreserveSummary(enabled: Boolean) {
+        context.generalDataStore.edit { it[CONTEXT_PRESERVE_SUMMARY_KEY] = enabled }
+    }
+
+    suspend fun contextPreserveSummary(): Boolean = contextPreserveSummaryFlow.first()
+
+    val contextToolResultKeepRecentFlow: Flow<Int> =
+        context.generalDataStore.data.map { (it[CONTEXT_TOOL_RESULT_KEEP_RECENT_KEY] ?: 8).coerceIn(0, 100) }
+
+    suspend fun setContextToolResultKeepRecent(count: Int) {
+        context.generalDataStore.edit { it[CONTEXT_TOOL_RESULT_KEEP_RECENT_KEY] = count.coerceIn(0, 100) }
+    }
+
+    suspend fun contextToolResultKeepRecent(): Int = contextToolResultKeepRecentFlow.first()
+
+    // Read all five fields from one DataStore emission: combine of separate maps can expose partial presets.
+    val contextPreferencesFlow: Flow<ContextPreferences> = context.generalDataStore.data.map { prefs ->
+        ContextPreferences(
+            prefs[CONTEXT_TRIM_ROUNDS_KEY] ?: 0,
+            (prefs[SOFT_COMPACTION_THRESHOLD_PERCENT_KEY] ?: DEFAULT_SOFT_COMPACTION_THRESHOLD_PERCENT).coerceIn(1, 100),
+            (prefs[COMPACTION_THRESHOLD_PERCENT_KEY] ?: DEFAULT_COMPACTION_THRESHOLD_PERCENT).coerceIn(1, 100),
+            prefs[CONTEXT_PRESERVE_SUMMARY_KEY] ?: true,
+            (prefs[CONTEXT_TOOL_RESULT_KEEP_RECENT_KEY] ?: 8).coerceIn(0, 100),
+        )
+    }
+
+    suspend fun contextPreferences(): ContextPreferences = contextPreferencesFlow.first()
+
+    suspend fun setContextPreferences(value: ContextPreferences) {
+        context.generalDataStore.edit { prefs ->
+            prefs[CONTEXT_TRIM_ROUNDS_KEY] = value.rounds.coerceIn(0, 100)
+            prefs[SOFT_COMPACTION_THRESHOLD_PERCENT_KEY] = value.soft.coerceIn(1, 100)
+            prefs[COMPACTION_THRESHOLD_PERCENT_KEY] = value.hard.coerceIn(1, 100)
+            prefs[CONTEXT_PRESERVE_SUMMARY_KEY] = value.preserveSummary
+            prefs[CONTEXT_TOOL_RESULT_KEEP_RECENT_KEY] = value.keepTools.coerceIn(0, 100)
+        }
+    }
+
+    suspend fun applyContextPreset(preset: ContextPreset) {
+        preset.preferences?.let { setContextPreferences(it) }
+    }
 
     /** 拉取模型后自动对齐本地列表的开关流；未设置时回退到 true（默认开启）。 */
     val autoRemoveStaleModelsFlow: Flow<Boolean> =

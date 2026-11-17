@@ -93,8 +93,7 @@ internal fun toolGroupKey(first: AgentUIMessage): String = "toolgroup:${first.id
 internal fun AgentUIMessage.rendersActionRow(): Boolean =
     role == MessageRole.ASSISTANT &&
         !isCompactionMarker && !isContextSummary && !isCompactionFailure && !isBackgroundNotification &&
-        !isSamplingLoopStop &&
-        (content.hasVisibleContent() || attachments.isNotEmpty())
+        !isSamplingLoopStop
 
 /**
  * 单条消息（非工具分组）在一次渲染中占据的 item：
@@ -265,7 +264,7 @@ internal fun buildChatItems(
         }
         // 这一截通常结尾就是上一轮的最终回复（窗口从某一轮中间切开）：它照旧常显，
         // 只有它的思考与更早的过程步骤折进折叠头，与完整轮次的呈现一致。
-        val resultId = leading.last().takeIf { it.isResultCandidate() }?.id
+        val resultId = leading.last().takeIf { it.rendersActionRow() }?.id
         // 身份行不在这里补：这一截的轮首助手消息已被窗口切掉，给它挂身份行等于把身份行挂到轮中间。
         val process = buildTurnProcessItems(leading, resultId, groupOverrides, soulHeaderId = null)
         if (process.isNotEmpty()) {
@@ -296,7 +295,7 @@ internal fun buildChatItems(
         val key = turnKeys[turn.userMessage.id]
             ?: turn.messages.firstNotNullOfOrNull { turnKeys[it.id] }
             ?: turn.key
-        val resultId = if (running) null else turn.messages.lastOrNull { it.isResultCandidate() }?.id
+        val resultId = if (running) null else turn.messages.lastOrNull { it.rendersActionRow() }?.id
         val soulHeaderId = turn.messages.firstOrNull {
             it.role == MessageRole.ASSISTANT && !it.isSystemCardInTurn() && it.content.hasVisibleContent()
         }?.id

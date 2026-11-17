@@ -1,5 +1,7 @@
 package com.aharou.feature.agent.domain.container
 
+import android.content.Context
+import dagger.hilt.android.qualifiers.ApplicationContext
 import com.aharou.core.util.FileLogger
 import com.aharou.core.util.shellQuote
 import com.aharou.feature.workspace.domain.remote.RemoteAuth
@@ -42,12 +44,21 @@ private const val TAG = "RemoteSshConnection"
  * [RemoteSftpFileAccess] 串行化（sshj 的 SFTPClient 非线程安全）。
  */
 @Singleton
-class RemoteSshConnection @Inject constructor(
+class RemoteSshConnection internal constructor(
     private val hostKeyStore: SshHostKeyStore,
     private val hostKeyVerifier: SshHostKeyVerifier,
     private val privateKeyStore: SshPrivateKeyStore,
-    private val containerInstaller: ContainerInstaller
+    private val containerInstaller: ContainerInstaller,
+    private val assetUpgrade: BuiltinAssetUpgradeCoordinator? = null,
 ) {
+    @Inject constructor(
+        hostKeyStore: SshHostKeyStore,
+        hostKeyVerifier: SshHostKeyVerifier,
+        privateKeyStore: SshPrivateKeyStore,
+        containerInstaller: ContainerInstaller,
+        @ApplicationContext context: Context,
+    ) : this(hostKeyStore, hostKeyVerifier, privateKeyStore, containerInstaller,
+        BuiltinAssetUpgradeCoordinator.initialize(context))
 
     @Volatile
     private var sshClient: SSHClient? = null
@@ -613,27 +624,16 @@ class RemoteSshConnection @Inject constructor(
      * @param docs 相对 docs/ 的路径（可含子目录，如 guide/terminal.md）→ 文件内容。
      */
     suspend fun uploadDocs(docs: Map<String, ByteArray>, target: BootstrapTarget) {
-        if (docs.isEmpty()) return
+        check(assetUpgrade?.state?.value?.choice != BuiltinAssetUpgradeCoordinator.Choice.PENDING) { "BUILTIN_ASSET_UPGRADE_PENDING" }
+        if (assetUpgrade?.canUpgrade == false) return
+        assetUpgrade?.installIfAllowed()
+        val selected = assetUpgrade?.selectedFiles("docs") ?: docs
+        if (selected.isEmpty()) return
         check(isCurrentBootstrap(target)) { "SSH_CONNECTION_CHANGED" }
-        val destDir = target.home.trimEnd('/') + "/.aharou/docs"
         withContext(Dispatchers.IO) {
-            runCatching {
-                // Complete all replacements before removing obsolete paths; a failed upload must keep old documents.
-                val subDirs = docs.keys.mapNotNull { key ->
-                    key.substringBeforeLast('/', "").takeIf { it.isNotEmpty() }
-                }.distinct()
-                val mkdirArgs = (listOf(destDir) + subDirs.map { "$destDir/$it" }).joinToString(" ") { shellQuote(it) }
-                bootstrapExec(target, "mkdir -p $mkdirArgs")
-                for ((name, content) in docs) {
-                    check(isCurrentBootstrap(target)) { "SSH_CONNECTION_CHANGED" }
-                    val dest = "$destDir/$name"
-                    val tmp = "$dest.aharou-tmp"
-                    bootstrapExec(target, "printf %s ${shellQuote(content.decodeToString())} > ${shellQuote(tmp)} && mv -f ${shellQuote(tmp)} ${shellQuote(dest)}")
-                }
-                val retained = docs.keys.filter { it.endsWith(".md") }.joinToString(" ") { "! -path ${shellQuote("$destDir/$it")}" }
-                bootstrapExec(target, "find ${shellQuote(destDir)} -type f -name '*.md' $retained -delete")
-                FileLogger.i(TAG, "已同步 ${docs.size} 个文档到远程 $destDir")
-            }.getOrThrow()
+            target.client.newSFTPClient().use { client ->
+                remoteBuiltinStore(client, target).deploy("docs", selected)
+            }
         }
     }
 
@@ -651,14 +651,32 @@ class RemoteSshConnection @Inject constructor(
         rootDir: String = ".aharou",
         target: BootstrapTarget
     ) {
-        if (files.isEmpty()) return
+        val managed = rootDir == ".aharou" && destSubdir in setOf("agents", "teams", "skills")
+        if (managed) {
+            check(assetUpgrade?.state?.value?.choice != BuiltinAssetUpgradeCoordinator.Choice.PENDING) { "BUILTIN_ASSET_UPGRADE_PENDING" }
+            if (assetUpgrade?.canUpgrade == false) return
+            assetUpgrade?.installIfAllowed()
+        }
+        val selected = if (assetUpgrade != null && managed) {
+            assetUpgrade.selectedFiles(destSubdir).filterKeys { it in files }
+        } else files
+        if (selected.isEmpty()) return
         check(isCurrentBootstrap(target)) { "SSH_CONNECTION_CHANGED" }
+        if (managed && assetUpgrade != null) {
+            withContext(Dispatchers.IO) {
+                target.client.newSFTPClient().use { client ->
+                    remoteBuiltinStore(client, target).deploy(destSubdir, selected,
+                        historical = assetUpgrade.historicalHashes(destSubdir), preserveUnknown = true)
+                }
+            }
+            return
+        }
         val root = rootDir.trim('/')
         val destDir = target.home.trimEnd('/') + "/" + (if (root.isEmpty()) "" else "$root/") + destSubdir.trim('/')
         withContext(Dispatchers.IO) {
             runCatching {
                 bootstrapExec(target, "mkdir -p ${shellQuote(destDir)}")
-                for ((name, bytes) in files) {
+                for ((name, bytes) in selected) {
                     val dest = "$destDir/$name"
                     // name 可含子目录（如 skills/config-channel/SKILL.md）：先建父目录，
                     // 否则重定向会因目录不存在而失败。
@@ -671,17 +689,36 @@ class RemoteSshConnection @Inject constructor(
                     val temporary = "$dest.aharou-tmp"
                     bootstrapExec(target, "if [ ! -e ${shellQuote(dest)} ]; then printf %s '$b64' | base64 -d > ${shellQuote(temporary)} && mv ${shellQuote(temporary)} ${shellQuote(dest)}$chmod; fi")
                 }
-                FileLogger.i(TAG, "已释放 ${files.size} 个内置文件到远程 $destDir")
+                FileLogger.i(TAG, "已释放 ${selected.size} 个内置文件到远程 $destDir")
             }.getOrThrow()
         }
     }
 
+    private fun remoteBuiltinStore(client: net.schmizz.sshj.sftp.SFTPClient, target: BootstrapTarget) =
+        RemoteBuiltinAssetStore(RemoteBuiltinAssetStore.SftpAccess(client, "${target.home.trimEnd('/')}/.aharou") {
+            check(isCurrentBootstrap(target)) { "SSH_CONNECTION_CHANGED" }
+        }, assetUpgrade?.state?.value?.versionCode ?: com.aharou.BuildConfig.VERSION_CODE)
+
     /** Builtin-only namespace, byte-checked over the pinned SFTP channel; user skills are untouched. */
     suspend fun uploadBuiltinSkillResources(files: Map<String, ByteArray>, target: BootstrapTarget) = withContext(Dispatchers.IO) {
         check(isCurrentBootstrap(target)) { "SSH_CONNECTION_CHANGED" }
+        val retained = assetUpgrade?.selectedFiles("skills")
+        val selected = if (retained == null) files else files.keys.associateWith { name ->
+            retained[name] ?: error("BUILTIN_SKILL_RESOURCES_MISSING")
+        }
+        if (assetUpgrade?.canUpgrade == true) {
+            target.client.newSFTPClient().use { client ->
+                val groups = selected.entries.groupBy { it.key.substringBefore('/') }
+                for ((directory, entries) in groups) {
+                    remoteBuiltinStore(client, target).deploy("builtin-skills/$directory",
+                        entries.associate { it.key.substringAfter('/') to it.value }, requireExact = true)
+                }
+            }
+            return@withContext
+        }
         target.client.newSFTPClient().use { client ->
             check(isCurrentBootstrap(target)) { "SSH_CONNECTION_CHANGED" }
-            for ((name, bytes) in files) {
+            for ((name, bytes) in selected) {
                 require(name.split('/').all { it.isNotBlank() && it != "." && it != ".." })
                 require(!name.startsWith('/'))
                 check(isCurrentBootstrap(target)) { "SSH_CONNECTION_CHANGED" }
@@ -706,6 +743,8 @@ class RemoteSshConnection @Inject constructor(
                     count == bytes.size && actual.copyOf(count).contentEquals(bytes)
                 }
                 if (matches) continue
+                // Pending/declined upgrades may execute existing matching resources, never repair them from a new APK.
+                check(assetUpgrade?.canUpgrade != false) { "BUILTIN_SKILL_RESOURCES_RETAINED" }
                 client.mkdirs(dest.substringBeforeLast('/'))
                 val temporary = "$dest.aharou-${java.util.UUID.randomUUID()}.tmp"
                 try {

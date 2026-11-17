@@ -51,7 +51,8 @@ internal fun MessageActionsBottomSheet(
     /** 从此处新建分支：以该消息（含）之前的历史另起会话。隐身会话不提供，传 null 即隐藏该项。 */
     onForkClick: (() -> Unit)? = null,
     // 让另一个模型复审：有正文的消息才提供，传 null 即隐藏该项。
-    onCrossCheckClick: (() -> Unit)? = null
+    onCrossCheckClick: (() -> Unit)? = null,
+    onContinueClick: (() -> Unit)? = null
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -74,6 +75,11 @@ internal fun MessageActionsBottomSheet(
             )
 
             Spacer(modifier = Modifier.height(Spacing.xs))
+
+            if (onContinueClick != null) {
+                MessageActionItem(icon = FeatherIcons.RefreshCw, title = stringResource(R.string.chat_action_continue),
+                    onClick = { onDismiss(); onContinueClick() })
+            }
 
             // 编辑消息
             MessageActionItem(

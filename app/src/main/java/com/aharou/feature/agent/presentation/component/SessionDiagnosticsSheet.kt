@@ -69,6 +69,7 @@ internal enum class SessionDiagnosticTab(@param:StringRes val title: Int) {
     PLANNING(R.string.project_main_conversation),
     CONVERSATION(R.string.conversation_map_title),
     ACTIVITY(R.string.activity_sheet_title),
+    TREE(R.string.execution_tree_title),
     MEMBERS(R.string.session_diagnostics_members),
 }
 
@@ -106,6 +107,8 @@ internal fun SessionDiagnosticsSheet(
     bodyVisible: Boolean, canLocate: (String) -> Boolean, onJump: (String) -> Boolean,
     onDismiss: () -> Unit,
     projectConversation: (@Composable () -> Unit)? = null,
+    executionHistory: com.aharou.feature.agent.presentation.SessionExecutionHistory =
+        com.aharou.feature.agent.presentation.SessionExecutionHistory(sessionId),
 ) {
     val sections = SessionDiagnosticTab.entries.filter { it != SessionDiagnosticTab.PLANNING || projectConversation != null }
     AdaptiveModalBottomSheet(onDismissRequest = onDismiss) {
@@ -159,6 +162,8 @@ internal fun SessionDiagnosticsSheet(
                                         else -> Box(contentModifier.height(readerHeight)) {
                                             when (section) {
                                                 SessionDiagnosticTab.PLANNING -> projectConversation?.invoke()
+                                                SessionDiagnosticTab.TREE -> ExecutionHistoryTreeSection(sessionId, executionHistory,
+                                                    bodyVisible, canLocate, { id -> onJump(id).also { if (it) onDismiss() } }, contentModifier)
                                                 SessionDiagnosticTab.CONVERSATION -> ConversationMapSheet(sessionId, session, messagesState,
                                                     bodyVisible, canLocate, onJump, onDismiss, embedded = true)
                                                 SessionDiagnosticTab.MEMBERS -> SessionMembersDiagnostics(sessionId, onDismiss)

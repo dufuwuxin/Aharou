@@ -463,6 +463,7 @@ object AgentModule {
         observeTool: ObserveTool,
         browserTool: BrowserTool,
         configTool: ConfigTool,
+        promptEditTool: com.aharou.feature.agent.domain.tool.custom.PromptEditTool,
         vdTool: VdTool,
         a11yTool: A11yTool,
         openAppTool: OpenAppTool,
@@ -508,6 +509,7 @@ object AgentModule {
             register("observe", observeTool)
             register("browser", browserTool)
             register("config", configTool)
+            register("prompt_edit", promptEditTool)
             register("vscreen", vdTool)
             register("a11y", a11yTool)
             register("open_app", openAppTool)

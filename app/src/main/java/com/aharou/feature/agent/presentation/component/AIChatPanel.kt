@@ -393,8 +393,7 @@ fun AIChatPanel(
             val isLastTurn = i == turns.lastIndex
             val turnFinished = !isLastTurn || !isBusy
             if (turnFinished) {
-                val resultMsg = turn.messages.lastOrNull { it.isResultCandidate() && it.rendersActionRow() }
-                    ?: turn.messages.lastOrNull { it.rendersActionRow() }
+                val resultMsg = turn.messages.lastOrNull { it.rendersActionRow() }
                 if (resultMsg != null) {
                     ids += resultMsg.id
                 }
@@ -1770,6 +1769,9 @@ fun AIChatPanel(
                 val copyScope = rememberCoroutineScope()
                 MessageActionsBottomSheet(
                     message = message,
+                    onContinueClick = if (com.aharou.feature.agent.presentation.showContinuationAction(messagesState, currentSessionId,
+                            message.id, isBusy || currentSessionId in activeAgentSessions))
+                        ({ currentSessionId?.let { viewModel.continueExecution(it, message.id) } }) else null,
                     onDismiss = { messageForMenu = null },
                     onEditClick = { editingMessage = message },
                     onRegenerateClick = { viewModel.regenerateMessage(message.id) },
@@ -1789,10 +1791,16 @@ fun AIChatPanel(
                 val conversationMapScope = rememberCoroutineScope()
                 if (showSessionDiagnostics) {
                     val receipts by viewModel.currentSessionReceipts.collectAsStateWithLifecycle()
+                    val treeFlow = remember(diagnosticsSessionId, messagesState.limit) {
+                        diagnosticsSessionId?.let(viewModel::executionHistoryFlow)
+                            ?: kotlinx.coroutines.flow.flowOf(com.aharou.feature.agent.presentation.SessionExecutionHistory(null))
+                    }
+                    val executionHistory by treeFlow.collectAsStateWithLifecycle(
+                        initialValue = com.aharou.feature.agent.presentation.SessionExecutionHistory(diagnosticsSessionId))
                     SessionDiagnosticsSheet(diagnosticsSessionId, currentSession?.takeIf { it.id == diagnosticsSessionId }, messagesState, receipts,
                         sessionContextMetrics(contextUsages[diagnosticsSessionId], if (diagnosticsSessionId == null) 0 else sessionLastInputTokens,
                             activeModelMetadata?.takeIf { diagnosticsSessionId != null }?.let { com.aharou.feature.settings.domain.model.ModelContextPolicy.effectiveInputBudget(it) } ?: 0),
-                        injectedContextText, bodyOverride == null, projectConversation = projectConversation,
+                        injectedContextText, bodyOverride == null, projectConversation = projectConversation, executionHistory = executionHistory,
                     canLocate = { findChatMessageIndex(chatItems, it) >= 0 },
                     onJump = { id ->
                         val index = findChatMessageIndex(chatItems, id)

@@ -67,6 +67,8 @@ internal fun SkillEditorScreen(
     var name by rememberSaveable { mutableStateOf(initial?.name ?: "") }
     var description by rememberSaveable { mutableStateOf(initial?.description ?: "") }
     var instructions by rememberSaveable { mutableStateOf(initial?.instructions ?: "") }
+    var tags by rememberSaveable { mutableStateOf(initial?.tags.orEmpty().joinToString("\n")) }
+    var typeId by rememberSaveable { mutableStateOf(initial?.typeId) }
     var keywordEnabled by rememberSaveable { mutableStateOf(initial?.keywordEnabled ?: false) }
     var keywordInputs by rememberSaveable {
         mutableStateOf(initial?.keywords.orEmpty().let { it + List((2 - it.size).coerceAtLeast(0)) { "" } })
@@ -116,7 +118,9 @@ internal fun SkillEditorScreen(
                                     instructions = instructions.trim(),
                                     requiredTools = initial?.requiredTools ?: emptyList(),
                                     keywordEnabled = keywordEnabled,
-                                    keywords = keywords
+                                    keywords = keywords,
+                                    tags = tags.lines().map { it.trim() }.filter { it.isNotEmpty() }.distinct(),
+                                    typeId = typeId
                                 ),
                                 scope
                             )
@@ -200,6 +204,16 @@ internal fun SkillEditorScreen(
                 }
             }
 
+            SettingsGroupHeader(text = stringResource(R.string.skills_type_label))
+            SettingsGroup {
+                Column(modifier = Modifier.padding(Spacing.lg), verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
+                    AppTextField(value = tags, onValueChange = { tags = it },
+                        label = stringResource(R.string.skills_tags),
+                        placeholder = stringResource(R.string.skills_tags_hint), singleLine = false)
+                    SkillTypeSelector(scope, typeId, { typeId = it })
+                }
+            }
+
             SettingsGroupHeader(text = stringResource(R.string.skills_keyword_editor_title))
             SettingsGroup {
                 Column(
@@ -253,6 +267,7 @@ internal fun SkillEditorScreen(
 
 private fun SkillSaveError.messageRes(): Int = when (this) {
     SkillSaveError.INVALID_NAME -> R.string.skills_editor_error_invalid_name
+    SkillSaveError.UNKNOWN_TYPE -> R.string.skills_editor_error_unknown_type
     SkillSaveError.EMPTY_INSTRUCTIONS -> R.string.skills_editor_error_empty_instructions
     SkillSaveError.NAME_CONFLICT -> R.string.skills_editor_error_name_conflict
     SkillSaveError.BOUND_RENAME -> R.string.skills_editor_error_bound_rename

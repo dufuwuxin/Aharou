@@ -1,11 +1,13 @@
 package com.aharou.feature.agent.domain.skill
 
 import com.aharou.testutil.TestFileAccessProvider
+import com.aharou.feature.settings.presentation.matchesSkillQuery
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.spyk
 import io.mockk.verify
 import java.io.File
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -522,4 +524,69 @@ class SkillRepositoryTest {
             temp.deleteRecursively()
         }
     }
+    @Test
+    fun metadata_savedAndImportedAndExportedWithoutLoss() {
+        val temp = java.nio.file.Files.createTempDirectory("skill-metadata").toFile()
+        try {
+            val existing = File(temp, "editable").apply { mkdirs() }
+            File(existing, "SKILL.md").writeText("---\nname: editable\n---\nold body")
+            val typed = skill("editable").copy(dirPath = existing.path)
+            every { globalSource.listSkills() } returns listOf(typed)
+            val types = mockk<SkillTypeRepository>()
+            every { types.get("general", SkillScope.GLOBAL) } returns SkillType("general", "General", "common", "functions")
+            val repo = SkillRepository(builtinSource, globalSource, projectSource, config, provider, agents, types)
+            val tags = listOf("标签: #1", "quote \" \\ path")
+            val form = SkillForm("editable", "desc", "specialty", tags = tags, typeId = "general")
+            assertEquals(null, repo.save(form, SkillScope.GLOBAL, "editable"))
+            val parsed = SkillParser.parse(provider, existing.path, "editable")!!
+            assertEquals(tags, parsed.tags)
+            assertEquals("general", parsed.typeId)
+            val destination = File(temp, "imported").path
+            val imported = SkillImporter.importMarkdown(provider, destination, emptySet(), File(existing, "SKILL.md").readText(), "imported")
+            assertEquals(listOf("editable"), imported.imported)
+            assertNull(imported.fatal)
+            assertTrue(imported.failures.isEmpty())
+            val importedDir = File(destination, "editable")
+            assertEquals(tags, SkillParser.parse(provider, importedDir.path, "editable")!!.tags)
+            val zip = repo.exportZip("editable", SkillScope.GLOBAL)!!
+            val restoredRoot = File(temp, "restored").path
+            val restoredReport = SkillImporter.importArchive(provider, restoredRoot, emptySet(), zip.inputStream(), "restored")
+            assertEquals(listOf("editable"), restoredReport.imported)
+            assertNull(restoredReport.fatal)
+            assertTrue(restoredReport.failures.isEmpty())
+            val restored = SkillParser.parse(provider, File(restoredRoot, "editable").path, "editable")!!
+            assertEquals(tags, restored.tags)
+            assertEquals("general", restored.typeId)
+        } finally { temp.deleteRecursively() }
+    }
+
+    @Test
+    fun typeGuidance_precedesSpecialtyAndMissingTypeFailsClosed() {
+        val types = mockk<SkillTypeRepository>()
+        val localSkill = skill("typed").copy(typeId = "general", instructions = "specialty")
+        every { projectSource.listSkills() } returns listOf(localSkill)
+        every { types.get("general", SkillScope.PROJECT) } returns SkillType("general", "General", "common semantics", "common functions")
+        val repo = SkillRepository(builtinSource, globalSource, projectSource, config, provider, agents, types)
+        assertEquals("common semantics\n\ncommon functions\n\nspecialty", repo.loadInstructions("typed"))
+        assertEquals("common semantics\n\ncommon functions\n\nspecialty", repo.loadInstructionsForAgent("typed", null, "", true))
+        every { types.get("general", SkillScope.PROJECT) } returns null
+        assertNull(repo.loadInstructions("typed"))
+        assertEquals(SkillSaveError.UNKNOWN_TYPE, repo.save(SkillForm("new", "", "body", typeId = "general"), SkillScope.PROJECT))
+        every { config.disabledNames() } returns setOf("typed")
+        assertNull(repo.loadInstructionsForAgent("typed", null, "", true))
+    }
+
+    @Test
+    fun exactTagAndTypeSearch_keepsKeywordSearchIndependent() {
+        val item = com.aharou.feature.settings.presentation.SkillUiEntry("report", "description", SkillScope.GLOBAL,
+            disabled = false, instructions = "body", keywordEnabled = true, keywords = listOf("Kotlin"), tags = listOf("tag one"), typeId = "general", typeName = "General type")
+        with(item) {
+            assertTrue(matchesSkillQuery("tag:\"tag one\" type:general"))
+            assertTrue(matchesSkillQuery("type:\"General type\" Kotlin"))
+            assertFalse(matchesSkillQuery("tag:tag"))
+            assertFalse(matchesSkillQuery("type:gen"))
+            assertFalse(matchesSkillQuery("tag:Kotlin"))
+        }
+    }
+
 }

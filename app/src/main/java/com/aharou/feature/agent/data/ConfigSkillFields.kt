@@ -3,6 +3,7 @@ package com.aharou.feature.agent.data
 import com.aharou.core.config.ConfigCollection
 import com.aharou.core.config.ConfigError
 import com.aharou.core.config.ConfigField
+import com.aharou.core.config.ConfigRisk
 import com.aharou.core.config.ConfigRegistry
 import com.aharou.core.config.ConfigSchema
 import com.aharou.core.config.ConfigValue
@@ -10,6 +11,9 @@ import com.aharou.core.config.fields.ClosureField
 import com.aharou.feature.agent.domain.skill.SkillConfigRepository
 import com.aharou.feature.agent.domain.skill.SkillRepository
 import com.aharou.feature.agent.domain.skill.SkillScope
+import com.aharou.feature.agent.domain.skill.SkillForm
+import com.aharou.feature.agent.domain.skill.SkillType
+import com.aharou.feature.agent.domain.skill.SkillTypeRepository
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -26,7 +30,15 @@ import javax.inject.Singleton
 class ConfigSkillFields @Inject constructor(
     private val skillRepository: SkillRepository,
     private val skillConfig: SkillConfigRepository,
+    private val skillTypes: SkillTypeRepository = skillRepository.skillTypes,
 ) {
+
+    private var sessionWorkspace: String? = null
+    fun forWorkspace(root: String): ConfigSkillFields = ConfigSkillFields(skillRepository, skillConfig, skillTypes)
+        .also { it.sessionWorkspace = root }
+    private fun checkWorkspace() {
+        sessionWorkspace?.let { if (it != skillTypes.workspaceKey().orEmpty()) throw ConfigError.InvalidValue("Workspace changed; reopen this session's project") }
+    }
 
     fun registerInto(registry: ConfigRegistry) {
         registry.register(com.aharou.core.config.fields.ReadOnlyField(
@@ -35,15 +47,87 @@ class ConfigSkillFields @Inject constructor(
             valueSchema = ConfigSchema.Bool, risk = com.aharou.core.config.ConfigRisk.SENSITIVE,
             reader = { ConfigValue.Bool(com.aharou.core.config.BuiltinSkillEditCapability.enabled.value) }))
         registry.register(SkillCollection())
+        registry.register(TypeCollection(SkillScope.GLOBAL, "skill.types"))
+        registry.register(TypeCollection(SkillScope.PROJECT, "skill.project_types"))
     }
 
-    private fun skillNames(): List<String> =
-        skillRepository.listAllSkills()
+    private fun skillNames(): List<String> {
+        checkWorkspace()
+        return skillRepository.listAllSkills()
             .filter { it.scope != SkillScope.BUILTIN || com.aharou.core.config.BuiltinSkillEditCapability.enabled.value }
             .map { it.skill.name }
+    }
 
     private fun skill(name: String) = skillRepository.listAllSkills().firstOrNull { it.skill.name == name }
         ?: throw ConfigError.InvalidValue("Unknown skill")
+
+    private fun metadataFields(id: String, base: String): List<ConfigField> {
+        fun update(transform: (SkillForm) -> SkillForm) {
+            val entry = skill(id)
+            val s = entry.skill
+            val form = SkillForm(s.name, s.description, s.instructions, s.requiredTools, s.keywordEnabled, s.keywords, s.tags, s.typeId)
+            skillRepository.save(transform(form), entry.scope, s.name)?.let {
+                throw ConfigError.InvalidValue("Skill update rejected: $it")
+            }
+        }
+        return listOf(
+            ClosureField(path = "$base.$id.tags", displayName = "tags", description = "Exact-match discovery tags; independent from trigger keywords.",
+                valueSchema = ConfigSchema.Array(ConfigSchema.Str()),
+                reader = { ConfigValue.Arr(skill(id).skill.tags.map { ConfigValue.Str(it) }) },
+                writer = { value -> checkWorkspace(); update { it.copy(tags = strings(value)) } }),
+            ClosureField(path = "$base.$id.type_id", displayName = "type_id", description = "Existing type id; empty string removes classification.", risk = ConfigRisk.SENSITIVE,
+                valueSchema = ConfigSchema.Str(),
+                reader = { ConfigValue.Str(skill(id).skill.typeId.orEmpty()) },
+                writer = { value ->
+                    checkWorkspace()
+                    val type = (value as? ConfigValue.Str)?.value ?: throw ConfigError.TypeMismatch("string")
+                    update { it.copy(typeId = type.takeIf { id -> id.isNotBlank() }) }
+                })
+        )
+    }
+
+    private fun strings(value: ConfigValue): List<String> = (value as? ConfigValue.Arr)?.value?.map {
+        (it as? ConfigValue.Str)?.value ?: throw ConfigError.TypeMismatch("string")
+    } ?: throw ConfigError.TypeMismatch("array")
+
+    private inner class TypeCollection(private val scope: SkillScope, override val basePath: String) : ConfigCollection {
+        override val displayName = "Skill types"
+        override val description = "Reusable type guidance in this scope. Project types override matching global ids."
+        override val removable = false
+        override fun childIds(): List<String> { checkWorkspace(); return skillTypes.listLocal(scope).map { it.id } }
+        override fun remove(id: String) { throw ConfigError.InvalidValue("Type removal is not supported; references must remain valid") }
+        override fun add(payload: ConfigValue): String {
+            checkWorkspace()
+            val expectedWorkspace = sessionWorkspace ?: skillTypes.workspaceKey()
+            val fields = (payload as? ConfigValue.Obj)?.value ?: throw ConfigError.TypeMismatch("object")
+            fun text(key: String): String = (fields[key] as? ConfigValue.Str)?.value ?: throw ConfigError.InvalidValue("Missing $key")
+            val id = text("id")
+            if (id in childIds()) throw ConfigError.InvalidValue("Type already exists; edit its fields")
+            skillTypes.save(SkillType(id, text("name"), text("semantics"), text("functions"), fields["tags"]?.let(::strings).orEmpty()), scope, expectedWorkspace)
+            return id
+        }
+        override fun fields(forId: String): List<ConfigField> {
+            if (forId !in childIds()) return emptyList()
+            val expectedWorkspace = skillTypes.workspaceKey()
+            fun current(): SkillType {
+                checkWorkspace()
+                if (scope == SkillScope.PROJECT && expectedWorkspace != skillTypes.workspaceKey()) throw ConfigError.InvalidValue("Workspace changed; read type again")
+                return skillTypes.listLocal(scope).firstOrNull { it.id == forId } ?: throw ConfigError.InvalidValue("Unknown type")
+            }
+            fun text(key: String, read: (SkillType) -> String, change: (SkillType, String) -> SkillType) = ClosureField(
+                path = "$basePath.$forId.$key", displayName = key, description = "Reusable skill type $key", valueSchema = ConfigSchema.Str(), risk = ConfigRisk.SENSITIVE,
+                reader = { ConfigValue.Str(read(current())) }, writer = { value ->
+                    val string = (value as? ConfigValue.Str)?.value ?: throw ConfigError.TypeMismatch("string")
+                    skillTypes.save(change(current(), string), scope, expectedWorkspace)
+                })
+            return listOf(text("name", { it.name }, { t, v -> t.copy(name = v) }),
+                text("semantics", { it.semantics }, { t, v -> t.copy(semantics = v) }),
+                text("functions", { it.functions }, { t, v -> t.copy(functions = v) }),
+                ClosureField(path = "$basePath.$forId.tags", displayName = "tags", description = "Type tags", valueSchema = ConfigSchema.Array(ConfigSchema.Str()),
+                    reader = { ConfigValue.Arr(current().tags.map { ConfigValue.Str(it) }) },
+                    writer = { skillTypes.save(current().copy(tags = strings(it)), scope, expectedWorkspace) }))
+        }
+    }
 
     private inner class SkillCollection : ConfigCollection {
         override val basePath = "skill.skills"
@@ -62,15 +146,16 @@ class ConfigSkillFields @Inject constructor(
                 description = "Builtin edits require user permission and save a global override.",
                 valueSchema = ConfigSchema.Str(), risk = com.aharou.core.config.ConfigRisk.SENSITIVE,
                 reader = { ConfigValue.Str(skill(forId).skill.instructions) }, writer = { value ->
+                    checkWorkspace()
                     val entry = skill(forId); val s = entry.skill
                     val text = (value as? ConfigValue.Str)?.value ?: throw ConfigError.TypeMismatch("string")
-                    skillRepository.save(com.aharou.feature.agent.domain.skill.SkillForm(s.name, s.description, text, s.requiredTools, s.keywordEnabled, s.keywords),
+                    skillRepository.save(com.aharou.feature.agent.domain.skill.SkillForm(s.name, s.description, text, s.requiredTools, s.keywordEnabled, s.keywords, s.tags, s.typeId),
                         entry.scope, s.name)?.let { throw ConfigError.PermissionDenied("Skill update rejected: $it") }
                 })
-            if (skill(forId).scope == SkillScope.BUILTIN) return listOf(content)
+            if (skill(forId).scope == SkillScope.BUILTIN) return listOf(content) + metadataFields(forId, basePath)
             val editableContent = if (skillRepository.isBuiltinName(forId) && !com.aharou.core.config.BuiltinSkillEditCapability.enabled.value)
                 emptyList() else listOf(content)
-            return editableContent + listOf(
+            return editableContent + metadataFields(forId, basePath) + listOf(
                 ClosureField(
                     path = "$basePath.$forId.keyword_enabled",
                     displayName = "关键词公共模式",

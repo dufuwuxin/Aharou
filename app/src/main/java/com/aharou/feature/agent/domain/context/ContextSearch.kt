@@ -5,13 +5,28 @@ import java.util.Locale
 object ContextSearch {
     private val whitespace = Regex("\\s+")
 
+    private val queryToken = Regex("""tag:"[^"]*"|"[^"]*"|\S+""", RegexOption.IGNORE_CASE)
+
+    fun tagQuery(query: String): Pair<List<String>, String> {
+        val tokens = queryToken.findAll(query).map { it.value }.toList()
+        val tags = tokens.filter { it.startsWith("tag:", true) }
+            .map { it.substring(4).removeSurrounding("\"").lowercase(Locale.ROOT) }
+        return tags to tokens.filterNot { it.startsWith("tag:", true) }.joinToString(" ")
+    }
+
+    fun matchesTags(tags: List<String>, required: List<String>): Boolean = required.all { requested ->
+        tags.any { it.lowercase(Locale.ROOT) == requested }
+    }
+
     fun explain(entry: ContextEntry): String = entry.worldbook.explanation()
 
     fun search(entries: List<ContextEntry>, query: String, includeSource: Boolean = false): List<ContextEntry> {
-        val normalized = query.trim().lowercase(Locale.ROOT)
+        val (requiredTags, text) = tagQuery(query)
+        val candidates = if (requiredTags.isEmpty()) entries else entries.filter { matchesTags(it.worldbook.tags, requiredTags) }
+        val normalized = text.trim().lowercase(Locale.ROOT)
         val terms = normalized.split(whitespace).filter(String::isNotBlank).distinct()
-        if (terms.isEmpty()) return entries
-        return entries.mapNotNull { entry ->
+        if (terms.isEmpty()) return candidates
+        return candidates.mapNotNull { entry ->
             val title = entry.title.lowercase(Locale.ROOT)
             val keywords = entry.keywords.map { it.lowercase(Locale.ROOT) }
             val description = entry.description.lowercase(Locale.ROOT)

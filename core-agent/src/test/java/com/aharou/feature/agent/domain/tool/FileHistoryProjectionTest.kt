@@ -7,6 +7,19 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class FileHistoryProjectionTest {
+    @Test fun indexCoversReadsPendingAndOldNonFileCallsWithoutRawContent() {
+        val messages = listOf(AgentMessage.UserMessage(id = "u", content = "secret body"),
+            AgentMessage.AssistantMessage(id = "a", content = "", toolCalls = listOf(
+                ToolCall("pending", "readFile", mapOf("path" to JsonPrimitive("/root/a.kt"))),
+                ToolCall("command", "Bash", mapOf("command" to JsonPrimitive("secret command"))))))
+        val index = projectFileHistory(messages).index
+        assertTrue(index.contains("pending"))
+        assertTrue(index.contains("command"))
+        assertTrue(index.contains("user"))
+        assertFalse(index.contains("secret body"))
+        assertFalse(index.contains("secret command"))
+    }
+
     private fun pair(id: String, result: String, image: Boolean = false) = listOf(
         AgentMessage.AssistantMessage(content = "", toolCalls = listOf(ToolCall(id, "editFile", mapOf("path" to JsonPrimitive("src/A.kt"))))),
         AgentMessage.ToolResultMessage(id = id, toolName = "editFile", result = result,

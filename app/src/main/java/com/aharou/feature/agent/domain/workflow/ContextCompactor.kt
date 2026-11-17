@@ -308,16 +308,15 @@ class ContextCompactor @Inject constructor(
         systemPrompt: String = "",
         tools: List<AgentTool> = emptyList(),
         currentInputTokens: Int = 0,
+        settingsSnapshot: com.aharou.feature.settings.data.repository.ContextPreferences? = null,
         onEvent: suspend (AgentEvent) -> Unit = {}
     ): CompactionResult {
-        // 组装、token 估算、分块切分都是纯 CPU 活，历史长时在主线程上跑会明显掉帧；整段挑到 Default。
-        // 事件回调要放回调用方原本的上下文（去掉 Job 重建），否则 CompactionFinished 之类的
-        // UI 更新会落到别的作用域里。
+        // CPU 规划移到后台，但事件回到调用方上下文。
         val eventContext = currentCoroutineContext().minusKey(Job)
         return withContext(backgroundDispatcher) {
             compactOnBackground(
                 messages, aiProvider, sessionId, force, windowProvider, systemPrompt, tools,
-                currentInputTokens
+                currentInputTokens, settingsSnapshot
             ) { event -> withContext(eventContext) { onEvent(event) } }
         }
     }
@@ -332,6 +331,7 @@ class ContextCompactor @Inject constructor(
         systemPrompt: String,
         tools: List<AgentTool>,
         currentInputTokens: Int,
+        settingsSnapshot: com.aharou.feature.settings.data.repository.ContextPreferences?,
         onEvent: suspend (AgentEvent) -> Unit
     ): CompactionResult {
         val unchanged = CompactionResult(messages, compacted = false)
@@ -345,12 +345,12 @@ class ContextCompactor @Inject constructor(
                 val inputBudget = ModelContextPolicy.effectiveInputBudget(metadata)
                 // 估算必须按「实际发出去的投影」算：送模型前老的截图早被裁掉了，拿原始历史
                 // 里每张 4096 的图去估，会把压缩提前触发、把本来装得下的历史判成超预算。
-                // 视觉能力取 windowModel（消息真正发往的模型），不是压缩专用模型。
                 val sendsImages = metadata.supportsVision
                 val imageProjected = projectImagesForEstimate(messages, sendsImages)
                 val estimatedTokens = CompactionText.estimateRequest(systemPrompt, tools, imageProjected)
                 val currentTokens = currentInputTokens.takeIf { it > 0 } ?: estimatedTokens
-                val limits = ContextWatermarks.from(inputBudget, generalSettingsRepository.softCompactionThresholdPercent(), generalSettingsRepository.compactionThresholdPercent())
+                val preferences = settingsSnapshot ?: generalSettingsRepository.contextPreferences()
+                val limits = ContextWatermarks.from(inputBudget, preferences.soft, preferences.hard)
                 val threshold = limits.maxTokens
                 // 系统提示与工具定义压不掉，必须先扣掉再算目标：不扣的话小窗口模型
                 // （或窗口元数据落到兜底值时）目标会被它们吃满，摘要写出来照样过不了校验。

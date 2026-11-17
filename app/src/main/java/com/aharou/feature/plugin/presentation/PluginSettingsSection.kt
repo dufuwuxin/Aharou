@@ -57,7 +57,10 @@ internal fun PluginSettingsSection(
     viewModel: PluginViewModel = hiltViewModel(),
     marketViewModel: ExtensionsViewModel = hiltViewModel(),
     operitViewModel: OperitMarketViewModel = hiltViewModel(),
+    promptViewModel: PluginPromptViewModel = hiltViewModel(),
 ) {
+    val promptDraft by promptViewModel.draft.collectAsStateWithLifecycle()
+    promptDraft?.let { PluginPromptEditor(it, promptViewModel::close, promptViewModel::save) }
     val pluginContext = LocalContext.current
     val plugins by viewModel.plugins.collectAsStateWithLifecycle()
     val hostView by viewModel.hostView.collectAsStateWithLifecycle()
@@ -179,6 +182,7 @@ internal fun PluginSettingsSection(
                         onUninstall = { runIfIdle { pendingUninstall = plugin } },
                         onCompile = { runIfIdle { viewModel.compile(plugin.manifest.id) } },
                         onOpen = { runIfIdle { viewModel.openHostView(plugin.manifest.id, pluginContext) } },
+                        onEditInjection = { runIfIdle { promptViewModel.open(plugin.manifest.id) } },
                         onEnabledChange = { enabled -> runIfIdle { viewModel.setEnabled(plugin.manifest.id, enabled) } }
                     )
                 }
@@ -218,6 +222,7 @@ private fun PluginCard(
     onCompile: () -> Unit,
     onOpen: () -> Unit,
     onEnabledChange: (Boolean) -> Unit,
+    onEditInjection: () -> Unit,
 ) {
     val manifest = plugin.manifest
     SettingsGroup {
@@ -303,6 +308,7 @@ private fun PluginCard(
                 canCompile = manifest.hostRuntime.compileCommand.isNotBlank(),
                 loaded = plugin.status == PluginStatus.RUNNING,
                 onEnabledChange = onEnabledChange, onCompile = onCompile, onOpen = onOpen,
+                onEditInjection = onEditInjection,
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (busy) {

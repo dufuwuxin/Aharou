@@ -164,6 +164,10 @@ internal fun ContextEntryCard(entry: ContextEntry, query: String = "", onClick: 
             }
             Text(stringResource(R.string.context_entry_metadata, stringResource(entry.scope.label()), stringResource(entry.kind.label())),
                 style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (entry.worldbook.tags.isNotEmpty()) Text(
+                stringResource(R.string.asset_tags_summary, entry.worldbook.tags.joinToString(" · ")),
+                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary,
+                maxLines = 2, overflow = TextOverflow.Ellipsis)
             if (query.isNotBlank()) Text(stringResource(R.string.context_search_location,
                 stringResource(entry.category.label()), entry.folder.ifEmpty { stringResource(R.string.context_folder_root_title) }, entry.sourceLabel),
                 style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

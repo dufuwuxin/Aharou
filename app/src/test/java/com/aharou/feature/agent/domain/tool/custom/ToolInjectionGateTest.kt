@@ -217,6 +217,22 @@ class ToolInjectionGateTest {
     }
 
     @Test
+    fun pluginGuidanceOnlyAppendsToItsNamespaceAndKeepsSchemaDescription() {
+        val prefix = ToolPromptMetadata.pluginKey("owner.plugin")
+        val tool = FakeTool(prefix + "lookup", description = "original", schemaDescription = "original")
+        val other = FakeTool(ToolPromptMetadata.pluginKey("other.plugin") + "lookup", description = "other")
+        val snapshot = ToolSettingsStore.Snapshot(overrides = mapOf(
+            prefix to ToolOverride(description = "common guidance"),
+            tool.name to ToolOverride(schemaJson = """{"type":"object","description":"schema wording"}""")))
+        val visible = gate.visible(listOf(tool, other), "", snapshot)
+        assertEquals("schema wording\n\ncommon guidance", visible[0].description)
+        assertEquals("schema wording\n\ncommon guidance", visible[0].toJsonSchema()["description"])
+        assertEquals("other", visible[1].description)
+        assertEquals(tool.permissionPolicy, visible[0].permissionPolicy)
+        assertEquals(tool.parameters, visible[0].parameters)
+    }
+
+    @Test
     fun noSettings_keepsEverything() {
         assertEquals(
             listOf("readFile", "Bash"),

@@ -41,4 +41,17 @@ class BuiltinSkillResourceDeployerTest {
         try { deployer.ensure("security-audit", "/w") } catch (_: IllegalStateException) { failed = true }
         assertTrue(failed)
     }
+    @Test fun missingRetainedResourcesDoNotConnectOrFallBackToNewResources() = runBlocking {
+        every { profiles.forWorkspace("/w") } returns profile
+        every { source.resourceFiles("retained-skill") } returns emptyMap()
+        try {
+            deployer.ensure("retained-skill", "/w")
+            fail("missing previous resources must be explicit")
+        } catch (expected: IllegalStateException) {
+            assertEquals("BUILTIN_SKILL_RESOURCES_MISSING", expected.message)
+        }
+        coVerify(exactly = 0) { connection.connectTarget(any()) }
+        coVerify(exactly = 0) { connection.uploadBuiltinSkillResources(any(), any()) }
+    }
+
 }

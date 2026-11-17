@@ -211,6 +211,7 @@ class AIAgentViewModel @Inject constructor(
 ) : ViewModel(), SlashCommandContext {
 
     private val sessionJobs = mutableMapOf<String, Job>()
+    private val continuationGate = ContinuationGate()
     private val stoppingSessions = mutableMapOf<String, kotlinx.coroutines.CompletableDeferred<Unit>>()
 
     /** 记忆兑现节流：每个会话上次自动整理的时间戳，10 分钟内不重复跑。 */
@@ -952,6 +953,16 @@ class AIAgentViewModel @Inject constructor(
      * 使 UI 能区分「切换/冷启动加载中」与「空会话」——避免先闪 Welcome 或上一个会话的消息再突然刷新。
      * 过滤掉「纯工具调用」的空助手行（content 为空、仅用于回放配对，不应显示为气泡）。
      */
+    internal fun executionHistoryFlow(sessionId: String): kotlinx.coroutines.flow.Flow<SessionExecutionHistory> {
+        if (sessionId != _currentSessionId.value) return flowOf(SessionExecutionHistory(sessionId))
+        val limit = _messageLimit.value[sessionId] ?: defaultLimit
+        return messagePersistenceUseCase.messagesFlow(sessionId, limit).map { rows ->
+            val restored = messagePersistenceUseCase.restoreAll(rows)
+            if (sessionId != _currentSessionId.value) SessionExecutionHistory(sessionId)
+            else projectSessionExecutionHistory(sessionId, restored, rows.size >= limit)
+        }.flowOn(Dispatchers.Default)
+    }
+
     val messagesState: StateFlow<ChatMessagesState> = combine(
         _currentSessionId,
         _messageLimit,
@@ -960,11 +971,13 @@ class AIAgentViewModel @Inject constructor(
         .flatMapLatest { (id, limit, selections) ->
             if (id == null) flowOf(ChatMessagesState(null, emptyList(), loaded = false))
             else messagePersistenceUseCase.messagesFlow(id, limit).map { list ->
+                val restored = messagePersistenceUseCase.restoreAll(list)
+                val latest = latestContinuationMessageId(restored.map { it.toUIMessage() })
                 ChatMessagesState(
                     sessionId = id,
                     messages = applyVariantSelection(
-                        messagePersistenceUseCase.restoreAll(list).filterNot {
-                            it.role == MessageRole.ASSISTANT.name &&
+                        restored.filterNot {
+                            it.id != latest && it.role == MessageRole.ASSISTANT.name &&
                                 !it.content.hasVisibleContent() &&
                                 it.reasoning.isNullOrEmpty()
                         },
@@ -1986,7 +1999,8 @@ class AIAgentViewModel @Inject constructor(
         skipCommandDispatch: Boolean = false,
         /** /init 等场景：调用方已先落过命令文本，这轮不再落用户消息，避免落出两条。 */
         persistUserMessage: Boolean = true,
-        executionTurnId: String = UUID.randomUUID().toString()
+        executionTurnId: String = UUID.randomUUID().toString(),
+        continuationTargetMessageId: String? = null
     ): Job = viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
         val sessionId = targetSessionId ?: ensureSession()
         if (sessionId.isBlank()) {
@@ -2002,6 +2016,7 @@ class AIAgentViewModel @Inject constructor(
                 stoppingSessions[sessionId]?.await()
                 val previousJob = sessionJobs[sessionId]
                 if (previousJob == null || previousJob === currentJob || previousJob.isCompleted) break
+                if (continuationTargetMessageId != null) return@launch
                 previousJob.join()
             }
             if (!skipCommandDispatch && request.startsWith("/")) {
@@ -2012,6 +2027,11 @@ class AIAgentViewModel @Inject constructor(
                     }); return@launch }
                     null -> Unit
                 }
+            }
+            if (continuationTargetMessageId != null) {
+                val latest = latestContinuationMessageId(agentMessageDao.getMessagesBySessionOnce(sessionId).map { it.toUIMessage() })
+                if (!continuationAllowed(sessionId, _currentSessionId.value, continuationTargetMessageId, latest,
+                        continuationBusy(sessionId))) return@launch
             }
             projectExecution.begin(sessionId, executionTurnId)
             sessionJobs[sessionId] = currentJob
@@ -2966,6 +2986,19 @@ class AIAgentViewModel @Inject constructor(
      *
      * 注意删除从用户消息自身开始：重跑时 runner 会重新落一条同样的用户消息，只删「其后」会多出气泡。
      */
+    private fun continuationBusy(sessionId: String): Boolean = sessionJobs[sessionId]?.isActive == true ||
+        sessionId in stoppingSessions || sessionId in _activeAgentSessions.value || sessionId in _runningCommandSessions.value ||
+        _agentStates.value[sessionId].let { it is AgentUIState.Loading || it is AgentUIState.Streaming }
+
+    fun continueExecution(sessionId: String, messageId: String) = viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
+        continuationGate.run(sessionId, messageId, { _currentSessionId.value }, { continuationBusy(sessionId) },
+            latest = { latestContinuationMessageId(agentMessageDao.getMessagesBySessionOnce(sessionId).map { it.toUIMessage() }) }) {
+            executeAgentRequestStream(request = RESUMED_TURN_PROMPT, projectRoot = workspaceOf(sessionId),
+                targetSessionId = sessionId, isAutoTrigger = true, persistUserMessage = false, skipTitleUpdate = true,
+                continuationTargetMessageId = messageId).join()
+        }
+    }
+
     fun retryLastFailedRequest() = viewModelScope.launch {
         val sessionId = _currentSessionId.value ?: return@launch
         val userMessage = lastUserInputMessage(sessionId) ?: return@launch

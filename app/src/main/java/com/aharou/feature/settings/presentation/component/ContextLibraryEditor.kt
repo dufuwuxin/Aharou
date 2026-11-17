@@ -67,10 +67,11 @@ internal fun ContextLibraryEditor(
     var confirmDelete by rememberSaveable(editorKey) { mutableStateOf(false) }
     var confirmBack by rememberSaveable(editorKey) { mutableStateOf(false) }
     val worldbook = remember(draft.worldbookJson) { runCatching { WorldbookRules.fromJson(draft.worldbookJson) }.getOrNull() }
+    var tagText by rememberSaveable(editorKey) { mutableStateOf(worldbook?.tags.orEmpty().joinToString(", ")) }
     if (showRules && worldbook != null) WorldbookStructuredEditor(
         worldbook, enabled = !state.writing,
         onDismiss = { showRules = false },
-        onApply = { draft = draft.copy(worldbookJson = it.toJson()); showRules = false },
+        onApply = { draft = draft.copy(worldbookJson = it.toJson()); tagText = it.tags.joinToString(", "); showRules = false },
     )
     val dirty = draft != original
     val back = { if (!state.writing) { if (dirty) confirmBack = true else onBack() } }
@@ -113,6 +114,14 @@ internal fun ContextLibraryEditor(
             AppTextField(value = draft.description, onValueChange = { draft = draft.copy(description = it) },
                 label = stringResource(R.string.context_field_description), enabled = !state.writing)
         }
+        if (worldbook != null) key("tags") {
+            AppTextField(value = tagText, onValueChange = { text ->
+                tagText = text
+                draft = draft.copy(worldbookJson = worldbook.copy(tags =
+                    com.aharou.feature.agent.domain.skill.SkillParser.parseKeywordInput(text)).toJson())
+            }, label = stringResource(R.string.asset_classification_tags),
+                supportingText = { Text(stringResource(R.string.asset_tags_help)) }, enabled = !state.writing)
+        }
         key("content") {
             AppTextField(value = draft.content, onValueChange = { draft = draft.copy(content = it) }, label = stringResource(R.string.context_field_content),
                 singleLine = false, minLines = 5, enabled = !state.writing)
@@ -131,7 +140,10 @@ internal fun ContextLibraryEditor(
                 }
                 if (showAdvanced || worldbook == null) {
                     if (worldbook == null) ContextNotice(stringResource(R.string.context_worldbook_recover), error = true)
-                    AppTextField(value = draft.worldbookJson, onValueChange = { draft = draft.copy(worldbookJson = it) },
+                    AppTextField(value = draft.worldbookJson, onValueChange = { text ->
+                        draft = draft.copy(worldbookJson = text)
+                        runCatching { WorldbookRules.fromJson(text) }.getOrNull()?.let { tagText = it.tags.joinToString(", ") }
+                    },
                         label = stringResource(R.string.context_worldbook_field), singleLine = false, minLines = 4, enabled = !state.writing)
                     TextButton(enabled = !state.writing && worldbook != null, onClick = {
                         worldbook?.let { draft = draft.copy(worldbookJson = it.toJson()) }

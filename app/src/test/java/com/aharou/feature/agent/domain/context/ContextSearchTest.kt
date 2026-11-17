@@ -13,6 +13,15 @@ class ContextSearchTest {
         ContextLoad.SEARCH, ContextOrigin.MEMORY, "source-$id", keywords = keywords,
     )
 
+    @Test fun explicitTagsAreExactAndCombinedWithText() {
+        val exact = entry("exact", title = "Kotlin").copy(worldbook = WorldbookRules(tags = listOf("Android", "API Design")))
+        val partial = entry("partial", title = "Android Kotlin").copy(worldbook = WorldbookRules(tags = listOf("AndroidX")))
+        assertEquals(listOf(exact), ContextSearch.search(listOf(partial, exact), "tag:android"))
+        assertEquals(listOf(exact), ContextSearch.search(listOf(exact), "tag:ANDROID tag:\"API Design\" kotlin"))
+        assertTrue(ContextSearch.search(listOf(exact), "tag:missing kotlin").isEmpty())
+        assertTrue(ContextSearch.search(listOf(exact), "tag: kotlin").isEmpty())
+    }
+
     @Test fun exactTitleThenKeywordThenSummaryThenBody() {
         val body = entry("body", content = "arm64 ".repeat(100))
         val summary = entry("summary", description = "Use arm64")

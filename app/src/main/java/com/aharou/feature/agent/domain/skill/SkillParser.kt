@@ -67,9 +67,14 @@ object SkillParser {
             instructions = body.trim(),
             keywordEnabled = frontmatter["keyword_enabled"] == true,
             keywords = (frontmatter["keywords"] as? List<*>)?.filterIsInstance<String>()
-                ?.map { it.trim() }?.filter { it.isNotEmpty() }?.distinct() ?: emptyList()
+                ?.map { it.trim() }?.filter { it.isNotEmpty() }?.distinct() ?: emptyList(),
+            tags = (frontmatter["tags"] as? List<*>)?.filterIsInstance<String>()
+                ?.map { it.trim() }?.filter { it.isNotEmpty() }?.distinct() ?: emptyList(),
+            typeId = (frontmatter["type_id"] as? String)?.trim()?.takeIf { it.isNotEmpty() }
         )
     }
+
+    private fun quoteMetadata(value: String): String = kotlinx.serialization.json.JsonPrimitive(value).toString()
 
     /** 按提示词语言挑描述：中文优先 `description_zh`，其它语言优先 `description_en`，都缺再退通用字段。 */
     private fun langDescription(frontmatter: Map<String, Any>, lang: String?): String {
@@ -97,7 +102,9 @@ object SkillParser {
         requiredTools: List<String>,
         instructions: String,
         keywordEnabled: Boolean = false,
-        keywords: List<String> = emptyList()
+        keywords: List<String> = emptyList(),
+        tags: List<String> = emptyList(),
+        typeId: String? = null
     ): String = buildString {
         appendLine("---")
         appendLine("name: ${Frontmatter.quote(name)}")
@@ -107,6 +114,8 @@ object SkillParser {
             appendLine("keyword_enabled: $keywordEnabled")
             appendLine("keywords: [${keywords.joinToString(", ") { Frontmatter.quote(it) }}]")
         }
+        if (tags.isNotEmpty()) appendLine("tags: [${tags.joinToString(", ") { quoteMetadata(it) }}]")
+        typeId?.takeIf { it.isNotBlank() }?.let { appendLine("type_id: ${quoteMetadata(it)}") }
         appendLine("---")
         appendLine(instructions.trim())
     }

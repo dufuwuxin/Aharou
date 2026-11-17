@@ -56,24 +56,15 @@ internal fun GeneralSettingsSection(
     onSetMaxNetworkRetries: (Int) -> Unit,
     enterToSend: Boolean,
     onToggleEnterToSend: (Boolean) -> Unit,
-    compactionThresholdPercent: Int,
-    onSetCompactionThresholdPercent: (Int) -> Unit,
-    softCompactionThresholdPercent: Int,
-    onSetSoftCompactionThresholdPercent: (Int) -> Unit,
     sendFileMaxSizeMb: Int,
     onSetSendFileMaxSizeMb: (Int) -> Unit,
     deleteExternalWorkspaceSessions: Boolean,
     onToggleDeleteExternalWorkspaceSessions: (Boolean) -> Unit,
-    contextTrimRounds: Int,
-    onSetContextTrimRounds: (Int) -> Unit
 ) {
     var showStartupSessionSheet by remember { mutableStateOf(false) }
     var editingFirstByteTimeout by remember { mutableStateOf(false) }
     var editingStreamIdleTimeout by remember { mutableStateOf(false) }
     var editingMaxNetworkRetries by remember { mutableStateOf(false) }
-    var editingCompactionThreshold by remember { mutableStateOf(false) }
-    var editingContextTrim by remember { mutableStateOf(false) }
-    var editingSoftCompactionThreshold by remember { mutableStateOf(false) }
     var editingSendFileMaxSize by remember { mutableStateOf(false) }
 
     Column(
@@ -97,53 +88,9 @@ internal fun GeneralSettingsSection(
                     )
                 }
             )
-            SettingsDivider()
-            SettingsRow(
-                icon = null,
-                title = stringResource(R.string.settings_context_trim_title),
-                subtitle = stringResource(R.string.settings_context_trim_desc),
-                onClick = { editingContextTrim = true },
-                trailing = {
-                    Text(
-                        text = if (contextTrimRounds <= 0) {
-                            stringResource(R.string.settings_context_trim_off)
-                        } else {
-                            stringResource(R.string.settings_context_trim_value, contextTrimRounds)
-                        },
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.semanticColors.subtleText
-                    )
-                }
-            )
-            SettingsDivider()
-            SettingsRow(
-                icon = null,
-                title = stringResource(R.string.settings_compaction_threshold),
-                subtitle = stringResource(R.string.settings_compaction_threshold_desc),
-                onClick = { editingCompactionThreshold = true },
-                trailing = {
-                    Text(
-                        text = stringResource(R.string.settings_percent_value, compactionThresholdPercent),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.semanticColors.subtleText
-                    )
-                }
-            )
-            SettingsDivider()
-            SettingsRow(
-                icon = null,
-                title = stringResource(R.string.settings_soft_compaction_threshold),
-                subtitle = stringResource(R.string.settings_soft_compaction_threshold_desc),
-                onClick = { editingSoftCompactionThreshold = true },
-                trailing = {
-                    Text(
-                        text = stringResource(R.string.settings_percent_value, softCompactionThresholdPercent),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.semanticColors.subtleText
-                    )
-                }
-            )
         }
+
+        ContextManagementSection()
 
         SettingsGroupHeader(text = stringResource(R.string.settings_general_session))
         SettingsGroup {
@@ -298,51 +245,6 @@ internal fun GeneralSettingsSection(
                 editingMaxNetworkRetries = false
             },
             onDismiss = { editingMaxNetworkRetries = false }
-        )
-    }
-
-    if (editingCompactionThreshold) {
-        NumberInputDialog(
-            title = stringResource(R.string.settings_compaction_threshold),
-            initialValue = compactionThresholdPercent,
-            hint = stringResource(R.string.settings_compaction_threshold_input_hint),
-            minValue = 1,
-            maxValue = 100,
-            onConfirm = {
-                onSetCompactionThresholdPercent(it)
-                editingCompactionThreshold = false
-            },
-            onDismiss = { editingCompactionThreshold = false }
-        )
-    }
-
-    if (editingContextTrim) {
-        NumberInputDialog(
-            title = stringResource(R.string.settings_context_trim_title),
-            initialValue = contextTrimRounds,
-            hint = stringResource(R.string.settings_context_trim_input_hint),
-            minValue = 0,
-            maxValue = 100,
-            onConfirm = {
-                onSetContextTrimRounds(it)
-                editingContextTrim = false
-            },
-            onDismiss = { editingContextTrim = false }
-        )
-    }
-
-    if (editingSoftCompactionThreshold) {
-        NumberInputDialog(
-            title = stringResource(R.string.settings_soft_compaction_threshold),
-            initialValue = softCompactionThresholdPercent,
-            hint = stringResource(R.string.settings_compaction_threshold_input_hint),
-            minValue = 1,
-            maxValue = 100,
-            onConfirm = {
-                onSetSoftCompactionThresholdPercent(it)
-                editingSoftCompactionThreshold = false
-            },
-            onDismiss = { editingSoftCompactionThreshold = false }
         )
     }
 

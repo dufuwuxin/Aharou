@@ -16,7 +16,13 @@ class ConfigPluginFields @Inject constructor(
     @param:ApplicationContext private val context: Context,
     private val manager: PluginManager,
     private val records: PluginRecordStore,
+    private val toolSettings: com.aharou.feature.agent.domain.tool.custom.ToolSettingsStore,
 ) {
+    private var sessionWorkspace: String? = null
+    fun forWorkspace(root: String): ConfigPluginFields = ConfigPluginFields(context, manager, records, toolSettings).also { it.sessionWorkspace = root }
+    private fun checkWorkspace() {
+        sessionWorkspace?.let { if (!toolSettings.matchesCurrentProject(it)) throw com.aharou.core.config.ConfigError.InvalidValue("Workspace changed; reopen this session's project") }
+    }
     fun registerInto(registry: ConfigRegistry) {
         registry.register(object : ConfigCollection {
             override val basePath = "plugins"
@@ -29,6 +35,19 @@ class ConfigPluginFields @Inject constructor(
                 if (forId !in childIds()) return emptyList()
                 val pluginId = forId.replace("~", ".")
                 return listOf(
+                    ClosureField(
+                        path = "plugins.$forId.injection", displayName = context.getString(R.string.plugin_injection_edit),
+                        description = context.getString(R.string.plugin_injection_help), valueSchema = ConfigSchema.Str(maxLength = 40000), risk = ConfigRisk.SENSITIVE,
+                        reader = { ConfigValue.Str(toolSettings.snapshotOverrides()[com.aharou.feature.agent.domain.tool.custom.ToolPromptMetadata.pluginKey(pluginId)]?.description.orEmpty()) },
+                        writer = { value ->
+                            checkWorkspace()
+                            val text = (value as? ConfigValue.Str)?.value ?: throw com.aharou.core.config.ConfigError.TypeMismatch("string")
+                            val key = com.aharou.feature.agent.domain.tool.custom.ToolPromptMetadata.pluginKey(pluginId)
+                            check(runBlocking { toolSettings.updateOverrideForProject(key, sessionWorkspace) {
+                                it.copy(description = text, promptReset = text.isBlank())
+                            } })
+                        },
+                    ),
                     ClosureField(
                         path = "plugins.$forId.enabled", displayName = context.getString(R.string.plugin_host_enabled),
                         description = description, valueSchema = ConfigSchema.Bool, risk = ConfigRisk.SENSITIVE,

@@ -117,4 +117,20 @@ class SessionToolProcessTest {
         coVerify(exactly = 1) { messages.restoreAll(match { it.size == 1 && it.single().id == "archived" }) }
     }
 
+    @Test fun searchCompactedIsStrictExplicitAndReturnsMessageIdentity() = runTest {
+        coEvery { sessions.getSessionById("root") } returns root
+        coEvery { sessions.getSessionById("member") } returns member
+        val hit = com.aharou.feature.agent.data.local.dao.ChatSearchMatch("saved-id", "member", "title", "USER", "tail", 1L)
+        coEvery { messages.searchInWorkspace("/w", "tail", 30) } returns emptyList()
+        coEvery { messages.searchInWorkspace("/w", "tail", 30, true) } returns listOf(hit)
+        val args = mapOf("action" to JsonPrimitive("search"), "query" to JsonPrimitive("tail"))
+        val default = (tool.executeWithContext(args, context) as ToolResult.Success).data.jsonObject
+        assertEquals(0, default.getValue("count").jsonPrimitive.int)
+        val explicit = (tool.executeWithContext(args + ("include_compacted" to JsonPrimitive(true)), context) as ToolResult.Success).data.jsonObject
+        assertEquals("saved-id", explicit.getValue("hits").jsonArray.single().jsonObject.getValue("messageId").jsonPrimitive.content)
+        for (invalid in listOf(JsonPrimitive("true"), JsonPrimitive(1), JsonNull)) {
+            assertEquals("INVALID_ARGS", (tool.executeWithContext(args + ("include_compacted" to invalid), context) as ToolResult.Error).code)
+        }
+        coVerify(exactly = 1) { messages.searchInWorkspace("/w", "tail", 30, true) }
+    }
 }

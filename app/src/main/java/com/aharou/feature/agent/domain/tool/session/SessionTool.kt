@@ -21,6 +21,7 @@ import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.put
 
 /**
@@ -83,6 +84,8 @@ class SessionTool @Inject constructor(
         "status" to ToolParameter("status", ParameterType.STRING, "tool_calls: SUCCESS / ERROR / PARTIAL", false),
         "after" to ToolParameter("after", ParameterType.INTEGER, "tool_calls: inclusive epoch millis", false),
         "before" to ToolParameter("before", ParameterType.INTEGER, "tool_calls: inclusive epoch millis", false),
+        "include_compacted" to ToolParameter("include_compacted", ParameterType.BOOLEAN,
+            "search: explicitly search compacted archived originals (default false); summaries and excluded messages stay excluded", false),
         "query" to ToolParameter(
             "query", ParameterType.STRING,
             "search 专用：关键词", false,
@@ -177,9 +180,16 @@ class SessionTool @Inject constructor(
     private suspend fun searchMessages(workspace: String, args: Map<String, JsonElement>, limit: Int?): ToolResult {
         val query = (args["query"] as? JsonPrimitive)?.contentOrNull?.trim()
         if (query.isNullOrBlank()) return ToolResult.Error("search 需要 query", "MISSING_ARGS")
-        val hits = messagePersistenceUseCase.searchInWorkspace(
-            workspace, query, (limit ?: DEFAULT_LIST_LIMIT).coerceIn(1, MAX_LIMIT)
-        ).filter { hit ->
+        val includeCompacted = if ("include_compacted" in args) {
+            val value = args["include_compacted"] as? JsonPrimitive
+            if (value == null || value.isString || value.booleanOrNull == null)
+                return ToolResult.Error("include_compacted must be a boolean", "INVALID_ARGS")
+            value.booleanOrNull == true
+        } else false
+        val maxHits = (limit ?: DEFAULT_LIST_LIMIT).coerceIn(1, MAX_LIMIT)
+        val matches = if (includeCompacted) messagePersistenceUseCase.searchInWorkspace(workspace, query, maxHits, true)
+            else messagePersistenceUseCase.searchInWorkspace(workspace, query, maxHits)
+        val hits = matches.filter { hit ->
             val session = sessionUseCase.getSessionById(hit.sessionId)
             session != null && session.workspacePath == workspace
         }
@@ -192,6 +202,7 @@ class SessionTool @Inject constructor(
                     hits.forEach { h ->
                         addJsonObject {
                             put("sessionId", h.sessionId)
+                            put("messageId", h.messageId)
                             put("sessionTitle", h.sessionTitle)
                             put("role", h.role)
                             put("snippet", h.content)

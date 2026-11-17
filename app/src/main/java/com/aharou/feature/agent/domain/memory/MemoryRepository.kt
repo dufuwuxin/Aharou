@@ -322,6 +322,11 @@ class MemoryRepository @Inject constructor(
      * 当门槛分不开噪音与单关键词查询（如 `PRoot`）。bigram 一律降为加分项，不再单独决定入围。
      */
     internal fun searchMemories(query: String, candidates: List<Memory>, limit: Int): List<Memory> {
+        val (tags, text) = com.aharou.feature.agent.domain.context.ContextSearch.tagQuery(query)
+        if (tags.isNotEmpty()) {
+            val filtered = candidates.filter { com.aharou.feature.agent.domain.context.ContextSearch.matchesTags(it.worldbook.tags, tags) }
+            return if (text.isBlank()) filtered.take(limit) else searchMemories(text, filtered, limit)
+        }
         val raw = rawTermsOf(query).distinct()
         if (raw.isEmpty() || candidates.isEmpty()) return emptyList()
         val rawSet = raw.toHashSet()

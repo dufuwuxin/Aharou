@@ -631,4 +631,49 @@ class BuiltinContextEntriesTest {
         }
     }
 
+    @Test fun upgradePendingDoesNotCreateNewNativeDefaultsOrReceipt() {
+        val memory = mockk<MemoryRepository>()
+        val receipt = File(temp.root, ".context-defaults-v1")
+        val seeds = BuiltinContextEntries(receipt,
+            { com.aharou.feature.agent.domain.container.BuiltinAssetUpgradeCoordinator.Choice.PENDING }) { asset.readText() }
+        seeds.ensureSeeded(memory)
+        verify { memory wasNot io.mockk.Called }
+        assertFalse(receipt.exists())
+    }
+
+    @Test fun refusedUpgradeRecordsNewIdsWithoutChangingEditedOffOrDeletedNativeEntries() {
+        val memory = memories()
+        val library = ContextLibraryRepository(memory, seeds())
+        val entries = library.list(null)
+        val kept = entries.first()
+        assertTrue(library.save(kept.copy(content = "user edited", loading = ContextLoad.OFF), null))
+        val deleted = entries.last()
+        memory.deleteMemory(deleted.title, MemoryScope.GLOBAL, null)
+        val before = ContextLibraryRepository(memory).list(null)
+        val bytes = before.associate { it.sourceLabel to File(it.sourceLabel).readBytes().toList() }
+        val receipt = File(temp.root, ".context-defaults-v1")
+        val keptDefaultId = seeds().defaults().single { it.title == kept.title }.id
+        receipt.writeText("version=1\n$keptDefaultId\n")
+        val retained = BuiltinContextEntries(receipt,
+            { com.aharou.feature.agent.domain.container.BuiltinAssetUpgradeCoordinator.Choice.KEEP }) { asset.readText() }
+        retained.ensureSeeded(memory)
+        assertEquals(before, ContextLibraryRepository(memory).list(null))
+        bytes.forEach { (path, content) -> assertEquals(content, File(path).readBytes().toList()) }
+        assertTrue(receipt.readLines().containsAll(retained.defaults().map { it.id }))
+        val later = BuiltinContextEntries(receipt,
+            { com.aharou.feature.agent.domain.container.BuiltinAssetUpgradeCoordinator.Choice.APPLY }) { asset.readText() }
+        later.ensureSeeded(memory)
+        assertEquals(before, ContextLibraryRepository(memory).list(null))
+    }
+
+    @Test fun acceptedLegacyUpgradeWithoutReceiptCannotResurrectDeletedNativeDefaults() {
+        val memory = mockk<MemoryRepository>()
+        val receipt = File(temp.root, ".context-defaults-v1")
+        val seeds = BuiltinContextEntries(receipt,
+            { com.aharou.feature.agent.domain.container.BuiltinAssetUpgradeCoordinator.Choice.APPLY }) { asset.readText() }
+        seeds.ensureSeeded(memory)
+        verify { memory wasNot io.mockk.Called }
+        assertTrue(receipt.readLines().containsAll(seeds.defaults().map { it.id }))
+    }
+
 }

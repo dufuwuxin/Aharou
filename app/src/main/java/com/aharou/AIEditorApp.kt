@@ -374,6 +374,7 @@ class AIEditorApp : Application(), Configuration.Provider {
             // 轻量子进程不能触发 Hilt 业务注入、数据库或主进程常驻服务。
             return
         }
+        com.aharou.feature.agent.domain.container.BuiltinAssetUpgradeCoordinator.initialize(this)
         super.onCreate()
         logDeviceInfo()
         // 补记 Java 未捕获异常处理器覆盖不到的异常退出（native 崩溃 / ANR / 低内存被杀 / 被信号杀死）。
@@ -434,16 +435,12 @@ class AIEditorApp : Application(), Configuration.Provider {
         liveUpdateCoordinator.start()
         // 启动凭据请求监听：容器内 credential helper 写来的 cred-req-* → 全局弹窗回填 → 回喂 git 续跑。
         credentialRequestBridge.start()
-        // 启动即把最新的内置指南手册提取到私有配置目录
         appScope.launch {
             ContainerInstaller.extractDocs(this@AIEditorApp)
         }
-        // 启动即把内置提示词全量释放到 ~/.aharou/prompts/（覆盖式，随 App 升级更新）；
-        // 用户自定义覆盖放在 ~/.aharou/prompts.custom/，同名即覆盖，不被升级覆盖。
         appScope.launch {
             ContainerInstaller.extractSkills(this@AIEditorApp)
         }
-        // 启动即释放内置子代理定义（Explore）与团队预设；已存在不覆盖，用户改过或删掉都不会被升级拉回。
         appScope.launch {
             ContainerInstaller.extractAgents(this@AIEditorApp)
             ContainerInstaller.extractTeams(this@AIEditorApp)

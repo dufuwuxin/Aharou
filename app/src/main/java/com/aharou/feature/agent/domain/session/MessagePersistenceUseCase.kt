@@ -171,11 +171,12 @@ class MessagePersistenceUseCase @Inject constructor(
     suspend fun restoreAll(entities: List<AgentMessageEntity>): List<AgentMessageEntity> =
         messageArchiveStore.restoreAll(entities)
 
-    suspend fun searchInWorkspace(workspacePath: String, keyword: String, limit: Int): List<ChatSearchMatch> {
+    suspend fun searchInWorkspace(workspacePath: String, keyword: String, limit: Int, includeCompacted: Boolean = false): List<ChatSearchMatch> {
         if (keyword.isBlank() || limit <= 0) return emptyList()
         val hits = ArrayList<ChatSearchMatch>()
         val newestFirst = compareByDescending<ChatSearchMatch> { it.timestamp }.thenByDescending { it.messageId }
         for (session in agentDatabase.chatSessionDao().getAllSessionsByWorkspaceOnce(workspacePath)) {
+            if (session.workspacePath != workspacePath) continue
             var timestamp = Long.MIN_VALUE
             var id = ""
             while (true) {
@@ -184,7 +185,8 @@ class MessagePersistenceUseCase @Inject constructor(
                 if (page.isEmpty()) break
                 for (message in page) {
                     currentCoroutineContext().ensureActive()
-                    if (message.isCompacted || message.isContextSummary || message.isCompactionMarker ||
+                    if ((!includeCompacted && message.isCompacted) || message.isContextExcluded ||
+                        message.isContextSummary || message.isCompactionMarker ||
                         (message.role != MessageRole.USER.name && message.role != MessageRole.ASSISTANT.name)) continue
                     val content = messageArchiveStore.restoreContentForSearch(message)
                     val index = content.indexOf(keyword, ignoreCase = true)

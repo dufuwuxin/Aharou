@@ -26,6 +26,7 @@ fun HostPluginActions(
     onEnabledChange: (Boolean) -> Unit,
     onCompile: () -> Unit,
     onOpen: () -> Unit,
+    onEditInjection: () -> Unit,
 ) {
     Text(stringResource(R.string.plugin_host_trust), style = MaterialTheme.typography.bodySmall)
     Row {
@@ -38,6 +39,9 @@ fun HostPluginActions(
         }
         TextButton(onClick = onOpen, enabled = !busy && loaded) {
             Text(stringResource(R.string.plugin_host_open))
+        }
+        TextButton(onClick = onEditInjection, enabled = !busy) {
+            Text(stringResource(R.string.plugin_injection_edit))
         }
     }
 }

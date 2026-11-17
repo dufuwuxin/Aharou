@@ -285,7 +285,7 @@ internal fun AgentMessageItem(
     val hasContent = message.content.hasVisibleContent()
     val hasAttachments = message.attachments.isNotEmpty()
     // 模型直出的图片走附件落库，纯图消息没有正文与思考，同样要展示（不能提前 return）。
-    if (message.role == MessageRole.ASSISTANT && !hasContent && !hasReasoning && !hasAttachments) return
+    if (message.role == MessageRole.ASSISTANT && !hasContent && !hasReasoning && !hasAttachments && !showActions) return
 
     val isUser = message.role == MessageRole.USER
     // 分块消息：块间只留一个段落间距，视觉上仍是连续的一段正文（DSH 扁平文档流下不再有描边接缝）。
@@ -351,7 +351,7 @@ internal fun AgentMessageItem(
                 onExpandedChange = onReasoningExpandedChange
             )
         }
-        if (hasContent || hasAttachments || message.role != MessageRole.ASSISTANT) {
+        if (hasContent || hasAttachments || showActions || message.role != MessageRole.ASSISTANT) {
             Column(
                 modifier = Modifier.fillMaxWidth(),
                 // 助手消息左对齐，用户消息右对齐
@@ -477,7 +477,7 @@ internal fun AgentMessageItem(
                 val durationText = taskDurationMs?.let { formatTaskDuration(it) }
                 val hasMeta = isUser || tokenStats != null || cacheHitRate != null || durationText != null
                 val actionsVisible = isUser || showActions
-                if ((hasContent || hasAttachments) && message.role != MessageRole.TOOL && isChunkFooter &&
+                if ((hasContent || hasAttachments || actionsVisible) && message.role != MessageRole.TOOL && isChunkFooter &&
                     (actionsVisible || hasMeta)
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {

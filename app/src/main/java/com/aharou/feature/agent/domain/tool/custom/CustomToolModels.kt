@@ -154,10 +154,11 @@ data class ToolOverride(
     val description: String? = null,
     val injectionMode: ToolInjectionMode? = null,
     val keywords: List<String>? = null,
-    val schemaJson: String? = null
+    val schemaJson: String? = null,
+    val promptReset: Boolean = false
 ) {
     val isEmpty: Boolean
-        get() = description.isNullOrBlank() && injectionMode == null && keywords.isNullOrEmpty() && schemaJson.isNullOrBlank()
+        get() = !promptReset && description.isNullOrBlank() && injectionMode == null && keywords.isNullOrEmpty() && schemaJson.isNullOrBlank()
 
     fun normalized(): ToolOverride = copy(
         description = description?.trim()?.takeIf { it.isNotEmpty() },
