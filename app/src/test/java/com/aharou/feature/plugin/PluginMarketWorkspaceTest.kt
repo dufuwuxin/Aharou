@@ -44,8 +44,7 @@ class PluginMarketWorkspaceTest {
         every { access.toDisplayPath(any()) } returns "~/workspace/unapproved.zip"
         val skills = mockk<SkillRepository>()
         val manager = mockk<PluginManager>()
-        val actions = PluginMarketplaceActions(context, skills, manager, files)
-        actions.javaClass.getDeclaredField("operit").apply { isAccessible = true }.set(actions, catalog)
+        val actions = PluginMarketplaceActions(context, skills, manager, files, catalog)
         coEvery { catalog.page("all", 1) } returns OperitPage(items = listOf(OperitEntry("fixture", "skill")))
         coEvery { catalog.resolve(any(), null) } returns OperitDownload("https://example.org/fixture.zip", "fixture.zip", null)
         coEvery { catalog.stage(any(), any()) } answers { temp.newFile().apply { writeText("fixture") } }
@@ -107,8 +106,7 @@ class PluginMarketWorkspaceTest {
         val output = java.io.ByteArrayOutputStream()
         every { context.contentResolver } returns resolver
         every { resolver.openOutputStream(uri, "wt") } returns output
-        val actions = PluginMarketplaceActions(context, mockk(), mockk(), files)
-        actions.javaClass.getDeclaredField("operit").apply { isAccessible = true }.set(actions, catalog)
+        val actions = PluginMarketplaceActions(context, mockk(), mockk(), files, catalog)
         val result = actions.perform("download", "operit", "fixture", document = uri,
             authorizeWrite = { error("SAF must not check AI write lease") })
         assertEquals("downloaded", result.getValue("status").jsonPrimitive.content)

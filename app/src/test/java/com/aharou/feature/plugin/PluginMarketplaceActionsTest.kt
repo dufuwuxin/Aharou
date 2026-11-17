@@ -28,7 +28,7 @@ class PluginMarketplaceActionsTest {
     private val files = mockk<FileAccessProvider>()
     private fun actions(): PluginMarketplaceActions {
         every { context.cacheDir } returns temp.root
-        return PluginMarketplaceActions(context, skills, manager, files)
+        return PluginMarketplaceActions(context, skills, manager, files, operit = mockk())
     }
     private fun archive(name: String, entries: Map<String, String>): File = temp.newFile(name).also { file ->
         ZipOutputStream(file.outputStream()).use { zip -> entries.forEach { (path, text) ->

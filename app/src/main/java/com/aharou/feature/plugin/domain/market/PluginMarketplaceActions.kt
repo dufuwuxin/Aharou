@@ -19,14 +19,21 @@ import kotlinx.serialization.json.*
 
 /** Shared UI/config consumer. Calling install/download must already have passed the caller's permission gate. */
 @Singleton
-class PluginMarketplaceActions @Inject constructor(
-    @param:ApplicationContext private val context: Context,
+class PluginMarketplaceActions internal constructor(
+    private val context: Context,
     private val skills: SkillRepository,
     private val manager: PluginManager,
     private val files: FileAccessProvider,
+    private val operit: OperitMarketRepository,
     engine: LinuxContainerEngine? = null,
 ) {
-    private val operit = OperitMarketRepository(context, skills)
+    @Inject constructor(
+        @ApplicationContext context: Context,
+        skills: SkillRepository,
+        manager: PluginManager,
+        files: FileAccessProvider,
+        engine: LinuxContainerEngine,
+    ) : this(context, skills, manager, files, OperitMarketRepository(context, skills), engine)
     private val dsh = DshMarketRepository(operit, engine?.let { DshContainerCatalog(it)::page })
 
     suspend fun query(source: String, query: String, page: Int = 1, type: String = "all"): JsonObject = withContext(Dispatchers.IO) {
