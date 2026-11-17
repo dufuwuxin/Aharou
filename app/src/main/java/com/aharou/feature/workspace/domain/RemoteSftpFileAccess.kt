@@ -61,7 +61,36 @@ class RemoteSftpFileAccess @Inject constructor(
     private var boundEndpoint: Triple<String, Int, String>? = null
     private var boundHome: String? = null
 
-    override fun checked(): FileAccessProvider = forWorkspace(currentWorkspaceRoot())
+    override fun checked(): FileAccessProvider {
+        requireBoundTarget()
+        return if (boundWorkspace != null) this else forWorkspace(currentWorkspaceRoot())
+    }
+
+    override fun requireResourcePath(root: String, relative: String) {
+        if (boundWorkspace == null) return checked().requireResourcePath(root, relative)
+        val parts = resourcePathParts(relative)
+        require(root.isNotBlank() && root.split('/').none { it == "." || it == ".." } &&
+            root.none { it.isISOControl() }) { "Invalid resource root" }
+        val remoteRoot = toRemotePath(root).trimEnd('/')
+        require(remoteRoot.startsWith('/') && remoteRoot.split('/').none { it == "." || it == ".." }) {
+            "Resource root must resolve to an absolute remote path"
+        }
+        val target = "$remoteRoot/${parts.joinToString("/")}"
+        withSftp { sftp ->
+            var cursor = ""
+            for (part in target.trimStart('/').split('/')) {
+                cursor += "/$part"
+                val attrs = try { sftp.lstat(cursor) } catch (error: SFTPException) {
+                    if (error.statusCode == net.schmizz.sshj.sftp.Response.StatusCode.NO_SUCH_FILE) null else throw error
+                }
+                require(attrs?.type != FileMode.Type.SYMLINK) { "Symbolic link resource rejected" }
+                if (cursor != target) require(attrs == null || attrs.type == FileMode.Type.DIRECTORY) {
+                    "Resource parent is not a directory"
+                }
+            }
+            requireBoundTarget()
+        }
+    }
 
     override fun forWorkspace(workspacePath: String): FileAccessProvider {
         if (workspacePath.isBlank()) return this

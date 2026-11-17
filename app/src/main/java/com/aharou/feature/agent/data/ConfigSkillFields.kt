@@ -71,6 +71,24 @@ class ConfigSkillFields @Inject constructor(
             }
         }
         return listOf(
+            ClosureField(path = "$base.$id.required_tools", displayName = "required_tools",
+                description = "Tool binding metadata; does not grant permissions.", risk = ConfigRisk.SENSITIVE,
+                valueSchema = ConfigSchema.Array(ConfigSchema.Str()),
+                reader = { ConfigValue.Arr(skill(id).skill.requiredTools.map { ConfigValue.Str(it) }) },
+                writer = { value -> checkWorkspace(); update { it.copy(requiredTools = strings(value)) } }),
+            com.aharou.core.config.fields.ReadOnlyField(path = "$base.$id.resources", displayName = "resources",
+                description = "Exact relative resource paths; read or execute with existing file and shell tools under their permission policy.",
+                valueSchema = ConfigSchema.Array(ConfigSchema.Str()),
+                reader = { ConfigValue.Arr(skillRepository.resourcePaths(skill(id).skill).map { ConfigValue.Str(it) }) }),
+            ClosureField(path = "$base.$id.resource_edits", displayName = "resource_edits",
+                description = "Object of relative path to UTF-8 text. Adds/updates only these files, never deletes other resources. Absolute/traversal/symlink escape paths are rejected.",
+                valueSchema = ConfigSchema.Json, risk = ConfigRisk.SENSITIVE,
+                reader = { ConfigValue.Obj(emptyMap()) }, writer = { value ->
+                    checkWorkspace()
+                    val entries = (value as? ConfigValue.Obj)?.value ?: throw ConfigError.TypeMismatch("object")
+                    val edits = entries.mapValues { (_, v) -> (v as? ConfigValue.Str)?.value ?: throw ConfigError.TypeMismatch("string") }
+                    update { it.copy(resourceEdits = edits) }
+                }),
             ClosureField(path = "$base.$id.tags", displayName = "tags", description = "Exact-match discovery tags; independent from trigger keywords.",
                 valueSchema = ConfigSchema.Array(ConfigSchema.Str()),
                 reader = { ConfigValue.Arr(skill(id).skill.tags.map { ConfigValue.Str(it) }) },

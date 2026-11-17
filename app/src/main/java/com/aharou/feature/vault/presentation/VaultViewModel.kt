@@ -26,6 +26,24 @@ class VaultViewModel @Inject constructor(
     private val _names = MutableStateFlow<List<String>>(emptyList())
     val names: StateFlow<List<String>> = _names.asStateFlow()
     val privacyRedaction = repository.privacyRedaction
+    val keywordNames = repository.keywordNames
+
+    fun keywordEntries(): List<Pair<String, String>> = repository.keywordEntries()
+
+    fun saveKeywordEntries(entries: List<Pair<String, String>>, onSaved: () -> Unit) = viewModelScope.launch {
+        try {
+            val saved = kotlinx.coroutines.withContext(Dispatchers.IO) { repository.saveKeywordEntries(entries) }
+            _privacyError.value = !saved
+            if (saved) { _names.value = repository.names(); onSaved() }
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { _privacyError.value = true }
+    }
+
+    fun setKeywordReplacement(name: String, enabled: Boolean) = viewModelScope.launch(Dispatchers.IO) {
+        try { _privacyError.value = !repository.setKeywordSelected(name, enabled) }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { _privacyError.value = true }
+    }
     val outboundMasking = generalSettings.privacyMaskingEnabledFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
     private val _outboundError = MutableStateFlow(false)
@@ -72,7 +90,7 @@ class VaultViewModel @Inject constructor(
 
     fun delete(name: String) = viewModelScope.launch(Dispatchers.IO) {
         try {
-            repository.delete(name)
+            _privacyError.value = !repository.delete(name)
             _writeBlocked.value = false
             _names.value = repository.names()
         } catch (e: VaultReadOnlyException) {

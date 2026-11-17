@@ -65,8 +65,22 @@ Conditional stages run through the existing team executor and retain its routing
 
 Keep the stage's communication guide alongside its communication policy and message limit. Changing the policy does not replace the guide, and permission to communicate does not expand tool or file-write authority.
 
+## Member graph and role selection — candidate interaction
+
+The following UI changes are part of the current unreleased candidate. Implementation and device interaction checks are still pending; do not assume that an installed release already provides them.
+
+- In the team editor, pinch with two fingers to zoom the member graph and drag to inspect another area. Zoom and the drawing surface must stay bounded; this is not a claim of measured memory usage or device performance. After moving or zooming, tapping a member must still select that member for the existing relationship editor. Gestures do not change execution, review or rejection routes.
+- In role management, long-press a role or use the existing multi-select entry, then tap rows to toggle selection. Selected rows must have a visible background and check indicator, not only a changed total. Exit selection before opening a role normally; leaving selection must restore the usual tap action. Selection does not itself delete or edit a role, and project/global roles remain distinct.
+
+If the highlight or node target does not match your action, do not infer that a configuration was saved. Leave selection or reopen the editor and verify the saved roster and relationships before running the team.
+
 ## Editing a workflow
 
 In the workflow editor, choose an existing team for each layer. Use the move-up and move-down controls to change layer order, and choose a lead or leave the team's default lead selected. Configure which layers accept rejection and the maximum rejection rounds deliberately; adding a layer does not automatically create a repair path.
 
 Save the workflow before starting it. A saved order or lead selection is configuration, not evidence that those teams have run. Verify the resulting execution and delivery records separately. Global definitions may be shared by several projects, so check the selected scope before saving.
+
+
+### 跨阶段反向联系
+
+第三阶段的成员可以直接和第一阶段成员建立协作关系。先选来源、再选目标；若在弹窗中改选，成员会从另一侧自动移除，不必手工清理重叠选择。这里的协作关系不改变执行顺序，可单向或双向；执行交接仍保留无环校验，审核驳回沿原路由合同。

@@ -62,6 +62,20 @@ class ConfigCredentialFields @Inject constructor(
         registry.register(LoginKeyCollection())
         registry.register(vaultNamesField())
         registry.register(ClosureField(
+            path = "vault.keyword_names",
+            displayName = "具名关键词替换",
+            description = "选择凭据库条目名；开启出站脱敏后，条目原值会在新模型请求中精确替换为独立占位符，不授予工具读取原值的权限。",
+            valueSchema = ConfigSchema.Array(ConfigSchema.Str()),
+            reader = { ConfigValue.Arr(vault.keywordNames.value.sorted().map { ConfigValue.Str(it) }) },
+            writer = { value ->
+                val names = (value as? ConfigValue.Arr)?.value?.map {
+                    (it as? ConfigValue.Str)?.value ?: throw ConfigError.TypeMismatch("string")
+                }?.toSet() ?: throw ConfigError.TypeMismatch("array")
+                if (names.any { it !in vault.names() }) throw ConfigError.InvalidValue("Unknown vault keyword name")
+                if (!vault.setKeywordNames(names)) throw ConfigError.PermissionDenied("Keyword selection was not saved")
+            },
+        ))
+        registry.register(ClosureField(
             path = "vault.privacy_redaction",
             displayName = "额外隐私脱敏",
             description = "对工具结果、日志与审计中的常见凭据、邮箱和大陆手机号额外脱敏；不修改原文件、登录认证或手写消息。默认关闭。",

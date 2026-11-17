@@ -109,7 +109,7 @@ object SkillParser {
         appendLine("---")
         appendLine("name: ${Frontmatter.quote(name)}")
         appendLine("description: ${Frontmatter.quote(description)}")
-        if (requiredTools.isNotEmpty()) appendLine("required_tools: [${requiredTools.joinToString(", ")}]")
+        if (requiredTools.isNotEmpty()) appendLine("required_tools: [${requiredTools.joinToString(", ") { quoteMetadata(it) }}]")
         if (keywordEnabled || keywords.isNotEmpty()) {
             appendLine("keyword_enabled: $keywordEnabled")
             appendLine("keywords: [${keywords.joinToString(", ") { Frontmatter.quote(it) }}]")

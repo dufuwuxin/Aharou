@@ -59,7 +59,7 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
     val branchHasChildren = selectedBranch?.let { branch -> ProjectTaskGraph.subtree(branch.id, tasks).any { !it.isRequirementBranch } } == true
     var deletingBranchId by rememberSaveable(projectId) { mutableStateOf<String?>(null) }
     val rootId = ProjectTaskMapLayout.rootId(projectId)
-    var viewMode by rememberSaveable(projectId) { mutableStateOf("map") }
+    var viewMode by rememberSaveable(projectId) { mutableStateOf("tree") }
     var menuOpen by rememberSaveable(projectId) { mutableStateOf(false) }
     var expandedId by rememberSaveable(projectId) { mutableStateOf<String?>(null) }
     var collapsed by remember(projectId) { mutableStateOf(emptySet<String>()) }
@@ -81,7 +81,14 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
     val toggle: (String) -> Unit = { id ->
         if (id == rootId) onSelectRequirementBranch(null)
         else if (tasks.any { it.id == id && it.isRequirementBranch }) onSelectRequirementBranch(id)
-        if (expandedId == id) expandedId = null else { expandedId = id; viewModel.select(id) }
+        if (expandedId == id) {
+            expandedId = null
+            collapsed = collapsed + id
+        } else {
+            expandedId = id
+            collapsed = collapsed - id
+            viewModel.select(id)
+        }
     }
     val process: @Composable (ProjectTask) -> Unit = { task ->
         ProjectTaskProcess(task, tasks, onEdit = {}, onAccept = { viewModel.accept(task) }, conversation = conversation,
@@ -246,7 +253,8 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
                                 Text(stringResource(R.string.project_node_add_child))
                             }
                             Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surface,
-                                modifier = Modifier.fillMaxWidth().height(processHeight)) { process(row.task) }
+                                modifier = Modifier.fillMaxWidth().height(processHeight)
+                                    .then(if (row.task.isRequirementBranch) Modifier.testTag("project_branch_inline") else Modifier)) { process(row.task) }
                         }
                     }
                 }

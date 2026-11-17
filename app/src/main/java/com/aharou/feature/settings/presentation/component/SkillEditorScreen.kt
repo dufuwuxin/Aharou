@@ -68,6 +68,11 @@ internal fun SkillEditorScreen(
     var description by rememberSaveable { mutableStateOf(initial?.description ?: "") }
     var instructions by rememberSaveable { mutableStateOf(initial?.instructions ?: "") }
     var tags by rememberSaveable { mutableStateOf(initial?.tags.orEmpty().joinToString("\n")) }
+    var requiredTools by rememberSaveable { mutableStateOf(initial?.requiredTools.orEmpty().joinToString("\n")) }
+    var resourceEdits by rememberSaveable { mutableStateOf(hashMapOf<String, String>()) }
+    var resourcePath by rememberSaveable { mutableStateOf("") }
+    var resourceText by rememberSaveable { mutableStateOf("") }
+    var resourceError by rememberSaveable { mutableStateOf(false) }
     var typeId by rememberSaveable { mutableStateOf(initial?.typeId) }
     var keywordEnabled by rememberSaveable { mutableStateOf(initial?.keywordEnabled ?: false) }
     var keywordInputs by rememberSaveable {
@@ -85,7 +90,7 @@ internal fun SkillEditorScreen(
     BackHandler { onNavigateBack() }
 
     val scope = if (initial?.builtin == true || scopeIsGlobal) SkillScope.GLOBAL else SkillScope.PROJECT
-    val canSave = name.isNotBlank() && instructions.isNotBlank() && (!keywordEnabled || keywords.isNotEmpty())
+    val canSave = resourcePath.isBlank() && name.isNotBlank() && instructions.isNotBlank() && (!keywordEnabled || keywords.isNotEmpty())
 
     Scaffold(
         containerColor = settingsPageBackground(),
@@ -116,7 +121,8 @@ internal fun SkillEditorScreen(
                                     name = name.trim(),
                                     description = description.trim(),
                                     instructions = instructions.trim(),
-                                    requiredTools = initial?.requiredTools ?: emptyList(),
+                                    requiredTools = com.aharou.feature.agent.domain.skill.SkillParser.parseKeywordInput(requiredTools),
+                                    resourceEdits = resourceEdits,
                                     keywordEnabled = keywordEnabled,
                                     keywords = keywords,
                                     tags = tags.lines().map { it.trim() }.filter { it.isNotEmpty() }.distinct(),
@@ -211,6 +217,36 @@ internal fun SkillEditorScreen(
                         label = stringResource(R.string.skills_tags),
                         placeholder = stringResource(R.string.skills_tags_hint), singleLine = false)
                     SkillTypeSelector(scope, typeId, { typeId = it })
+                }
+            }
+
+            SettingsGroupHeader(text = stringResource(R.string.skills_resources_title))
+            SettingsGroup {
+                Column(modifier = Modifier.padding(Spacing.lg), verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
+                    AppTextField(value = requiredTools, onValueChange = { requiredTools = it },
+                        label = stringResource(R.string.skills_required_tools), singleLine = false)
+                    Text(stringResource(R.string.skills_resources_hint), style = MaterialTheme.typography.bodySmall)
+                    (initial?.resourcePaths.orEmpty() + resourceEdits.keys).distinct().forEach { path ->
+                        val text = resourceEdits[path] ?: initial?.resourceTexts?.get(path)
+                        TextButton(enabled = text != null, onClick = { resourcePath = path; resourceText = text.orEmpty() }) {
+                            Text(path)
+                        }
+                    }
+                    AppTextField(value = resourcePath, onValueChange = { resourcePath = it; resourceError = false },
+                        label = stringResource(R.string.skills_resource_path))
+                    AppTextField(value = resourceText, onValueChange = { resourceText = it },
+                        label = stringResource(R.string.skills_resource_text), singleLine = false, minLines = 4)
+                    TextButton(enabled = resourcePath.isNotBlank() && saveState !is SkillSaveState.Saving, onClick = {
+                        val edits = HashMap(resourceEdits).apply { put(resourcePath, resourceText) }
+                        resourceError = runCatching { com.aharou.feature.agent.domain.skill.SkillResources.validateEdits(edits) }.isFailure
+                        if (!resourceError) {
+                            resourceEdits = edits
+                            resourcePath = ""
+                            resourceText = ""
+                        }
+                    }) { Text(stringResource(R.string.skills_resource_stage)) }
+                    if (resourceError) Text(stringResource(R.string.skills_resource_invalid), color = MaterialTheme.colorScheme.error)
+                    if (resourceEdits.isNotEmpty()) Text(stringResource(R.string.skills_resource_staged, resourceEdits.size))
                 }
             }
 

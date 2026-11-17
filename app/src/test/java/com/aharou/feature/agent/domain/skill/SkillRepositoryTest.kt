@@ -11,12 +11,23 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Test
 
 class SkillRepositoryTest {
 
-    private val provider = TestFileAccessProvider()
-    private val language = mockk<AppLanguageProvider>().apply { every { code } returns "zh" }
+    private val provider = object : com.aharou.feature.workspace.domain.FileAccessProvider by TestFileAccessProvider() {
+        override fun checked(): com.aharou.feature.workspace.domain.FileAccessProvider = this
+        private val mapper = mockk<com.aharou.feature.workspace.domain.WorkspacePathMapper>().apply {
+            every { toHostFile(any(), any()) } answers { File(firstArg<String>()) }
+        }
+        private val local = com.aharou.feature.workspace.domain.LocalFileAccess(mapper)
+        override fun requireResourcePath(root: String, relative: String) = local.requireResourcePath(root, relative)
+    }
+    private val language = mockk<AppLanguageProvider>().apply {
+        every { code } returns "zh"
+        every { promptCode } returns "zh"
+    }
     private val globalSource = spyk(GlobalDirectorySkillSource(language, provider)).apply {
         every { listSkills() } returns emptyList()
     }
@@ -588,5 +599,197 @@ class SkillRepositoryTest {
             assertFalse(matchesSkillQuery("tag:Kotlin"))
         }
     }
+
+    @Test
+    fun savingResourceEditsPreservesNestedFilesAndRejectsTraversal() {
+        val root = java.nio.file.Files.createTempDirectory("skill-resources-save").toFile()
+        try {
+            val dir = File(root, "editable").apply { mkdirs() }
+            val instruction = File(dir, "SKILL.md").apply { writeText("---\nname: editable\n---\nold") }
+            val untouched = File(dir, "code/original.bin").apply { parentFile.mkdirs(); writeBytes(byteArrayOf(0, 7, 8)) }
+            every { globalSource.listSkills() } answers { listOf(SkillParser.parseText(instruction.readText(), "editable").copy(dirPath = dir.path)) }
+            assertNull(repository.save(SkillForm("editable", "desc", "new", listOf("Bash"),
+                resourceEdits = mapOf("scripts/nested/run.py" to "print('ok')")), SkillScope.GLOBAL, "editable"))
+            assertEquals("print('ok')", File(dir, "scripts/nested/run.py").readText())
+            assertTrue(untouched.readBytes().contentEquals(byteArrayOf(0, 7, 8)))
+            assertEquals(listOf("Bash"), SkillParser.parseText(instruction.readText(), "editable").requiredTools)
+            assertTrue(repository.loadInstructions("editable")!!.contains("${dir.path}/scripts/nested/run.py"))
+            assertEquals(SkillSaveError.IO_FAILED, repository.save(SkillForm("editable", "desc", "bad",
+                resourceEdits = mapOf("../escape.txt" to "bad")), SkillScope.GLOBAL, "editable"))
+            assertFalse(File(root, "escape.txt").exists())
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test
+    fun resourceWritesRollbackWhenInstructionCommitFails() {
+        val root = java.nio.file.Files.createTempDirectory("skill-resource-rollback").toFile()
+        try {
+            val dir = File(root, "editable").apply { mkdirs() }
+            val instruction = File(dir, "SKILL.md").apply { writeText("---\nname: editable\n---\nold") }
+            val script = File(dir, "scripts/run.py").apply { parentFile.mkdirs(); writeText("old script") }
+            every { globalSource.listSkills() } answers { listOf(SkillParser.parseText(instruction.readText(), "editable").copy(dirPath = dir.path)) }
+            val access = spyk(provider)
+            var failOnce = true
+            every { access.writeFile(instruction.path, any(), any(), any()) } answers {
+                if (failOnce) { failOnce = false; throw java.io.IOException("fixture commit failure") }
+                callOriginal()
+            }
+            val repo = SkillRepository(builtinSource, globalSource, projectSource, config, access, agents)
+            val form = SkillForm("editable", "", "new", resourceEdits = mapOf("scripts/run.py" to "new script", "templates/new.txt" to "new"))
+            assertEquals(SkillSaveError.IO_FAILED, repo.save(form, SkillScope.GLOBAL, "editable"))
+            assertEquals("old script", script.readText())
+            assertFalse(File(dir, "templates/new.txt").exists())
+            assertTrue(instruction.readText().endsWith("old"))
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test fun projectImportPinsScanAndWriteBackendAcrossGlobalSwitch() {
+        val temp = java.nio.file.Files.createTempDirectory("skill-project-pinned").toFile()
+        try {
+            val a = File(temp, "A").apply { mkdirs() }
+            val b = File(temp, "B").apply { mkdirs() }
+            var current = a
+            fun mapper(): com.aharou.feature.workspace.domain.WorkspacePathMapper = mockk<com.aharou.feature.workspace.domain.WorkspacePathMapper>().apply {
+                every { toHostFile(any(), any()) } answers {
+                    val root = secondArg<String?>()?.let(::File) ?: current
+                    val path = firstArg<String>()
+                    if (path == "~/workspace") root else File(root, path.removePrefix("~/workspace/"))
+                }
+                every { resolveFile(any(), any(), any()) } answers {
+                    val root = secondArg<String?>()?.let(::File) ?: current
+                    File(root, firstArg<String>().removePrefix("~/workspace/"))
+                }
+                every { toContainerPath(any(), any()) } answers { firstArg<String>() }
+            }
+            val local = com.aharou.feature.workspace.domain.LocalFileAccess(mapper())
+            val fileA = File(a, ".aharou/skills/existing/SKILL.md").apply { parentFile!!.mkdirs(); writeText("---\nname: duplicate\n---\nA") }
+            every { projectSource.skillsRoot } returns "~/workspace/.aharou/skills"
+            val repo = SkillRepository(builtinSource, globalSource, projectSource, config, local, agents)
+            val markdown = "---\nname: pinned\n---\nbody"
+            val report = repo.importMarkdown(markdown, "pinned", SkillScope.PROJECT, expectedWorkspace = a.path,
+                authorizeWrite = { current = b })
+            assertEquals(listOf("pinned"), report.imported)
+            assertTrue(File(a, ".aharou/skills/pinned/SKILL.md").isFile)
+            assertFalse(File(b, ".aharou/skills/pinned/SKILL.md").exists())
+            assertTrue(fileA.isFile)
+            assertEquals(SkillImportError.NAME_CONFLICT, repo.importMarkdown("---\nname: duplicate\n---\nbody", "duplicate",
+                SkillScope.PROJECT, expectedWorkspace = a.path).fatal)
+            val zip = requireNotNull(SkillExporter.zipOf("zipped", mapOf("SKILL.md" to "---\nname: zipped\n---\nbody".toByteArray(), "scripts/run.py" to "old".toByteArray())))
+            current = a
+            val imported = repo.importZip(zip.inputStream(), "zipped", SkillScope.PROJECT, expectedWorkspace = a.path, authorizeWrite = { current = b })
+            assertEquals(listOf("zipped"), imported.imported)
+            assertEquals("old", File(a, ".aharou/skills/zipped/scripts/run.py").readText())
+            assertFalse(File(b, ".aharou/skills/zipped").exists())
+        } finally { temp.deleteRecursively() }
+    }
+
+    @Test fun archivePermissionPreflightRejectsLaterResourceBeforeAnyWrite() {
+        val root = java.nio.file.Files.createTempDirectory("skill-preflight").toFile()
+        try {
+            every { globalSource.skillsRoot } returns root.path
+            val provider = TestFileAccessProvider().let { delegate ->
+                object : com.aharou.feature.workspace.domain.FileAccessProvider by delegate {
+                    override fun checked(): com.aharou.feature.workspace.domain.FileAccessProvider = this
+                    override fun requireResourcePath(root: String, relative: String) {
+                        require(!relative.startsWith('/') && relative.split('/').none { it == ".." })
+                    }
+                }
+            }
+            val repo = SkillRepository(builtinSource, globalSource, projectSource, config, provider, agents)
+            val zip = requireNotNull(SkillExporter.zipOf("demo", linkedMapOf(
+                "SKILL.md" to "---\nname: demo\n---\nbody".toByteArray(), "scripts/run.py" to "pass".toByteArray())))
+            try {
+                repo.importZip(zip.inputStream(), "demo", SkillScope.GLOBAL, authorizeWrite = { path ->
+                    if (path.endsWith("run.py")) throw SecurityException("WRITE_LEASE_DENIED")
+                })
+                fail("Later resource must be rejected before the instruction is written")
+            } catch (expected: SecurityException) { assertEquals("WRITE_LEASE_DENIED", expected.message) }
+            assertFalse(File(root, "demo/SKILL.md").exists())
+            assertFalse(File(root, "demo/scripts/run.py").exists())
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test fun archiveRuntimeRevocationRestoresOnlyThisImportsPriorFiles() {
+        val root = java.nio.file.Files.createTempDirectory("skill-rollback").toFile()
+        try {
+            every { globalSource.skillsRoot } returns root.path
+            val delegate = TestFileAccessProvider()
+            val provider = object : com.aharou.feature.workspace.domain.FileAccessProvider by delegate {
+                override fun checked(): com.aharou.feature.workspace.domain.FileAccessProvider = this
+                override fun requireResourcePath(root: String, relative: String) {
+                    require(!relative.startsWith('/') && relative.split('/').none { it == ".." })
+                }
+            }
+            val instruction = File(root, "demo/SKILL.md").apply { parentFile!!.mkdirs(); writeText("---\nname: demo\n---\nold") }
+            val script = File(root, "demo/scripts/run.py").apply { parentFile!!.mkdirs(); writeText("old script") }
+            val repo = SkillRepository(builtinSource, globalSource, projectSource, config, provider, agents)
+            val zip = requireNotNull(SkillExporter.zipOf("demo", linkedMapOf(
+                "SKILL.md" to "---\nname: demo\n---\nnew".toByteArray(), "scripts/run.py" to "new script".toByteArray())))
+            var scriptChecks = 0
+            try {
+                repo.importZip(zip.inputStream(), "demo", SkillScope.GLOBAL, overwrite = true, authorizeWrite = { path ->
+                    if (path.endsWith("run.py") && ++scriptChecks == 2) throw SecurityException("WRITE_LEASE_DENIED")
+                })
+                fail("Revocation after preflight must reject the remaining writes")
+            } catch (expected: SecurityException) { assertEquals("WRITE_LEASE_DENIED", expected.message) }
+            assertEquals("---\nname: demo\n---\nold", instruction.readText())
+            assertEquals("old script", script.readText())
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test fun builtinEditorAndExportUseRetainedDiskResourcesNotNewApk() {
+        val temp = java.nio.file.Files.createTempDirectory("skill-builtin-retained").toFile()
+        val capability = com.aharou.core.config.BuiltinSkillEditCapability
+        io.mockk.mockkObject(com.aharou.feature.agent.domain.container.BuiltinAssetUpgradeCoordinator.Companion)
+        try {
+            val dir = File(temp, "builtin-skills/retained").apply { mkdirs() }
+            File(dir, "SKILL.md").writeText("---\nname: retained\ncustom_metadata: keep\n---\nold instructions")
+            File(dir, "scripts").mkdirs()
+            File(dir, "scripts/old.py").writeText("old code")
+            val binary = byteArrayOf(0, -1, 2)
+            File(dir, "asset.bin").writeBytes(binary)
+            val context = mockk<android.content.Context>(relaxed = true)
+            val apkAssets = mockk<android.content.res.AssetManager>()
+            every { context.assets } returns apkAssets
+            every { apkAssets.open("skills/retained/scripts/new.py") } answers { "different-new-apk-code".byteInputStream() }
+            val coordinator = com.aharou.feature.agent.domain.container.BuiltinAssetUpgradeCoordinator(temp, 2, true)
+            coordinator.choose(false)
+            every { com.aharou.feature.agent.domain.container.BuiltinAssetUpgradeCoordinator.initialize(context) } returns coordinator
+            val source = BuiltinSkillSource(context, language)
+            val root = File(temp, "global").absolutePath
+            every { globalSource.skillsRoot } returns root
+            val repo = SkillRepository(source, globalSource, projectSource, config, provider, agents)
+            val skill = source.listSkills().single()
+            assertEquals(listOf("asset.bin", "scripts/old.py"), repo.resourcePaths(skill))
+            assertEquals(mapOf("scripts/old.py" to "old code"), repo.resourceTexts(skill, repo.resourcePaths(skill)))
+            capability.setEnabled(true)
+            assertNull(repo.save(SkillForm("retained", "edited", "edited instructions"), SkillScope.BUILTIN))
+            assertEquals("old code", File(root, "retained/scripts/old.py").readText())
+            assertTrue(binary.contentEquals(File(root, "retained/asset.bin").readBytes()))
+            assertTrue(File(root, "retained/SKILL.md").readText().contains("custom_metadata: keep"))
+            val exported = requireNotNull(repo.exportZip("retained", SkillScope.BUILTIN))
+            val unpacked = File(temp, "imported").absolutePath
+            val imported = SkillImporter.importArchive(provider, unpacked, emptySet(), exported.inputStream(), "retained")
+            assertEquals(listOf("retained"), imported.imported)
+            assertEquals("old code", File(unpacked, "retained/scripts/old.py").readText())
+            assertTrue(binary.contentEquals(File(unpacked, "retained/asset.bin").readBytes()))
+            assertFalse(File(unpacked, "retained/scripts/new.py").exists())
+            io.mockk.verify(exactly = 0) { context.assets }
+            val broken = spyk(provider)
+            every { broken.checked() } returns broken
+            every { broken.writeFile(any(), any(), any(), any()) } throws java.io.IOException("fixture_write_failed")
+            val failedRoot = File(temp, "failed").absolutePath
+            every { globalSource.skillsRoot } returns failedRoot
+            val failing = SkillRepository(source, globalSource, projectSource, config, broken, agents)
+            assertEquals(SkillSaveError.IO_FAILED, failing.save(SkillForm("retained", "", "edit"), SkillScope.BUILTIN))
+            assertFalse(File(failedRoot, "retained/scripts/old.py").exists())
+            assertFalse(File(failedRoot, "retained/SKILL.md").exists())
+        } finally {
+            capability.setEnabled(false)
+            io.mockk.unmockkObject(com.aharou.feature.agent.domain.container.BuiltinAssetUpgradeCoordinator.Companion)
+            temp.deleteRecursively()
+        }
+    }
+
 
 }

@@ -81,13 +81,19 @@ internal fun TeamRelationshipDialog(
                 Text(stringResource(R.string.team_relationship_sources), style = MaterialTheme.typography.labelLarge)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
                     nodes.forEach { node -> FilterChip(node in sources, {
-                        sources = if (node in sources) sources - node else sources + node
+                        if (node in sources) sources = sources - node else {
+                            sources = sources + node
+                            targets = targets - node
+                        }
                     }, { Text(label(node)) }, modifier = Modifier.testTag("team_relation_source_${teamNodeReference(node)}")) }
                 }
                 Text(stringResource(R.string.team_relationship_targets), style = MaterialTheme.typography.labelLarge)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
                     nodes.forEach { node -> FilterChip(node in targets, {
-                        targets = if (node in targets) targets - node else targets + node
+                        if (node in targets) targets = targets - node else {
+                            targets = targets + node
+                            sources = sources - node
+                        }
                     }, { Text(label(node)) }, modifier = Modifier.testTag("team_relation_target_${teamNodeReference(node)}")) }
                 }
                 if (collaboration) {

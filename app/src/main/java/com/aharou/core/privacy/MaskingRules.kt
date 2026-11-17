@@ -21,7 +21,16 @@ import com.aharou.core.privacy.MaskingKind.PRIVATE_KEY
  */
 object MaskingRules {
 
-    fun defaultRules(): List<MaskingRule> = DEFAULT_RULES
+    @Volatile
+    var literalValues: () -> List<String> = { emptyList() }
+
+    fun defaultRules(): List<MaskingRule> = DEFAULT_RULES + literalRules(literalValues())
+
+    internal fun literalRules(values: List<String>): List<MaskingRule> {
+        val terms = values.filter { it.isNotEmpty() }.distinct().sortedByDescending { it.length }
+        if (terms.isEmpty()) return emptyList()
+        return listOf(MaskingRule(ASSIGNED_SECRET, Regex(terms.joinToString("|") { Regex.escape(it) })))
+    }
 
     /** 中文关键词单列一条：`\b` 在汉字与全角冒号之间不成立，塞进半角那条会整条失效。 */
     private val ASSIGNED_VALUE_CN = Regex(

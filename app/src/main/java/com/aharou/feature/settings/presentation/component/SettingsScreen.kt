@@ -8,6 +8,7 @@ import kotlinx.coroutines.launch
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import com.aharou.core.ui.rememberSafeDocumentPicker
+import com.aharou.core.ui.primarySettingsSwipe
 import androidx.annotation.StringRes
 import com.aharou.feature.plugin.presentation.PluginSettingsSection
 import androidx.core.content.FileProvider
@@ -72,7 +73,6 @@ import com.aharou.feature.agent.presentation.component.MarkdownContent
 import com.aharou.feature.agent.presentation.component.MarkdownRenderCache
 import com.aharou.feature.backup.presentation.BackupSection
 import com.aharou.feature.connectors.presentation.ConnectorsSection
-import com.aharou.feature.vault.presentation.VaultSection
 import com.aharou.feature.settings.domain.model.AIProviderConfig
 import com.aharou.feature.settings.presentation.SettingsViewModel
 import com.aharou.feature.settings.presentation.ShizukuViewModel
@@ -188,7 +188,8 @@ fun SettingsScreen(
     onOnboardingModelAdded: (() -> Unit)? = null,
     onOnboardingDismissFetchDialog: (() -> Unit)? = null,
     /** 顶层分组过滤：默认空列表展示全部；「配置」页传 listOf(SettingsSection.AiGroup) 只展 AI 组。 */
-    menuGroups: List<SettingsSection> = emptyList()
+    menuGroups: List<SettingsSection> = emptyList(),
+    onPrimarySwipe: ((Boolean) -> Unit)? = null,
 ) {
     val scope = rememberCoroutineScope()
     val providers by viewModel.providers.collectAsStateWithLifecycle()
@@ -516,7 +517,10 @@ fun SettingsScreen(
         )
     }
 
-    Row(modifier = Modifier.fillMaxSize()) {
+    Row(modifier = Modifier.fillMaxSize().primarySettingsSwipe(
+        enabled = onPrimarySwipe != null && sectionHistory.size == 1,
+        onSwipe = { onPrimarySwipe?.invoke(it) },
+    )) {
         // 大屏：菜单常驻左栏，右栏只换详情，不再整页来回切。
         if (expanded) {
             Column(
@@ -822,8 +826,8 @@ fun SettingsScreen(
                 SettingsSection.ConfigAudit -> ConfigAuditSection()
                 SettingsSection.ShadowScreen -> ShadowScreenSection()
                 SettingsSection.Experiments -> ExperimentsSection()
-                SettingsSection.EnvVars -> EnvVarsSection()
-                SettingsSection.Vault -> VaultSection()
+                SettingsSection.EnvVars -> SecretSettingsSection(initialEnvironment = true)
+                SettingsSection.Vault -> SecretSettingsSection()
                 SettingsSection.Accessibility -> AccessibilitySection()
                 SettingsSection.Memory -> ContextLibrarySection()
                 SettingsSection.Theme -> ThemeSettingsSection(

@@ -30,6 +30,38 @@ class TeamEditorComposeTest {
     private val saves = mutableListOf<AgentTeamForm>()
     private var dismissed = false
 
+    @Test fun flowMapPinchAndPanKeepNodeHitCoordinatesAndBoundZoom() {
+        var clicked: TeamFlowNode? = null
+        val stages = listOf(AgentTeamStageForm(id = "stage", title = "Build", tasks = listOf(
+            AgentTeamTaskForm(id = "task", agent = "worker", prompt = "Build"))))
+        compose.setContent { MaterialTheme {
+            com.aharou.feature.settings.presentation.component.TeamFlowMap(stages, emptyList(), emptySet()) { clicked = it }
+        } }
+        val viewport = compose.onNodeWithTag("team_flow_viewport")
+        viewport.performTouchInput {
+            pinch(androidx.compose.ui.geometry.Offset(center.x - 60f, center.y), androidx.compose.ui.geometry.Offset(center.x - 75f, center.y),
+                androidx.compose.ui.geometry.Offset(center.x + 60f, center.y), androidx.compose.ui.geometry.Offset(center.x + 75f, center.y))
+        }
+        viewport.performTouchInput { swipeLeft(startX = center.x, endX = center.x - 24f) }
+        compose.onNodeWithTag("team_graph_node_stage/task").performTouchInput { click(center) }
+        assertEquals(TeamFlowNode("stage", "task"), clicked)
+        assertTrue(viewport.fetchSemanticsNode().config[androidx.compose.ui.semantics.SemanticsProperties.StateDescription].toFloat() > 1f)
+        repeat(6) {
+            viewport.performTouchInput {
+                pinch(androidx.compose.ui.geometry.Offset(center.x - 60f, center.y), androidx.compose.ui.geometry.Offset(center.x - 120f, center.y),
+                    androidx.compose.ui.geometry.Offset(center.x + 60f, center.y), androidx.compose.ui.geometry.Offset(center.x + 120f, center.y))
+            }
+        }
+        assertEquals(2f, viewport.fetchSemanticsNode().config[androidx.compose.ui.semantics.SemanticsProperties.StateDescription].toFloat(), 0.02f)
+        repeat(8) {
+            viewport.performTouchInput {
+                pinch(androidx.compose.ui.geometry.Offset(center.x - 120f, center.y), androidx.compose.ui.geometry.Offset(center.x - 60f, center.y),
+                    androidx.compose.ui.geometry.Offset(center.x + 120f, center.y), androidx.compose.ui.geometry.Offset(center.x + 60f, center.y))
+            }
+        }
+        assertEquals(0.5f, viewport.fetchSemanticsNode().config[androidx.compose.ui.semantics.SemanticsProperties.StateDescription].toFloat(), 0.02f)
+    }
+
     @Test fun newTeamSelectsCoordinatorOutsideRosterAndSavesClickedRouteWithStableIds() {
         open()
         field(R.string.team_editor_name).performScrollTo().performTextInput("click-team")

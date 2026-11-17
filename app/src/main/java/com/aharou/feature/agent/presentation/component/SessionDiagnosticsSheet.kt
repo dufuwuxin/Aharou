@@ -182,7 +182,7 @@ internal fun SessionDiagnosticsSheet(
 }
 
 @Composable
-private fun SessionMembersDiagnostics(sessionId: String?, onDismiss: () -> Unit) {
+internal fun SessionMembersDiagnostics(sessionId: String?, onDismiss: () -> Unit) {
     if (sessionId == null) {
         Text(stringResource(R.string.session_context_no_usage), Modifier.padding(Spacing.lg))
         return

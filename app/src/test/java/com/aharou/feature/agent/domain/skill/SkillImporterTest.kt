@@ -33,6 +33,49 @@ class SkillImporterTest {
     private fun importZip(root: File, bytes: ByteArray, existing: Set<String> = emptySet(), fallback: String = "archive") =
         SkillImporter.importArchive(provider, root.absolutePath, existing, ByteArrayInputStream(bytes), fallback)
 
+    @Test fun dynamicDenialInSecondSkillRestoresEntireImportAndPreservesUnrelatedBackup() {
+        val root = tempRoot()
+        try {
+            val old = File(root, "first/SKILL.md").apply { parentFile!!.mkdirs(); writeText("old instruction") }
+            val sentinel = File(root, "first/backup.sentinel").apply { writeText("user backup") }
+            val access = object : com.aharou.feature.workspace.domain.FileAccessProvider by provider {
+                override fun writeBytes(path: String, bytes: ByteArray, overwrite: Boolean) {
+                    if (path.contains("/second/")) throw SecurityException("WRITE_LEASE_DENIED")
+                    provider.writeBytes(path, bytes, overwrite)
+                }
+            }
+            val bytes = zipOf("first/SKILL.md" to "---\nname: first\n---\nnew", "first/new.txt" to "new resource",
+                "second/SKILL.md" to "---\nname: second\n---\nsecond")
+            try {
+                SkillImporter.importArchive(access, root.path, emptySet(), bytes.inputStream(), "batch", overwrite = true)
+                throw AssertionError("Second-skill revocation must fail")
+            } catch (expected: SecurityException) { assertEquals("WRITE_LEASE_DENIED", expected.message) }
+            assertEquals("old instruction", old.readText())
+            assertEquals("user backup", sentinel.readText())
+            assertFalse(File(root, "first/new.txt").exists())
+            assertFalse(File(root, "second/SKILL.md").exists())
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test fun silentDeleteFailureIsReportedAsRollbackFailure() {
+        val root = tempRoot()
+        try {
+            val access = object : com.aharou.feature.workspace.domain.FileAccessProvider by provider {
+                override fun writeBytes(path: String, bytes: ByteArray, overwrite: Boolean) {
+                    if (path.endsWith("run.py")) throw SecurityException("WRITE_LEASE_DENIED")
+                    provider.writeBytes(path, bytes, overwrite)
+                }
+                override fun delete(path: String) { }
+            }
+            val bytes = zipOf("demo/SKILL.md" to "---\nname: demo\n---\nbody", "demo/run.py" to "pass")
+            try {
+                SkillImporter.importArchive(access, root.path, emptySet(), bytes.inputStream(), "demo")
+                throw AssertionError("Cleanup failure must not be reported as restored")
+            } catch (expected: IllegalStateException) { assertEquals("SKILL_IMPORT_ROLLBACK_FAILED", expected.message) }
+            assertTrue(File(root, "demo/SKILL.md").exists())
+        } finally { root.deleteRecursively() }
+    }
+
     @Test
     fun importMarkdown_writesSkillMd() {
         val root = tempRoot()

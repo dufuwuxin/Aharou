@@ -1,5 +1,10 @@
 package com.aharou.feature.agent.presentation.observe
 
+import com.aharou.feature.agent.data.task.ProjectTaskRepository
+import com.aharou.feature.agent.domain.task.ProjectTask
+import com.aharou.feature.agent.presentation.projectSessionExecutionHistory
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.onStart
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -27,6 +32,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.shareIn
 import javax.inject.Inject
 
 /**
@@ -113,6 +119,32 @@ sealed interface ObserveMessage {
     ) : ObserveMessage
 }
 
+data class ObserveFileChange(val path: String, val action: String, val toolMessageId: String, val timestamp: Long?)
+data class ObserveTaskLink(val id: String, val title: String, val role: String?, val outcome: String?)
+
+/** Only paired, explicitly successful writes count; commands and self-reported claims are not file evidence. */
+internal fun observeFileChanges(sessionId: String, rows: List<AgentMessageEntity>): List<ObserveFileChange> {
+    val history = projectSessionExecutionHistory(sessionId, rows, hasMore = true)
+    return history.tree.events.mapNotNull { event ->
+        val path = event.path ?: return@mapNotNull null
+        val receipt = event.toolMessageId ?: return@mapNotNull null
+        if (event.action !in setOf("writeFile", "editFile") || event.status != "success") null
+        else ObserveFileChange(path, event.action, receipt, history.timestamps[receipt])
+    }
+}
+
+internal fun observeTaskLinks(sessionId: String, tasks: List<ProjectTask>): List<ObserveTaskLink> = tasks
+    .filter { sessionId in it.sessionIds || sessionId in it.processSessionIds || it.createdBySessionId == sessionId }
+    .map { task -> ObserveTaskLink(task.id, task.title, task.processMembers[sessionId]?.role, task.processMembers[sessionId]?.outcome) }
+
+internal fun observeTaskLinksBySession(
+    sessions: List<com.aharou.feature.agent.domain.subagent.TreeSession>,
+    tasksForWorkspace: (String) -> List<ProjectTask>,
+): Map<String, List<ObserveTaskLink>> = sessions.associate { session ->
+    session.id to if (session.workspacePath.isBlank()) emptyList() else observeTaskLinks(session.id,
+        tasksForWorkspace(session.workspacePath).filter { it.workspace == session.workspacePath })
+}
+
 /** 观察面板的完整 UI 状态。不可变，只由 [ObservePanelViewModel] 单向产出。 */
 data class ObservePanelUiState(
     /** 被观察树的入口会话 id；null 表示还没接线（宿主未传入）。 */
@@ -131,6 +163,8 @@ data class ObservePanelUiState(
     val depth: Int = 1,
     val members: List<ObserveMemberItem> = emptyList(),
     val messages: List<ObserveMessage> = emptyList(),
+    val fileChanges: List<ObserveFileChange> = emptyList(),
+    val taskLinks: List<ObserveTaskLink> = emptyList(),
     /** 候选为空时的提示类型（没有上级 / 没有下级）；null 表示无提示。 */
     val emptyHint: ObserveEmptyHint? = null,
     /** 读取失败的类型化描述；null 表示无错误，具体文案由 UI 层映射。 */
@@ -154,7 +188,8 @@ class ObservePanelViewModel @Inject constructor(
     private val observer: SessionTreeObserver,
     private val messagePersistenceUseCase: MessagePersistenceUseCase,
     private val agentTaskDao: AgentTaskDao,
-    savedStateHandle: SavedStateHandle
+    savedStateHandle: SavedStateHandle,
+    private val projectTasks: ProjectTaskRepository,
 ) : ViewModel() {
 
     private companion object {
@@ -186,6 +221,7 @@ class ObservePanelViewModel @Inject constructor(
 
     /** 宿主在运行时（而不是导航参数里）拿到会话 id 时用这个接上。 */
     fun bind(sessionId: String) {
+        if (_selfId.value != sessionId) _selectedMemberId.value = null
         _selfId.value = sessionId
     }
 
@@ -221,6 +257,8 @@ class ObservePanelViewModel @Inject constructor(
 
     /** 一次树快照的结果。 */
     private data class TreeSnapshot(
+        val sessionId: String? = null,
+        val tasksBySession: Map<String, List<ObserveTaskLink>> = emptyMap(),
         val selfTitle: String = "",
         val selfRole: String? = null,
         val selfState: ObserveRunState = ObserveRunState.UNKNOWN,
@@ -233,7 +271,7 @@ class ObservePanelViewModel @Inject constructor(
      * 树快照：低频轮询。候选成员列表与各自运行态每次重算（状态本来就会变），
      * 只有「看谁」与「看多深」变化时才重启循环。
      */
-    private val treeFlow: Flow<TreeSnapshot> = observeTree()
+    private val treeFlow: Flow<TreeSnapshot> = observeTree().shareIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), replay = 1)
 
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     private fun observeTree(): Flow<TreeSnapshot> = combine(
@@ -260,24 +298,25 @@ class ObservePanelViewModel @Inject constructor(
      * 被观察成员的消息流：走聊天页同一个数据入口（含隐身内存缓冲），
      * 再用 [MessagePersistenceUseCase.restoreAll] 做归档恢复，最后压成只读展示单元。
      */
-    private val messagesFlow: Flow<List<ObserveMessage>> = observeMessages()
+    private data class MemberRecords(val rootId: String?, val memberId: String?,
+        val messages: List<ObserveMessage> = emptyList(), val changes: List<ObserveFileChange> = emptyList())
+
+    private val messagesFlow: Flow<MemberRecords> = observeMessages()
 
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
-    private fun observeMessages(): Flow<List<ObserveMessage>> = combine(
-        _selfId,
-        _selectedMemberId
-    ) { selfId, selected -> selected ?: selfId }
-        .distinctUntilChanged()
-        .flatMapLatest { targetId ->
-            if (targetId == null) {
-                flowOf(emptyList())
-            } else {
-                messagePersistenceUseCase.messagesFlow(targetId, MESSAGE_LIMIT)
-                    .map { entities -> toObserveMessages(messagePersistenceUseCase.restoreAll(entities)) }
-                    .catch { emit(emptyList()) }
+    private fun observeMessages(): Flow<MemberRecords> = combine(treeFlow, _selfId, _selectedMemberId) { tree, selfId, selected ->
+        val target = selected?.takeIf { id -> tree.sessionId == selfId && tree.members.any { it.id == id } } ?: selfId
+        selfId to target
+    }.distinctUntilChanged().flatMapLatest { (rootId, targetId) ->
+        if (targetId == null) flowOf(MemberRecords(rootId, null))
+        else messagePersistenceUseCase.messagesFlow(targetId, MESSAGE_LIMIT)
+            .map { entities ->
+                val rows = messagePersistenceUseCase.restoreAll(entities).filter { it.sessionId == targetId }
+                MemberRecords(rootId, targetId, toObserveMessages(rows), observeFileChanges(targetId, rows))
             }
-        }
-        .flowOn(Dispatchers.Default)
+            .onStart { emit(MemberRecords(rootId, targetId)) }
+            .catch { if (it is CancellationException) throw it; emit(MemberRecords(rootId, targetId)) }
+    }.flowOn(Dispatchers.Default)
 
     val uiState: StateFlow<ObservePanelUiState> = combine(
         treeFlow,
@@ -285,7 +324,8 @@ class ObservePanelViewModel @Inject constructor(
         _direction,
         _depth,
         _selectedMemberId
-    ) { snapshot, messages, direction, depth, selectedId ->
+    ) { rawSnapshot, records, direction, depth, selectedId ->
+        val snapshot = rawSnapshot.takeIf { it.sessionId == _selfId.value } ?: TreeSnapshot()
         val selected = selectedId?.let { id -> snapshot.members.firstOrNull { it.id == id } }
         // 点选的成员若已不在候选里（例如下级跑完被清理），自动回落到「看自己」，避免空面板。
         val observed = selected ?: snapshot.members.firstOrNull { it.isSelf }
@@ -300,7 +340,9 @@ class ObservePanelViewModel @Inject constructor(
             direction = direction,
             depth = depth,
             members = snapshot.members,
-            messages = messages,
+            messages = records.takeIf { it.rootId == _selfId.value && it.memberId == observed?.id }?.messages.orEmpty(),
+            fileChanges = records.takeIf { it.rootId == _selfId.value && it.memberId == observed?.id }?.changes.orEmpty(),
+            taskLinks = observed?.let { snapshot.tasksBySession[it.id] }.orEmpty(),
             emptyHint = snapshot.emptyHint,
             error = snapshot.error
         )
@@ -320,7 +362,7 @@ class ObservePanelViewModel @Inject constructor(
         depth: Int
     ): TreeSnapshot = runCatching {
         val self = observer.self(selfId)
-            ?: return@runCatching TreeSnapshot(error = ObserveError.SessionMissing(selfId.take(8)))
+            ?: return@runCatching TreeSnapshot(sessionId = selfId, error = ObserveError.SessionMissing(selfId.take(8)))
         val related = when (direction) {
             ObserveDirection.UP -> observer.upward(selfId, depth)
             ObserveDirection.DOWN -> observer.downward(selfId, depth)
@@ -344,6 +386,10 @@ class ObservePanelViewModel @Inject constructor(
             )
         }
         TreeSnapshot(
+            sessionId = selfId,
+            tasksBySession = observeTaskLinksBySession(listOf(self) + related.map { it.session }) { workspace ->
+                projectTasks.snapshots.value[workspace]?.tasks.orEmpty()
+            },
             selfTitle = self.title,
             selfRole = self.subagentType,
             selfState = runStateOf(self.id),
@@ -351,7 +397,9 @@ class ObservePanelViewModel @Inject constructor(
             emptyHint = if (related.isEmpty()) emptyHintFor(direction) else null
         )
     }.getOrElse { throwable ->
+        if (throwable is CancellationException) throw throwable
         TreeSnapshot(
+            sessionId = selfId,
             error = ObserveError.TreeReadFailed(
                 throwable.message ?: throwable::class.simpleName ?: ""
             )

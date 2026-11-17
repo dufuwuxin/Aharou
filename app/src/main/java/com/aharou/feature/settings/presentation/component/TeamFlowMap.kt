@@ -2,11 +2,17 @@ package com.aharou.feature.settings.presentation.component
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.geometry.Offset
@@ -29,15 +35,41 @@ internal fun TeamFlowMap(stages: List<AgentTeamStageForm>, routes: List<TeamRout
     val positions = buildMap { rows.forEachIndexed { stageIndex, (stage, tasks) -> tasks.forEachIndexed { memberIndex, task ->
         put(TeamFlowNode(stage.id, task.id), memberIndex to stageIndex)
     } } }
+    var zoom by remember { mutableFloatStateOf(1f) }
+    var pan by remember { mutableStateOf(Offset.Zero) }
+    val density = LocalDensity.current.density
     val executeColor = MaterialTheme.colorScheme.primary
     val reviewColor = MaterialTheme.colorScheme.tertiary
     val rejectColor = MaterialTheme.colorScheme.error
     Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
         Text(stringResource(if (routes.isEmpty()) R.string.team_flow_legacy else R.string.team_flow_routed), style = MaterialTheme.typography.bodySmall)
         Text(stringResource(R.string.team_relationship_hint), style = MaterialTheme.typography.labelSmall)
-        Box(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-            Box(Modifier.width(width.dp).height(height.dp)) {
+        Text(stringResource(R.string.team_flow_gesture_hint), style = MaterialTheme.typography.labelSmall)
+        BoxWithConstraints(Modifier.fillMaxWidth().height(360.dp).clipToBounds()) {
+            val viewWidth = maxWidth.value
+            val viewHeight = maxHeight.value
+            fun bounded(value: Offset, scale: Float) = Offset(
+                value.x.coerceIn(minOf(0f, viewWidth - width * scale), 0f),
+                value.y.coerceIn(minOf(0f, viewHeight - height * scale), 0f))
+            LaunchedEffect(width, height, viewWidth, viewHeight) { pan = bounded(pan, zoom) }
+            // Extent is virtual: allocate only a viewport canvas and visible fixed-size node layers.
+            Box(Modifier.fillMaxSize().testTag("team_flow_viewport")
+                .semantics {
+                    stateDescription = zoom.toString()
+                    horizontalScrollAxisRange = ScrollAxisRange({ -pan.x * density }, { maxOf(0f, width * zoom - viewWidth) * density })
+                    verticalScrollAxisRange = ScrollAxisRange({ -pan.y * density }, { maxOf(0f, height * zoom - viewHeight) * density })
+                    scrollBy { x, y -> pan = bounded(pan - Offset(x, y) / density, zoom); true }
+                }
+                .pointerInput(viewWidth, viewHeight, width, height) {
+                    detectTransformGestures { centroid, movement, factor, _ ->
+                        val next = (zoom * factor).coerceIn(0.5f, 2f)
+                        val center = centroid / density
+                        pan = bounded(center - (center - pan) * (next / zoom) + movement / density, next)
+                        zoom = next
+                    }
+                }) {
                 Canvas(Modifier.fillMaxSize()) {
+                    withTransform({ translate(pan.x * density, pan.y * density); scale(zoom, zoom, Offset.Zero) }) {
                     rows.forEach { (stage, tasks) -> tasks.forEach { task ->
                         val source = positions[TeamFlowNode(stage.id, task.id)] ?: return@forEach
                         task.interfaces.forEach { edge ->
@@ -74,13 +106,19 @@ internal fun TeamFlowMap(stages: List<AgentTeamStageForm>, routes: List<TeamRout
                         drawLine(color, Offset(x2 - 4.dp.toPx(), y2 - 8.dp.toPx()), Offset(x2, y2), 2.dp.toPx())
                         drawLine(color, Offset(x2 + 4.dp.toPx(), y2 - 8.dp.toPx()), Offset(x2, y2), 2.dp.toPx())
                     }
+                    }
                 }
-                rows.forEachIndexed { stageIndex, (stage, tasks) -> tasks.forEachIndexed { memberIndex, task ->
+                rows.forEachIndexed { stageIndex, (stage, tasks) -> tasks.forEachIndexed member@{ memberIndex, task ->
                     val node = TeamFlowNode(stage.id, task.id)
+                    val x = (memberIndex * 240 + 36) * zoom + pan.x
+                    val y = (stageIndex * 160 + 120) * zoom + pan.y
+                    if (x + 216 * zoom < 0 || y + 88 * zoom < 0 || x > viewWidth || y > viewHeight) return@member
                     Surface(color = if (node in selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainer,
                         shape = MaterialTheme.shapes.medium,
-                        modifier = Modifier.offset(x = (memberIndex * 240 + 36).dp, y = (stageIndex * 160 + 120).dp)
-                            .width(216.dp).height(88.dp).testTag("team_graph_node_${teamNodeReference(node)}").clickable { onNodeClick(node) }) {
+                        modifier = Modifier.graphicsLayer {
+                            translationX = x * density; translationY = y * density
+                            scaleX = zoom; scaleY = zoom; transformOrigin = TransformOrigin(0f, 0f)
+                        }.requiredSize(216.dp, 88.dp).testTag("team_graph_node_${teamNodeReference(node)}").clickable { onNodeClick(node) }) {
                         Column(Modifier.padding(Spacing.md)) {
                             Text(stage.title, style = MaterialTheme.typography.labelMedium, maxLines = 1)
                             Text(task.agent.ifBlank { task.department.ifBlank { task.agentQuery } }, style = MaterialTheme.typography.titleSmall, maxLines = 1)

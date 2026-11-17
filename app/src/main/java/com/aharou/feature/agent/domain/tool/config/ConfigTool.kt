@@ -53,6 +53,7 @@ class ConfigTool @Inject constructor(
     private val skillFields: dagger.Lazy<com.aharou.feature.agent.data.ConfigSkillFields>? = null,
     private val toolFields: dagger.Lazy<com.aharou.feature.agent.data.ConfigToolControlFields>? = null,
     private val pluginFields: dagger.Lazy<com.aharou.feature.plugin.data.ConfigPluginFields>? = null,
+    private val writeLease: com.aharou.feature.agent.domain.subagent.SubAgentWriteLease = com.aharou.feature.agent.domain.subagent.SubAgentWriteLease(),
 ) : AgentTool() {
 
     private companion object {
@@ -109,6 +110,7 @@ class ConfigTool @Inject constructor(
             // ALLOW（完全放行）同样视作自动批准：配置类写入也不再弹确认。
             autoMode = context.mode == AgentMode.AUTO || context.mode == AgentMode.ALLOW,
             workspace = context.projectRoot,
+            agentContext = context,
             mainAgent = context.agentDefinition == null && context.sessionId?.let { id -> sessions.getSessionById(id)?.let { it.parentId == null } } == true
         )
 
@@ -116,7 +118,7 @@ class ConfigTool @Inject constructor(
     override suspend fun execute(args: Map<String, JsonElement>): ToolResult =
         executeInternal(args, autoMode = false)
 
-    private suspend fun executeInternal(args: Map<String, JsonElement>, autoMode: Boolean, workspace: String? = null, mainAgent: Boolean = false): ToolResult {
+    private suspend fun executeInternal(args: Map<String, JsonElement>, autoMode: Boolean, workspace: String? = null, mainAgent: Boolean = false, agentContext: AgentContext? = null): ToolResult {
         val action = (args["action"] as? JsonPrimitive)?.contentOrNull?.trim()?.lowercase()
             ?: return ToolResult.Error("缺少 action（list / get / set）", "MISSING_ACTION")
         val path = (args["path"] as? JsonPrimitive)?.contentOrNull?.trim().orEmpty()
@@ -132,7 +134,19 @@ class ConfigTool @Inject constructor(
             }
         }
         return try {
+            if (path == "plugin_market" || path.startsWith("plugin_market.")) {
+                require(!workspace.isNullOrBlank() && agentContext != null && pluginFields != null) { "Marketplace requires a session workspace" }
+            }
             val boundRegistry = when {
+                (path == "plugin_market" || path.startsWith("plugin_market.")) && workspace != null && pluginFields != null ->
+                    ConfigRegistry.isolated().also { registry ->
+                        pluginFields.get().forWorkspace(workspace, agentContext?.sessionId) { target ->
+                            val paths = writeLease.pathsFor(agentContext?.sessionId) ?: agentContext?.writePaths
+                            com.aharou.feature.agent.domain.subagent.WriteLease.denialReason(paths, target, agentContext?.sessionId, workspace)?.let {
+                                throw SecurityException("WRITE_LEASE_DENIED: $it")
+                            }
+                        }.registerInto(registry)
+                    }
                 path.startsWith("skill.") && workspace != null && skillFields != null -> ConfigRegistry.isolated().also { skillFields.get().forWorkspace(workspace).registerInto(it) }
                 path.startsWith("tool.overrides.") && workspace != null && toolFields != null -> ConfigRegistry.isolated().also { toolFields.get().forWorkspace(workspace).registerInto(it) }
                 path.startsWith("plugins.") && workspace != null && pluginFields != null -> ConfigRegistry.isolated().also { pluginFields.get().forWorkspace(workspace).registerInto(it) }
@@ -167,6 +181,11 @@ class ConfigTool @Inject constructor(
                 else -> ToolResult.Error("不支持的 action：$action", "INVALID_ACTION")
             }
         } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            if (path.startsWith("plugin_market.")) {
+                val code = com.aharou.feature.plugin.domain.market.PluginMarketplaceActions.failureCode(e)
+                return ToolResult.Error("Marketplace operation failed: $code", code)
+            }
             FileLogger.e(TAG, "config tool failed: ${e.message}", e)
             ToolResult.Error("配置操作失败：${e.message}")
         }

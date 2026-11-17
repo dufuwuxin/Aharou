@@ -15,8 +15,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.runtime.LaunchedEffect
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import com.aharou.core.ui.AppSwitch
@@ -28,6 +26,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.platform.testTag
+import kotlinx.coroutines.launch
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -56,19 +56,14 @@ import compose.icons.feathericons.Plus
 @Composable
 internal fun VaultSection(viewModel: VaultViewModel = hiltViewModel()) {
     val names by viewModel.names.collectAsStateWithLifecycle()
+    val keywordNames by viewModel.keywordNames.collectAsStateWithLifecycle()
     val writeBlocked by viewModel.writeBlocked.collectAsStateWithLifecycle()
     val privacyEnabled by viewModel.privacyRedaction.collectAsStateWithLifecycle()
     val privacyError by viewModel.privacyError.collectAsStateWithLifecycle()
     val outboundEnabled by viewModel.outboundMasking.collectAsStateWithLifecycle()
     val outboundError by viewModel.outboundError.collectAsStateWithLifecycle()
-    var previewInput by remember { mutableStateOf("") }
-    var previewOutput by remember { mutableStateOf("") }
-    var outboundPreview by remember { mutableStateOf("") }
-    LaunchedEffect(previewInput) {
-        val result = withContext(Dispatchers.IO) { viewModel.previewRedaction(previewInput) to viewModel.previewOutboundMasking(previewInput) }
-        previewOutput = result.first
-        outboundPreview = result.second
-    }
+    var keywordDraft by remember { mutableStateOf<List<Pair<String, String>>?>(null) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
     var showAdd by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf<String?>(null) }
     var confirmReset by remember { mutableStateOf(false) }
@@ -89,6 +84,10 @@ internal fun VaultSection(viewModel: VaultViewModel = hiltViewModel()) {
             )
         }
 
+        SettingsGroup {
+            Text(stringResource(R.string.secret_storage_difference), modifier = Modifier.padding(Spacing.lg),
+                style = MaterialTheme.typography.bodySmall)
+        }
         SettingsGroupHeader(text = stringResource(R.string.vault_privacy_title))
         SettingsGroup {
             SettingsRow(
@@ -107,20 +106,14 @@ internal fun VaultSection(viewModel: VaultViewModel = hiltViewModel()) {
                     modifier = Modifier.padding(Spacing.md))
             }
             SettingsDivider()
-            Column(Modifier.fillMaxWidth().padding(Spacing.md), verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-                Text(stringResource(R.string.vault_privacy_preview_hint), style = MaterialTheme.typography.bodySmall)
-                AppTextField(value = previewInput, onValueChange = { previewInput = it.take(8192) },
-                    label = stringResource(R.string.vault_privacy_preview_input), minLines = 2, maxLines = 5)
-                if (previewOutput.isNotEmpty()) {
-                    SelectionContainer { Text(previewOutput, style = MaterialTheme.typography.bodySmall) }
-                }
-                if (outboundPreview.isNotEmpty()) {
-                    Text(stringResource(R.string.privacy_outbound_preview), style = MaterialTheme.typography.labelMedium)
-                    SelectionContainer { Text(outboundPreview, style = MaterialTheme.typography.bodySmall) }
-                }
-                Text(stringResource(R.string.vault_privacy_limits), style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
+            SettingsRow(
+                title = stringResource(R.string.vault_keyword_editor_title),
+                subtitle = stringResource(R.string.vault_keyword_editor_help),
+                onClick = { scope.launch {
+                    keywordDraft = withContext(Dispatchers.IO) { viewModel.keywordEntries() }
+                } },
+                modifier = Modifier.testTag("vault_keyword_editor_open"),
+            )
         }
 
         SettingsGroupHeader(text = stringResource(R.string.vault_list_header))
@@ -156,7 +149,15 @@ internal fun VaultSection(viewModel: VaultViewModel = hiltViewModel()) {
                 names.forEachIndexed { index, name ->
                     if (index > 0) SettingsDivider()
                     SwipeToDeleteRow(onDelete = { deleting = name }) {
-                        VaultRow(name = name)
+                        Column {
+                            VaultRow(name = name)
+                            SettingsRow(
+                                title = stringResource(R.string.vault_keyword_replacement),
+                                subtitle = stringResource(R.string.vault_keyword_replacement_help),
+                                trailing = { AppSwitch(checked = name in keywordNames,
+                                    onCheckedChange = { viewModel.setKeywordReplacement(name, it) }) },
+                            )
+                        }
                     }
                 }
             }
@@ -171,6 +172,10 @@ internal fun VaultSection(viewModel: VaultViewModel = hiltViewModel()) {
         }
     }
 
+    keywordDraft?.let { entries ->
+        VaultKeywordEditor(entries, onDismiss = { keywordDraft = null },
+            onSave = { values -> viewModel.saveKeywordEntries(values) { keywordDraft = null } })
+    }
     if (showAdd) {
         VaultEditDialog(
             existing = names,

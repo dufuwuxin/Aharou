@@ -13,12 +13,14 @@ class BuiltinSkillOverrideTest {
     @Test fun overrideWritesGlobalAndRevocationPreservesSavedContent() {
         val builtin = mockk<BuiltinSkillSource>()
         every { builtin.listSkills() } returns listOf(Skill("builtin", "", instructions = "original"))
+        every { builtin.resourceFiles("builtin") } returns mapOf("builtin/SKILL.md" to "---\nname: builtin\n---\noriginal".toByteArray())
         val global = mockk<GlobalDirectorySkillSource>()
         every { global.listSkills() } returns emptyList()
         every { global.skillsRoot } returns "/global"
         val project = mockk<ProjectDirectorySkillSource>()
         every { project.listSkills() } returns emptyList()
         val files = mockk<FileAccessProvider>(relaxed = true)
+        every { files.checked() } returns files
         every { files.isFile(any()) } returns false
         every { files.isDirectory(any()) } returns false
         val agents = mockk<AgentDefinitionRepository>()

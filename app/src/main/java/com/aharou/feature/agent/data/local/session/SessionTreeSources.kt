@@ -26,7 +26,8 @@ class RoomSessionTreeSource(
         id = id,
         parentId = parentId,
         title = title,
-        subagentType = subagentType
+        subagentType = subagentType,
+        workspacePath = workspacePath,
     )
 }
 

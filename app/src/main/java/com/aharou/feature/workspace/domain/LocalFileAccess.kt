@@ -36,7 +36,27 @@ class LocalFileAccess @Inject constructor(
     private var boundWorkspace: String? = null
     private var strictListings = false
     override fun checked(): FileAccessProvider = if (strictListings) this else LocalFileAccess(pathMapper).also {
-        it.boundWorkspace = boundWorkspace; it.strictListings = true
+        it.boundWorkspace = boundWorkspace ?: pathMapper.toHostFile(WorkspacePathMapper.CONTAINER_ROOT).absolutePath
+        it.strictListings = true
+    }
+
+    override fun requireResourcePath(root: String, relative: String) {
+        val parts = resourcePathParts(relative)
+        require(root.isNotBlank() && root.split('/').none { it == "." || it == ".." } &&
+            root.none { it.isISOControl() }) { "Invalid resource root" }
+        // resolveFile follows container symlinks; inspect the original mapped tree instead.
+        val directory = pathMapper.toHostFile(root, boundWorkspace).absoluteFile.toPath()
+        val target = parts.fold(directory) { path, part -> path.resolve(part) }
+        require(target.startsWith(directory) && target != directory) { "Resource escapes skill directory" }
+        var cursor = target.root
+        for (part in target) {
+            cursor = cursor.resolve(part)
+            val attrs = try {
+                Files.readAttributes(cursor, BasicFileAttributes::class.java, LinkOption.NOFOLLOW_LINKS)
+            } catch (_: NoSuchFileException) { null }
+            require(attrs?.isSymbolicLink != true) { "Symbolic link resource rejected" }
+            if (cursor != target) require(attrs == null || attrs.isDirectory) { "Resource parent is not a directory" }
+        }
     }
 
     /**
@@ -347,7 +367,8 @@ class LocalFileAccess @Inject constructor(
     internal fun transactionIdentity(path: String): String = "local:" + resolve(path).canonicalPath
 
     override fun toDisplayPath(path: String): String {
-        return pathMapper.toContainerPath(pathMapper.toHostFile(path, boundWorkspace).absolutePath, boundWorkspace)
+        val host = if (strictListings) resolve(path).canonicalPath else pathMapper.toHostFile(path, boundWorkspace).absolutePath
+        return pathMapper.toContainerPath(host, boundWorkspace)
     }
 
     private companion object {

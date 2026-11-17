@@ -786,6 +786,10 @@ fun AppNavigation(
                     onNavigateBack = { navController.popBackStack() },
                     onStopAllAndCloseTerminal = { agentViewModel.stopAllAndCloseTerminal() },
                     menuGroups = listOf(com.aharou.feature.settings.presentation.component.SettingsSection.AiGroup),
+                    onPrimarySwipe = { left -> if (left) navController.navigate("settings") {
+                        popUpTo(navController.graph.startDestinationId) { saveState = true }
+                        launchSingleTop = true; restoreState = true
+                    } },
                     onboardingStep = onboardingUiState.step.takeIf { onboardingUiState.active },
                     onOnboardingModelAdded = {
                         if (onboardingUiState.active && onboardingUiState.step == OnboardingStep.SIMULATE_FETCH_DIALOG) {
@@ -808,7 +812,11 @@ fun AppNavigation(
                     onNavigateBack = {
                         navController.popBackStack()
                     },
-                    onStopAllAndCloseTerminal = { agentViewModel.stopAllAndCloseTerminal() }
+                    onStopAllAndCloseTerminal = { agentViewModel.stopAllAndCloseTerminal() },
+                    onPrimarySwipe = { left -> if (!left) navController.navigate("config") {
+                        popUpTo(navController.graph.startDestinationId) { saveState = true }
+                        launchSingleTop = true; restoreState = true
+                    } },
                 )
             }
             composable("terminal") { entry ->
@@ -966,6 +974,7 @@ fun AppNavigation(
         ) {
             FloatingTabBar(
                 selected = activeTab,
+                draggableIndices = setOf(1, 2),
                 onSelect = { i ->
                     // 点当前 tab 不重复导航；点其它一级 tab 切过去（popUpTo 起点，不叠加返回栈）。
                     if (i != activeTab) {

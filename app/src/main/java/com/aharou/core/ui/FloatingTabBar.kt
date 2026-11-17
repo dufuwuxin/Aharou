@@ -8,7 +8,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -225,7 +225,7 @@ fun FloatingTabBar(
                 .border(1.dp, glassBorderBrush, RoundedCornerShape(Radius.pill))
                 .padding(horizontal = 6.dp, vertical = 3.dp)
                 .pointerInput(items) {
-                    detectDragGesturesAfterLongPress(
+                    detectDragGestures(
                         onDrag = { change, _ ->
                             change.consume()
                             val x = change.position.x
@@ -414,7 +414,8 @@ fun FloatingTabBar(
     items: List<FloatingTabItem>,
     maskColor: Color,
     modifier: Modifier = Modifier,
-    isScrolling: Boolean = false
+    isScrolling: Boolean = false,
+    draggableIndices: Set<Int> = items.indices.toSet(),
 ) {
     val contentAlpha by animateFloatAsState(
         targetValue = if (isScrolling) 0.35f else 1f,
@@ -551,22 +552,29 @@ fun FloatingTabBar(
                 }
                 .border(1.dp, glassBorderBrush, RoundedCornerShape(Radius.pill))
                 .padding(horizontal = 6.dp, vertical = 3.dp)
-                .pointerInput(items) {
-                    detectDragGesturesAfterLongPress(
+                .pointerInput(items, draggableIndices) {
+                    var allowedStart = false
+                    detectDragGestures(
                         onDragStart = { start ->
-                            val w = tabBounds.values.firstOrNull()?.width ?: 0f
-                            dragX = start.x - w / 2f
+                            val origin = tabBounds.entries.firstOrNull { it.value.contains(start) }?.key
+                            allowedStart = currentSelected in draggableIndices && origin in draggableIndices
+                            if (allowedStart) {
+                                val w = tabBounds.values.firstOrNull()?.width ?: 0f
+                                dragX = start.x - w / 2f
+                            }
                         },
                         onDrag = { change, _ ->
+                            if (!allowedStart) return@detectDragGestures
                             change.consume()
                             val x = change.position.x
-                            val tabWidth = tabBounds.values.firstOrNull()?.width ?: 0f
+                            val allowed = tabBounds.filterKeys { it in draggableIndices }
+                            val tabWidth = allowed.values.firstOrNull()?.width ?: 0f
                             if (tabWidth > 0f) {
-                                val minX = tabBounds.values.minOfOrNull { it.left } ?: 0f
-                                val maxX = (tabBounds.values.maxOfOrNull { it.right } ?: tabWidth) - tabWidth
+                                val minX = allowed.values.minOf { it.left }
+                                val maxX = allowed.values.maxOf { it.right } - tabWidth
                                 dragX = (x - tabWidth / 2f).coerceIn(minX, maxX)
                             }
-                            val target = items.indices.minByOrNull { abs((tabBounds[it]?.center?.x ?: x) - x) }
+                            val target = allowed.minByOrNull { abs(it.value.center.x - x) }?.key
                             if (target != null && target != currentSelected) onSelect(target)
                         },
                         onDragEnd = { dragX = Float.NaN },

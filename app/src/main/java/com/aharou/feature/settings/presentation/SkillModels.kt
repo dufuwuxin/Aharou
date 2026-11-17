@@ -14,7 +14,7 @@ data class SkillUiEntry(
     val scope: SkillScope,
     val disabled: Boolean,
     val instructions: String,
-    /** 手写技能里的 `required_tools`，编辑页不展示，保存时原样写回。 */
+    /** Tool binding metadata, subject to normal execution permissions. */
     val keywordEnabled: Boolean = false,
     val keywords: List<String> = emptyList(),
     val requiredTools: List<String> = emptyList(),
@@ -22,7 +22,9 @@ data class SkillUiEntry(
     val builtin: Boolean = false,
     val tags: List<String> = emptyList(),
     val typeId: String? = null,
-    val typeName: String? = null
+    val typeName: String? = null,
+    val resourcePaths: List<String> = emptyList(),
+    val resourceTexts: Map<String, String> = emptyMap()
 )
 
 /** 技能编辑页的保存结果：UI 据此决定是退回列表还是就地报错。 */

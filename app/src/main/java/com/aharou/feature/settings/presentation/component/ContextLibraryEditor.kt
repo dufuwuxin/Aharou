@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -34,7 +33,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import com.aharou.R
 import com.aharou.core.theme.Spacing
-import com.aharou.core.ui.AdaptiveModalBottomSheet
 import com.aharou.core.ui.AppSwitch
 import com.aharou.core.ui.AppTextField
 import com.aharou.feature.agent.domain.context.ContextCategory
@@ -45,6 +43,12 @@ import com.aharou.feature.agent.domain.context.WorldbookRules
 import com.aharou.feature.agent.domain.memory.MemoryScope
 import com.aharou.feature.settings.presentation.ContextEditorDraft
 import com.aharou.feature.settings.presentation.ContextLibraryState
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 
 @Composable
 internal fun ContextLibraryEditor(
@@ -61,18 +65,11 @@ internal fun ContextLibraryEditor(
         ContextEditorDraft.from(entry, initialCategory, initialFolder, state.hasWorkspace)
     }
     var draft by rememberSaveable(editorKey, stateSaver = ContextEditorDraftSaver) { mutableStateOf(original) }
-    var showRules by rememberSaveable(editorKey) { mutableStateOf(false) }
     var showAdvanced by rememberSaveable(editorKey) { mutableStateOf(false) }
     var showPlacement by rememberSaveable(editorKey) { mutableStateOf(false) }
     var confirmDelete by rememberSaveable(editorKey) { mutableStateOf(false) }
     var confirmBack by rememberSaveable(editorKey) { mutableStateOf(false) }
-    val worldbook = remember(draft.worldbookJson) { runCatching { WorldbookRules.fromJson(draft.worldbookJson) }.getOrNull() }
-    var tagText by rememberSaveable(editorKey) { mutableStateOf(worldbook?.tags.orEmpty().joinToString(", ")) }
-    if (showRules && worldbook != null) WorldbookStructuredEditor(
-        worldbook, enabled = !state.writing,
-        onDismiss = { showRules = false },
-        onApply = { draft = draft.copy(worldbookJson = it.toJson()); tagText = it.tags.joinToString(", "); showRules = false },
-    )
+    val worldbook = remember(draft.worldbookJson) { memoryRulesFromDraft(draft.worldbookJson) }
     val dirty = draft != original
     val back = { if (!state.writing) { if (dirty) confirmBack = true else onBack() } }
     BackHandler(enabled = true) { back() }
@@ -114,42 +111,21 @@ internal fun ContextLibraryEditor(
             AppTextField(value = draft.description, onValueChange = { draft = draft.copy(description = it) },
                 label = stringResource(R.string.context_field_description), enabled = !state.writing)
         }
-        if (worldbook != null) key("tags") {
-            AppTextField(value = tagText, onValueChange = { text ->
-                tagText = text
-                draft = draft.copy(worldbookJson = worldbook.copy(tags =
-                    com.aharou.feature.agent.domain.skill.SkillParser.parseKeywordInput(text)).toJson())
-            }, label = stringResource(R.string.asset_classification_tags),
-                supportingText = { Text(stringResource(R.string.asset_tags_help)) }, enabled = !state.writing)
-        }
         key("content") {
             AppTextField(value = draft.content, onValueChange = { draft = draft.copy(content = it) }, label = stringResource(R.string.context_field_content),
                 singleLine = false, minLines = 5, enabled = !state.writing)
         }
         com.aharou.core.translation.TranslationPreview(draft.content)
-        SettingsGroup {
-            Column(Modifier.padding(Spacing.lg), verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-                Text(stringResource(R.string.context_worldbook_title), style = MaterialTheme.typography.titleMedium)
-                Text(stringResource(R.string.context_worldbook_help), style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-                TextButton(enabled = !state.writing && worldbook != null, onClick = { showRules = true }) {
-                    Text(stringResource(R.string.context_worldbook_edit_rules))
-                }
-                TextButton(enabled = !state.writing, onClick = { showAdvanced = !showAdvanced }) {
-                    Text(stringResource(if (showAdvanced) R.string.context_worldbook_hide_json else R.string.context_worldbook_show_json))
-                }
-                if (showAdvanced || worldbook == null) {
-                    if (worldbook == null) ContextNotice(stringResource(R.string.context_worldbook_recover), error = true)
-                    AppTextField(value = draft.worldbookJson, onValueChange = { text ->
-                        draft = draft.copy(worldbookJson = text)
-                        runCatching { WorldbookRules.fromJson(text) }.getOrNull()?.let { tagText = it.tags.joinToString(", ") }
-                    },
-                        label = stringResource(R.string.context_worldbook_field), singleLine = false, minLines = 4, enabled = !state.writing)
-                    TextButton(enabled = !state.writing && worldbook != null, onClick = {
-                        worldbook?.let { draft = draft.copy(worldbookJson = it.toJson()) }
-                    }) { Text(stringResource(R.string.context_worldbook_validate)) }
-                }
-            }
+        key(editorKey) {
+            MemoryEntryFields(draft.worldbookJson, !state.writing) { draft = draft.copy(worldbookJson = it) }
+        }
+        TextButton(enabled = !state.writing, onClick = { showAdvanced = !showAdvanced }) {
+            Text(stringResource(if (showAdvanced) R.string.context_worldbook_hide_json else R.string.context_worldbook_show_json))
+        }
+        if (showAdvanced || worldbook == null) {
+            if (worldbook == null) ContextNotice(stringResource(R.string.context_worldbook_recover), error = true)
+            AppTextField(value = draft.worldbookJson, onValueChange = { draft = draft.copy(worldbookJson = it) },
+                label = stringResource(R.string.context_worldbook_field), singleLine = false, minLines = 4, enabled = !state.writing)
         }
         TextButton(enabled = !state.writing, onClick = { showPlacement = !showPlacement }) {
             Text(stringResource(if (showPlacement) R.string.context_hide_placement else R.string.context_show_placement))
@@ -224,93 +200,100 @@ internal fun ContextLibraryPreview(state: ContextLibraryState, onRun: (String, S
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+/** Raw field text lives in the existing saveable draft, including incomplete numbers and trailing newlines. */
+internal fun memoryRulesFromDraft(value: String): WorldbookRules? = runCatching {
+    val fields = (Json.parseToJsonElement(value) as JsonObject).toMutableMap()
+    for (name in listOf("triggers", "excludes", "roles", "sharedWithRoles", "tags")) {
+        val field = fields[name] as? JsonPrimitive ?: continue
+        if (!field.isString) continue
+        val terms = if (name == "tags") com.aharou.feature.agent.domain.skill.SkillParser.parseKeywordInput(field.content)
+            else field.content.lines().map(String::trim).filter(String::isNotEmpty)
+        fields[name] = JsonArray(terms.map { JsonPrimitive(it) })
+    }
+    for (name in listOf("priority", "confidence", "importance")) {
+        val field = fields[name] as? JsonPrimitive ?: continue
+        if (!field.isString) continue
+        fields[name] = when {
+            name != "priority" && field.content.isBlank() -> JsonNull
+            name == "confidence" -> JsonPrimitive(requireNotNull(field.content.toDoubleOrNull()))
+            else -> JsonPrimitive(requireNotNull(field.content.toIntOrNull()))
+        }
+    }
+    (fields["ownerRole"] as? JsonPrimitive)?.takeIf { it.isString }?.let {
+        fields["ownerRole"] = it.content.trim().takeIf(String::isNotEmpty)?.let(::JsonPrimitive) ?: JsonNull
+    }
+    // Strict decoding intentionally rejects unknown keys: editing another field must never discard them.
+    WorldbookRules.fromJson(JsonObject(fields).toString())
+}.getOrNull()
+
 @Composable
-private fun WorldbookStructuredEditor(
-    rules: WorldbookRules,
-    enabled: Boolean,
-    onDismiss: () -> Unit,
-    onApply: (WorldbookRules) -> Unit,
-) {
-    var triggers by rememberSaveable { mutableStateOf(rules.triggers.joinToString("\n")) }
-    var excludes by rememberSaveable { mutableStateOf(rules.excludes.joinToString("\n")) }
-    var roles by rememberSaveable { mutableStateOf(rules.roles.joinToString("\n")) }
-    var owner by rememberSaveable { mutableStateOf(rules.ownerRole.orEmpty()) }
-    var sharedWith by rememberSaveable { mutableStateOf(rules.sharedWithRoles.joinToString("\n")) }
-    var active by rememberSaveable { mutableStateOf(rules.enabled) }
-    var matchAll by rememberSaveable { mutableStateOf(rules.matchAll) }
-    var caseSensitive by rememberSaveable { mutableStateOf(rules.caseSensitive) }
-    var priority by rememberSaveable { mutableStateOf(rules.priority.toString()) }
-    var confidence by rememberSaveable { mutableStateOf(rules.confidence?.toString().orEmpty()) }
-    var importance by rememberSaveable { mutableStateOf(rules.importance?.toString().orEmpty()) }
+internal fun MemoryEntryFields(value: String, enabled: Boolean, onChange: (String) -> Unit) {
+    val fields = remember(value) { runCatching { Json.parseToJsonElement(value) as JsonObject }.getOrNull() } ?: return
     var advanced by rememberSaveable { mutableStateOf(false) }
-    val priorityValue = priority.toIntOrNull()
+    fun text(name: String, default: String = ""): String = when (val field = fields[name]) {
+        null, JsonNull -> default
+        is JsonPrimitive -> field.content
+        is JsonArray -> field.joinToString("\n") { (it as? JsonPrimitive)?.content ?: it.toString() }
+        else -> field.toString()
+    }
+    fun update(name: String, field: JsonElement) { onChange(JsonObject(fields + (name to field)).toString()) }
+    val confidence = text("confidence")
     val confidenceValue = confidence.toDoubleOrNull()
-    val importanceValue = importance.toIntOrNull()
-    val priorityError = priorityValue == null
     val confidenceError = confidence.isNotBlank() &&
         (confidenceValue == null || !confidenceValue.isFinite() || confidenceValue !in 0.0..1.0)
+    val importance = text("importance")
+    val importanceValue = importance.toIntOrNull()
     val importanceError = importance.isNotBlank() && (importanceValue == null || importanceValue !in 0..100)
-    val valid = !priorityError && !confidenceError && !importanceError
-    AdaptiveModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(Modifier.fillMaxWidth().imePadding().verticalScroll(rememberScrollState()).padding(Spacing.lg),
-            verticalArrangement = Arrangement.spacedBy(Spacing.lg)) {
-            Text(stringResource(R.string.context_worldbook_edit_rules), style = MaterialTheme.typography.titleLarge)
-            ContextNotice(stringResource(R.string.context_worldbook_form_help))
-            SettingsGroup {
-                Column(Modifier.padding(Spacing.lg), verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
-                    WorldbookToggle(stringResource(R.string.context_worldbook_enabled), active, enabled) { active = it }
-                    AppTextField(triggers, { triggers = it }, label = stringResource(R.string.context_worldbook_triggers),
-                        singleLine = false, minLines = 2, enabled = enabled)
-                    AppTextField(excludes, { excludes = it }, label = stringResource(R.string.context_worldbook_excludes),
-                        singleLine = false, minLines = 2, enabled = enabled)
-                    Text(stringResource(R.string.context_worldbook_match), style = MaterialTheme.typography.labelLarge)
-                    ContextChoiceRow(listOf(stringResource(R.string.context_worldbook_any), stringResource(R.string.context_worldbook_all)),
-                        if (matchAll) 1 else 0, { matchAll = it == 1 }, enabled)
-                    AppTextField(priority, { priority = it }, label = stringResource(R.string.context_worldbook_priority),
-                        isError = priorityError, supportingText = {
-                            Text(stringResource(if (priorityError) R.string.context_worldbook_integer_error else R.string.context_worldbook_priority_help))
-                        }, enabled = enabled)
-                }
+    val priorityError = text("priority", "0").toIntOrNull() == null
+    Column(verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
+        MemoryRuleField(fields, "tags", enabled, onChange, R.string.asset_classification_tags, multiline = true)
+        MemoryRuleField(fields, "triggers", enabled, onChange, R.string.context_worldbook_triggers, multiline = true)
+        MemoryRuleField(fields, "excludes", enabled, onChange, R.string.context_worldbook_excludes, multiline = true)
+        MemoryRuleField(fields, "confidence", enabled, onChange, R.string.context_worldbook_confidence,
+            error = R.string.context_worldbook_confidence_error.takeIf { confidenceError })
+        MemoryRuleField(fields, "importance", enabled, onChange, R.string.context_worldbook_importance,
+            error = R.string.context_worldbook_importance_error.takeIf { importanceError })
+        Text(stringResource(R.string.context_worldbook_metadata_help), style = MaterialTheme.typography.bodySmall)
+        Text(stringResource(R.string.context_worldbook_match), style = MaterialTheme.typography.labelLarge)
+        ContextChoiceRow(listOf(stringResource(R.string.context_worldbook_any), stringResource(R.string.context_worldbook_all)),
+            if (text("matchAll") == "true") 1 else 0, { update("matchAll", JsonPrimitive(it == 1)) }, enabled)
+        TextButton(enabled = enabled, onClick = { advanced = !advanced }) {
+            Text(stringResource(if (advanced) R.string.context_worldbook_less else R.string.context_worldbook_more))
+        }
+        if (advanced) {
+            WorldbookToggle(stringResource(R.string.context_worldbook_enabled), text("enabled", "true") == "true", enabled) {
+                update("enabled", JsonPrimitive(it))
             }
-            TextButton(onClick = { advanced = !advanced }) {
-                Text(stringResource(if (advanced) R.string.context_worldbook_less else R.string.context_worldbook_more))
-            }
-            if (advanced) SettingsGroup {
-                Column(Modifier.padding(Spacing.lg), verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
-                    AppTextField(owner, { owner = it }, label = stringResource(R.string.context_memory_owner),
-                        supportingText = { Text(stringResource(R.string.context_memory_owner_help)) }, enabled = enabled)
-                    AppTextField(sharedWith, { sharedWith = it }, label = stringResource(R.string.context_memory_shared_roles),
-                        singleLine = false, minLines = 2, enabled = enabled)
-                    AppTextField(roles, { roles = it }, label = stringResource(R.string.context_worldbook_roles),
-                        supportingText = { Text(stringResource(R.string.context_worldbook_roles_help)) },
-                        singleLine = false, minLines = 2, enabled = enabled)
-                    WorldbookToggle(stringResource(R.string.context_worldbook_case), caseSensitive, enabled) { caseSensitive = it }
-                    AppTextField(confidence, { confidence = it }, label = stringResource(R.string.context_worldbook_confidence),
-                        isError = confidenceError, supportingText = {
-                            Text(stringResource(if (confidenceError) R.string.context_worldbook_confidence_error else R.string.context_worldbook_metadata_help))
-                        }, enabled = enabled)
-                    AppTextField(importance, { importance = it }, label = stringResource(R.string.context_worldbook_importance),
-                        isError = importanceError, supportingText = {
-                            Text(stringResource(if (importanceError) R.string.context_worldbook_importance_error else R.string.context_worldbook_metadata_help))
-                        }, enabled = enabled)
-                }
-            }
-            if (!valid) ContextNotice(stringResource(R.string.context_worldbook_numeric_error), error = true)
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-                TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_cancel)) }
-                Button(enabled = enabled && valid, onClick = {
-                    onApply(rules.copy(enabled = active, triggers = worldbookLines(triggers), excludes = worldbookLines(excludes),
-                        matchAll = matchAll, caseSensitive = caseSensitive, priority = requireNotNull(priorityValue),
-                        roles = worldbookLines(roles), confidence = confidenceValue, importance = importanceValue,
-                        ownerRole = owner.trim().takeIf { it.isNotEmpty() }, sharedWithRoles = worldbookLines(sharedWith)))
-                }) { Text(stringResource(R.string.context_worldbook_apply)) }
+            MemoryRuleField(fields, "priority", enabled, onChange, R.string.context_worldbook_priority, default = "0",
+                error = R.string.context_worldbook_integer_error.takeIf { priorityError })
+            MemoryRuleField(fields, "ownerRole", enabled, onChange, R.string.context_memory_owner)
+            MemoryRuleField(fields, "sharedWithRoles", enabled, onChange, R.string.context_memory_shared_roles, multiline = true)
+            MemoryRuleField(fields, "roles", enabled, onChange, R.string.context_worldbook_roles, multiline = true)
+            WorldbookToggle(stringResource(R.string.context_worldbook_case), text("caseSensitive") == "true", enabled) {
+                update("caseSensitive", JsonPrimitive(it))
             }
         }
+        if (confidenceError || importanceError || priorityError)
+            ContextNotice(stringResource(R.string.context_worldbook_invalid), error = true)
     }
 }
 
-private fun worldbookLines(value: String): List<String> = value.lines().map(String::trim).filter(String::isNotEmpty)
+@Composable
+private fun MemoryRuleField(fields: JsonObject, name: String, enabled: Boolean, onChange: (String) -> Unit,
+                            label: Int, multiline: Boolean = false, default: String = "", error: Int? = null) {
+    val value = when (val field = fields[name]) {
+        null, JsonNull -> default
+        is JsonPrimitive -> field.content
+        is JsonArray -> field.joinToString("\n") { (it as? JsonPrimitive)?.content ?: it.toString() }
+        else -> field.toString()
+    }
+    key(name) {
+        AppTextField(value, { onChange(JsonObject(fields + (name to JsonPrimitive(it))).toString()) },
+            label = stringResource(label), singleLine = !multiline, minLines = if (multiline) 2 else 1,
+            enabled = enabled, isError = error != null,
+            supportingText = { if (error != null) Text(stringResource(error)) })
+    }
+}
 
 @Composable
 private fun WorldbookToggle(label: String, checked: Boolean, enabled: Boolean, onChange: (Boolean) -> Unit) {

@@ -147,8 +147,6 @@ class ProjectRequirementBranchTest {
             state.value = state.value.copy(tasks = state.value.tasks + ProjectTask(id = "child", workspace = "w", projectId = "p",
                 title = "Planned child", requirement = "Build child", parentId = "branch"))
         }
-        compose.onNodeWithContentDescription(compose.activity.getString(R.string.project_view_actions)).performClick()
-        compose.onNodeWithTag("project_mode_toggle").performClick()
         compose.onNodeWithTag("project_tree_body").performScrollToNode(hasTestTag("task_node_child"))
         compose.onNodeWithTag("task_node_child").assertExists()
         compose.onNodeWithContentDescription(compose.activity.getString(R.string.project_view_actions)).performClick()

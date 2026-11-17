@@ -31,6 +31,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
@@ -56,6 +57,7 @@ import com.aharou.feature.settings.presentation.SubAgentSettingsViewModel
 import com.aharou.feature.settings.presentation.SubAgentUiEntry
 import compose.icons.FeatherIcons
 import compose.icons.feathericons.CheckSquare
+import compose.icons.feathericons.Square
 import compose.icons.feathericons.ChevronRight
 import compose.icons.feathericons.MessageSquare
 import compose.icons.feathericons.Trash2
@@ -74,6 +76,7 @@ internal fun SubAgentsSection(
     onOpenDetail: (SubAgentUiEntry) -> Unit,
     limitViewModel: SubAgentSettingsViewModel = hiltViewModel()
 ) {
+    val settingsViewModel = rememberSettingsViewModel()
     val maxRunning by limitViewModel.maxRunning.collectAsStateWithLifecycle()
     val communicationEnabled by limitViewModel.communicationEnabled.collectAsStateWithLifecycle()
     var editingLimit by remember { mutableStateOf(false) }
@@ -90,7 +93,8 @@ internal fun SubAgentsSection(
                 projectName = projectName,
                 entries = entries,
                 onDelete = onDelete,
-                onOpenDetail = onOpenDetail
+                onOpenDetail = onOpenDetail,
+                onBatchDelete = { names, scope -> settingsViewModel.deleteSubAgents(names, scope) },
             )
         }
     }
@@ -112,11 +116,12 @@ internal fun SubAgentsSection(
  * 又不改动列表自己的滚动、多选与批量删除逻辑。
  */
 @Composable
-private fun SubAgentsList(
+internal fun SubAgentsList(
     projectName: String?,
     entries: List<SubAgentUiEntry>,
     onDelete: (SubAgentUiEntry) -> Unit,
-    onOpenDetail: (SubAgentUiEntry) -> Unit
+    onOpenDetail: (SubAgentUiEntry) -> Unit,
+    onBatchDelete: (List<String>, AgentDefinitionScope) -> Unit,
 ) {
     // 已禁用的沉到组末尾：禁用项一多，混在中间会把启用的冲散。
     val projectAgents = entries.filter { it.scope == AgentDefinitionScope.PROJECT }.sortedBy { it.disabled }
@@ -165,7 +170,6 @@ private fun SubAgentsList(
     var projectExpanded by rememberSaveable { mutableStateOf(true) }
     var globalExpanded by rememberSaveable { mutableStateOf(true) }
 
-    val settingsViewModel = rememberSettingsViewModel()
     val selection = rememberListSelectionState()
     // 选中 id 带作用域：同名子代理可能项目与全局各一份
     val selectionIds = entries.map(::subAgentSelectionId)
@@ -290,7 +294,7 @@ private fun SubAgentsList(
                 selection.exit()
                 // 删除接口按作用域定位目录，跨作用域的选中必须分组提交
                 selectedEntries.groupBy { it.scope }.forEach { (scope, group) ->
-                    settingsViewModel.deleteSubAgents(group.map { it.name }, scope)
+                    onBatchDelete(group.map { it.name }, scope)
                 }
             },
             onDismiss = { showBatchDelete = false }
@@ -312,7 +316,8 @@ private fun SubAgentRow(
     onToggleSelect: () -> Unit = {},
     onLongClick: (() -> Unit)? = null
 ) {
-    val rowBackground = MaterialTheme.semanticColors.cardSurface
+    val rowBackground = if (selectionMode && selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.12f)
+        else MaterialTheme.semanticColors.cardSurface
 
     SwipeToDeleteRow(
         onDelete = onDelete,
@@ -326,6 +331,7 @@ private fun SubAgentRow(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(rowBackground)
+                .testTag("subagent_row_${subAgentSelectionId(entry)}")
                 .padding(start = Spacing.lg, end = Spacing.xs, top = 11.dp, bottom = 11.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -389,9 +395,11 @@ private fun SubAgentRow(
             Spacer(modifier = Modifier.width(Spacing.sm))
 
             Icon(
-                imageVector = FeatherIcons.ChevronRight,
-                contentDescription = null,
-                tint = MaterialTheme.semanticColors.subtleText,
+                imageVector = if (selectionMode) {
+                    if (selected) FeatherIcons.CheckSquare else FeatherIcons.Square
+                } else FeatherIcons.ChevronRight,
+                contentDescription = if (selectionMode) stringResource(if (selected) R.string.subagents_selected else R.string.subagents_not_selected) else null,
+                tint = if (selectionMode && selected) MaterialTheme.colorScheme.primary else MaterialTheme.semanticColors.subtleText,
                 modifier = Modifier.size(18.dp)
             )
         }

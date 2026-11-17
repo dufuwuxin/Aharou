@@ -276,12 +276,6 @@ internal fun SettingsMoreRows(onOpen: (SettingsSection) -> Unit) {
             )
             SettingsDivider()
             SettingsRow(
-                icon = FeatherIcons.Key,
-                title = stringResource(SettingsSection.EnvVars.titleRes),
-                onClick = { onOpen(SettingsSection.EnvVars) }
-            )
-            SettingsDivider()
-            SettingsRow(
                 icon = FeatherIcons.PieChart,
                 title = stringResource(SettingsSection.Storage.titleRes),
                 onClick = { onOpen(SettingsSection.Storage) }

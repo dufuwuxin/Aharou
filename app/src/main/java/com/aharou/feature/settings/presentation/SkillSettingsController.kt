@@ -3,6 +3,7 @@ package com.aharou.feature.settings.presentation
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
+import com.aharou.core.util.FileLogger
 import com.aharou.feature.agent.domain.skill.SkillConfigRepository
 import com.aharou.feature.agent.domain.skill.SkillForm
 import com.aharou.feature.agent.domain.skill.SkillImportError
@@ -156,6 +157,12 @@ class SkillSettingsController @Inject constructor(
             _skills.value = withContext(Dispatchers.IO) {
                 val disabled = skillConfigRepository.disabledNames()
                 skillRepository.listAllSkills().map { entry ->
+                    val resourcePaths = try { skillRepository.resourcePaths(entry.skill) }
+                    catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                    catch (failure: Exception) { FileLogger.w(TAG, "Resource listing unavailable", failure); emptyList() }
+                    val resourceTexts = try { skillRepository.resourceTexts(entry.skill, resourcePaths) }
+                    catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                    catch (failure: Exception) { FileLogger.w(TAG, "Resource text unavailable: ${entry.skill.name}", failure); emptyMap() }
                     SkillUiEntry(
                         name = entry.skill.name,
                         description = entry.skill.description,
@@ -163,6 +170,8 @@ class SkillSettingsController @Inject constructor(
                         disabled = entry.skill.name.lowercase() in disabled,
                         instructions = entry.skill.instructions,
                         requiredTools = entry.skill.requiredTools,
+                        resourcePaths = resourcePaths,
+                        resourceTexts = resourceTexts,
                     keywordEnabled = entry.skill.keywordEnabled,
                     keywords = entry.skill.keywords,
                         tags = entry.skill.tags,

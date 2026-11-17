@@ -58,6 +58,7 @@ class VaultRepository @Inject constructor(
     init {
         // 暴露脱敏入口给非 DI 组件（FileLogger / DecisionAuditLog 注入不到本类）。
         VaultRedactor.delegate = ::redact
+        com.aharou.core.privacy.MaskingRules.literalValues = ::literalMaskingValues
     }
 
     companion object {
@@ -104,6 +105,46 @@ class VaultRepository @Inject constructor(
 
     fun get(name: String): String? = synchronized(lock) { load()[name] }
 
+    private val _keywordNames = MutableStateFlow(prefs.getStringSet("keyword_names", emptySet()).orEmpty().toSet())
+    val keywordNames = _keywordNames.asStateFlow()
+
+    fun setKeywordNames(names: Set<String>): Boolean = synchronized(lock) {
+        require(names.all { it in load() }) { "Unknown vault keyword name" }
+        if (!prefs.edit().putStringSet("keyword_names", names.toSet()).commit()) return@synchronized false
+        _keywordNames.value = names.toSet()
+        true
+    }
+
+    fun setKeywordSelected(name: String, enabled: Boolean): Boolean = synchronized(lock) {
+        val current = load()
+        ensureWritable("修改关键词选择")
+        require(name in current) { "Unknown vault keyword name" }
+        setKeywordNames(if (enabled) _keywordNames.value + name else _keywordNames.value - name)
+    }
+
+    fun keywordEntries(): List<Pair<String, String>> = synchronized(lock) {
+        load().filterKeys { it in _keywordNames.value }.toList()
+    }
+
+    fun saveKeywordEntries(entries: List<Pair<String, String>>): Boolean = synchronized(lock) {
+        val current = load()
+        ensureWritable("保存关键词替换")
+        require(entries.all { NAME_REGEX.matches(it.first) && it.second.isNotEmpty() })
+        require(entries.map { it.first }.distinct().size == entries.size)
+        val data = current + entries.toMap()
+        val json = JSONObject().apply { data.forEach { (name, value) -> put(name, value) } }
+        val names = entries.map { it.first }.toSet()
+        if (!prefs.edit().putString(KEY_BLOB, KeystoreCipher.encryptString(json.toString()))
+                .putStringSet("keyword_names", names).commit()) return@synchronized false
+        cache = data
+        _keywordNames.value = names
+        true
+    }
+
+    private fun literalMaskingValues(): List<String> = synchronized(lock) {
+        load().filterKeys { it in _keywordNames.value }.values.filter { it.isNotEmpty() }
+    }
+
     fun set(name: String, value: String) {
         if (!NAME_REGEX.matches(name)) {
             throw VaultError("凭据名只允许字母、数字、下划线、点与短横线：$name")
@@ -120,6 +161,7 @@ class VaultRepository @Inject constructor(
         val current = load()
         ensureWritable("删除")
         if (name !in current) return@synchronized false
+        if (!setKeywordNames(_keywordNames.value - name)) return@synchronized false
         save(current - name)
         true
     }
@@ -210,7 +252,8 @@ class VaultRepository @Inject constructor(
      * 代价是清掉后原有凭据确实拿不回来了——调用方必须二次确认。
      */
     fun reset() = synchronized(lock) {
-        prefs.edit().remove(KEY_BLOB).apply()
+        prefs.edit().remove(KEY_BLOB).remove("keyword_names").apply()
+        _keywordNames.value = emptySet()
         cache = emptyMap()
         readFailure = null
         FileLogger.w(TAG, "凭据库已被手动清空，后续写入按空库重建")

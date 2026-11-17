@@ -26,12 +26,14 @@ data class SkillForm(
     val name: String,
     val description: String,
     val instructions: String,
-    /** 手写技能里的 `required_tools`，编辑页不暴露但原样写回，避免保存后丢字段。 */
+    /** Tool names are metadata only; they never grant execution permission. */
     val requiredTools: List<String> = emptyList(),
     val keywordEnabled: Boolean = false,
     val keywords: List<String> = emptyList(),
     val tags: List<String> = emptyList(),
-    val typeId: String? = null
+    val typeId: String? = null,
+    /** Only explicitly edited resources are written; other files, including binaries, remain untouched. */
+    val resourceEdits: Map<String, String> = emptyMap()
 )
 
 /** 保存技能失败的原因。 */

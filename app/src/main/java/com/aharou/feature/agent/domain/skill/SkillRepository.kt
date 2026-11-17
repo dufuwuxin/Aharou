@@ -125,10 +125,40 @@ class SkillRepository @Inject constructor(
             else -> SkillScope.BUILTIN
         }
         val skill = entriesIn(scope).firstOrNull { it.name.equals(name, true) }
-        val typeId = skill?.typeId ?: return body
-        val type = skillTypes.get(typeId, scope) ?: return null
-        return listOf(type.semantics, type.functions, body).filter { it.isNotBlank() }.joinToString("\n\n")
+        val type = skill?.typeId?.let { skillTypes.get(it, scope) ?: return null }
+        val content = listOfNotNull(type?.semantics, type?.functions, body).filter { it.isNotBlank() }.joinToString("\n\n")
+        return content + (skill?.dirPath?.let { SkillResources.manifest(fileAccess, it, skill.requiredTools) }
+            ?: if (skill?.requiredTools.isNullOrEmpty()) "" else "\n\nRequired tools (no permission grant): ${skill?.requiredTools?.joinToString(", ")}")
     }
+
+    private fun builtinFiles(name: String): Map<String, ByteArray> {
+        val files = builtinSkillSource.resourceFiles(name)
+        check(files.isNotEmpty()) { "Selected builtin version is unavailable" }
+        return files.mapKeys { (path, _) -> path.substringAfter('/') }.also { entries ->
+            entries.keys.filterNot { it.equals(INSTRUCTION_FILE, true) || it.equals("CLAUDE.md", true) }.forEach(SkillResources::relativePath)
+        }
+    }
+
+    fun resourcePaths(skill: Skill): List<String> = skill.dirPath?.let { SkillResources.list(fileAccess, it) }
+        ?: builtinFiles(skill.name).keys.filterNot { it.equals(INSTRUCTION_FILE, true) || it.equals("CLAUDE.md", true) }.sorted()
+
+    fun resourceTexts(skill: Skill, paths: List<String>): Map<String, String> =
+        skill.dirPath?.let { SkillResources.texts(fileAccess, it, paths) } ?: run {
+            val files = builtinFiles(skill.name)
+            var total = 0
+            buildMap {
+                for (path in paths) {
+                    SkillResources.relativePath(path)
+                    if (path.substringAfterLast('.', "").lowercase() !in setOf("md", "txt", "py", "sh", "js", "ts", "json", "yaml", "yml", "toml", "kt", "xml", "csv", "html", "css", "sql")) continue
+                    val bytes = files[path] ?: error("Selected builtin resource is unavailable")
+                    if (bytes.size > 256 * 1024 || total + bytes.size > 1024 * 1024 || bytes.any { it == 0.toByte() }) continue
+                    val text = bytes.toString(Charsets.UTF_8)
+                    if (!text.toByteArray(Charsets.UTF_8).contentEquals(bytes)) continue
+                    total += bytes.size
+                    put(path, text)
+                }
+            }
+        }
 
     /** 技能是否在任一作用域中被禁用。 */
     fun isSkillDisabled(name: String): Boolean =
@@ -188,15 +218,23 @@ class SkillRepository @Inject constructor(
             typeId = typeId
         )
 
-        val provider = fileAccess
+        val provider = fileAccess.checked()
         return@save try {
+            SkillResources.validateEdits(form.resourceEdits)
             val dir = existingDir?.takeIf { provider.isDirectory(it) } ?: "${skillsRoot(scope)}/$name"
             provider.mkdirs(dir)
+            val seed = if (scope == SkillScope.GLOBAL && existingDir == null && originalName?.let(::isBuiltinName) == true)
+                builtinFiles(requireNotNull(originalName)) else emptyMap()
+            val resourceBytes = seed.filterKeys { !it.equals(INSTRUCTION_FILE, true) && !it.equals("CLAUDE.md", true) } +
+                form.resourceEdits.mapValues { (_, text) -> text.toByteArray(Charsets.UTF_8) }
+            val resourceTargets = resourceBytes.mapKeys { (relative, _) -> SkillResources.path(provider, dir, relative) }
+            val resourceOriginals = resourceTargets.mapValues { (path, _) -> if (provider.exists(path)) provider.readBytes(path) else null }
             val target = instructionFile(provider, dir) ?: "${dir.trimEnd('/')}/$INSTRUCTION_FILE"
             val original = if (provider.exists(target)) provider.readFile(target) else null
             // Keep unknown/translated frontmatter. Only fields owned by this form are patched.
-            val updated = if (original == null) text else {
-                val normalized = original.replace("\r\n", "\n")
+            val source = original ?: seed[INSTRUCTION_FILE]?.toString(Charsets.UTF_8)
+            val updated = if (source == null) text else {
+                val normalized = source.replace("\r\n", "\n")
                 val end = if (normalized.startsWith("---\n")) normalized.indexOf("\n---", 3) else -1
                 val yaml = org.yaml.snakeyaml.Yaml()
                 val fields = if (end >= 0) {
@@ -212,10 +250,15 @@ class SkillRepository @Inject constructor(
                 "---\n${yaml.dump(fields)}---\n${form.instructions.trim()}\n"
             }
             try {
+                resourceTargets.forEach { (path, content) -> provider.writeBytes(path, content, overwrite = true) }
                 provider.writeFile(target, updated, overwrite = true)
             } catch (failure: Exception) {
-                if (original != null) try {
-                    provider.writeFile(target, original, overwrite = true)
+                resourceOriginals.forEach { (path, bytes) ->
+                    try { if (bytes == null) provider.delete(path) else provider.writeBytes(path, bytes, overwrite = true) }
+                    catch (rollback: Exception) { failure.addSuppressed(rollback) }
+                }
+                try {
+                    if (original != null) provider.writeFile(target, original, overwrite = true) else if (provider.exists(target)) provider.delete(target)
                 } catch (rollback: Exception) { failure.addSuppressed(rollback) }
                 throw failure
             }
@@ -241,10 +284,16 @@ class SkillRepository @Inject constructor(
         text: String,
         fallbackName: String,
         scope: SkillScope,
-        overwrite: Boolean = false
+        overwrite: Boolean = false,
+        expectedWorkspace: String? = null,
+        authorizeWrite: (String) -> Unit = {},
+        boundAccess: FileAccessProvider? = null,
     ): SkillImportReport = synchronized(com.aharou.core.config.BuiltinSkillEditCapability) {
+        val access = boundAccess ?: (expectedWorkspace?.let(fileAccess::forWorkspace) ?: fileAccess).checked()
+        val root = skillsRoot(scope)
+        val existing = importEntries(access, root)
         SkillImporter.importMarkdown(
-            guardedImportAccess(scope), skillsRoot(scope), existingNamesIn(scope), text, fallbackName, overwrite, ::mayModify
+            guardedImportAccess(scope, access, root, existing, authorizeWrite), root, existing.map { it.name.lowercase() }.toSet(), text, fallbackName, overwrite, ::mayModify
         )
     }
 
@@ -253,10 +302,27 @@ class SkillRepository @Inject constructor(
         input: InputStream,
         fallbackName: String,
         scope: SkillScope,
-        overwrite: Boolean = false
+        overwrite: Boolean = false,
+        expectedWorkspace: String? = null,
+        authorizeWrite: (String) -> Unit = {},
+        boundAccess: FileAccessProvider? = null,
     ): SkillImportReport = synchronized(com.aharou.core.config.BuiltinSkillEditCapability) {
+        val access = boundAccess ?: (expectedWorkspace?.let(fileAccess::forWorkspace) ?: fileAccess).checked()
+        val root = skillsRoot(scope)
+        val existing = importEntries(access, root)
         SkillImporter.importArchive(
-            guardedImportAccess(scope), skillsRoot(scope), existingNamesIn(scope), input, fallbackName, overwrite, ::mayModify
+            guardedImportAccess(scope, access, root, existing, authorizeWrite), root, existing.map { it.name.lowercase() }.toSet(), input, fallbackName, overwrite, ::mayModify,
+            authorizeWrite = { path -> authorizeWrite(access.toDisplayPath(path)) },
+            restoreFile = { path, bytes ->
+                access.requireResourcePath(root, path.removePrefix(root.trimEnd('/') + "/"))
+                if (bytes == null) {
+                    if (access.exists(path)) access.delete(path)
+                    check(!access.exists(path)) { "Imported file cleanup failed" }
+                } else {
+                    access.writeBytes(path, bytes, overwrite = true)
+                    check(access.readBytes(path).contentEquals(bytes)) { "Imported file restore failed" }
+                }
+            },
         )
     }
 
@@ -265,26 +331,47 @@ class SkillRepository @Inject constructor(
      * 同名技能只留优先级最高的那一条，用它按作用域找实体时低优先级那侧会被整条藏掉——
      * 结果就是「目标已有同名」判不出来，删除 / 导出也定位不到目录。
      */
-    private fun guardedImportAccess(scope: SkillScope): FileAccessProvider = object : FileAccessProvider by fileAccess {
+    private fun importEntries(access: FileAccessProvider, root: String): List<Skill> {
+        if (!access.exists(root)) return emptyList()
+        return access.listFilesRecursive(root, 4)
+            .filter { it.substringAfterLast('/').equals("SKILL.md", true) || it.substringAfterLast('/').equals("CLAUDE.md", true) }
+            .map { relative ->
+                val dir = relative.substringBeforeLast('/', "")
+                val target = if (dir.isBlank()) root else "$root/$dir"
+                access.requireResourcePath(root, relative)
+                SkillParser.parseText(access.readFile("$root/$relative"), target.substringAfterLast('/')).copy(dirPath = target)
+            }
+    }
+
+    private fun guardedImportAccess(
+        scope: SkillScope, access: FileAccessProvider, skillRoot: String, existing: List<Skill>, authorizeWrite: (String) -> Unit,
+    ): FileAccessProvider = object : FileAccessProvider by access {
         private fun checkWrite(path: String, content: String?) {
-            val root = skillsRoot(scope).trimEnd('/') + "/"
-            val name = path.removePrefix(root).substringBefore('/')
+            val root = skillRoot.trimEnd('/') + "/"
+            require(path.startsWith(root)) { "Import path escapes skill root" }
+            val relative = path.removePrefix(root)
+            val parts = relative.split('/')
+            require(parts.size >= 2 && parts.all { it.isNotBlank() && it != "." && it != ".." && '\\' !in it })
+            val name = parts.first()
+            access.requireResourcePath(root.trimEnd('/'), relative)
             check(mayModify(name)) { "Builtin skill editing is disabled" }
-            entriesIn(scope).filter { it.dirPath != null && path.startsWith(it.dirPath!!.trimEnd('/') + "/") }
+            existing.filter { it.dirPath != null && path.startsWith(it.dirPath!!.trimEnd('/') + "/") }
                 .forEach { check(mayModify(it.name)) { "Builtin skill editing is disabled" } }
             if (content != null && path.substringAfterLast('/') in setOf("SKILL.md", "CLAUDE.md")) {
                 val parsed = SkillParser.parseText(content, name)
                 check(mayModify(parsed.name)) { "Builtin skill editing is disabled" }
-                check(parsed.typeId == null || skillTypes.get(parsed.typeId, scope) != null) { "Unknown skill type" }
+                check(parsed.typeId == null || SkillTypeRepository(access).get(parsed.typeId, scope) != null) { "Unknown skill type" }
             }
         }
         override fun writeFile(path: String, content: String, overwrite: Boolean, encoding: java.nio.charset.Charset) {
             checkWrite(path, content)
-            fileAccess.writeFile(path, content, overwrite, encoding)
+            authorizeWrite(access.toDisplayPath(path))
+            access.writeFile(path, content, overwrite, encoding)
         }
         override fun writeBytes(path: String, bytes: ByteArray, overwrite: Boolean) {
             checkWrite(path, bytes.toString(Charsets.UTF_8))
-            fileAccess.writeBytes(path, bytes, overwrite)
+            authorizeWrite(access.toDisplayPath(path))
+            access.writeBytes(path, bytes, overwrite)
         }
     }
 
@@ -301,8 +388,7 @@ class SkillRepository @Inject constructor(
     /**
      * 把指定作用域的技能整个导出成一个 zip（见 [SkillExporter]），技能不存在或读不到时返回 null。
      *
-     * 内置技能没有磁盘目录（正文在 assets），用 [SkillParser.serialize] 现攒一份 SKILL.md 打包，
-     * 包内结构与其它技能一致——导出的东西同样能导回来，不用单开一条「只导 md」的路。
+     * 内置技能从用户已选定的磁盘版本完整导出，不与当前 APK 的资源混合。
      */
     fun exportZip(name: String, scope: SkillScope): ByteArray? {
         if (scope == SkillScope.BUILTIN) return exportBuiltin(name)
@@ -315,20 +401,7 @@ class SkillRepository @Inject constructor(
     private fun exportBuiltin(name: String): ByteArray? {
         val skill = visibleBuiltinSkills()
             .firstOrNull { it.name.equals(name, ignoreCase = true) } ?: return null
-        val text = SkillParser.serialize(
-            name = skill.name,
-            description = skill.description,
-            requiredTools = skill.requiredTools,
-            instructions = skill.instructions,
-            keywordEnabled = skill.keywordEnabled,
-            keywords = skill.keywords,
-            tags = skill.tags,
-            typeId = skill.typeId
-        )
-        return SkillExporter.zipOf(
-            skill.name,
-            mapOf(INSTRUCTION_FILE to text.toByteArray(Charsets.UTF_8))
-        )
+        return SkillExporter.zipOf(skill.name, builtinFiles(skill.name))
     }
 
     private val deletedBuiltinsPath = "~/.aharou/skills.deleted-builtins.json"

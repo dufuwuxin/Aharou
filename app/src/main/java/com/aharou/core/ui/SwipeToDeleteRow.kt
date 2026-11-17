@@ -31,6 +31,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
@@ -183,7 +184,11 @@ fun SwipeToDeleteRow(
                 .fillMaxWidth()
                 .background(rowBackground)
                 .then(
-                    if (selectionTint != null) Modifier.background(selectionTint) else Modifier
+                    // Content may draw an opaque card surface; keep selection visible above it.
+                    if (selectionTint != null) Modifier.drawWithContent {
+                        drawContent()
+                        drawRect(selectionTint)
+                    } else Modifier
                 )
                 .pointerInput(selectionMode) {
                     // 多选态下整行只作选中开关，左滑删除不可用

@@ -76,7 +76,8 @@ class ContextLibraryRepository @Inject constructor(
                                 roleName: String? = null, roleTags: List<String> = emptyList(),
                                 memoryAllowed: Boolean = true): String =
         sources(projectRoot).filter { entry ->
-            memoryAllowed && entry.requestKey == name && entry.enabled && !entry.pending && entry.loading != ContextLoad.OFF &&
+            memoryAllowed && memoryStore?.isMemoryEnabled() != false &&
+                entry.requestKey == name && entry.enabled && !entry.pending && entry.loading != ContextLoad.OFF &&
                 (entry.scope != MemoryScope.PROJECT || !projectRoot.isNullOrBlank()) &&
                 entry.category == ContextCategory.RULE &&
                 entry.worldbook.omission(userText,

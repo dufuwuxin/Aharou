@@ -37,6 +37,11 @@ interface FileAccessProvider {
     /** Persistence transactions handle failures themselves instead of accepting safe UI fallbacks. */
     fun checked(): FileAccessProvider = this
 
+    /** Validate a skill-relative path without following links; absent suffixes may be created later. */
+    fun requireResourcePath(root: String, relative: String) {
+        throw UnsupportedOperationException("Resource path validation is unavailable for this backend")
+    }
+
     /**
      * 读取文件全文文本。文件不存在时抛 [NoSuchFileException]。
      * 远程模式对超过实现上限的文件抛 [RemoteOutputTooLargeException]，避免整篇读进内存。
@@ -172,6 +177,14 @@ interface FileAccessProvider {
      * 而不是全局「当前工作区」。空串表示不绑定（跟随全局），默认实现即如此。
      */
     fun forWorkspace(workspacePath: String): FileAccessProvider = this
+}
+
+internal fun resourcePathParts(relative: String): List<String> {
+    require(relative.isNotBlank() && !relative.startsWith('/') && !relative.startsWith('~') &&
+        '\\' !in relative && ':' !in relative && relative.none { it.isISOControl() }) { "Invalid resource path" }
+    return relative.split('/').also { parts ->
+        require(parts.all { it.isNotBlank() && it != "." && it != ".." }) { "Resource escapes skill directory" }
+    }
 }
 
 /**

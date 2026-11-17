@@ -9,10 +9,15 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.*
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.Modifier
 import com.aharou.feature.agent.data.local.entity.ToolCallReceiptEntity
+import com.aharou.feature.agent.data.local.entity.AgentMessageEntity
+import com.aharou.feature.agent.presentation.observe.*
+import com.aharou.feature.agent.domain.task.ProjectTask
+import com.aharou.feature.agent.domain.task.ProjectTaskMemberRun
 import com.aharou.feature.agent.domain.prompt.InjectedContextStore
 import com.aharou.feature.agent.domain.workflow.AgentEvent
 import com.aharou.feature.agent.domain.workflow.RequestContextComposition
@@ -36,6 +41,64 @@ import org.robolectric.annotation.SQLiteMode
 @ConscryptMode(ConscryptMode.Mode.OFF)
 class SessionDiagnosticsTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
+
+    @Test fun selectedMemberTasksUseItsStoredWorkspaceNotRootOrGlobalSelection() {
+        val root = com.aharou.feature.agent.domain.subagent.TreeSession("root", null, "Root", workspacePath = "/A")
+        val member = root.copy(id = "member", parentId = "root", title = "Member", workspacePath = "/B")
+        val unknown = root.copy(id = "unknown", workspacePath = "")
+        fun task(id: String, workspace: String, session: String) = ProjectTask(id = id, workspace = workspace,
+            title = id, requirement = "Build", processSessionIds = listOf(session))
+        val snapshots = mapOf("/A" to listOf(task("root-A", "/A", "root"), task("wrong-A", "/A", "member")),
+            "/B" to listOf(task("member-B", "/B", "member"), task("wrong-C", "/C", "member")),
+            "/C" to listOf(task("global-C", "/C", "member")))
+        val requested = mutableListOf<String>()
+        val links = observeTaskLinksBySession(listOf(root, member, unknown)) { workspace ->
+            requested += workspace
+            snapshots[workspace].orEmpty()
+        }
+        assertEquals(listOf("root-A"), links.getValue("root").map { it.id })
+        assertEquals(listOf("member-B"), links.getValue("member").map { it.id })
+        assertTrue(links.getValue("unknown").isEmpty())
+        assertEquals(listOf("/A", "/B"), requested)
+    }
+
+    @Test fun fileChangesRequireSuccessfulPairedWritesAndExactMemberScope() {
+        val rows = listOf(
+            AgentMessageEntity("calls", "member", "ASSISTANT", "", 1, toolCallsJson = """[{"id":"ok","name":"editFile","arguments":{"path":"/work/a.kt"}},{"id":"bad","name":"writeFile","arguments":{"path":"/work/b.kt"}},{"id":"pending","name":"writeFile","arguments":{"path":"/work/pending.kt"}},{"id":"unknown","name":"writeFile","arguments":{"path":"/work/unknown.kt"}}]"""),
+            AgentMessageEntity("success", "member", "TOOL", """{"status":"success"}""", 2, toolCallId = "ok", toolName = "editFile"),
+            AgentMessageEntity("failed", "member", "TOOL", """{"status":"success"}""", 3, toolCallId = "bad", toolName = "writeFile", isError = true),
+            AgentMessageEntity("unknown", "member", "TOOL", "no structured status", 4, toolCallId = "unknown", toolName = "writeFile"),
+            AgentMessageEntity("orphan", "member", "TOOL", """{"status":"success"}""", 5, toolCallId = "orphan", toolName = "writeFile"),
+            AgentMessageEntity("other", "elsewhere", "TOOL", """{"status":"success"}""", 6, toolCallId = "pending", toolName = "writeFile"))
+        val changes = observeFileChanges("member", rows)
+        assertEquals(listOf("/work/a.kt"), changes.map { it.path })
+        assertEquals("success", changes.single().toolMessageId)
+        assertTrue(observeFileChanges("elsewhere", rows).isEmpty())
+        val task = ProjectTask(id = "t", workspace = "w", title = "Linked task", requirement = "Build",
+            processSessionIds = listOf("member"), processMembers = mapOf("member" to ProjectTaskMemberRun("writer", 1, 1, "DONE")))
+        assertEquals("writer", observeTaskLinks("member", listOf(task)).single().role)
+        assertTrue(observeTaskLinks("elsewhere", listOf(task)).isEmpty())
+    }
+
+    @Test fun verticalMemberSelectionSwapsActualTraceWithoutLeakingPreviousMemberFiles() {
+        val selected = mutableStateOf<String?>(null)
+        val members = listOf(ObserveMemberItem("main", "Main", null, 0, ObserveRunState.UNKNOWN, true),
+            ObserveMemberItem("worker", "Worker", "writer", 1, ObserveRunState.DONE))
+        compose.setContent { MaterialTheme {
+            val worker = selected.value == "worker"
+            ObserveScreen(ObservePanelUiState(sessionId = "main", members = members, observingSelf = !worker,
+                observedTitle = if (worker) "Worker" else "Main", observedMemberId = selected.value,
+                fileChanges = if (worker) listOf(ObserveFileChange("/work/actual.kt", "editFile", "receipt", 1L)) else emptyList(),
+                taskLinks = if (worker) listOf(ObserveTaskLink("task", "Actual task", "writer", "DONE")) else emptyList()),
+                {}, {}, { selected.value = it }, {})
+        } }
+        compose.onNodeWithTag("observe_member_worker").performClick().assertIsSelected()
+        compose.onNodeWithText("/work/actual.kt").assertExists()
+        compose.onNodeWithTag("observe_task_task").assertExists()
+        compose.onNodeWithTag("observe_member_main").performClick().assertIsSelected()
+        compose.onNodeWithText("/work/actual.kt").assertDoesNotExist()
+        compose.onNodeWithTag("observe_task_task").assertDoesNotExist()
+    }
 
     @Test fun projectSectionsExpandIndependentlyAndPlanningReaderHasFiniteHeight() {
         compose.setContent {

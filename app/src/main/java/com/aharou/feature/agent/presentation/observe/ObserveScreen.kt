@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -30,6 +29,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -211,8 +213,9 @@ private fun ObserveHeader(
 
             // 第四行：可点选的候选成员（自己 + 上级/下级）
             if (state.members.isNotEmpty()) {
-                LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
+                LazyColumn(
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 220.dp).testTag("observe_members"),
+                    verticalArrangement = Arrangement.spacedBy(Spacing.xs),
                     contentPadding = PaddingValues(vertical = Spacing.xs)
                 ) {
                     items(state.members, key = { it.id }) { member ->
@@ -295,10 +298,13 @@ private fun MemberPill(
     Surface(
         onClick = onClick,
         color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
-        shape = RoundedCornerShape(999.dp)
+        shape = RoundedCornerShape(8.dp),
+        modifier = Modifier.fillMaxWidth().padding(start = (kotlin.math.abs(member.depth).coerceAtMost(5) * 12).dp)
+            .testTag("observe_member_${member.id}").semantics { this.selected = selected }
     ) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = Spacing.md, vertical = Spacing.sm)) {
         Row(
-            modifier = Modifier.padding(horizontal = Spacing.md, vertical = Spacing.xs),
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
@@ -316,10 +322,12 @@ private fun MemberPill(
                 else MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.widthIn(max = 180.dp)
+                modifier = Modifier.weight(1f)
             )
             Spacer(Modifier.width(Spacing.xs))
             StatePill(member.runState)
+        }
+        Text(member.roleName ?: stringResource(R.string.observe_main_session), style = MaterialTheme.typography.labelSmall)
         }
     }
 }
@@ -354,7 +362,7 @@ private fun ObserveMessageList(
     modifier: Modifier = Modifier
 ) {
     // 工具卡片的折叠状态：按消息 id 记，默认折叠（观察时先看骨架，需要细节再展开）。
-    val expanded = remember { mutableStateMapOf<String, Boolean>() }
+    val expanded = remember(state.sessionId, state.observedMemberId) { mutableStateMapOf<String, Boolean>() }
 
     LazyColumn(
         modifier = modifier,
@@ -383,6 +391,28 @@ private fun ObserveMessageList(
                     ObserveEmptyHint.NO_CHILD -> stringResource(R.string.observe_hint_no_child)
                 }
                 HintRow(text)
+            }
+        }
+        item(key = "member-trace") {
+            Column(Modifier.fillMaxWidth().testTag("observe_member_trace"), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+                Text(stringResource(R.string.observe_linked_tasks), style = MaterialTheme.typography.titleSmall)
+                if (state.taskLinks.isEmpty()) Text(stringResource(R.string.observe_no_task_link), style = MaterialTheme.typography.bodySmall)
+                state.taskLinks.forEach { task ->
+                    Text(stringResource(R.string.observe_task_trace, task.title, task.id,
+                        task.role ?: stringResource(R.string.observe_trace_unknown), task.outcome ?: stringResource(R.string.observe_trace_unknown)),
+                        Modifier.testTag("observe_task_${task.id}"), style = MaterialTheme.typography.bodySmall)
+                }
+                Text(stringResource(R.string.observe_file_changes), style = MaterialTheme.typography.titleSmall)
+                Text(stringResource(R.string.observe_file_changes_scope), style = MaterialTheme.typography.labelSmall)
+                if (state.fileChanges.isEmpty()) Text(stringResource(R.string.observe_no_file_changes), style = MaterialTheme.typography.bodySmall)
+            }
+        }
+        items(state.fileChanges, key = { "change:${it.toolMessageId}" }) { change ->
+            Column(Modifier.fillMaxWidth().testTag("observe_change_${change.toolMessageId}")) {
+                Text(change.path, style = MaterialTheme.typography.bodyMedium)
+                Text(stringResource(R.string.observe_file_change_record, change.action,
+                    change.timestamp?.let(::timeText) ?: stringResource(R.string.observe_trace_unknown), change.toolMessageId),
+                    style = MaterialTheme.typography.labelSmall)
             }
         }
         if (state.messages.isEmpty()) {

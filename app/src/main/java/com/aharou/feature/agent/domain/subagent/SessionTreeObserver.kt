@@ -32,7 +32,8 @@ data class TreeSession(
     val parentId: String?,
     val title: String,
     /** 子代理角色名（探索 / 评审…），主会话为 null。 */
-    val subagentType: String? = null
+    val subagentType: String? = null,
+    val workspacePath: String = "",
 )
 
 /** 会话树只读入口：按 parentId 取节点与直接子节点。 */

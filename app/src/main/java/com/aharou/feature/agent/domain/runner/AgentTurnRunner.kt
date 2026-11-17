@@ -195,9 +195,10 @@ class AgentTurnRunner @Inject constructor(
         if (session?.parentId == null) {
             projectExecution.withWorkspace(workspace) {
                 projectTasks.requireExecutionReady(workspace, turn.sessionId)
-                runUncoordinated(turn).collect { emit(it) }
             }
-        } else runUncoordinated(turn).collect { emit(it) }
+        }
+        // Only task readiness is workspace-wide; independent sessions must not wait for a long-lived flow.
+        runUncoordinated(turn).collect { emit(it) }
     }
 
     private fun runUncoordinated(turn: AgentTurnRequest): Flow<AgentEvent> = flow {

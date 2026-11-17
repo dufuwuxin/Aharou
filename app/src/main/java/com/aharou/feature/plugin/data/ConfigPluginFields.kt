@@ -17,13 +17,25 @@ class ConfigPluginFields @Inject constructor(
     private val manager: PluginManager,
     private val records: PluginRecordStore,
     private val toolSettings: com.aharou.feature.agent.domain.tool.custom.ToolSettingsStore,
+    private val marketplace: com.aharou.feature.plugin.domain.market.PluginMarketplaceActions? = null,
 ) {
+    private var operationResults = java.util.concurrent.ConcurrentHashMap<String, LinkedHashMap<String, ConfigValue>>()
     private var sessionWorkspace: String? = null
-    fun forWorkspace(root: String): ConfigPluginFields = ConfigPluginFields(context, manager, records, toolSettings).also { it.sessionWorkspace = root }
+    private var sessionId: String? = null
+    private var authorizeWrite: (String) -> Unit = {}
+    fun forWorkspace(root: String, sessionId: String? = null, authorizeWrite: (String) -> Unit = {}): ConfigPluginFields =
+        ConfigPluginFields(context, manager, records, toolSettings, marketplace).also {
+            it.sessionWorkspace = root; it.sessionId = sessionId; it.authorizeWrite = authorizeWrite
+            it.operationResults = operationResults
+        }
     private fun checkWorkspace() {
         sessionWorkspace?.let { if (!toolSettings.matchesCurrentProject(it)) throw com.aharou.core.config.ConfigError.InvalidValue("Workspace changed; reopen this session's project") }
     }
     fun registerInto(registry: ConfigRegistry) {
+        if (marketplace != null) {
+            registry.register(MarketCollection(false))
+            registry.register(MarketCollection(true))
+        }
         registry.register(object : ConfigCollection {
             override val basePath = "plugins"
             override val displayName = context.getString(R.string.plugin_host_title)
@@ -72,4 +84,54 @@ class ConfigPluginFields @Inject constructor(
             override fun remove(id: String) { error("Uninstall from the plugin screen") }
         })
     }
+    /** Query records are transient operation results, not user settings. Mutations retain the existing config confirmation/audit gate. */
+    private inner class MarketCollection(private val mutation: Boolean) : ConfigCollection {
+        override val basePath = if (mutation) "plugin_market.actions" else "plugin_market.queries"
+        override val displayName = "Plugin marketplace"
+        override val description = if (mutation)
+            "Sensitive operation. Payload: action=download|install, source=operit|dsh, id, page (default 1), type (Operit, default all), asset_id (when multiple assets), scope=global|project, destination (container file path required for download). Only native txplugin and skill formats install; DSH CLI packages report unsupported/missing runtime, never false success."
+            else "Public read-only catalog query. Payload: source=operit|dsh, query (filters current page only), page (default 1), type (Operit: all|skill|script|package|mcp). Read returned record.result for exact source metadata and asset ids. DSH directory metadata does not prove runtime compatibility."
+        override val risk = if (mutation) ConfigRisk.SENSITIVE else ConfigRisk.NORMAL
+        override val removable = false
+        private val results get() = operationResults.getOrPut("$basePath:${sessionWorkspace.orEmpty()}:${sessionId.orEmpty()}") { linkedMapOf() }
+        override fun childIds(): List<String> = synchronized(results) { results.keys.toList() }
+        override fun fields(forId: String): List<ConfigField> = synchronized(results) {
+            if (forId !in results) emptyList() else listOf(ReadOnlyField(
+                path = "$basePath.$forId.result", displayName = "result", description = "Structured operation result", valueSchema = ConfigSchema.Json,
+                reader = { synchronized(results) { results[forId] ?: throw ConfigError.InvalidValue("Expired result; query again") } }))
+        }
+        override fun add(payload: ConfigValue): String {
+            if (mutation) checkWorkspace()
+            val market = marketplace ?: throw ConfigError.InvalidValue("Marketplace unavailable")
+            val values = (payload as? ConfigValue.Obj)?.value ?: throw ConfigError.TypeMismatch("object")
+            fun text(key: String, default: String? = null): String = (values[key] as? ConfigValue.Str)?.value
+                ?: default ?: throw ConfigError.InvalidValue("Missing $key")
+            val page = (values["page"] as? ConfigValue.Int)?.value ?: 1
+            val source = text("source")
+            val result = runBlocking {
+                if (!mutation) market.query(source, text("query", ""), page, text("type", "all"))
+                else {
+                    val scope = when (text("scope", "global")) {
+                        "global" -> com.aharou.feature.agent.domain.skill.SkillScope.GLOBAL
+                        "project" -> com.aharou.feature.agent.domain.skill.SkillScope.PROJECT
+                        else -> throw ConfigError.InvalidValue("scope must be global or project")
+                    }
+                    if (scope == com.aharou.feature.agent.domain.skill.SkillScope.PROJECT && sessionWorkspace.isNullOrBlank())
+                        throw ConfigError.InvalidValue("Project installation requires a session workspace")
+                    market.perform(text("action"), source, text("id"), page, text("type", "all"),
+                        (values["asset_id"] as? ConfigValue.Str)?.value, scope,
+                        destination = (values["destination"] as? ConfigValue.Str)?.value,
+                        workspaceRoot = sessionWorkspace, beforeMutation = { checkWorkspace() }, authorizeWrite = authorizeWrite)
+                }
+            }
+            val id = java.util.UUID.randomUUID().toString()
+            synchronized(results) {
+                while (results.size >= 20) results.remove(results.keys.first())
+                results[id] = requireNotNull(ConfigValue.decode(result.toString()))
+            }
+            return id
+        }
+        override fun remove(id: String) { throw ConfigError.InvalidValue("Operation records expire automatically") }
+    }
+
 }

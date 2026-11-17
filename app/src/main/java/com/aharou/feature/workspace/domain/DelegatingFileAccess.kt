@@ -48,6 +48,9 @@ class DelegatingFileAccess private constructor(
      */
     override fun checked(): FileAccessProvider = delegate().checked()
 
+    override fun requireResourcePath(root: String, relative: String) =
+        delegate().checked().requireResourcePath(root, relative)
+
     private fun delegate(): FileAccessProvider {
         val remote = if (boundWorkspace != null) {
             profileResolver.forWorkspace(boundWorkspace).mode == ExecutionMode.REMOTE_SSH

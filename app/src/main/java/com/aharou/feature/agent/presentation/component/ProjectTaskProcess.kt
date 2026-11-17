@@ -11,6 +11,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
 import com.aharou.R
 import com.aharou.core.theme.Spacing
 import com.aharou.feature.agent.domain.task.ProjectTask
@@ -85,7 +86,14 @@ internal fun ProjectTaskProcess(task: ProjectTask, tasks: List<ProjectTask>, onE
                 (task.processSessionIds.isEmpty() || com.aharou.feature.agent.domain.task.ProjectWorkflowPlan.delivered(task))) { Text(stringResource(R.string.project_task_accept)) }
         HorizontalDivider()
         val sessionId = selectedSession?.takeIf { it in records }
+        var tracking by rememberSaveable(task.id, sessionId) { mutableStateOf(false) }
+        if (sessionId != null) TextButton(onClick = { tracking = !tracking }, modifier = Modifier.testTag("task_member_tracking_${task.id}")) {
+            Text(stringResource(if (tracking) R.string.project_tracking_close else R.string.project_member_tracking))
+        }
         if (sessionId == null) Text(stringResource(R.string.project_process_empty), style = MaterialTheme.typography.bodySmall)
+        else if (tracking) Box(if (fillConversation) Modifier.weight(1f).fillMaxWidth() else Modifier.fillMaxWidth().height(480.dp)) {
+            SessionMembersDiagnostics(sessionId) { tracking = false }
+        }
         else {
             task.processMembers[sessionId]?.let { member ->
                 Text(when (member.outcome) {

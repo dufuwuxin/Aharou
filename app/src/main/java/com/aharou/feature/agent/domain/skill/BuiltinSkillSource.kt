@@ -25,13 +25,20 @@ class BuiltinSkillSource @Inject constructor(
             emptyList()
         }
 
-    override fun loadInstructions(name: String): String? =
-        listSkills().firstOrNull { it.name.equals(name, ignoreCase = true) }?.instructions
+    override fun loadInstructions(name: String): String? {
+        val files = resourceFiles(name)
+        val instruction = files.keys.firstOrNull { it.substringAfter('/') == SKILL_FILE } ?: return null
+        val directory = instruction.substringBefore('/')
+        val skill = readSkill(directory, files) ?: return null
+        val resources = files.keys.map { it.removePrefix("$directory/") }
+            .filterNot { it.equals(SKILL_FILE, true) || it.equals("CLAUDE.md", true) }
+        return skill.instructions + SkillResources.manifest("~/.aharou/builtin-skills/$directory", skill.requiredTools, resources)
+    }
 
     internal fun resourceFiles(name: String): Map<String, ByteArray> {
         val files = selectedFiles()
         val directory = files.keys.filter { it.endsWith("/$SKILL_FILE") && it.count { char -> char == '/' } == 1 }
-            .map { it.substringBefore('/') }.firstOrNull { readSkill(it, files)?.name == name }
+            .map { it.substringBefore('/') }.firstOrNull { readSkill(it, files)?.name?.equals(name, ignoreCase = true) == true }
             ?: return emptyMap()
         require(directory.matches(Regex("[A-Za-z0-9_-]+")))
         return files.filterKeys { it.startsWith("$directory/") }

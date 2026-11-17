@@ -131,6 +131,56 @@ class WorldbookRulesTest {
         assertTrue(ContextSearch.explain(linked).contains("user-authored"))
     }
 
+    @Test fun namedSearchRuleHonorsGlobalMemorySwitchAndTheSameActivationBoundaries() {
+        val memories = mockk<MemoryRepository>()
+        val store = mockk<com.aharou.core.memory.AharouMemoryStore>()
+        val profile = java.nio.file.Files.createTempDirectory("named-rule-profile").toFile()
+        try {
+            // Prevent unrelated profile seeding; all state belongs to this disposable fixture.
+            java.io.File(profile, ".native-profile-v1").writeText("version=1\n")
+            every { store.dir } returns profile
+            var enabled = false
+            every { store.isMemoryEnabled() } answers { enabled }
+            val key = "rules/current.md"
+            val rules = WorldbookRules(triggers = listOf("needle"), excludes = listOf("ignore"),
+                ownerRole = "reviewer", audiences = listOf(WorldbookAudience.ROLE))
+            var row = Memory("named", "summary", MemoryScope.GLOBAL, content = "named-body", worldbook = rules,
+                contextLoad = ContextLoad.SEARCH, contextCategory = ContextCategory.RULE, contextRequest = key)
+            every { memories.listMemoriesInScope(MemoryScope.GLOBAL, any()) } answers { listOf(row) }
+            every { memories.listMemoriesInScope(MemoryScope.PROJECT, any()) } returns emptyList()
+            val library = ContextLibraryRepository(memories, memoryStore = store)
+            fun read(text: String = "needle", role: String = "reviewer") = library.resolvePromptForContext(
+                key, "/project", "s", text, ContextCategory.ROLE_INJECTED, role)
+            // Old named resolution ignored the global switch outside a prompt snapshot.
+            assertEquals("", read())
+            row = row.copy(contextLoad = ContextLoad.FULL)
+            assertTrue(library.preview("/project", "needle", "s", roleName = "reviewer").full.isEmpty())
+            enabled = true
+            assertEquals("named-body", read())
+            assertEquals(listOf("named"), library.preview("/project", "needle", "s", roleName = "reviewer").full.map { it.title })
+            row = row.copy(contextLoad = ContextLoad.SEARCH)
+            assertEquals("named-body", read()) // Explicit retrieval remains distinct from automatic injection.
+            assertTrue(library.preview("/project", "needle", "s", roleName = "reviewer").full.isEmpty())
+            assertEquals("", read(""))
+            assertEquals("", read("needle ignore"))
+            assertEquals("", read("needle", "other"))
+            assertEquals("", library.resolvePromptForContext(key, "/project", "s", "needle"))
+            assertEquals("", library.resolvePromptForContext(key, "/project", "s", "needle",
+                ContextCategory.ROLE_INJECTED, "reviewer", memoryAllowed = false))
+            row = row.copy(contextLoad = ContextLoad.OFF)
+            assertEquals("", read())
+            row = row.copy(contextLoad = ContextLoad.FULL, scope = MemoryScope.PROJECT)
+            every { memories.listMemoriesInScope(MemoryScope.GLOBAL, any()) } returns emptyList()
+            every { memories.listMemoriesInScope(MemoryScope.PROJECT, any()) } answers { listOf(row) }
+            assertEquals("", library.resolvePromptForContext(key, null, "s", "needle",
+                ContextCategory.ROLE_INJECTED, "reviewer"))
+            assertEquals("named-body", read())
+        } finally {
+            java.io.File(profile, ".native-profile-v1").delete()
+            profile.delete()
+        }
+    }
+
     @Test fun invalidMetadataIsRejectedAndDefaultsRoundTrip() {
         assertEquals(WorldbookRules(), WorldbookRules.fromJson("{}"))
         assertEquals(WorldbookRules(), WorldbookRules.fromJson(WorldbookRules().toJson()))

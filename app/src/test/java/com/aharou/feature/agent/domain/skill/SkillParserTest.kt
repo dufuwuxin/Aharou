@@ -114,4 +114,15 @@ class SkillParserTest {
         assertEquals("specialty", parsed.instructions)
     }
 
+    @Test
+    fun requiredToolsRoundTripQuotesPunctuationWithoutLosingOtherMetadata() {
+        val tools = listOf("Bash", "readFile", "tool:with#punctuation", "quoted\"tool")
+        val text = SkillParser.serialize("resources", "desc", tools, "body", true, listOf("Kotlin"), listOf("tag"), "type")
+        val parsed = SkillParser.parseText(text, "fallback")
+        assertEquals(tools, parsed.requiredTools)
+        assertEquals(listOf("Kotlin"), parsed.keywords)
+        assertEquals(listOf("tag"), parsed.tags)
+        assertEquals("type", parsed.typeId)
+    }
+
 }

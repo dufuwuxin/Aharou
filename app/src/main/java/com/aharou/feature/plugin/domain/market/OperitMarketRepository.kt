@@ -135,11 +135,11 @@ internal class OperitMarketRepository internal constructor(
         }
     }
 
-    private suspend fun stage(download: OperitDownload): File {
+    internal suspend fun stage(download: OperitDownload, referer: String = "https://operit.app/"): File {
         val file = File.createTempFile("operit-download-", ".part", context.cacheDir)
         try {
             val digest = MessageDigest.getInstance("SHA-256")
-            request(download.url) { input ->
+            request(download.url, referer) { input ->
                 file.outputStream().use { output -> copyBounded(input, output, MAX_DOWNLOAD, digest) }
             }
             verifyHash(digest.digest(), download.sha256)
@@ -150,19 +150,19 @@ internal class OperitMarketRepository internal constructor(
         }
     }
 
-    private suspend fun text(url: String): String = request(url) { input ->
+    internal suspend fun text(url: String, referer: String = "https://operit.app/"): String = request(url, referer) { input ->
         val output = java.io.ByteArrayOutputStream()
         copyBounded(input, output, MAX_TEXT)
         output.toString("UTF-8")
     }
 
-    private suspend fun <T> request(url: String, consume: suspend (InputStream) -> T): T = coroutineScope {
+    private suspend fun <T> request(url: String, referer: String = "https://operit.app/", consume: suspend (InputStream) -> T): T = coroutineScope {
         var target = url
         repeat(6) {
             currentCoroutineContext().ensureActive()
             publicUrl(target)
             val request = Request.Builder().url(target).header("User-Agent", "Aharou-OperitMarket/1.0")
-                .header("Referer", "https://operit.app/").build()
+                .header("Referer", referer).build()
             requestMutex.withLock {
                 val now = System.nanoTime() / 1_000_000
                 val wait = 700L - (now - lastRequestAt)
@@ -180,7 +180,7 @@ internal class OperitMarketRepository internal constructor(
                         target = response.header("Location")?.let { response.request.url.resolve(it)?.toString() }
                             ?: error("invalid_redirect")
                     } else {
-                        check(response.isSuccessful) { "market_http_failure" }
+                        check(response.isSuccessful) { "market_http_failure:${response.code}" }
                         val body = response.body ?: error("empty_response")
                         return@coroutineScope body.byteStream().use { consume(it) }
                     }

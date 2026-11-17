@@ -36,7 +36,15 @@ class OutboundMasker private constructor(private val rules: List<MaskingRule>) {
         var out = text
         for (rule in rules) {
             if (!rule.enabled) continue
-            out = rule.regex.replace(out) { match -> replaceMatch(rule, match) }
+            out = buildString {
+                var from = 0
+                PLACEHOLDER.findAll(out).forEach { placeholder ->
+                    append(rule.regex.replace(out.substring(from, placeholder.range.first)) { replaceMatch(rule, it) })
+                    append(placeholder.value)
+                    from = placeholder.range.last + 1
+                }
+                append(rule.regex.replace(out.substring(from)) { replaceMatch(rule, it) })
+            }
         }
         return maskKnown(out)
     }

@@ -100,17 +100,24 @@ internal object SkillImporter {
         input: InputStream,
         fallbackName: String,
         overwrite: Boolean = false,
-        canWrite: (String) -> Boolean = { true }
+        canWrite: (String) -> Boolean = { true },
+        authorizeWrite: (String) -> Unit = {},
+        restoreFile: ((String, ByteArray?) -> Unit)? = null,
     ): SkillImportReport {
         val skills = when (val read = readArchive(input, fallbackName)) {
             is ArchiveRead.Failed -> return SkillImportReport(emptyList(), fatal = read.error)
             is ArchiveRead.Ok -> read.skills
         }
 
+        skills.forEach { skill ->
+            skill.files.keys.forEach { relative -> authorizeWrite("${rootFor(skillsRoot, skill.name.trim())}/$relative") }
+        }
         val imported = mutableListOf<String>()
         val failures = mutableListOf<SkillImportFailure>()
         // 同批导入里已占用的名称，避免一个包内两个同名技能互相覆盖（与 [overwrite] 无关）。
         val used = mutableSetOf<String>()
+        val previous = linkedMapOf<String, ByteArray?>()
+        val attempted = mutableListOf<String>()
 
         for (skill in skills) {
             val name = skill.name.trim()
@@ -129,13 +136,39 @@ internal object SkillImporter {
                 failures += SkillImportFailure(name, error)
                 continue
             }
+            val attemptStart = attempted.size
             try {
+                skill.files.keys.forEach { relative ->
+                    val path = "${rootFor(skillsRoot, name)}/$relative"
+                    if (!previous.containsKey(path)) previous[path] = if (provider.exists(path)) provider.readBytes(path) else null
+                }
                 skill.files.forEach { (relative, bytes) ->
-                    provider.writeBytes("${rootFor(skillsRoot, name)}/$relative", bytes, overwrite = true)
+                    val path = "${rootFor(skillsRoot, name)}/$relative"
+                    attempted += path
+                    provider.writeBytes(path, bytes, overwrite = true)
                 }
                 used += name.lowercase()
                 imported += name
             } catch (e: Exception) {
+                var rollbackFailed = false
+                val rollbackAll = e is SecurityException || e is kotlinx.coroutines.CancellationException
+                val restoring = if (rollbackAll) attempted else attempted.drop(attemptStart)
+                restoring.asReversed().forEach { path ->
+                    try {
+                        val bytes = previous[path]
+                        if (restoreFile != null) restoreFile(path, bytes)
+                        else if (bytes == null) {
+                            if (provider.exists(path)) provider.delete(path)
+                            check(!provider.exists(path)) { "Imported file cleanup failed" }
+                        } else {
+                            provider.writeBytes(path, bytes, overwrite = true)
+                            check(provider.readBytes(path).contentEquals(bytes)) { "Imported file restore failed" }
+                        }
+                    } catch (restore: Exception) { e.addSuppressed(restore); rollbackFailed = true }
+                }
+                if (rollbackFailed) throw IllegalStateException("SKILL_IMPORT_ROLLBACK_FAILED", e)
+                if (rollbackAll) throw e
+                while (attempted.size > attemptStart) attempted.removeAt(attempted.lastIndex)
                 FileLogger.e(TAG, "导入技能失败: $name", e)
                 failures += SkillImportFailure(name, SkillImportError.IO_FAILED)
             }

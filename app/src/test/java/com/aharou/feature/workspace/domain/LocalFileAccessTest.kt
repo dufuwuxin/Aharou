@@ -419,4 +419,31 @@ class LocalFileAccessTest {
         LocalFileAccess(pathMapper).forWorkspace("ws-b").toDisplayPath("f.txt")
         assertEquals(listOf<String?>("ws-b", "ws-b"), seen)
     }
+    @Test fun checkedAccessKeepsActualWorkspaceMapperSnapshotAfterGlobalSwitch() {
+        val workspace = mockk<com.aharou.feature.workspace.data.repository.WorkspaceRepository>()
+        val installer = mockk<com.aharou.feature.agent.domain.container.ContainerInstaller>()
+        val settings = mockk<com.aharou.feature.settings.data.repository.ContainerSettingsRepository>()
+        val home = mockk<PathHomeResolver>()
+        val a = tmp.newFolder("snapshot-A")
+        val b = tmp.newFolder("snapshot-B")
+        var current = a
+        every { workspace.currentPath() } answers { current.path }
+        every { installer.aharouDir } returns tmp.newFolder("snapshot-config")
+        every { installer.sharedDir } returns tmp.newFolder("snapshot-shared")
+        every { installer.rootfsDirFor(any()) } returns tmp.newFolder("snapshot-rootfs")
+        every { settings.activeProfileIdFlow } returns kotlinx.coroutines.flow.MutableStateFlow("ubuntu")
+        every { settings.customProfilesFlow } returns kotlinx.coroutines.flow.MutableStateFlow(emptyList())
+        every { home.home() } returns "/root"
+        every { home.expandHome(any()) } answers { firstArg<String>().replace("~", "/root") }
+        val mapper = WorkspacePathMapper(workspace, installer, settings, home)
+        val access = LocalFileAccess(mapper).checked()
+        access.writeFile("~/workspace/scripts/run.py", "A")
+        access.requireResourcePath("~/workspace", "scripts/run.py")
+        current = b
+        assertEquals("A", access.readFile("~/workspace/scripts/run.py"))
+        access.writeFile("~/workspace/scripts/run.py", "still-A")
+        assertEquals("still-A", File(a, "scripts/run.py").readText())
+        assertFalse(File(b, "scripts/run.py").exists())
+    }
+
 }

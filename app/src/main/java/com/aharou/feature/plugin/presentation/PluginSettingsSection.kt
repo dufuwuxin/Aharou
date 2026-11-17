@@ -73,14 +73,16 @@ internal fun PluginSettingsSection(
     val marketBusyId by marketViewModel.busyId.collectAsStateWithLifecycle()
     val marketEvent by marketViewModel.event.collectAsStateWithLifecycle()
     val operitState by operitViewModel.state.collectAsStateWithLifecycle()
+    val dshViewModel: DshMarketViewModel = hiltViewModel()
+    val dshState by dshViewModel.state.collectAsStateWithLifecycle()
     var selectedTab by rememberSaveable { mutableStateOf(0) }
     var choosingImport by rememberSaveable { mutableStateOf(false) }
     val legacyBusy = busyId != null || marketBusyId != null || choosingImport
-    val anyBusy = legacyBusy || operitState.busy
+    val anyBusy = legacyBusy || operitState.busy || dshState.busy
 
     // 回调读取实时值而非上一帧的 enabled，文件选择返回也走同一个门禁。
     fun runIfIdle(action: () -> Unit) {
-        if (!choosingImport && viewModel.busyId.value == null && marketViewModel.busyId.value == null && !operitViewModel.state.value.busy) action()
+        if (!choosingImport && viewModel.busyId.value == null && marketViewModel.busyId.value == null && !operitViewModel.state.value.busy && !dshViewModel.state.value.busy) action()
     }
     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         choosingImport = false
@@ -105,9 +107,9 @@ internal fun PluginSettingsSection(
             Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 },
                 text = { Text(stringResource(R.string.plugin_tab_installed)) })
             Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 },
-                text = { Text(stringResource(R.string.plugin_tab_market)) })
-            Tab(selected = selectedTab == 2, onClick = { selectedTab = 2 },
                 text = { Text(stringResource(R.string.operit_tab)) })
+            Tab(selected = selectedTab == 2, onClick = { selectedTab = 2 },
+                text = { Text(stringResource(R.string.dsh_market_tab)) })
         }
         if (anyBusy) {
             Text(
@@ -123,18 +125,13 @@ internal fun PluginSettingsSection(
         }
         event?.let { PluginEventText(it) }
         PluginMarketNotice(marketEvent)
-        if (selectedTab == 2) {
+        if (selectedTab == 1) {
             marketState.SaveableStateProvider("operit") {
-                OperitMarketPanel(operitViewModel, legacyBusy, Modifier.weight(1f))
+                OperitMarketPanel(operitViewModel, legacyBusy || dshState.busy, Modifier.weight(1f))
             }
-        } else if (selectedTab == 1) {
-            marketState.SaveableStateProvider("market") {
-                PluginMarketPanel(
-                    viewModel = marketViewModel,
-                    anyBusy = anyBusy,
-                    onInstall = { entry, allowUnknown -> runIfIdle { marketViewModel.installMarketPlugin(entry, allowUnknown) } },
-                    modifier = Modifier.weight(1f),
-                )
+        } else if (selectedTab == 2) {
+            marketState.SaveableStateProvider("dsh") {
+                DshMarketPanel(dshViewModel, legacyBusy || operitState.busy, Modifier.weight(1f))
             }
         } else Column(
             modifier = Modifier
