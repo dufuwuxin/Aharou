@@ -14,6 +14,7 @@ import com.aharou.feature.agent.domain.workflow.PermissionVerdict
 import com.aharou.feature.workspace.domain.FileAccessProvider
 import dagger.Lazy
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.*
@@ -34,36 +35,42 @@ class LiveContextScriptRunner @Inject constructor(
     private val receipts: ToolCallReceiptRepository,
     private val notifications: AgentNotificationCenter,
 ) {
-    suspend fun build(context: AgentContext): String = withSessionStop(context) { buildCurrent(context) }
+    suspend fun build(context: AgentContext): String = withSessionStop(context) { checkStopped ->
+        buildCurrent(context, checkStopped)
+    }
 
-    private suspend fun <T> withSessionStop(context: AgentContext, block: suspend () -> T): T = coroutineScope {
-        val session = context.sessionId ?: return@coroutineScope block()
-        fun stopped() = notifications.peek(session).any { it.kind == AgentNotificationKind.USER_INTERRUPT }
+    private suspend fun <T> withSessionStop(context: AgentContext, block: suspend (() -> Unit) -> T): T = coroutineScope {
+        val session = context.sessionId ?: return@coroutineScope block {}
+        val stopObserved = AtomicBoolean(false)
+        fun stopped() = notifications.peek(session).any { it.kind == AgentNotificationKind.USER_INTERRUPT } || stopObserved.get()
         fun cancelStopped(): Nothing {
+            // Retain the stop after either coroutine removes its notification.
+            stopObserved.set(true)
             val hits = notifications.peek(session).filter { it.kind == AgentNotificationKind.USER_INTERRUPT }
             notifications.ack(session, hits.map { it.seq })
             throw CancellationException("Live context session stopped")
         }
-        if (stopped()) cancelStopped()
-        val work = async { block() }
+        fun checkStopped() { if (stopped()) cancelStopped() }
+        checkStopped()
+        val work = async { block(::checkStopped) }
         val stop = async {
             while (!stopped()) delay(25)
         }
         try {
             select<T> {
                 stop.onAwait { cancelStopped() }
-                work.onAwait { if (stopped()) cancelStopped(); it }
+                work.onAwait { checkStopped(); it }
             }
         } finally { work.cancel(); stop.cancel() }
     }
 
-    private suspend fun buildCurrent(context: AgentContext): String {
+    private suspend fun buildCurrent(context: AgentContext, checkStopped: () -> Unit): String {
         val revision = manager.revision
         val scripts = manager.definitions.value.filter { it.enabled && it.type == ScriptToolType.LIVE_CONTEXT }
         if (scripts.isEmpty()) return ""
         val output = buildList {
             for (definition in scripts) add(try {
-                val output = withTimeoutOrNull(definition.timeoutSeconds * 1000L) { execute(definition, revision, context) }
+                val output = withTimeoutOrNull(definition.timeoutSeconds * 1000L) { execute(definition, revision, context, checkStopped) }
                 if (output == null) {
                     diagnostic(definition, "timeout")
                     ""
@@ -82,7 +89,12 @@ class LiveContextScriptRunner @Inject constructor(
         return if (manager.revision == revision) output else ""
     }
 
-    private suspend fun execute(definition: ScriptToolDefinition, revision: Long, context: AgentContext): String {
+    private suspend fun execute(
+        definition: ScriptToolDefinition,
+        revision: Long,
+        context: AgentContext,
+        checkStopped: () -> Unit,
+    ): String {
         check(registry.get().getDeferredTools(context).any { it.name == executor.name }) { "Bash is not allowed in this agent context" }
         val input = buildJsonObject {
             put("sessionId", context.sessionId)
@@ -113,6 +125,7 @@ class LiveContextScriptRunner @Inject constructor(
         }
         // Approval may outlive an edit/disable operation. Never run an obsolete saved command.
         check(manager.revision == revision && manager.definitions.value.any { it == definition && it.enabled }) { "Script changed during approval" }
+        checkStopped()
         val result = executor.executeForeground(args, context)
         check(manager.revision == revision && manager.definitions.value.any { it == definition && it.enabled }) { "Script changed during execution" }
         check(result.exitCode == 0 && !result.outputTruncated && result.output.length <= definition.outputLimit) { "Script failed or output was truncated" }

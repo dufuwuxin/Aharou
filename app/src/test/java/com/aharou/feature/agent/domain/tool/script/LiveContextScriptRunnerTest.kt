@@ -155,6 +155,20 @@ class LiveContextScriptRunnerTest {
         coVerify(exactly = 0) { executor.executeForeground(any(), any()) }
     }
 
+    @Test fun stopBeforeApprovalPreventsScriptStartup() = runTest {
+        ask()
+        coEvery { executor.executeForeground(any(), any()) } returns CommandResult("must not run", 0)
+        val work = async { runCatching { runner.build(context) } }
+        while (permissions.pendingBatch.value == null) yield()
+        val batch = checkNotNull(permissions.pendingBatch.value)
+        notifications.enqueue("one", PendingNotification(AgentNotificationKind.USER_INTERRUPT, "user", "stop", NotificationOutcome.STOPPED))
+        permissions.resolveBatch(batch.id, PermissionChoice.ONCE)
+        val result = work.await()
+        coVerify(exactly = 0) { executor.executeForeground(any(), any()) }
+        assertTrue(result.exceptionOrNull() is CancellationException)
+        assertNull(permissions.pendingBatch.value)
+    }
+
     @Test fun actualSessionStopCancelsRunningScript() = runTest {
         val started = CompletableDeferred<Unit>()
         val cancelled = CompletableDeferred<Unit>()
