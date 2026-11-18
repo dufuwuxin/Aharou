@@ -221,38 +221,40 @@ class ExecuteCommandTool @Inject constructor(
         args: Map<String, JsonElement>,
         context: com.aharou.feature.agent.domain.model.AgentContext
     ): ToolResult {
-        val command = args["command"]?.jsonPrimitive?.contentOrNull
-            ?: return ToolResult.Error("缺少必需参数: command")
-
-        // 提权必须说明理由：理由会随命令一起进确认弹窗，避免「反正能提权就先试一下」的随手重试。
-        val elevateReason = args["reason"]?.jsonPrimitive?.contentOrNull?.trim()
-        if (isElevation(args) && elevateReason.isNullOrEmpty()) {
-            return ToolResult.Error(
-                "提权必须说明理由：在 reason 参数里写清这次为什么非执行不可（会展示给用户确认）。",
-                "ELEVATE_REASON_REQUIRED"
-            )
-        }
-
+        validationError(args)?.let { return it }
+        val command = args.getValue("command").jsonPrimitive.content
         if (isBackground(args)) return startBackground(command, args, context)
+        return try {
+            val result = executeForeground(args, context)
+            ToolResult.Success(JsonPrimitive(toModelOutput(result.output, result.exitCode)))
+        } catch (e: CancellationException) { throw e }
+        catch (e: Exception) {
+            FileLogger.e(TAG, "execute_command 失败: $command", e)
+            ToolResult.Error("执行命令失败: ${e.message}")
+        }
+    }
 
-        // 令牌必须在执行前写好：gradlew 门阀是在脚本里读它的，晚一步就会被拒。
+    private fun validationError(args: Map<String, JsonElement>): ToolResult.Error? {
+        if (args["command"]?.jsonPrimitive?.contentOrNull == null) return ToolResult.Error("缺少必需参数: command")
+        if (isElevation(args) && args["reason"]?.jsonPrimitive?.contentOrNull?.trim().isNullOrEmpty()) {
+            return ToolResult.Error("提权必须说明理由：在 reason 参数里写清这次为什么非执行不可（会展示给用户确认）。", "ELEVATE_REASON_REQUIRED")
+        }
+        return null
+    }
+
+    /** Structured status is engine-owned; stdout cannot forge exitCode or truncation. PermissionGate stays with callers. */
+    internal suspend fun executeForeground(
+        args: Map<String, JsonElement>,
+        context: com.aharou.feature.agent.domain.model.AgentContext,
+    ): com.aharou.feature.agent.domain.container.CommandResult {
+        validationError(args)?.let { throw IllegalArgumentException(it.message) }
+        require(!isBackground(args)) { "Foreground execution cannot create a terminal" }
+        val command = args.getValue("command").jsonPrimitive.content
         val workdir = sessionWorkdir(context)
         val granted = grantBuildToken(command, workdir)
         return try {
-            // 在会话绑定的工作区目录内执行，与文件工具保持同一根目录
-            val timeoutMs = resolveTimeoutMs(args)
-            FileLogger.d(TAG, "execute_command (timeout=${timeoutMs}ms): $command")
-            val result = commandEngine.runCommandSyncWithExit(command, workdir, timeoutMs)
-            FileLogger.v(TAG, "execute_command 完成，输出 ${result.output.length} 字符，退出码 ${result.exitCode}")
-            ToolResult.Success(JsonPrimitive(toModelOutput(result.output, result.exitCode)))
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            FileLogger.e(TAG, "execute_command 失败: $command", e)
-            ToolResult.Error("执行命令失败: ${e.message}")
-        } finally {
-            if (granted) revokeBuildToken(workdir)
-        }
+            commandEngine.runCommandSyncWithExit(command, workdir, resolveTimeoutMs(args))
+        } finally { if (granted) revokeBuildToken(workdir) }
     }
 
     /**

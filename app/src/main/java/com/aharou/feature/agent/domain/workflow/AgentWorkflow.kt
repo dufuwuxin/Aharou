@@ -114,6 +114,8 @@ sealed class AgentEvent {
 }
 
 interface AgentWorkflow {
+    fun resetModelOverride(sessionId: String) {}
+
     /**
      * 运行 Agent 循环并以事件流的形式分步推送进度：
      * 模型回复 → （可能的）工具调用 → 工具结果 → 再回复 …… 直至模型不再调用工具。

@@ -58,6 +58,23 @@ class ScriptToolDefinitionTest {
         ScriptToolDefinition.validateAll(listOf(definition(), definition().copy(name = "other")))
     }
 
+    @Test fun legacyDefinitionDefaultsToOrdinaryTool() {
+        val loaded = Json.decodeFromString<ScriptToolDefinition>("""{"name":"old","description":"Legacy","command":"cat"}""")
+        assertEquals(ScriptToolType.TOOL, loaded.type)
+        assertEquals(10, loaded.timeoutSeconds)
+        assertEquals(8192, loaded.outputLimit)
+    }
+
+    @Test fun liveContextSerializationRoundTrip() {
+        val original = definition().copy(type = ScriptToolType.LIVE_CONTEXT, timeoutSeconds = 3, outputLimit = 32)
+        val encoded = Json.encodeToString(original)
+        assertTrue(encoded.contains("live_context"))
+        assertEquals(original, Json.decodeFromString<ScriptToolDefinition>(encoded))
+    }
+
+    @Test(expected = IllegalArgumentException::class) fun invalidTimeoutRejected() { definition().copy(timeoutSeconds = 0) }
+    @Test(expected = IllegalArgumentException::class) fun invalidLimitRejected() { definition().copy(outputLimit = 65537) }
+
     @Test fun jsonRoundTripPreservesDefinitions() {
         val original = listOf(definition("cat\nprintf '%s' 'done'").copy(enabled = false))
         assertEquals(original, Json.decodeFromString<List<ScriptToolDefinition>>(Json.encodeToString(original)))

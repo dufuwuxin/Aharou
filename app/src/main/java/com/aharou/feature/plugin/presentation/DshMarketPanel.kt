@@ -30,6 +30,18 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.*
 
+internal fun dshTransportDiagnostic(failure: Exception, fallback: String): String {
+    val chain = generateSequence<Throwable>(failure) { it.cause }.take(12).toList()
+    val stage = chain.firstNotNullOfOrNull {
+        Regex("dsh_catalog_transport:(tls|dns|timeout|network|response)|dsh_catalog_parse").find(it.message.orEmpty())?.value
+    } ?: fallback
+    val http = chain.firstNotNullOfOrNull { Regex("market_http_failure:[0-9]{3}").find(it.message.orEmpty())?.value }
+    val container = (chain + chain.flatMap { it.suppressed.toList() }).flatMap {
+        Regex("dsh_container_[a-z0-9_]+(?::[0-9]+)?").findAll(it.message.orEmpty()).map { match -> match.value }.toList()
+    }.distinct().sortedBy { it == "dsh_container_unavailable" }.joinToString(" / ").takeIf { it.isNotBlank() }
+    return listOfNotNull(stage.take(80), http, container).joinToString(" / ")
+}
+
 internal data class DshMarketState(
     val query: String = "", val page: Int = 1, val busy: Boolean = false,
     val items: List<JsonObject> = emptyList(), val notice: Int? = null, val diagnostic: String? = null,
@@ -90,18 +102,7 @@ internal class DshMarketViewModel @Inject constructor(private val actions: Plugi
             finally { mutable.update { it.copy(busy = false) } }
         }
     }
-    private fun diagnostic(failure: Exception, fallback: String): String {
-        val chain = generateSequence<Throwable>(failure) { it.cause }.take(12).toList()
-        val stage = chain.firstNotNullOfOrNull {
-            Regex("dsh_catalog_transport:(tls|dns|timeout|network|response)|dsh_catalog_parse")
-                .find(it.message.orEmpty())?.value
-        } ?: fallback
-        val http = chain.firstNotNullOfOrNull { Regex("market_http_failure:[0-9]{3}").find(it.message.orEmpty())?.value }
-        val container = chain.firstNotNullOfOrNull {
-            Regex("dsh_container_[a-z_]+(?::[0-9]+)?").find(it.message.orEmpty())?.value
-        }
-        return listOfNotNull(stage.take(80), http, container).joinToString(" / ")
-    }
+    private fun diagnostic(failure: Exception, fallback: String): String = dshTransportDiagnostic(failure, fallback)
     fun cancel() { operation?.cancel() }
 }
 
@@ -130,6 +131,12 @@ internal fun DshMarketPanel(viewModel: DshMarketViewModel, externalBusy: Boolean
         state.notice?.let { notice ->
             val diagnostic = state.diagnostic.orEmpty()
             val message = when {
+                "dsh_container_curl_missing" in diagnostic -> R.string.dsh_market_curl_missing
+                "dsh_container_ca_missing" in diagnostic -> R.string.dsh_market_ca_missing
+                "dsh_container_certificate" in diagnostic -> R.string.dsh_market_container_certificate
+                "dsh_container_base64_missing" in diagnostic -> R.string.dsh_market_base64_missing
+                "dsh_container_dns" in diagnostic -> R.string.dsh_market_container_dns
+                "dsh_container_timeout" in diagnostic || "dsh_container_connection" in diagnostic -> R.string.dsh_market_container_network
                 notice == R.string.dsh_market_container_unavailable -> notice
                 "transport:tls" in diagnostic -> R.string.dsh_market_tls_failed
                 "transport:dns" in diagnostic -> R.string.dsh_market_dns_failed

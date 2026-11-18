@@ -452,3 +452,11 @@ The unified tool browser and six-action creation sheet reuse existing execution 
 ### 实测反馈修正与双会话运行
 
 配置/设置根页与底栏均支持不长按的普通横滑，只在这两页之间生效，项目仅点击。成员关系弹窗改选来源/目标自动去重，第三阶段可向第一阶段建立协作边，不改变执行路由无环约束。关键词逐卡片编辑，单次commit更新原文与选择；默认只替换已选文本且需总开关。普通根会话只在任务就绪检查时持有workspace锁，模型长流锁外独立运行；同session队列和目标停止保留。真实runner旧5项中2项并发超时，修后同5项全绿。DSH宿主TLS关闭可使用当前已就绪容器现有curl读取公开目录，保留认证校验/HTTP拒绝/来源身份/容量限制，结果显示通道；源下载未接备用，不能把目录成功当安装运行成功。
+
+
+### 2026-11-18 实时注入与可信宿主扩展（源码边界）
+
+- 工具页脚本编辑器可保存普通工具/实时上下文类型及限时限量；config 的 `script_tools.<name>.type`（`tool/live_context`）、`timeout_seconds`、`output_limit` 复用同一管理器，新增时也接受这些字段。旧定义默认普通工具；实时脚本不注册 function tool。
+- 工作流正式会话请求的逐轮入口调用 `SystemPromptProvider.buildForRequest`，以当前 AgentContext 经 `LiveContextScriptRunner` → `ExecuteCommandTool` + `PermissionGate` 执行。输出只拼接本次提示，无持久历史追加；拒绝/异常/超时继续原请求，取消传播，关闭无调用。角色工具快照不允许 Bash 时不执行。
+- SDK `onContext` 已接入上述真实注入消费者；JS 和 DEX 透传默认一致，失败留诊断且不自动停用。宿主桥的 `reflect.class/context/new/invoke/get/set/release` 提供实例隔离句柄与 private 宿主反射，退休/候选失败均释放；不声称修改任意 DEX 方法体，不改变登录鉴权/SSE，也不绕过 tool.invoke 的 PermissionGate。
+- 本节仅记录源码接线。新增 manager/livecontext/runtime/bridge/reflection 回归源文件；本轮未运行 Gradle，Android DEX/JNI 与界面实测仍无证据。

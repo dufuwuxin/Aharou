@@ -264,6 +264,7 @@ class StatefulAgentWorkflow @Inject constructor(
     }
 
     /** 解析当前生效的 provider 配置：优先 session 绑定的 providerId/model，回退全局 active provider；绑定失效也回退，保老会话不中断。 */
+    override fun resetModelOverride(sessionId: String) = failoverCoordinator.deactivate(sessionId)
     private suspend fun resolveProviderConfig(sessionId: String?): AIProviderConfig? {
         // 回退覆盖优先：主供应商已因额度/鉴权/限流失败过，不要每轮再撞一次
         failoverCoordinator.overrideConfig(sessionId)?.let { return it }
@@ -601,7 +602,7 @@ class StatefulAgentWorkflow @Inject constructor(
         val inputBudget = ContextWatermarks.from(ModelContextPolicy.effectiveInputBudget(callMetadata),
             contextPreferences.soft, contextPreferences.hard).maxTokens
         val requestVersion = injectedContexts.beginRequest(currentContext.sessionId)
-        val baseRequestPrompt = appendMiddlewarePrompt(providerInUse.providerId, systemPrompt)
+        val baseRequestPrompt = appendMiddlewarePrompt(providerInUse.providerId, promptProvider.buildForRequest(currentContext.copy(history = state.messages), systemPrompt))
         var requestSystemPrompt = baseRequestPrompt
         val promptTools = requestTools(currentTools, currentContext)
         val compactionProvider = resolveCompactionFallbackProvider(currentContext.sessionId) ?: providerInUse
@@ -713,7 +714,7 @@ class StatefulAgentWorkflow @Inject constructor(
             var samplingLoopCut = false
             // 用户打断：与采样检测共用同一个 takeWhile，命中即掉断上游流，不再继续吐字。
             var userInterruptCut = false
-            callId = telemetry.llmRequest(providerInUse.providerId, providerInUse.model, messagesToSend.size, promptTools.size, predictedInput)
+            if (consumeUserInterrupt(currentContext.sessionId)) { actionQueue.clear(); return state }; callId = telemetry.llmRequest(providerInUse.providerId, providerInUse.model, messagesToSend.size, promptTools.size, predictedInput)
             providerInUse.completeStream(outbound.systemPrompt, messagesToSend, promptTools, currentContext.reasoningEffort)
                 .takeWhile { !samplingLoopCut && !userInterruptCut }
                 .collect { chunk ->

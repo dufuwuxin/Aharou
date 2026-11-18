@@ -5,14 +5,22 @@ import kotlinx.serialization.json.JsonObject
 import java.security.MessageDigest
 
 @Serializable
+enum class ScriptToolType { @kotlinx.serialization.SerialName("tool") TOOL, @kotlinx.serialization.SerialName("live_context") LIVE_CONTEXT }
+
+@Serializable
 data class ScriptToolDefinition(
     val name: String,
     val description: String,
     val command: String,
     val enabled: Boolean = true,
+    val type: ScriptToolType = ScriptToolType.TOOL,
+    val timeoutSeconds: Int = 10,
+    val outputLimit: Int = 8192,
 ) {
     init {
         require(Regex("[A-Za-z][A-Za-z0-9_]{0,23}").matches(name)) { "Invalid script name" }
+        require(timeoutSeconds in 1..1800) { "Invalid timeout" }
+        require(outputLimit in 1..65536) { "Invalid output limit" }
         require(description.isNotBlank()) { "Description is required" }
         require(command.isNotBlank() && '\u0000' !in command) { "Invalid command" }
     }

@@ -53,12 +53,15 @@ internal fun editTeamCollaboration(stages: List<AgentTeamStageForm>, sources: Se
 
 internal fun editTeamRoutes(stages: List<AgentTeamStageForm>, routes: List<TeamRoute>,
     sources: Set<TeamFlowNode>, targets: Set<TeamFlowNode>, action: TeamRouteAction,
-    remove: Boolean = false): List<TeamRoute>? {
+    remove: Boolean = false, feedback: Boolean = false): List<TeamRoute>? {
     val nodes = stages.flatMap { stage -> stage.tasks.filter { it.prompt.isNotBlank() }.map { TeamFlowNode(stage.id, it.id) } }.toSet()
     if (sources.isEmpty() || targets.isEmpty() || !nodes.containsAll(sources + targets) || sources.any { it in targets }) return null
     val base = routes.ifEmpty { teamDefaultRoutes(stages) }
-    val kept = base.filterNot { it.from in sources && it.to in targets }
-    val updated = (kept + if (remove) emptyList() else sources.flatMap { from -> targets.map { TeamRoute(from, it, action) } }).distinct()
+    if (feedback && action == TeamRouteAction.EXECUTE) return null
+    val isFeedback = feedback || action == TeamRouteAction.REJECT
+    val kept = base.filterNot { it.from in sources && it.to in targets && it.isFeedback == isFeedback &&
+        (isFeedback.not() || it.action == action) }
+    val updated = (kept + if (remove) emptyList() else sources.flatMap { from -> targets.map { TeamRoute(from, it, action, feedback) } }).distinct()
     val team = AgentTeam("", "", stages.map { stage -> TeamStage(stage.title,
         stage.tasks.filter { it.prompt.isNotBlank() }.map { TeamTask(agent = it.agent.takeIf(String::isNotBlank), prompt = it.prompt, id = it.id) },
         id = stage.id, isReview = stage.isReview, condition = stage.condition) }, "", admins = listOf(MAIN_AGENT_ADMIN),

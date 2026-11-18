@@ -1,5 +1,6 @@
 package com.aharou.feature.git.domain
 
+import com.aharou.feature.agent.domain.container.BoundedOutput
 import com.aharou.feature.agent.domain.container.CommandEngine
 import com.aharou.feature.agent.domain.container.CommandEvent
 import com.aharou.feature.git.domain.model.GitBranch
@@ -190,7 +191,7 @@ class GitRepository @Inject constructor(
         onProgress: (Int) -> Unit = {}
     ): String {
         val command = buildGitCommand(arrayOf("clone", "--progress", url.trim(), "."))
-        val output = StringBuilder()
+        val output = BoundedOutput()
         var exitCode: Int? = null
         engine.runCommandStream(
             command,
@@ -200,14 +201,15 @@ class GitRepository @Inject constructor(
             .collect { event ->
                 when (event) {
                     is CommandEvent.Line -> {
-                        output.appendLine(event.text)
+                        output.append(event.text)
+                        output.append("\n")
                         parseCloneProgress(event.text)?.let(onProgress)
                     }
 
                     is CommandEvent.Exit -> exitCode = event.code
                 }
             }
-        val text = output.toString()
+        val text = output.build()
         if (exitCode != 0) {
             throw GitCommandFailureException(text.ifBlank { "git 退出码 $exitCode" })
         }

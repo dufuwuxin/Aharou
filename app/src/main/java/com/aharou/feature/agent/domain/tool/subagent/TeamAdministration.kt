@@ -41,6 +41,7 @@ internal object TeamAdministration {
             put("routes", buildJsonArray { team.routes.forEach { route -> add(buildJsonObject {
                 put("fromStage", route.from.stageId); put("fromTask", route.from.taskId)
                 put("toStage", route.to.stageId); put("toTask", route.to.taskId); put("action", route.action.name)
+                put("feedback", route.feedback)
             }) } })
         }
     }

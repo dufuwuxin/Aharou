@@ -85,9 +85,12 @@ fun FloatingTabBar(
     items: List<FloatingTabItem>,
     maskColor: Color,
     modifier: Modifier = Modifier,
-    isScrolling: Boolean = false
+    isScrolling: Boolean = false,
+    gesturesEnabled: Boolean = true,
+    onDragStateChange: (Boolean) -> Unit = {},
 ) {
     val coroutineScope = rememberCoroutineScope()
+    val dragStateChange by rememberUpdatedState(onDragStateChange)
     val isLight = MaterialTheme.colorScheme.background.luminance() > 0.5f
 
     val contentAlpha by animateFloatAsState(
@@ -224,8 +227,10 @@ fun FloatingTabBar(
                 }
                 .border(1.dp, glassBorderBrush, RoundedCornerShape(Radius.pill))
                 .padding(horizontal = 6.dp, vertical = 3.dp)
-                .pointerInput(items) {
+                .pointerInput(items, gesturesEnabled) {
+                    if (!gesturesEnabled) return@pointerInput
                     detectDragGestures(
+                        onDragStart = { dragStateChange(true) },
                         onDrag = { change, _ ->
                             change.consume()
                             val x = change.position.x
@@ -248,19 +253,23 @@ fun FloatingTabBar(
                         onDragEnd = {
                             coroutineScope.launch {
                                 val targetPage = (pagerState.currentPage + pagerState.currentPageOffsetFraction).roundToInt()
-                                pagerState.animateScrollToPage(
-                                    page = targetPage.coerceIn(0, items.lastIndex),
-                                    animationSpec = spring(dampingRatio = 0.78f, stiffness = 380f)
-                                )
+                                try {
+                                    pagerState.animateScrollToPage(
+                                        page = targetPage.coerceIn(0, items.lastIndex),
+                                        animationSpec = spring(dampingRatio = 0.78f, stiffness = 380f)
+                                    )
+                                } finally { dragStateChange(false) }
                             }
                         },
                         onDragCancel = {
                             coroutineScope.launch {
                                 val targetPage = (pagerState.currentPage + pagerState.currentPageOffsetFraction).roundToInt()
-                                pagerState.animateScrollToPage(
-                                    page = targetPage.coerceIn(0, items.lastIndex),
-                                    animationSpec = spring(dampingRatio = 0.78f, stiffness = 380f)
-                                )
+                                try {
+                                    pagerState.animateScrollToPage(
+                                        page = targetPage.coerceIn(0, items.lastIndex),
+                                        animationSpec = spring(dampingRatio = 0.78f, stiffness = 380f)
+                                    )
+                                } finally { dragStateChange(false) }
                             }
                         }
                     )

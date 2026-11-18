@@ -315,8 +315,8 @@ internal fun TeamEditorSheet(
                     stages = editTeamCollaboration(stages, sources, targets, both, about, remove)
                     selectedNodes = emptySet()
                 },
-                onRoute = { sources, targets, action, remove ->
-                    val updated = editTeamRoutes(stages, routes, sources, targets, action, remove)
+                onRoute = { sources, targets, action, remove, feedback ->
+                    val updated = editTeamRoutes(stages, routes, sources, targets, action, remove, feedback)
                     if (updated == null) false else { routes = updated; selectedNodes = emptySet(); true }
                 })
 

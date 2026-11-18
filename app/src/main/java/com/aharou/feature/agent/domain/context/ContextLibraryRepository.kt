@@ -75,7 +75,7 @@ class ContextLibraryRepository @Inject constructor(
                                 audience: ContextCategory = ContextCategory.MAIN_INJECTED,
                                 roleName: String? = null, roleTags: List<String> = emptyList(),
                                 memoryAllowed: Boolean = true): String =
-        sources(projectRoot).filter { entry ->
+        list(projectRoot, sessionId).filter { entry ->
             memoryAllowed && memoryStore?.isMemoryEnabled() != false &&
                 entry.requestKey == name && entry.enabled && !entry.pending && entry.loading != ContextLoad.OFF &&
                 (entry.scope != MemoryScope.PROJECT || !projectRoot.isNullOrBlank()) &&

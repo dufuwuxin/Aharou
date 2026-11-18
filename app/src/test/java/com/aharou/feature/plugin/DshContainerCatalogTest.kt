@@ -49,12 +49,30 @@ class DshContainerCatalogTest {
         assertTrue(output.length <= com.aharou.feature.agent.domain.container.MAX_UNBOUNDED_CHARS)
         assertEquals(html, DshContainerCatalog.decode(CommandResult(output, 0)))
     }
+    @Test fun preservesActionableDependencyAndNetworkFailuresWithoutAcceptingPartialData() {
+        mapOf(126 to "base64_missing", 127 to "curl_missing", 6 to "dns", 7 to "connection", 28 to "timeout", 60 to "certificate", 77 to "ca_missing").forEach { (exit, reason) ->
+            val failure = runCatching { DshContainerCatalog.decode(CommandResult("no catalog", exit)) }.exceptionOrNull()
+            assertEquals("dsh_container_$reason", failure?.message)
+        }
+    }
+    @Test fun wrappedTransportFailureKeepsDependencyAndCertificateDiagnosticCodes() {
+        for (code in listOf("dsh_container_base64_missing", "dsh_container_certificate")) {
+            val wrapped = IllegalStateException("dsh_catalog_transport:tls:dsh_container_unavailable:$code")
+                .also { it.addSuppressed(IllegalStateException(code)) }
+            val diagnostic = com.aharou.feature.plugin.presentation.dshTransportDiagnostic(wrapped, "fallback")
+            assertTrue(diagnostic, diagnostic.contains(code))
+            assertEquals(1, Regex(code).findAll(diagnostic).count())
+            assertTrue(diagnostic.indexOf(code) < diagnostic.indexOf("dsh_container_unavailable"))
+        }
+    }
     @Test fun handlesSingleLineHtmlViaFoldedBase64WithoutChangingBytes() {
         val html = "<html>" + "目录".repeat(100_000) + "</html>"
         assertEquals(html, DshContainerCatalog.decode(CommandResult(encoded(html), 0)))
     }
     @Test fun commandIsFixedHttpsBoundedDirectAndDoesNotFollowRedirectsOrLoadCurlConfig() {
         val command = DshContainerCatalog.command(2)
+        assertTrue(command.contains("command -v curl >/dev/null 2>&1 || exit 127"))
+        assertTrue(command.contains("command -v base64 >/dev/null 2>&1 || exit 126"))
         assertTrue(command.contains("curl -q --fail"))
         assertTrue(command.contains("--proto '=https'"))
         assertTrue(command.contains("--proxy '' --noproxy '*'"))

@@ -44,17 +44,17 @@ class FloatingTabBarGestureTest {
             down(a); moveTo(a + Offset(16f, 0f), delayMillis = 16); moveTo(b, delayMillis = 200); up()
         }
     }
-    @Test fun projectOnlyClicksWhileConfigAndSettingsDragBothWays() {
-        open(true)
+    @Test fun allThreePrimaryTabsAllowDragInBothDirections() {
+        open(false)
         drag("Project", "Config")
-        assertEquals(0, selected.intValue)
+        assertEquals(1, selected.intValue)
         compose.onNodeWithText("Config").performClick()
         drag("Config", "Settings")
         assertEquals(2, selected.intValue)
         drag("Settings", "Config")
         assertEquals(1, selected.intValue)
         drag("Config", "Project")
-        assertEquals(1, selected.intValue)
+        assertEquals(0, selected.intValue)
         compose.onNodeWithText("Project").performClick()
         assertEquals(0, selected.intValue)
     }

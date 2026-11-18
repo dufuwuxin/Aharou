@@ -29,6 +29,13 @@ public final class ExamplePlugin implements AharouPlugin {
     }
 
     @Override
+    public String onContext(String contextJson) {
+        // Return unchanged by default. Native plugins can use host.applicationContext()
+        // or the same host.call("reflect.*", json) operations as JavaScript plugins.
+        return contextJson;
+    }
+
+    @Override
     public String onModelRequest(String requestJson) {
         return requestJson;
     }

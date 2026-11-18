@@ -50,6 +50,21 @@ class ContextLibraryRepositoryTest {
         library.render(project.path, session, ContextOrigin.MEMORY)
     }
 
+    @Test fun repeatedNamedRetrievalSharesOnlyCurrentBuildSnapshot() {
+        fun write(body: String) = File(global, "rule.md").writeText(MemoryParser.format("rule", "summary", body,
+            contextCategory = ContextCategory.RULE, contextLoad = ContextLoad.SEARCH, contextRequest = "rule.md"))
+        write("first")
+        library.withPromptSnapshot(ctx()) {
+            repeat(10) { assertEquals("first", library.resolvePrompt("rule.md")) }
+            write("second")
+            assertEquals("first", library.resolvePrompt("rule.md"))
+            ""
+        }
+        io.mockk.verify(exactly = 1) { memories.listMemoriesInScope(MemoryScope.GLOBAL, project.path) }
+        io.mockk.verify(exactly = 1) { memories.listMemoriesInScope(MemoryScope.PROJECT, project.path) }
+        assertEquals("second", library.withPromptSnapshot(ctx()) { library.resolvePrompt("rule.md") })
+    }
+
     @Test fun persistedKeywordsReachSearchWithoutChangingRetrievalBoundaries() {
         File(global, "keyword.md").writeText(MemoryParser.format("keyword", "summary", "body", MemoryType.FACT,
             keywords = listOf("needle"), contextLoad = ContextLoad.SEARCH))

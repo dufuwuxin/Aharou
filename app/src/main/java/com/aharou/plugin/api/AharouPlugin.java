@@ -6,6 +6,8 @@ public interface AharouPlugin {
     default void onUnload() {}
     default String toolsJson() { return "[]"; }
     default String executeTool(String name, String argumentsJson, String contextJson) { return "null"; }
+    /** Current request injection as JSON; return it unchanged for passthrough. */
+    default String onContext(String contextJson) { return contextJson; }
     default String onModelRequest(String requestJson) { return requestJson; }
     default String onModelEvent(String eventJson) { return eventJson; }
     default Object createView(Object androidContext) { return null; }

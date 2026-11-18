@@ -95,6 +95,7 @@ object AgentTeamParser {
                 appendLine("    toStage: ${Frontmatter.quote(route.to.stageId)}")
                 appendLine("    toTask: ${Frontmatter.quote(route.to.taskId)}")
                 appendLine("    action: ${route.action.name}")
+                if (route.feedback) appendLine("    feedback: true")
             }
         }
         appendLine("stages:")
@@ -154,9 +155,12 @@ object AgentTeamParser {
         return list.map { item ->
             val map = item as? Map<*, *> ?: emptyMap<Any, Any>()
             val action = TeamRouteAction.entries.firstOrNull { it.name == map["action"]?.toString()?.uppercase() }
+            val feedback = if (map.containsKey("feedback")) map["feedback"] as? Boolean else false
             TeamRoute(TeamFlowNode(map["fromStage"]?.toString().orEmpty(), map["fromTask"]?.toString().orEmpty()),
                 TeamFlowNode(map["toStage"]?.toString().orEmpty(), map["toTask"]?.toString().orEmpty()),
-                action ?: TeamRouteAction.EXECUTE).let { if (action == null) it.copy(from = TeamFlowNode("", "")) else it }
+                action ?: TeamRouteAction.EXECUTE, feedback ?: false).let {
+                if (action == null || feedback == null) it.copy(from = TeamFlowNode("", "")) else it
+            }
         }
     }
 

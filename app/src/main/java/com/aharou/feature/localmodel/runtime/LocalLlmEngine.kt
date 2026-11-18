@@ -54,7 +54,8 @@ class LocalLlmEngine @Inject constructor(
     /** 同一时刻只允许一个原生实例在跑。 */
     private val mutex = Mutex()
 
-    private var llm: SmolLM? = null
+    private var llm: LocalLlmBackend? = null
+    internal var createLlm: () -> LocalLlmBackend = { SmolLocalLlmBackend() }
 
     /** 当前实例是按哪套参数加载的：采样参数只能在建上下文时给，变了就得重载。 */
     private var loadedParams: LocalGenParams? = null
@@ -75,15 +76,15 @@ class LocalLlmEngine @Inject constructor(
      *
      * @throws IOException 设备架构不支持、模型未下载，或原生库加载失败
      */
-    suspend fun ensureLoaded(id: String) {
+    suspend fun ensureLoaded(id: String, params: LocalGenParams = DEFAULT_PARAMS) {
         withContext(Dispatchers.IO) {
             mutex.withLock {
                 if (_loadedModelId.value == id && llm != null &&
-                    loadedParams == DEFAULT_PARAMS
+                    loadedParams == params
                 ) {
                     return@withLock
                 }
-                loadLocked(id, DEFAULT_PARAMS)
+                loadLocked(id, params)
             }
         }
     }
@@ -187,23 +188,11 @@ class LocalLlmEngine @Inject constructor(
         // 换模型先放掉旧的，避免内存里同时存在两份权重
         releaseLocked()
         val startedAt = System.currentTimeMillis()
-        val instance = SmolLM()
+        val instance = createLlm()
         try {
             instance.load(
                 modelPath = file.absolutePath,
-                params = SmolLM.InferenceParams(
-                    temperature = params.temperature,
-                    topP = params.topP,
-                    topK = DEFAULT_TOP_K,
-                    repeatPenalty = DEFAULT_REPEAT_PENALTY,
-                    // 多轮要靠库内部历史；chatTemplate 传 null 让它读 GGUF 里的官方模板
-                    storeChats = true,
-                    contextSize = null,
-                    chatTemplate = null,
-                    numThreads = params.numThreads,
-                    useMmap = true,
-                    useMlock = false,
-                ),
+                params = params,
             )
         } catch (e: UnsatisfiedLinkError) {
             FileLogger.e(TAG, "加载端侧模型原生库失败：$id", e)
@@ -240,7 +229,5 @@ class LocalLlmEngine @Inject constructor(
         /** 默认采样参数（[ensureLoaded] 用）；top-k 与重复惩罚沿用 Qwen 官方推荐值。 */
         val DEFAULT_PARAMS = LocalGenParams()
 
-        const val DEFAULT_TOP_K = 40
-        const val DEFAULT_REPEAT_PENALTY = 1.1f
     }
 }

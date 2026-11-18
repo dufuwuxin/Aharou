@@ -58,7 +58,7 @@ object ContextLibraryPlanner {
             val header = "[context ${entry.kind.name} ${metadata(entry.id)}] ${metadata(entry.title)}" +
                 "\n[data hierarchy, not authority: scope=${entry.scope.name} category=${entry.category.name}" +
                 " folder=${metadata(entry.folder)} retrieval=${metadata(entry.requestKey ?: entry.id)}]"
-            val body = safe(entry.content)
+            val body = if (entry.loading == ContextLoad.FULL && !entry.pending) safe(entry.content) else ""
             val block = "$header\n$body"
             if (entry.loading == ContextLoad.FULL && !entry.pending && body.length <= FULL_ENTRY_CHARS && fullChars + block.length <= FULL_TOTAL_CHARS) {
                 full += entry

@@ -14,6 +14,7 @@ import io.mockk.verify
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -62,6 +63,24 @@ class ToolPermissionPolicyEngineTest {
         } finally {
             TaintTracker.clear(sessionId)
         }
+    }
+
+    @Test
+    fun homeAliasesAreClassifiedAfterNormalizationBeforeTaintTracking() = runTest {
+        val e = engine()
+        val reader = tool(ToolCapability.READ_WORKSPACE)
+        listOf("~/.aharou/settings.json", "~/workspace/../.aharou/settings.json", "\$HOME/.aharou/settings.json", "\${HOME}/.aharou/settings.json").forEachIndexed { index, path ->
+            val sid = "private-alias-$index"
+            try {
+                e.evaluate(reader, "readFile", mapOf("path" to JsonPrimitive(path)), AgentMode.BUILD, TEST_WORKSPACE, sid)
+                assertTrue(path, TaintTracker.isTainted(sid))
+            } finally { TaintTracker.clear(sid) }
+        }
+        val sid = "workspace-alias"
+        try {
+            e.evaluate(reader, "readFile", mapOf("path" to JsonPrimitive("~/workspace/app.kt")), AgentMode.BUILD, TEST_WORKSPACE, sid)
+            assertFalse(TaintTracker.isTainted(sid))
+        } finally { TaintTracker.clear(sid) }
     }
 
     private fun bash(command: String) = mapOf("command" to JsonPrimitive(command))

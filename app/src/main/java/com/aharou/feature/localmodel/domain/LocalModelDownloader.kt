@@ -137,6 +137,9 @@ class LocalModelDownloader @Inject constructor(
                         currentCoroutineContext().ensureActive()
                         val count = input.read(buffer)
                         if (count < 0) break
+                        if (written > spec.sizeBytes || count.toLong() > spec.sizeBytes - written) {
+                            throw IOException("模型响应超过预期大小：${spec.sizeBytes} 字节")
+                        }
                         output.write(buffer, 0, count)
                         written += count
                         onProgress(written, spec.sizeBytes)

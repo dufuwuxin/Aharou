@@ -34,6 +34,8 @@ class ScriptToolManager @Inject constructor(
     private val json = Json { encodeDefaults = true }
     private val mutableDefinitions = MutableStateFlow<List<ScriptToolDefinition>>(emptyList())
     val definitions = mutableDefinitions.asStateFlow()
+    private val revisionSequence = java.util.concurrent.atomic.AtomicLong()
+    internal val revision: Long get() = revisionSequence.get()
     private val registered = mutableMapOf<String, AgentTool>()
 
     @Synchronized
@@ -45,6 +47,7 @@ class ScriptToolManager @Inject constructor(
         } catch (e: Exception) {
             unregisterOwned()
             mutableDefinitions.value = emptyList()
+            revisionSequence.incrementAndGet()
             throw e
         }
     }
@@ -76,7 +79,7 @@ class ScriptToolManager @Inject constructor(
 
     @Synchronized
     private fun isCurrent(definition: ScriptToolDefinition): Boolean = definitions.value.any {
-        it.name == definition.name && it.enabled && it.toolName == definition.toolName
+        it == definition && it.enabled && it.type == ScriptToolType.TOOL
     }
 
     private fun unregisterOwned() {
@@ -88,7 +91,7 @@ class ScriptToolManager @Inject constructor(
 
     private fun publish(next: List<ScriptToolDefinition>, persist: Boolean = true) {
         ScriptToolDefinition.validateAll(next)
-        val enabled = next.filter { it.enabled }
+        val enabled = next.filter { it.enabled && it.type == ScriptToolType.TOOL }
         enabled.forEach {
             val existing = registry.getTool(it.toolName)
             require(existing == null || existing === registered[it.toolName]) { "Tool namespace conflict" }
@@ -98,6 +101,7 @@ class ScriptToolManager @Inject constructor(
         }
         unregisterOwned()
         mutableDefinitions.value = next.toList()
+        revisionSequence.incrementAndGet()
         enabled.forEach {
             registry.register(it.toolName, ScriptTool(it))
             registered[it.toolName] = requireNotNull(registry.getTool(it.toolName))

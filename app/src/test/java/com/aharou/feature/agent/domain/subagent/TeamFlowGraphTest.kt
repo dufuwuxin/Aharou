@@ -37,10 +37,10 @@ class TeamFlowGraphTest {
         assertTrue(TeamFlowGraph.ready(t, setOf(node("a"))).none { it == node("c") })
         assertEquals(listOf(node("c")), TeamFlowGraph.ready(t, setOf(node("a"), node("b"))))
     }
-    @Test fun rejectionMustPointToAnAncestorAndIsBounded() {
+    @Test fun configuredRejectionCanCrossBranchesAndIsBounded() {
         val forward = TeamRoute(node("a"), node("b"), TeamRouteAction.REVIEW)
         assertNull(TeamFlowGraph.validate(team(listOf(forward, TeamRoute(node("b"), node("a"), TeamRouteAction.REJECT)))))
-        assertNotNull(TeamFlowGraph.validate(team(listOf(forward, TeamRoute(node("c"), node("a"), TeamRouteAction.REJECT)))))
+        assertNull(TeamFlowGraph.validate(team(listOf(forward, TeamRoute(node("c"), node("a"), TeamRouteAction.REJECT)))))
         assertTrue(TeamFlowGraph.canRework(1))
         assertFalse(TeamFlowGraph.canRework(2))
     }
@@ -52,4 +52,15 @@ class TeamFlowGraphTest {
         val chosen = mapOf(node("a") to emptySet<TeamFlowNode>(), node("b") to setOf(node("c")))
         assertTrue(TeamFlowGraph.selectedReady(t, setOf(node("c")), setOf(node("a"), node("b")), chosen).isEmpty())
     }
+    @Test fun feedbackIsNotAForwardDependencyAndCannotAuthorizeAnotherAction() {
+        val t = team(listOf(TeamRoute(node("a"), node("b")), TeamRoute(node("b"), node("c")),
+            TeamRoute(node("c"), node("a"), TeamRouteAction.REVIEW, true)))
+        assertNull(TeamFlowGraph.validate(t))
+        assertFalse(TeamFlowGraph.isReview(t, node("a")))
+        assertTrue(TeamFlowGraph.predecessors(t, node("a")).isEmpty())
+        assertNull(TeamFlowGraph.validateHandoff(t, node("c"), TeamHandoff(feedback = TeamFeedback(node("a"), TeamRouteAction.REVIEW))))
+        assertNotNull(TeamFlowGraph.validateHandoff(t, node("c"), TeamHandoff(feedback = TeamFeedback(node("a"), TeamRouteAction.REJECT))))
+        assertNotNull(TeamFlowGraph.validate(t.copy(routes = t.routes + TeamRoute(node("c"), node("a"), feedback = true))))
+    }
+
 }

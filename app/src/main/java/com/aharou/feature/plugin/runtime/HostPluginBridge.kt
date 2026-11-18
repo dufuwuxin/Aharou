@@ -36,12 +36,17 @@ class HostPluginBridge @Inject constructor(
     private val receipts: ToolCallReceiptRepository,
 ) {
     fun createHost(root: File, invocationContext: () -> AgentContext?): PluginHost = object : PluginHost {
+        private val reflection = HostPluginReflection { context.applicationContext }
+        @Volatile private var closed = false
+        override fun close() { closed = true; reflection.close() }
         override fun apiVersion() = 1
         override fun pluginDirectory() = root.absolutePath
         override fun dataDirectory() = File(root, "data").apply { mkdirs() }.absolutePath
         override fun applicationContext(): Any = context.applicationContext
         override fun call(operation: String, argumentsJson: String): String {
+            check(!closed) { "Plugin host was released" }
             val args = Json.parseToJsonElement(argumentsJson).jsonObject
+            if (operation.startsWith("reflect.")) return reflection.call(operation, args)
             return when (operation) {
                 "file.read" -> JsonPrimitive(resolve(args).readText(Charsets.UTF_8)).toString()
                 "file.write" -> {

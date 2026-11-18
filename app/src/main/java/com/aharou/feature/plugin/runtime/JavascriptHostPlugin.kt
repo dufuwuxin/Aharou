@@ -28,7 +28,8 @@ class JavascriptHostPlugin(private val source: String) : AharouPlugin {
                     apiVersion: ${host.apiVersion()},
                     pluginDirectory: ${JsonPrimitive(host.pluginDirectory())},
                     dataDirectory: ${JsonPrimitive(host.dataDirectory())},
-                    call: (operation, argsJson) => __aharouHostCall(operation, argsJson)
+                    call: (operation, argsJson) => __aharouHostCall(operation, argsJson),
+                    reflect: (operation, args) => JSON.parse(__aharouHostCall('reflect.' + operation, JSON.stringify(args || {})))
                 });
                 $source
                 if (typeof plugin !== 'object' || plugin === null) throw new Error('Missing global plugin object');
@@ -61,6 +62,7 @@ class JavascriptHostPlugin(private val source: String) : AharouPlugin {
     override fun toolsJson(): String = invoke("toolsJson", "[]")
     override fun executeTool(name: String, argumentsJson: String, contextJson: String): String =
         invoke("executeTool", "null", name, argumentsJson, contextJson)
+    override fun onContext(contextJson: String): String = invoke("onContext", contextJson, contextJson)
     override fun onModelRequest(requestJson: String): String = invoke("onModelRequest", requestJson, requestJson)
     override fun onModelEvent(eventJson: String): String = invoke("onModelEvent", eventJson, eventJson)
 

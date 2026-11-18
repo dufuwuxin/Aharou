@@ -86,6 +86,15 @@ internal fun TeamFlowMap(stages: List<AgentTeamStageForm>, routes: List<TeamRout
                             val bend = ((x1 + x2) / 2) + 48.dp.toPx()
                             val path = Path().apply { moveTo(x1, y1); cubicTo(bend, y1 - 56.dp.toPx(), bend, y2 - 56.dp.toPx(), x2, y2) }
                             drawPath(path, reviewColor, style = Stroke(2.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(6.dp.toPx(), 4.dp.toPx()))))
+                            // The final cubic tangent points from its control point into the target.
+                            val dx = x2 - bend; val dy = 56.dp.toPx()
+                            val length = kotlin.math.sqrt(dx * dx + dy * dy)
+                            val ux = dx / length; val uy = dy / length
+                            val tip = Offset(x2, y2)
+                            val base = tip - Offset(ux, uy) * 8.dp.toPx()
+                            val wing = Offset(-uy, ux) * 4.dp.toPx()
+                            drawLine(reviewColor, base + wing, tip, 2.dp.toPx())
+                            drawLine(reviewColor, base - wing, tip, 2.dp.toPx())
                         }
                     } }
                     routes.forEachIndexed { routeIndex, edge ->
@@ -96,13 +105,13 @@ internal fun TeamFlowMap(stages: List<AgentTeamStageForm>, routes: List<TeamRout
                         val color = when (edge.action) { TeamRouteAction.EXECUTE -> executeColor; TeamRouteAction.REVIEW -> reviewColor; TeamRouteAction.REJECT -> rejectColor }
                         val path = Path().apply {
                             moveTo(x1, y1)
-                            if (edge.action == TeamRouteAction.REJECT || from.second == to.second) {
+                            if (edge.isFeedback || from.second == to.second) {
                                 val rail = (width - 16 - routeIndex % 4 * 8).dp.toPx()
                                 lineTo(rail, y1 + 8.dp.toPx()); lineTo(rail, y2 - 8.dp.toPx()); lineTo(x2, y2 - 8.dp.toPx())
                             } else { val middle = (y1 + y2) / 2; lineTo(x1, middle); lineTo(x2, middle) }
                             lineTo(x2, y2)
                         }
-                        drawPath(path, color, style = Stroke(2.dp.toPx(), pathEffect = if (edge.action == TeamRouteAction.REJECT) PathEffect.dashPathEffect(floatArrayOf(8.dp.toPx(), 4.dp.toPx())) else null))
+                        drawPath(path, color, style = Stroke(2.dp.toPx(), pathEffect = if (edge.isFeedback) PathEffect.dashPathEffect(floatArrayOf(8.dp.toPx(), 4.dp.toPx())) else null))
                         drawLine(color, Offset(x2 - 4.dp.toPx(), y2 - 8.dp.toPx()), Offset(x2, y2), 2.dp.toPx())
                         drawLine(color, Offset(x2 + 4.dp.toPx(), y2 - 8.dp.toPx()), Offset(x2, y2), 2.dp.toPx())
                     }

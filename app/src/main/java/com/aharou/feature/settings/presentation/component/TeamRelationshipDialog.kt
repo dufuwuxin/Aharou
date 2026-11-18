@@ -38,7 +38,7 @@ internal fun TeamRelationshipDialog(
     initialSelection: Set<TeamFlowNode>,
     onDismiss: () -> Unit,
     onCollaboration: (Set<TeamFlowNode>, Set<TeamFlowNode>, Boolean, String, Boolean) -> Unit,
-    onRoute: (Set<TeamFlowNode>, Set<TeamFlowNode>, TeamRouteAction, Boolean) -> Boolean
+    onRoute: (Set<TeamFlowNode>, Set<TeamFlowNode>, TeamRouteAction, Boolean, Boolean) -> Boolean
 ) {
     val nodes = stages.flatMap { stage -> stage.tasks.filter { it.prompt.isNotBlank() }.map { TeamFlowNode(stage.id, it.id) } }
     fun label(node: TeamFlowNode): String {
@@ -59,13 +59,14 @@ internal fun TeamRelationshipDialog(
     var bidirectional by remember(initialSelection) { mutableStateOf(existing != null && existingReverse) }
     var about by remember { mutableStateOf(existing?.about.orEmpty()) }
     var action by remember { mutableStateOf(existingRoute?.action ?: TeamRouteAction.EXECUTE) }
+    var feedback by remember { mutableStateOf(existingRoute?.isFeedback == true) }
     var error by remember { mutableStateOf(false) }
     fun apply(remove: Boolean) {
         if (sources.isEmpty() || targets.isEmpty() || sources.any { it in targets }) { error = true; return }
         if (collaboration) {
             onCollaboration(sources, targets, bidirectional, about, remove)
             onDismiss()
-        } else if (onRoute(sources, targets, action, remove)) onDismiss() else error = true
+        } else if (onRoute(sources, targets, action, remove, feedback)) onDismiss() else error = true
     }
     AlertDialog(
         properties = DialogProperties(usePlatformDefaultWidth = false),
@@ -76,7 +77,8 @@ internal fun TeamRelationshipDialog(
                 verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
                     FilterChip(collaboration, { collaboration = true }, { Text(stringResource(R.string.team_relationship_collaboration)) })
-                    FilterChip(!collaboration, { collaboration = false }, { Text(stringResource(R.string.team_relationship_flow)) })
+                    FilterChip(!collaboration, { collaboration = false }, { Text(stringResource(R.string.team_relationship_flow)) },
+                        modifier = Modifier.testTag("team_relation_flow"))
                 }
                 Text(stringResource(R.string.team_relationship_sources), style = MaterialTheme.typography.labelLarge)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
@@ -102,7 +104,15 @@ internal fun TeamRelationshipDialog(
                         label = stringResource(R.string.team_relationship_about), singleLine = false, minLines = 1, maxLines = 3)
                 } else {
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
-                        TeamRouteAction.entries.forEach { item -> FilterChip(action == item, { action = item }, { Text(teamRouteActionLabel(item)) }) }
+                        FilterChip(!feedback, { feedback = false; if (action == TeamRouteAction.REJECT) action = TeamRouteAction.EXECUTE },
+                            { Text(stringResource(R.string.team_relationship_forward)) }, modifier = Modifier.testTag("team_relation_forward"))
+                        FilterChip(feedback, { feedback = true; if (action == TeamRouteAction.EXECUTE) action = TeamRouteAction.REVIEW },
+                            { Text(stringResource(R.string.team_relationship_feedback)) }, modifier = Modifier.testTag("team_relation_feedback"))
+                    }
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+                        TeamRouteAction.entries.filter { if (feedback) it != TeamRouteAction.EXECUTE else it != TeamRouteAction.REJECT }
+                            .forEach { item -> FilterChip(action == item, { action = item }, { Text(teamRouteActionLabel(item)) },
+                                modifier = Modifier.testTag("team_relation_action_${item.name}")) }
                     }
                 }
                 TextButton(onClick = { apply(true) }, modifier = Modifier.testTag("team_relation_remove")) {

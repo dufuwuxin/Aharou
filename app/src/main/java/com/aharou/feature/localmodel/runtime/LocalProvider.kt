@@ -73,7 +73,7 @@ class LocalProvider(private val engine: LocalLlmEngine) : AIProvider {
     ): Flow<AIStreamChunk> = flow {
         val history = toLocalHistory(systemPrompt, messages)
         val params = LocalGenParams(numThreads = threadCount())
-        engine.ensureLoaded(model)
+        engine.ensureLoaded(model, params)
 
         // 上层历史不是「上次的延续」时，原生上下文里的旧内容已经对不上了：重载一次，用完整历史重建。
         val appended = sentForModel == model && isPrefixOf(history, sentHistory)
@@ -81,7 +81,7 @@ class LocalProvider(private val engine: LocalLlmEngine) : AIProvider {
             if (sentHistory.isNotEmpty()) {
                 FileLogger.i(TAG, "端侧对话历史非追加式变化，重建上下文：${sentHistory.size} -> ${history.size}")
                 engine.unload()
-                engine.ensureLoaded(model)
+                engine.ensureLoaded(model, params)
             }
             sentHistory = emptyList()
         }

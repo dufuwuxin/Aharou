@@ -2616,7 +2616,7 @@ class AIAgentViewModel @Inject constructor(
         if (expectedSessionId != _currentSessionId.value) return
         val sid = expectedSessionId ?: return
         viewModelScope.launch {
-            sessionUseCase.updateProviderModel(sid, providerId, model)
+            sessionUseCase.updateProviderModel(sid, providerId, model); agentWorkflow.resetModelOverride(sid)
             _contextUsages.value = _contextUsages.value - sid
             // 空会话中的选择视为「新会话默认模型」，供下次新建会话沿用
             if (sessionUseCase.isSessionEmpty(sid)) {

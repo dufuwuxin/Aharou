@@ -31,7 +31,7 @@ class TeamRelationshipDialogTest {
                 onDismiss = { closed = true },
                 onCollaboration = { sources, targets, both, about, remove ->
                     saved = editTeamCollaboration(stages, sources, targets, both, about, remove)
-                }, onRoute = { _, _, _, _ -> false })
+                }, onRoute = { _, _, _, _, _ -> false })
         } }
         compose.onNodeWithTag("team_relation_source_s3/t3").performClick()
         compose.onNodeWithTag("team_relation_target_s1/t1").performClick()
@@ -41,4 +41,31 @@ class TeamRelationshipDialogTest {
         assertEquals("s1/t1", third.interfaces.single().with)
         assertTrue(requireNotNull(saved)[0].tasks.single().interfaces.isEmpty())
     }
+    @Test fun popupSelectsThirdToFirstFeedbackReviewAndRejectWithStableTaskIds() {
+        val stages = (1..3).map { i -> AgentTeamStageForm(id = "s$i", title = "Stage $i",
+            tasks = listOf(AgentTeamTaskForm(id = "t$i", agent = "same-member", prompt = "work"))) }
+        var saved = emptyList<TeamRoute>()
+        compose.setContent { MaterialTheme {
+            TeamRelationshipDialog(stages, emptyList(), linkedSetOf(TeamFlowNode("s3", "t3"), TeamFlowNode("s1", "t1")),
+                onDismiss = {}, onCollaboration = { _, _, _, _, _ -> fail("Not collaboration") },
+                onRoute = { sources, targets, action, remove, feedback ->
+                    saved = requireNotNull(com.aharou.feature.settings.presentation.component.editTeamRoutes(
+                        stages, saved, sources, targets, action, remove, feedback))
+                    true
+                })
+        } }
+        compose.onNodeWithTag("team_relation_flow").performClick()
+        compose.onNodeWithTag("team_relation_feedback").performScrollTo().performClick()
+        compose.onNodeWithTag("team_relation_action_REVIEW").performScrollTo().performClick()
+        compose.onNodeWithTag("team_relation_apply").performClick()
+        val review = saved.single { it.feedback }
+        assertEquals(TeamFlowNode("s3", "t3"), review.from)
+        assertEquals(TeamFlowNode("s1", "t1"), review.to)
+        assertEquals(TeamRouteAction.REVIEW, review.action)
+        compose.onNodeWithTag("team_relation_action_REJECT").performScrollTo().performClick()
+        compose.onNodeWithTag("team_relation_apply").performClick()
+        assertTrue(saved.contains(review))
+        assertTrue(saved.any { it.from == review.from && it.to == review.to && it.action == TeamRouteAction.REJECT && it.isFeedback })
+    }
+
 }

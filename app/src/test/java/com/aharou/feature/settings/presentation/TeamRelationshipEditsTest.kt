@@ -89,4 +89,17 @@ class TeamRelationshipEditsTest {
             members = listOf("builder", "tester", "reviewer").map { com.aharou.feature.agent.domain.subagent.TeamMemberRef(it) })
         assertNull(TeamFlowGraph.validate(mainTeam))
     }
+    @Test fun feedbackReviewCanRunBackwardsWithoutConvertingForwardReviewOrLosingMetadata() {
+        val before = stages
+        val from = setOf(TeamFlowNode("review", "review-task"))
+        val to = setOf(TeamFlowNode("build", "builder-task"))
+        val routes = requireNotNull(editTeamRoutes(stages, emptyList(), from, to, TeamRouteAction.REVIEW, feedback = true))
+        assertTrue(routes.single { it.feedback }.from in from)
+        assertTrue(routes.single { it.feedback }.to in to)
+        assertEquals(before, stages)
+        val kept = requireNotNull(editTeamRoutes(stages, routes, from, to, TeamRouteAction.REVIEW, remove = true, feedback = true))
+        assertTrue(kept.none { it.feedback })
+        assertTrue(kept.isNotEmpty())
+    }
+
 }

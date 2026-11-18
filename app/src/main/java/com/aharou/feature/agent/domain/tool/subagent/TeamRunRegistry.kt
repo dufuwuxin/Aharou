@@ -58,7 +58,7 @@ class TeamRunRegistry @Inject constructor() {
 
     @Synchronized fun reset(run: String, logicalIds: Set<String>) {
         logicalIds.forEach { id -> runs[run]?.members?.get(id)?.let { member ->
-            member.session?.let { sessions.remove(it) }
+            member.session?.let { sessions.remove(it); stopped += it }
             member.session = null
             member.state = "pending"
             member.messages.clear()

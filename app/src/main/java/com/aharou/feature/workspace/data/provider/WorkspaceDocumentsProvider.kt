@@ -14,6 +14,11 @@ import java.io.File
 import java.io.FileNotFoundException
 import java.io.IOException
 import java.util.LinkedList
+import java.nio.file.Files
+import java.nio.file.Path
+import java.nio.file.SimpleFileVisitor
+import java.nio.file.FileVisitResult
+import java.nio.file.attribute.BasicFileAttributes
 
 /**
  * SAF DocumentsProvider，把 app 私有 `filesDir` 暴露为**单一根**到系统「文件」app 及其它 app 的
@@ -180,9 +185,17 @@ class WorkspaceDocumentsProvider : DocumentsProvider() {
         if (file.canonicalFile == rootDir()) {
             throw FileNotFoundException("Cannot delete the root directory")
         }
-        if (!file.deleteRecursively()) {
-            throw FileNotFoundException("Failed to delete document: $documentId")
-        }
+        Files.walkFileTree(file.toPath(), object : SimpleFileVisitor<Path>() {
+            override fun visitFile(entry: Path, attrs: BasicFileAttributes): FileVisitResult {
+                Files.delete(entry)
+                return FileVisitResult.CONTINUE
+            }
+            override fun postVisitDirectory(dir: Path, exc: IOException?): FileVisitResult {
+                if (exc != null) throw exc
+                Files.delete(dir)
+                return FileVisitResult.CONTINUE
+            }
+        })
     }
 
     override fun getDocumentType(documentId: String): String =

@@ -31,6 +31,7 @@ import androidx.lifecycle.viewModelScope
 import com.aharou.R
 import com.aharou.core.ui.AppSwitch
 import com.aharou.core.ui.AppTextField
+import com.aharou.feature.agent.domain.tool.script.ScriptToolType
 import com.aharou.feature.agent.domain.tool.script.ScriptToolDefinition
 import com.aharou.feature.agent.domain.tool.script.ScriptToolManager
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -68,8 +69,8 @@ class ScriptToolsViewModel @Inject constructor(private val manager: ScriptToolMa
         }
     }
 
-    fun save(oldName: String?, name: String, description: String, command: String, enabled: Boolean, onSuccess: () -> Unit) = change({
-        val definition = ScriptToolDefinition(name, description, command, enabled)
+    fun save(oldName: String?, name: String, description: String, command: String, enabled: Boolean, type: ScriptToolType, timeoutSeconds: Int, outputLimit: Int, onSuccess: () -> Unit) = change({
+        val definition = ScriptToolDefinition(name, description, command, enabled, type, timeoutSeconds, outputLimit)
         if (oldName == null) manager.add(definition) else manager.update(oldName, definition)
     }, onSuccess)
 
@@ -96,6 +97,9 @@ internal fun ScriptToolsSection(
     var description by rememberSaveable { mutableStateOf("") }
     var command by rememberSaveable { mutableStateOf("") }
     var enabled by rememberSaveable { mutableStateOf(true) }
+    var liveContext by rememberSaveable { mutableStateOf(false) }
+    var timeout by rememberSaveable { mutableStateOf("10") }
+    var outputLimit by rememberSaveable { mutableStateOf("8192") }
 
     fun create() {
         oldName = null
@@ -103,6 +107,9 @@ internal fun ScriptToolsSection(
         description = ""
         command = ""
         enabled = true
+        liveContext = false
+        timeout = "10"
+        outputLimit = "8192"
         showEditor = true
     }
     LaunchedEffect(createRequested, busy) {
@@ -125,6 +132,15 @@ internal fun ScriptToolsSection(
                     if (error) Text(stringResource(R.string.script_tools_save_failed), color = MaterialTheme.colorScheme.error)
                     AppTextField(value = name, onValueChange = { name = it }, label = stringResource(R.string.script_tools_name), enabled = !busy)
                     AppTextField(value = description, onValueChange = { description = it }, label = stringResource(R.string.script_tools_description), enabled = !busy)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text(stringResource(R.string.script_tools_live_context))
+                        AppSwitch(checked = liveContext, onCheckedChange = { liveContext = it }, enabled = !busy)
+                    }
+                    Text(stringResource(if (liveContext) R.string.script_tools_live_context_help else R.string.script_tools_function_help), style = MaterialTheme.typography.bodySmall)
+                    if (liveContext) {
+                        AppTextField(value = timeout, onValueChange = { timeout = it }, label = stringResource(R.string.script_tools_timeout), enabled = !busy)
+                        AppTextField(value = outputLimit, onValueChange = { outputLimit = it }, label = stringResource(R.string.script_tools_output_limit), enabled = !busy)
+                    }
                     AppTextField(value = command, onValueChange = { command = it }, label = stringResource(R.string.script_tools_command), singleLine = false, minLines = 4, enabled = !busy)
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text(stringResource(R.string.script_tools_enabled))
@@ -132,7 +148,7 @@ internal fun ScriptToolsSection(
                     }
                     Row {
                         TextButton(enabled = !busy, onClick = {
-                            viewModel.save(oldName, name, description, command, enabled) { showEditor = false }
+                            viewModel.save(oldName, name, description, command, enabled, if (liveContext) ScriptToolType.LIVE_CONTEXT else ScriptToolType.TOOL, timeout.toIntOrNull() ?: 0, outputLimit.toIntOrNull() ?: 0) { showEditor = false }
                         }) { Text(stringResource(R.string.script_tools_save)) }
                         TextButton(enabled = !busy, onClick = { showEditor = false }) { Text(stringResource(R.string.script_tools_cancel)) }
                     }
@@ -148,6 +164,7 @@ internal fun ScriptToolsSection(
                 SettingsGroup {
                     Column(Modifier.padding(Spacing.md)) {
                         Text(definition.name, style = MaterialTheme.typography.titleMedium)
+                        Text(stringResource(if (definition.type == ScriptToolType.LIVE_CONTEXT) R.string.script_tools_live_context else R.string.script_tools_function))
                         Text(definition.description, style = MaterialTheme.typography.bodySmall)
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text(stringResource(R.string.script_tools_enabled))
@@ -160,9 +177,12 @@ internal fun ScriptToolsSection(
                                 description = definition.description
                                 command = definition.command
                                 enabled = definition.enabled
+                                liveContext = definition.type == ScriptToolType.LIVE_CONTEXT
+                                timeout = definition.timeoutSeconds.toString()
+                                outputLimit = definition.outputLimit.toString()
                                 showEditor = true
                             }) { Text(stringResource(R.string.script_tools_edit)) }
-                            onEditSettings?.let { editSettings ->
+                            onEditSettings?.takeIf { definition.type == ScriptToolType.TOOL }?.let { editSettings ->
                                 TextButton(enabled = definition.enabled && !busy, onClick = { editSettings(definition.toolName) }) {
                                     Text(stringResource(R.string.tools_injection_settings))
                                 }

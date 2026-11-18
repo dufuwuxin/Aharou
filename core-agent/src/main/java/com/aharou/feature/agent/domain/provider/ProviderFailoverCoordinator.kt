@@ -52,10 +52,10 @@ class ProviderFailoverCoordinator @Inject constructor(
         val plan = plans[key] ?: return null
         val config = plan.chain.getOrNull(plan.cursor)?.let { resolve(it) }
         if (config == null) {
-            plans.remove(key)
+            plans.remove(key, plan)
             FileLogger.w(TAG, "备用模型已不可用（被删 / 禁用 / 无 Key），撤销回退")
         }
-        return config
+        return config.takeIf { plans[key] === plan }
     }
 
     /**
@@ -67,13 +67,13 @@ class ProviderFailoverCoordinator @Inject constructor(
      */
     suspend fun next(sessionId: String?, origin: AIProviderConfig): AIProviderConfig? {
         val key = sessionKey(sessionId)
-        val existing = plans[key]
-        val chain = existing?.chain ?: chainOf(origin)
-        var index = (existing?.cursor ?: -1) + 1
+        val existing = plans.computeIfAbsent(key) { Plan(chainOf(origin), -1) }
+        val chain = existing.chain
+        var index = existing.cursor + 1
         while (index < chain.size) {
             val config = resolve(chain[index])
             if (config != null) {
-                plans[key] = Plan(chain, index)
+                if (!plans.replace(key, existing, Plan(chain, index))) return null
                 FileLogger.w(
                     TAG,
                     "备用模型切换：${origin.name} -> ${config.name}(${config.effectiveModel})，第 ${index + 1}/${chain.size} 跳"
@@ -83,7 +83,7 @@ class ProviderFailoverCoordinator @Inject constructor(
             index++
         }
         // 链走到底：撤销覆盖，下一轮回到主供应商，不再反复弹同一条错误
-        plans.remove(key)
+        plans.remove(key, existing)
         return null
     }
 

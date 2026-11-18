@@ -7,6 +7,19 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 
 class ContextLibraryPlannerTest {
+    @Test fun indexSkipsUnusedBodySanitizationWithoutChangingRequestText() {
+        val body = "x".repeat(1_000_000)
+        val indexed = entry("index-only", ContextLoad.INDEX).copy(content = body, description = "summary")
+        val expected = ContextLibraryPlanner.plan(listOf(indexed.copy(content = "unused"))).rendered
+        io.mockk.mockkObject(com.aharou.core.util.SecretMasker)
+        try {
+            io.mockk.every { com.aharou.core.util.SecretMasker.mask(any()) } answers { callOriginal() }
+            val result = ContextLibraryPlanner.plan(listOf(indexed))
+            assertEquals(expected, result.rendered)
+            io.mockk.verify(exactly = 0) { com.aharou.core.util.SecretMasker.mask(body) }
+        } finally { io.mockk.unmockkObject(com.aharou.core.util.SecretMasker) }
+    }
+
     @Test fun headersExposeOnlyAdmittedHierarchyAndRetrievalIdentity() {
         val admitted = entry("visible", ContextLoad.INDEX).copy(folder = "Research/Files", requestKey = "ref.md")
         val hidden = admitted.copy(id = "hidden", enabled = false, folder = "Hidden")

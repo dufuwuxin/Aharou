@@ -4,6 +4,7 @@ import com.aharou.feature.settings.domain.model.AIProviderConfig
 import com.aharou.feature.settings.domain.model.FallbackTarget
 import com.aharou.feature.settings.domain.model.ProviderType
 import com.aharou.feature.settings.domain.repository.AIProviderRepository
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
@@ -56,6 +57,42 @@ class ProviderFailoverCoordinatorTest {
         override suspend fun deleteProviders(ids: List<String>) = Unit
         override suspend fun setProvidersEnabled(ids: List<String>, isEnabled: Boolean) = Unit
         override suspend fun reorderProviders(providers: List<AIProviderConfig>) = Unit
+    }
+
+    @Test
+    fun manualSelectionResetDoesNotRetainAnOldFallbackOrAffectAnotherSession() = runTest {
+        val a = provider("a", chain = listOf(FallbackTarget("b", "backup-b")))
+        val coordinator = ProviderFailoverCoordinator(FakeRepository(listOf(a, provider("b"))))
+        coordinator.next("s1", a)
+        coordinator.next("s2", a)
+        coordinator.deactivate("s1")
+        assertFalse(coordinator.isActive("s1"))
+        assertNull(coordinator.overrideConfig("s1"))
+        assertEquals("b", coordinator.overrideConfig("s2")?.id)
+        assertEquals("b", coordinator.next("s1", a)?.id)
+    }
+
+    @Test
+    fun inFlightFallbackCannotRestoreAPlanAfterManualSelection() = runTest {
+        val a = provider("a", chain = listOf(FallbackTarget("b")))
+        val base = FakeRepository(listOf(a, provider("b")))
+        val entered = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val released = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val delayed = object : AIProviderRepository by base {
+            override suspend fun getProviderById(id: String): AIProviderConfig? {
+                entered.complete(Unit)
+                released.await()
+                return base.getProviderById(id)
+            }
+        }
+        val coordinator = ProviderFailoverCoordinator(delayed)
+        val pending = async { coordinator.next("s1", a) }
+        entered.await()
+        coordinator.deactivate("s1")
+        released.complete(Unit)
+        assertNull(pending.await())
+        assertNull(coordinator.overrideConfig("s1"))
+        assertFalse(coordinator.isActive("s1"))
     }
 
     @Test

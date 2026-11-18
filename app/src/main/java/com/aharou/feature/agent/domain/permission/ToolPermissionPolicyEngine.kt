@@ -503,8 +503,8 @@ class ToolPermissionPolicyEngine @Inject constructor(
     /** 读工作区外的文件算私密数据；相对路径默认落在工作区内，不算。 */
     private fun isOutsideWorkspace(rawPath: String?): Boolean {
         val path = rawPath?.trim()?.takeIf { it.isNotEmpty() } ?: return false
-        if (!path.startsWith("/")) return false
         val normalized = normalizePath(path)
+        if (!normalized.startsWith("/")) return false
         return normalized != WORKSPACE_CONTAINER_PREFIX && !normalized.startsWith("$WORKSPACE_CONTAINER_PREFIX/")
     }
 

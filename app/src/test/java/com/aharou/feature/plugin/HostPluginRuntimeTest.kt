@@ -32,6 +32,67 @@ class HostPluginRuntimeTest {
     private fun manifest() = PluginManifest(id = "fixture", name = "Fixture",
         hostRuntime = HostRuntimeSpec("dex", "example.Plugin", "classes.dex"))
 
+    @Test fun productionInjectionHelperConsumesLiveResultAndNativeHookEveryRequest() = runBlocking {
+        var calls = 0
+        every { loader.load(any(), any()) } returns object : AharouPlugin {
+            override fun onContext(contextJson: String): String {
+                calls++
+                val input = kotlinx.serialization.json.Json.parseToJsonElement(contextJson) as kotlinx.serialization.json.JsonObject
+                return kotlinx.serialization.json.JsonObject(input + ("systemPrompt" to kotlinx.serialization.json.JsonPrimitive(
+                    (input.getValue("systemPrompt") as kotlinx.serialization.json.JsonPrimitive).content + "_native_hook"))).toString()
+            }
+        }
+        runtime.load(manifest(), temp.root)
+        val live = mockk<com.aharou.feature.agent.domain.tool.script.LiveContextScriptRunner>()
+        coEvery { live.build(any()) } returnsMany listOf("live_one", "live_two")
+        val provider = com.aharou.feature.agent.domain.prompt.SystemPromptProvider(
+            context = mockk(), skillRepository = mockk(), promptFileResolver = mockk(), containerInstaller = mockk(),
+            agentDefinitionRepository = mockk(), agentTeamRepository = mockk(), ruleRepository = mockk(),
+            chatSessionDao = mockk(), sharedInbox = mockk(), containerProfileResolver = mockk(), projectIndex = mockk(),
+            projectTaskContext = mockk(), injectedContextStore = mockk(), contextLibrary = mockk(),
+            liveContextScripts = Lazy { live }, hostPlugins = Lazy { runtime },
+        )
+        val context = com.aharou.feature.agent.domain.model.AgentContext(null, null, temp.root.path, null)
+        assertTrue(provider.buildForRequest(context, "native").contains("live_one_native_hook"))
+        val next = provider.buildForRequest(context, "native")
+        assertTrue(next.contains("live_two_native_hook"))
+        assertFalse(next.contains("live_one"))
+        assertEquals(2, calls)
+        runtime.unload("fixture")
+        assertEquals("native", runtime.onContext(context, "native"))
+    }
+
+    @Test fun retiredHostHandlesAreReleasedWhileAnotherInstanceRemainsUsable() = runBlocking {
+        val hosts = mutableListOf<com.aharou.plugin.api.PluginHost>()
+        val realBridge = HostPluginBridge(mockk(), Lazy { registry }, mockk(), com.aharou.feature.agent.domain.tool.ToolPermissionManager(), mockk(), mockk())
+        val consumer = HostPluginRuntime(loader, Lazy { realBridge }, Lazy { registry })
+        every { loader.load(any(), any()) } answers { object : AharouPlugin {
+            override fun onLoad(host: com.aharou.plugin.api.PluginHost) { hosts.add(host) }
+        } }
+        consumer.load(manifest(), temp.root)
+        consumer.load(manifest().copy(id = "other"), temp.root)
+        val handle = hosts[0].call("reflect.class", "{\"name\":\"java.lang.StringBuilder\"}")
+        val args = "{\"target\":$handle}"
+        consumer.unload("fixture")
+        withTimeout(2000) {
+            while (runCatching { hosts[0].call("reflect.new", args) }.isSuccess) delay(1)
+        }
+        assertTrue(runCatching { hosts[0].call("reflect.new", args) }.isFailure)
+        assertTrue(hosts[1].call("reflect.class", "{\"name\":\"java.lang.StringBuilder\"}").contains("handle"))
+        consumer.unload("other")
+    }
+
+    @Test fun failingContextHookPreservesOriginalAndRemainsEnabled() = runBlocking {
+        every { loader.load(any(), any()) } returns object : AharouPlugin {
+            override fun onContext(contextJson: String): String = error("context fixture")
+        }
+        runtime.load(manifest(), temp.root)
+        val context = com.aharou.feature.agent.domain.model.AgentContext(null, null, temp.root.path, null)
+        assertEquals("original", runtime.onContext(context, "original"))
+        assertTrue(runtime.diagnostic("fixture").startsWith("context:"))
+        assertTrue(runtime.isLoaded("fixture"))
+    }
+
     @Test fun failedStartupNeverReportsLoaded() = runBlocking {
         every { loader.load(any(), any()) } returns object : AharouPlugin {
             override fun onLoad(host: com.aharou.plugin.api.PluginHost) { error("fixture startup") }
@@ -74,15 +135,28 @@ class HostPluginRuntimeTest {
         every { host.pluginDirectory() } returns temp.root.path
         every { host.dataDirectory() } returns File(temp.root, "data").path
         every { host.call("log", any()) } returns "null"
+        val reflection = com.aharou.feature.plugin.runtime.HostPluginReflection { Any() }
+        every { host.call(match { it.startsWith("reflect.") }, any()) } answers {
+            reflection.call(firstArg(), kotlinx.serialization.json.Json.parseToJsonElement(secondArg<String>()) as kotlinx.serialization.json.JsonObject)
+        }
         val plugin = com.aharou.feature.plugin.runtime.JavascriptHostPlugin("""
             var plugin = {
                 onLoad: function(host) { host.call('log', '{"message":"loaded"}'); },
                 toolsJson: function() { return '[]'; },
+                onContext: function(input) {
+                    var type = host.reflect('class', {name:'java.lang.StringBuilder'});
+                    var object = host.reflect('new', {target:type});
+                    host.reflect('invoke', {target:object, name:'append', parameterTypes:['int'], arguments:[42]});
+                    var c = JSON.parse(input);
+                    c.systemPrompt += "_js" + host.reflect('invoke', {target:object, name:'toString'});
+                    return JSON.stringify(c);
+                },
                 onModelEvent: function(event) { var e = JSON.parse(event); e.fixture = true; return JSON.stringify(e); }
             };
         """.trimIndent())
         try {
             plugin.onLoad(host)
+            assertTrue(plugin.onContext("{\"systemPrompt\":\"native\"}").contains("native_js42"))
             assertEquals("[]", plugin.toolsJson())
             assertTrue(plugin.onModelEvent("{}").contains("fixture"))
             verify(exactly = 1) { host.call("log", any()) }

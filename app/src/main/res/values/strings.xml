@@ -3521,7 +3521,7 @@
     <string name="project_task_state_done">已验收</string>
     <string name="project_task_state_blocked">执行受阻</string>
     <string name="team_flow_routes">条件工作流连线</string>
-    <string name="team_flow_route_hint">执行与送审向前；驳回必须单独连到上游。多条入边默认全部满足，不扩大成员权限。</string>
+    <string name="team_flow_route_hint">前向交接保持无环；反馈送审或驳回可指向任意其它任务。仅执行本次选定的反馈目标，全程最多两轮，不扩大成员权限。</string>
     <string name="team_flow_from">源阶段成员：%1$s</string>
     <string name="team_flow_to">目标阶段成员：%1$s</string>
     <string name="team_flow_execute">执行</string>
@@ -4168,7 +4168,7 @@
     <string name="team_topology_show">展开拓扑图</string>
     <string name="team_topology_hide">收起拓扑图</string>
     <string name="team_relationships">成员关系图</string>
-    <string name="team_relationship_hint">依次点来源与目标成员编辑关系；跨阶段反向联系请选择“协作关系”（如第三阶段到第一阶段）。协作不改变执行顺序；执行交接仍须无环。修改来源或目标会自动从另一侧移除，避免重复选择冲突。</string>
+    <string name="team_relationship_hint">依次点来源与目标成员编辑关系。仅共享信息时选择“协作关系”；需要真实跨阶段送审或驳回时，选择“执行流转”中的“反馈送审／驳回”，可从任意阶段指向其它阶段任务。前向交接保持无环，反馈全程最多两轮且不扩大成员权限。修改来源或目标会自动移除另一侧相同选择。</string>
     <string name="team_relationship_title">编辑成员关系</string>
     <string name="team_relationship_edit">编辑关系</string>
     <string name="team_relationship_collaboration">协作关系</string>
@@ -4323,4 +4323,18 @@
     <string name="dsh_market_parse_failed">已收到 DSH 页面，但其中的公开目录结构无法解析；未编造插件条目，也没有执行网页脚本。</string>
     <string name="dsh_market_transport_container">目录通过当前已就绪容器读取（使用现有 curl、正常证书校验）；未安装环境。插件下载仍使用原生网络，目录可见不代表下载或运行已成功。</string>
     <string name="dsh_market_container_unavailable">宿主目录连接失败，当前容器备用通道也不可用；未安装或更改容器。请检查已有容器与网络，原有插件不受影响。</string>
+    <string name="dsh_market_curl_missing">宿主安全握手失败，当前容器未安装 curl，无法读取备用目录。请在该软件自己的容器终端主动安装 curl 与 ca-certificates 后重试；其他软件或助手容器的工具不能代替这里的依赖。不会自动安装。</string>
+    <string name="dsh_market_ca_missing">容器 curl 缺少可用的证书库。请主动准备 ca-certificates 后重试；不会关闭 HTTPS 证书验证。</string>
+    <string name="dsh_market_container_dns">宿主连接失败，容器也无法解析 DSH 域名。请检查该容器实际 DNS 与当前网络；尚未收到目录，重复安装插件不会解决此问题。</string>
+    <string name="dsh_market_container_network">宿主连接失败，容器连接 DSH 同样超时或无法建立连接。请检查该软件在当前 VPN／网络中的访问情况；当前不是目录解析或安装失败。</string>
+    <string name="dsh_market_container_certificate">容器无法验证 DSH 的 HTTPS 证书。请检查容器证书库与设备时间；不会关闭证书验证或把失败响应当目录。</string>
+    <string name="dsh_market_base64_missing">当前容器缺少 base64，无法可靠传回目录内容。请在该软件容器中主动准备 coreutils 后重试；不会自动安装或修改已有插件。</string>
+    <string name="team_relationship_feedback">反馈送审／驳回</string>
+    <string name="team_relationship_forward">前向交接</string>
+    <string name="script_tools_live_context">实时上下文脚本</string>
+    <string name="script_tools_function">普通工具脚本</string>
+    <string name="script_tools_live_context_help">每次模型请求前按当前会话与工作区执行，输入为标准输入 JSON。仍需命令权限；结果仅供当次请求，失败继续原请求。</string>
+    <string name="script_tools_function_help">仅在模型调用时执行，作为普通函数工具提供。</string>
+    <string name="script_tools_timeout">限时（秒，1–1800）</string>
+    <string name="script_tools_output_limit">输出上限（字符，1–65536）</string>
 </resources>

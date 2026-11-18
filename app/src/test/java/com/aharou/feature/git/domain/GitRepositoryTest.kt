@@ -1,6 +1,8 @@
 package com.aharou.feature.git.domain
 
+import com.aharou.feature.agent.domain.container.BoundedOutput
 import com.aharou.feature.agent.domain.container.CommandEngine
+import com.aharou.feature.agent.domain.container.CommandEvent
 import com.aharou.feature.agent.domain.container.CommandResult
 import com.aharou.feature.git.domain.model.GitBranch
 import com.aharou.feature.git.domain.model.GitCommit
@@ -14,6 +16,8 @@ import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -42,6 +46,49 @@ class GitRepositoryTest {
         val workspace = mockk<WorkspaceRepository>()
         every { workspace.currentPath() } returns workPath
         return GitRepository(engine, workspace, mockk<PreCommitChecker>(relaxed = true))
+    }
+
+    @Test
+    fun cloneRepo_boundsLargeOutputWithoutChangingProgressOrExitSemantics() = runTest {
+        for (exit in listOf(0, 7, null)) {
+            val engine = mockk<CommandEngine>()
+            every { engine.runCommandStream(any(), any(), any()) } returns flow {
+                emit(CommandEvent.Line("Receiving objects: 50%"))
+                repeat(10_000) { emit(CommandEvent.Line("x".repeat(100))) }
+                emit(CommandEvent.Line("Resolving deltas: 100%"))
+                emit(CommandEvent.Line("diagnostic tail"))
+                if (exit != null) emit(CommandEvent.Exit(exit))
+            }
+            val workspace = mockk<WorkspaceRepository>()
+            every { workspace.currentPath() } returns workPath
+            val repo = GitRepository(engine, workspace, mockk(relaxed = true))
+            val progress = mutableListOf<Int>()
+            val result = runCatching { repo.cloneRepo("https://example.invalid/repo", onProgress = progress::add) }
+            val text = if (exit == 0) result.getOrThrow() else {
+                assertTrue(result.exceptionOrNull() is GitCommandFailureException)
+                (result.exceptionOrNull() as GitCommandFailureException).output
+            }
+            assertTrue(text.length <= BoundedOutput.DEFAULT_HEAD + BoundedOutput.DEFAULT_TAIL + 200)
+            assertTrue(text.startsWith("Receiving objects: 50%\n"))
+            assertTrue(text.endsWith("diagnostic tail\n"))
+            assertTrue(text.contains("已省略中间"))
+            assertEquals(listOf(42, 98), progress)
+        }
+    }
+
+    @Test
+    fun cloneRepo_emptyFailureStillExplainsExitCode() = runTest {
+        for (exit in listOf(9, null)) {
+            val engine = mockk<CommandEngine>()
+            every { engine.runCommandStream(any(), any(), any()) } returns
+                if (exit == null) flowOf<CommandEvent>() else flowOf(CommandEvent.Exit(exit))
+            val workspace = mockk<WorkspaceRepository>()
+            every { workspace.currentPath() } returns workPath
+            val repo = GitRepository(engine, workspace, mockk(relaxed = true))
+            val error = runCatching { repo.cloneRepo("https://example.invalid/repo") }.exceptionOrNull()
+            assertTrue(error is GitCommandFailureException)
+            assertEquals("git 退出码 $exit", error?.message)
+        }
     }
 
     // ── status()：porcelain v1 -b 解析 ───────────────────────────

@@ -31,7 +31,8 @@ internal class DshContainerCatalog(
             val file = "/tmp/aharou-dsh-${UUID.randomUUID()}.html"
             // curl's config and inherited proxy settings must not change this fixed public request.
             // Fold base64 output: the catalog HTML can exceed ProcessLineReader's single-line limit.
-            return "umask 077; set -C; : > '$file' || exit 1; " +
+            return "command -v curl >/dev/null 2>&1 || exit 127; command -v base64 >/dev/null 2>&1 || exit 126; " +
+                "umask 077; set -C; : > '$file' || exit 1; " +
                 "trap 'rm -f -- \"$file\"' EXIT; " +
                 "status=\$(curl -q --fail --silent --show-error --proto '=https' " +
                 "--proxy '' --noproxy '*' --connect-timeout 10 --max-time 25 --max-filesize $MAX_BYTES " +
@@ -42,7 +43,18 @@ internal class DshContainerCatalog(
 
         internal fun decode(result: CommandResult): String {
             check(result.exitCode != null) { "dsh_container_no_exit" }
-            check(result.exitCode == 0) { "dsh_container_exit:${result.exitCode}" }
+            check(result.exitCode == 0) {
+                when (result.exitCode) {
+                    127 -> "dsh_container_curl_missing"
+                    126 -> "dsh_container_base64_missing"
+                    6 -> "dsh_container_dns"
+                    7 -> "dsh_container_connection"
+                    28 -> "dsh_container_timeout"
+                    60 -> "dsh_container_certificate"
+                    77 -> "dsh_container_ca_missing"
+                    else -> "dsh_container_exit:${result.exitCode}"
+                }
+            }
             check(!result.outputTruncated) { "dsh_container_truncated" }
             check(result.output.length <= MAX_ENCODED + MAX_ENCODED / 76 + 2) { "dsh_container_too_large" }
             val encoded = result.output.filterNot { it == '\n' || it == '\r' }

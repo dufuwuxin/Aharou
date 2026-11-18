@@ -40,6 +40,18 @@ class HostPluginBridgeTest {
     private val policy = mockk<ToolPermissionPolicyEngine>()
     private val bridge = HostPluginBridge(mockk<Context>(), Lazy { registry }, policy, ToolPermissionManager(), mockk(), mockk())
 
+    @Test fun closingHostRevokesItsReflectionHandlesAndNoOtherHost() {
+        val one = bridge.createHost(temp.root) { null }
+        val two = bridge.createHost(temp.root) { null }
+        val handle = one.call("reflect.class", "{\"name\":\"java.lang.StringBuilder\"}")
+        val args = "{\"target\":$handle}"
+        assertTrue(runCatching { two.call("reflect.new", args) }.isFailure)
+        assertTrue(one.call("reflect.new", args).contains("handle"))
+        one.close()
+        assertTrue(runCatching { one.call("reflect.new", args) }.isFailure)
+        assertTrue(two.call("reflect.class", "{\"name\":\"java.lang.StringBuilder\"}").contains("handle"))
+    }
+
     @Test fun hostFileOperationsUseRealPersistentDataDirectory() {
         val host = bridge.createHost(temp.root) { null }
         host.call("file.write", "{\"path\":\"hello.txt\",\"content\":\"fixture\"}")

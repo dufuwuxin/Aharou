@@ -8,7 +8,6 @@ import kotlinx.coroutines.launch
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import com.aharou.core.ui.rememberSafeDocumentPicker
-import com.aharou.core.ui.primarySettingsSwipe
 import androidx.annotation.StringRes
 import com.aharou.feature.plugin.presentation.PluginSettingsSection
 import androidx.core.content.FileProvider
@@ -189,7 +188,7 @@ fun SettingsScreen(
     onOnboardingDismissFetchDialog: (() -> Unit)? = null,
     /** 顶层分组过滤：默认空列表展示全部；「配置」页传 listOf(SettingsSection.AiGroup) 只展 AI 组。 */
     menuGroups: List<SettingsSection> = emptyList(),
-    onPrimarySwipe: ((Boolean) -> Unit)? = null,
+    onRootChange: (Boolean) -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     val providers by viewModel.providers.collectAsStateWithLifecycle()
@@ -517,10 +516,8 @@ fun SettingsScreen(
         )
     }
 
-    Row(modifier = Modifier.fillMaxSize().primarySettingsSwipe(
-        enabled = onPrimarySwipe != null && sectionHistory.size == 1,
-        onSwipe = { onPrimarySwipe?.invoke(it) },
-    )) {
+    androidx.compose.runtime.SideEffect { onRootChange(sectionHistory.size == 1) }
+    Row(modifier = Modifier.fillMaxSize()) {
         // 大屏：菜单常驻左栏，右栏只换详情，不再整页来回切。
         if (expanded) {
             Column(

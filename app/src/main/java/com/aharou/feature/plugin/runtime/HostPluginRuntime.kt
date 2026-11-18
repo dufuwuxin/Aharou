@@ -45,6 +45,7 @@ class HostPluginRuntime @Inject constructor(
         @Volatile var context: AgentContext? = null
         @Volatile var active = true
         var tools: List<HostPluginTool> = emptyList()
+        var host: com.aharou.plugin.api.PluginHost? = null
     }
     private val mutations = Mutex()
     private val sequence = AtomicLong()
@@ -71,7 +72,9 @@ class HostPluginRuntime @Inject constructor(
         mutations.withLock {
             val candidate = Generation(loader.load(root, requireNotNull(manifest.hostRuntime)), sequence.incrementAndGet())
             try {
-                candidate.plugin.onLoad(bridge.get().createHost(root) { candidate.context })
+                val host = bridge.get().createHost(root) { candidate.context }
+                candidate.host = host
+                candidate.plugin.onLoad(host)
                 val metadata = Json.parseToJsonElement(candidate.plugin.toolsJson()) as? JsonArray
                     ?: error("toolsJson must return a JSON array")
                 candidate.tools = metadata.map { item ->
@@ -124,7 +127,7 @@ class HostPluginRuntime @Inject constructor(
                 diagnostics.putIfAbsent(id, "retired cleanup cancelled: ${cancelled.javaClass.simpleName}")
                 throw cancelled
             } catch (failure: Throwable) { diagnostics.putIfAbsent(id, "retired cleanup: ${failure.javaClass.simpleName}") }
-            finally { retiring.remove(generation.serial) }
+            finally { generation.host?.close(); retiring.remove(generation.serial) }
         }
     }
 
@@ -132,6 +135,7 @@ class HostPluginRuntime @Inject constructor(
         try { generation.plugin.onUnload() }
         catch (cancelled: CancellationException) { throw cancelled }
         catch (_: Throwable) { /* A failed unpublished candidate owns no public entrypoints. */ }
+        finally { generation.host?.close() }
     }
 
     private suspend fun <T> invoke(generation: Generation, context: AgentContext?, block: suspend () -> T): T =
@@ -147,7 +151,28 @@ class HostPluginRuntime @Inject constructor(
         put("inputMessageId", context.inputMessageId)
         put("mode", context.mode.name)
         put("currentFile", context.currentFile)
+        put("currentUserText", context.currentUserText)
+        put("workspaceName", context.workspaceName)
     }.toString()
+
+    /** Runs at the actual request injection boundary, before provider serialization. */
+    suspend fun onContext(context: AgentContext, systemPrompt: String): String {
+        var current = systemPrompt
+        for ((id, generation) in loaded.entries.sortedBy { it.key }) {
+            try {
+                val input = buildJsonObject {
+                    put("context", Json.parseToJsonElement(contextJson(context)))
+                    put("systemPrompt", current)
+                }.toString()
+                val next = invoke(generation, context) { generation.plugin.onContext(input) }
+                val prompt = Json.parseToJsonElement(next).jsonObject.getValue("systemPrompt").jsonPrimitive
+                require(prompt.isString) { "onContext must return a string systemPrompt" }
+                current = prompt.content
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Throwable) { diagnostics[id] = "context: ${failure.javaClass.simpleName}" }
+        }
+        return current
+    }
 
     // OkHttp hooks are synchronous, but only their worker waits; UI callers use suspend createView.
     fun onModelRequest(json: String): String = runBlocking(Dispatchers.IO) { transform(json, true) }

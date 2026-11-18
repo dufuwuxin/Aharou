@@ -95,12 +95,12 @@ class ConfigTeamControlFields @Inject constructor(
                             "taskId" to ConfigValue.Str(task.id), "member" to ConfigValue.Str(task.agent.orEmpty())))
                     } }) }, writer = { throw ConfigError.PermissionDenied("Edit members and stages in the team editor") }),
                 ClosureField(path = "$basePath.$forId.routes", displayName = "Conditional workflow routes",
-                    description = "Array of fromStage/fromTask/toStage/toTask/action; EXECUTE, REVIEW or REJECT. Applied next run.",
+                    description = "Array of fromStage/fromTask/toStage/toTask/action and optional boolean feedback (default false); feedback REVIEW or REJECT selects one configured target. Applied next run.",
                     valueSchema = ConfigSchema.Json,
                     reader = { ConfigValue.Arr(entry().team.routes.map { route -> ConfigValue.Obj(mapOf(
                         "fromStage" to ConfigValue.Str(route.from.stageId), "fromTask" to ConfigValue.Str(route.from.taskId),
                         "toStage" to ConfigValue.Str(route.to.stageId), "toTask" to ConfigValue.Str(route.to.taskId),
-                        "action" to ConfigValue.Str(route.action.name))) }) }, writer = { value ->
+                        "action" to ConfigValue.Str(route.action.name), "feedback" to ConfigValue.Bool(route.feedback))) }) }, writer = { value ->
                         val array = (value as? ConfigValue.Arr)?.value ?: throw ConfigError.TypeMismatch("array")
                         val routes = array.map { item ->
                             val fields = (item as? ConfigValue.Obj)?.value ?: throw ConfigError.TypeMismatch("object")
@@ -108,7 +108,10 @@ class ConfigTeamControlFields @Inject constructor(
                                 ?: throw ConfigError.InvalidValue("Missing $key")
                             val action = TeamRouteAction.entries.firstOrNull { it.name == str("action") }
                                 ?: throw ConfigError.InvalidValue("Invalid route action")
-                            TeamRoute(TeamFlowNode(str("fromStage"), str("fromTask")), TeamFlowNode(str("toStage"), str("toTask")), action)
+                            val feedback = if (fields.containsKey("feedback")) {
+                                (fields["feedback"] as? ConfigValue.Bool)?.value ?: throw ConfigError.TypeMismatch("boolean feedback")
+                            } else false
+                            TeamRoute(TeamFlowNode(str("fromStage"), str("fromTask")), TeamFlowNode(str("toStage"), str("toTask")), action, feedback)
                         }
                         val current = entry()
                         val form = current.team.toForm(current.scope)

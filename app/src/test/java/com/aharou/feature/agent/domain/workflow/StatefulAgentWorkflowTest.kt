@@ -219,6 +219,40 @@ class StatefulAgentWorkflowTest {
     }
 
     @Test
+    fun stopArrivingDuringLiveContextPreparationPreventsTheActualProviderRequest() = runTest {
+        prepare(flow { emit(AIStreamChunk.Final(AIResponse("must not send"))) })
+        var interrupted = false
+        coEvery { prompts.buildForRequest(any(), any()) } coAnswers {
+            interrupted = true
+            secondArg<String>()
+        }
+        every { notifications.peek("session") } answers {
+            if (interrupted) listOf(com.aharou.feature.agent.domain.notification.PendingNotification(
+                kind = com.aharou.feature.agent.domain.notification.AgentNotificationKind.USER_INTERRUPT,
+                sourceId = "session", title = "stop", outcome = com.aharou.feature.agent.domain.notification.NotificationOutcome.STOPPED,
+            )) else emptyList()
+        }
+        every { notifications.ack(any(), any()) } answers { interrupted = false }
+        workflow.executeEvents("request", context, emptyList()).collect { }
+        coVerify(exactly = 1) { prompts.buildForRequest(any(), any()) }
+        verify(exactly = 0) { provider.completeStream(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun liveContextPreparationReachesTheActualProviderWithCurrentRequestContext() = runTest {
+        prepare(flow { emit(AIStreamChunk.Final(AIResponse("done"))) })
+        coEvery { prompts.buildForRequest(any(), any()) } answers {
+            secondArg<String>() + "\\nlive-" + firstArg<AgentContext>().currentUserText
+        }
+        val sent = slot<String>()
+        every { provider.completeStream(capture(sent), any(), any(), any()) } returns flow { emit(AIStreamChunk.Final(AIResponse("done"))) }
+        workflow.executeEvents("request", context.copy(currentUserText = "request"), emptyList()).collect { event ->
+            if (event is AgentEvent.AssistantText) event.persisted?.complete(Unit)
+        }
+        assertTrue(sent.captured.contains("live-request"))
+    }
+
+    @Test
     fun privacyMaskingCoversTheActualSystemPromptBeforeProviderCall() = runTest {
         prepare(flow { emit(AIStreamChunk.Final(AIResponse("done"))) })
         coEvery { generalSettings.privacyMaskingEnabled() } returns true
@@ -481,6 +515,7 @@ class StatefulAgentWorkflowTest {
         every { provider.model } returns "model"
         every { provider.completeStream(any(), any(), any(), any()) } returns chunks
         every { prompts.build(any(), any()) } returns "system"
+        coEvery { prompts.buildForRequest(any(), any()) } answers { secondArg<String>() }
         // 卡死提示改为文件驱动后，workflow 首次用到时会 resolvePrompt；不打桩会抛 MockKException。
         every { prompts.resolvePrompt(any()) } returns "（测试）你在重复同一个动作"
         coEvery { metadata.resolve(any(), any(), any()) } returns ModelMetadata("model", contextTokens = 100_000, supportsVision = true)

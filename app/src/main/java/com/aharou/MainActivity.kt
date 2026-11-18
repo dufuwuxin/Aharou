@@ -78,8 +78,7 @@ import com.aharou.core.ui.RootBackHandler
 import com.aharou.core.ui.SplitPaneLayout
 import com.aharou.core.ui.isExpandedWidth
 import com.aharou.core.ui.pageEnter
-import com.aharou.core.ui.FloatingTabBar
-import com.aharou.core.ui.FloatingTabItem
+import com.aharou.core.ui.PrimaryPagesPager
 import com.aharou.core.ui.pageExit
 import com.aharou.feature.agent.presentation.AIAgentViewModel
 import com.aharou.feature.agent.presentation.component.AIChatPanel
@@ -745,14 +744,7 @@ fun AppNavigation(
                     },
                 )
             }
-            composable("projects") {
-                com.aharou.feature.agent.presentation.component.WorkspaceSessionBrowser(
-                    agentViewModel, projectTaskViewModel, workspaceViewModel, sessionBrowserWorkspace,
-                    { sessionBrowserWorkspace = it }, taskCreateRequested, { taskCreateRequested = false },
-                    onOpenProject = { id -> projectTaskViewModel.openProject(id) { navController.navigate("projects/$id") } },
-                    onOpenTask = { id -> projectTaskViewModel.select(id); navController.navigate("tasks/$id") },
-                    onOpenChat = { navController.navigate("chat") { launchSingleTop = true } })
-            }
+            composable("projects") {}
             composable("projects/{projectId}") { entry ->
                 ProjectChatScreen(projectId = entry.arguments?.getString("projectId").orEmpty(), agentViewModel, projectTaskViewModel,
                     settingsViewModel, workspaceViewModel, onBack = { navController.popBackStack() },
@@ -779,46 +771,8 @@ fun AppNavigation(
                     }
                 )
             }
-            composable("config") {
-                // 「配置」页：只展 AI 组（提示词/记忆/技能/团队/工具等 AI 相关设置）。
-                SettingsScreen(
-                    viewModel = settingsViewModel,
-                    onNavigateBack = { navController.popBackStack() },
-                    onStopAllAndCloseTerminal = { agentViewModel.stopAllAndCloseTerminal() },
-                    menuGroups = listOf(com.aharou.feature.settings.presentation.component.SettingsSection.AiGroup),
-                    onPrimarySwipe = { left -> if (left) navController.navigate("settings") {
-                        popUpTo(navController.graph.startDestinationId) { saveState = true }
-                        launchSingleTop = true; restoreState = true
-                    } },
-                    onboardingStep = onboardingUiState.step.takeIf { onboardingUiState.active },
-                    onOnboardingModelAdded = {
-                        if (onboardingUiState.active && onboardingUiState.step == OnboardingStep.SIMULATE_FETCH_DIALOG) {
-                            navController.popBackStack()
-                            onboardingCoordinator.nextStep()
-                        }
-                    },
-                    onOnboardingDismissFetchDialog = {
-                        if (onboardingUiState.active && onboardingUiState.step == OnboardingStep.SIMULATE_FETCH_DIALOG) {
-                            onboardingCoordinator.goToStep(OnboardingStep.PROVIDER_FETCH_MODELS)
-                        }
-                    }
-                )
-            }
-            composable("settings") {
-                // 复用 Activity 级 settingsViewModel（MainActivity 顶部已创建并 init），
-                // 避免进入设置页时重复创建实例与订阅。
-                SettingsScreen(
-                    viewModel = settingsViewModel,
-                    onNavigateBack = {
-                        navController.popBackStack()
-                    },
-                    onStopAllAndCloseTerminal = { agentViewModel.stopAllAndCloseTerminal() },
-                    onPrimarySwipe = { left -> if (!left) navController.navigate("config") {
-                        popUpTo(navController.graph.startDestinationId) { saveState = true }
-                        launchSingleTop = true; restoreState = true
-                    } },
-                )
-            }
+            composable("config") {}
+            composable("settings") {}
             composable("terminal") { entry ->
                 val terminalViewModel: TerminalViewModel = hiltViewModel()
                 TerminalScreen(
@@ -961,49 +915,43 @@ fun AppNavigation(
     Box(modifier = Modifier.fillMaxSize()) {
     navBody()
 
-    // 四个一级页共享底栏实测高度（含底边距），聊天等子路由不留空白。
-    val activeTab = when (currentRoute) {
-        "config" -> 1
-        "settings" -> 2
-        else -> 0
-    }
-    if (isPrimaryPage) {
-        Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = androidx.compose.ui.Alignment.BottomCenter
-        ) {
-            FloatingTabBar(
-                selected = activeTab,
-                draggableIndices = setOf(1, 2),
-                onSelect = { i ->
-                    // 点当前 tab 不重复导航；点其它一级 tab 切过去（popUpTo 起点，不叠加返回栈）。
-                    if (i != activeTab) {
-                        val route = when (i) {
-                            0 -> "projects"
-                            1 -> "config"
-                            else -> "settings"
-                        }
-                        navController.navigate(route) {
-                            popUpTo(navController.graph.startDestinationId) { saveState = true }
-                            launchSingleTop = true
-                            restoreState = true
-                        }
+    PrimaryPagesPager(
+        bottomContentPadding = bottomBarHeight,
+        modifier = Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)),
+        route = currentRoute,
+        onRouteChange = { route -> navController.navigate(route) {
+            popUpTo(navController.graph.startDestinationId) { saveState = true }
+            launchSingleTop = true; restoreState = true
+        } },
+        bottomBarModifier = Modifier.onboardingTarget(OnboardingStep.ENTER_SETTINGS)
+            .onSizeChanged { bottomBarHeightPx = it.height }.padding(bottom = 8.dp),
+        projects = {
+            com.aharou.feature.agent.presentation.component.WorkspaceSessionBrowser(
+                agentViewModel, projectTaskViewModel, workspaceViewModel, sessionBrowserWorkspace,
+                { sessionBrowserWorkspace = it }, taskCreateRequested, { taskCreateRequested = false },
+                onOpenProject = { id -> projectTaskViewModel.openProject(id) { navController.navigate("projects/$id") } },
+                onOpenTask = { id -> projectTaskViewModel.select(id); navController.navigate("tasks/$id") },
+                onOpenChat = { navController.navigate("chat") { launchSingleTop = true } })
+        },
+        settings = { config, active, onRootChange ->
+            SettingsScreen(viewModel = settingsViewModel,
+                onNavigateBack = { navController.popBackStack() },
+                onStopAllAndCloseTerminal = { agentViewModel.stopAllAndCloseTerminal() },
+                menuGroups = if (config) listOf(com.aharou.feature.settings.presentation.component.SettingsSection.AiGroup) else emptyList(),
+                onRootChange = onRootChange,
+                onboardingStep = onboardingUiState.step.takeIf { config && active && onboardingUiState.active },
+                onOnboardingModelAdded = {
+                    if (onboardingUiState.active && onboardingUiState.step == OnboardingStep.SIMULATE_FETCH_DIALOG) {
+                        navController.popBackStack(); onboardingCoordinator.nextStep()
                     }
                 },
-                items = listOf(
-                    FloatingTabItem(FeatherIcons.Home, stringResource(R.string.project_home)),
-                    FloatingTabItem(FeatherIcons.Sliders, stringResource(R.string.bottom_tab_config)),
-                    FloatingTabItem(FeatherIcons.Settings, stringResource(R.string.bottom_tab_settings)),
-                ),
-                maskColor = settingsPageBackground(),
-                modifier = Modifier
-                    .align(androidx.compose.ui.Alignment.BottomCenter)
-                    .onboardingTarget(OnboardingStep.ENTER_SETTINGS)
-                    .onSizeChanged { bottomBarHeightPx = it.height }
-                    .padding(bottom = 8.dp),
-            )
-        }
-    }
+                onOnboardingDismissFetchDialog = {
+                    if (onboardingUiState.active && onboardingUiState.step == OnboardingStep.SIMULATE_FETCH_DIALOG) {
+                        onboardingCoordinator.goToStep(OnboardingStep.PROVIDER_FETCH_MODELS)
+                    }
+                })
+        },
+    )
 
     // 外部分享进来的文件：确认「预览 / 插入输入框 / 取消」后才投给聊天面板。
     // 本函数是独立 Composable，够不到 Activity 的注入字段，走 EntryPoint 取同一个单例。

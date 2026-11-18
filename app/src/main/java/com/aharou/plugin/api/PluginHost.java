@@ -6,5 +6,7 @@ public interface PluginHost {
     String pluginDirectory();
     String dataDirectory();
     Object applicationContext();
+    /** Release instance-owned bridge handles when this generation retires. */
+    default void close() {}
     String call(String operation, String argumentsJson) throws Exception;
 }

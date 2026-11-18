@@ -42,7 +42,15 @@ class SystemPromptProvider @Inject constructor(
     private val injectedContextStore: InjectedContextStore,
     private val contextLibrary: ContextLibraryRepository,
     private val toolRegistry: dagger.Lazy<com.aharou.feature.agent.domain.tool.ToolRegistry>? = null,
+    private val liveContextScripts: dagger.Lazy<com.aharou.feature.agent.domain.tool.script.LiveContextScriptRunner>? = null,
+    private val hostPlugins: dagger.Lazy<com.aharou.feature.plugin.runtime.HostPluginRuntime>? = null,
 ) {
+    suspend fun buildForRequest(agentContext: AgentContext, native: String): String {
+        val live = liveContextScripts?.get()?.build(agentContext).orEmpty()
+        val current = listOf(native, live).filter { it.isNotBlank() }.joinToString("\n\n")
+        return hostPlugins?.get()?.onContext(agentContext, current) ?: current
+    }
+
     interface PromptSource { fun build(ctx: AgentContext): String? }
 
     fun findAgentDefinitionIncludingDisabled(name: String): AgentDefinition? =
