@@ -3,6 +3,10 @@ package com.aharou.feature.terminal.domain
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
+import android.widget.Toast
+import com.aharou.R
 import com.aharou.core.util.FileLogger
 import com.aharou.core.util.shellQuote
 import com.aharou.feature.agent.domain.container.RemoteSshConnection
@@ -450,6 +454,13 @@ class RemoteTerminalSessionManager @Inject constructor(
             val bytes = text.toByteArray(Charsets.UTF_8)
             session?.write(bytes, 0, bytes.size)
         }
+        override fun onInputRejected(session: TerminalSession, byteCount: Int) {
+            logWarn(TAG, "Input not sent: queue full or closed, bytes=$byteCount")
+            Handler(Looper.getMainLooper()).post {
+                Toast.makeText(appContext, R.string.terminal_input_rejected, Toast.LENGTH_LONG).show()
+            }
+        }
+
         override fun onBell(session: TerminalSession) {}
         override fun onColorsChanged(session: TerminalSession) {}
         override fun onTerminalCursorStateChange(state: Boolean) {}

@@ -21,7 +21,6 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -216,19 +215,18 @@ class BrowserUseManager(
         File(webView.context.cacheDir, "browser_screenshots").also { it.mkdirs() }
     }
 
-    /** Deferred used by executeJS to receive results from async scripts via JS bridge. */
-    private var asyncJsDeferred: CompletableDeferred<String>? = null
+    private val asyncJsResults = BrowserAsyncResult()
 
     /** JavaScript interface for async script result callbacks. */
     private val jsBridge = object {
         @JavascriptInterface
-        fun resolve(result: String) {
-            asyncJsDeferred?.complete(result)
+        fun resolve(requestId: String, result: String) {
+            asyncJsResults.complete(requestId, result)
         }
 
         @JavascriptInterface
-        fun reject(error: String) {
-            asyncJsDeferred?.complete("{\"error\":${JSONObject.quote(error)}}")
+        fun reject(requestId: String, error: String) {
+            asyncJsResults.complete(requestId, "{\"error\":${JSONObject.quote(error)}}")
         }
 
         /**
@@ -1061,35 +1059,16 @@ class BrowserUseManager(
         // Wrap in an async IIFE so `await` works in user scripts.
         // Android WebView doesn't resolve Promises from evaluateJavascript,
         // so we use a JS bridge callback (__aharou__.resolve / __aharou__.reject).
+        val request = asyncJsResults.begin()
         return try {
-            val deferred = CompletableDeferred<String>()
-            asyncJsDeferred = deferred
-            val wrapped = """
-                (async function(){
-                    try {
-                        var __r__ = (async function(){ $script })();
-                        var __v__ = await __r__;
-                        if (__v__ === undefined || __v__ === null) {
-                            __aharou__.resolve(String(__v__));
-                        } else if (typeof __v__ === 'object') {
-                            __aharou__.resolve(JSON.stringify(__v__));
-                        } else {
-                            __aharou__.resolve(String(__v__));
-                        }
-                    } catch(e) {
-                        __aharou__.reject(e.message || String(e));
-                    }
-                })();
-            """.trimIndent()
+            val wrapped = request.wrap("(async function(){ $script })()")
             withContext(Dispatchers.Main) {
                 webView.evaluateJavascript(wrapped, null)
             }
-            val raw = withTimeoutOrNull(30_000L) { deferred.await() }
+            val raw = withTimeoutOrNull(30_000L) { request.result.await() }
                 ?: run {
-                    asyncJsDeferred = null
                     return BrowserActionResult.error("JavaScript execution timed out (30s)")
                 }
-            asyncJsDeferred = null
             val json = try { JSONObject(raw) } catch (_: Exception) { null }
             if (json != null) {
                 if (json.has("error")) {
@@ -1101,8 +1080,9 @@ class BrowserUseManager(
                 BrowserActionResult(text = raw)
             }
         } catch (e: Exception) {
-            asyncJsDeferred = null
             BrowserActionResult.error("JavaScript error: ${e.message}")
+        } finally {
+            asyncJsResults.clear(request)
         }
     }
 
@@ -1198,30 +1178,16 @@ class BrowserUseManager(
      * pattern used by [executeJS].
      */
     private suspend fun awaitPromiseJs(js: String): String? {
-        val deferred = CompletableDeferred<String>()
-        asyncJsDeferred = deferred
-        val wrapped = """
-            (async function(){
-                try {
-                    var __v__ = await ($js);
-                    if (__v__ === undefined || __v__ === null) {
-                        __aharou__.resolve('null');
-                    } else if (typeof __v__ === 'object') {
-                        __aharou__.resolve(JSON.stringify(__v__));
-                    } else {
-                        __aharou__.resolve(String(__v__));
-                    }
-                } catch(e) {
-                    __aharou__.reject(e && e.message ? e.message : String(e));
-                }
-            })();
-        """.trimIndent()
-        withContext(Dispatchers.Main) {
-            webView.evaluateJavascript(wrapped, null)
+        val request = asyncJsResults.begin()
+        return try {
+            val wrapped = request.wrap(js, nullAsString = true)
+            withContext(Dispatchers.Main) {
+                webView.evaluateJavascript(wrapped, null)
+            }
+            withTimeoutOrNull(60_000L) { request.result.await() }
+        } finally {
+            asyncJsResults.clear(request)
         }
-        val raw = withTimeoutOrNull(60_000L) { deferred.await() }
-        asyncJsDeferred = null
-        return raw
     }
 
     // -- Set User Agent --

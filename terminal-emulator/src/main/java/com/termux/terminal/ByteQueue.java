@@ -14,7 +14,7 @@ final class ByteQueue {
 
     public synchronized void close() {
         mOpen = false;
-        notify();
+        notifyAll();
     }
 
     public synchronized int read(byte[] buffer, boolean block) {
@@ -49,6 +49,21 @@ final class ByteQueue {
         }
         if (wasFull) notify();
         return totalRead;
+    }
+
+    /** Accept the entire input packet without waiting, or leave the queue unchanged. */
+    public synchronized boolean tryWrite(byte[] buffer, int offset, int length) {
+        if (offset < 0 || length < 0 || offset > buffer.length - length) {
+            throw new IllegalArgumentException("invalid offset or length");
+        }
+        if (!mOpen || length > mBuffer.length - mStoredBytes) return false;
+        int tail = (mHead + mStoredBytes) % mBuffer.length;
+        int first = Math.min(length, mBuffer.length - tail);
+        System.arraycopy(buffer, offset, mBuffer, tail, first);
+        System.arraycopy(buffer, offset + first, mBuffer, 0, length - first);
+        mStoredBytes += length;
+        notifyAll();
+        return true;
     }
 
     /**

@@ -48,7 +48,9 @@ class LocalModelDownloaderTest {
         mockkObject(FileLogger)
         every { FileLogger.w(any(), any(), any()) } just Runs
         every { FileLogger.i(any(), any()) } just Runs
-        try { block(LocalModelDownloader(mockk<Context>())) }
+        try { block(LocalModelDownloader(mockk<Context>()).apply {
+            callFactory = okhttp3.OkHttpClient.Builder().connectionSpecs(listOf(okhttp3.ConnectionSpec.CLEARTEXT)).build()
+        }) }
         finally { unmockkObject(FileLogger) }
     }
 

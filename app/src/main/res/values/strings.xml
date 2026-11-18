@@ -4337,4 +4337,5 @@
     <string name="script_tools_function_help">仅在模型调用时执行，作为普通函数工具提供。</string>
     <string name="script_tools_timeout">限时（秒，1–1800）</string>
     <string name="script_tools_output_limit">输出上限（字符，1–65536）</string>
+    <string name="terminal_input_rejected">本次输入未发送：输入队列已满（每会话上限 1 MiB）或通道已关闭，请检查终端后重试。剪贴板未改动。</string>
 </resources>

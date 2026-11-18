@@ -38,7 +38,7 @@ public final class TerminalSession extends TerminalOutput {
      * A queue written to from the main thread due to user interaction, and read by another thread which forwards by
      * writing to the backend's output stream.
      */
-    final ByteQueue mTerminalToProcessIOQueue = new ByteQueue(4096);
+    final ByteQueue mTerminalToProcessIOQueue = new ByteQueue(1024 * 1024);
     /** Buffer to write translate code points into utf8 before writing to mTerminalToProcessIOQueue */
     private final byte[] mUtf8InputBuffer = new byte[5];
 
@@ -253,6 +253,8 @@ public final class TerminalSession extends TerminalOutput {
                     }
                 } catch (Exception e) {
                     mClient.logWarn(LOG_TAG, "PTY 写入异常(pid=" + mShellPid + "): " + e);
+                } finally {
+                    mTerminalToProcessIOQueue.close();
                 }
             }
         }.start();
@@ -261,7 +263,10 @@ public final class TerminalSession extends TerminalOutput {
     /** Write data to the shell process / remote shell. */
     @Override
     public void write(byte[] data, int offset, int count) {
-        if (mShellPid != -1) mTerminalToProcessIOQueue.write(data, offset, count);
+        if (count == 0) return;
+        if (mShellPid == -1 || !mTerminalToProcessIOQueue.tryWrite(data, offset, count)) {
+            mClient.onInputRejected(this, count);
+        }
     }
 
     /** Write the Unicode code point to the terminal encoded in UTF-8. */

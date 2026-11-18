@@ -12,6 +12,17 @@ import org.junit.Test
 class BrowserUseJsQuoteTest {
 
     @Test
+    fun asyncWrapperKeepsScriptQuotesAndBindsUuidOnEveryResultPath() {
+        val request = BrowserAsyncResult().begin()
+        val script = "(async function(){ return \"a'b\\c\\n中文\"; })()"
+        val wrapped = request.wrap(script)
+        org.junit.Assert.assertTrue(wrapped.contains("await ($script)"))
+        val callbackLines = wrapped.lineSequence().filter { it.contains("__aharou__.") }.toList()
+        assertEquals(4, callbackLines.size)
+        callbackLines.forEach { org.junit.Assert.assertTrue(it.contains("('${request.id}',")) }
+    }
+
+    @Test
     fun plainText_isUnchanged() {
         assertEquals("hello world", BrowserUseJS.jsQuote("hello world"))
     }

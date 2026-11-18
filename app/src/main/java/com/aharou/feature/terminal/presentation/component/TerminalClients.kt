@@ -3,6 +3,10 @@ package com.aharou.feature.terminal.presentation.component
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
+import android.widget.Toast
+import com.aharou.R
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.inputmethod.InputMethodManager
@@ -75,6 +79,13 @@ class AppTerminalSessionClient(
         if (text.isNotEmpty()) {
             val bytes = text.toByteArray(Charsets.UTF_8)
             session?.write(bytes, 0, bytes.size)
+        }
+    }
+
+    override fun onInputRejected(session: TerminalSession, byteCount: Int) {
+        logWarn(TAG, "Input not sent: queue full or closed, bytes=$byteCount")
+        Handler(Looper.getMainLooper()).post {
+            Toast.makeText(context, R.string.terminal_input_rejected, Toast.LENGTH_LONG).show()
         }
     }
 

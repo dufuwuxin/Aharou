@@ -45,6 +45,7 @@ class LocalModelDownloader @Inject constructor(
      * 走 [AppProxy] 的代理认证器，与容器镜像、语音模型下载一致——用户配了代理就该用上，
      * 不然 ModelScope 在部分网络下连不上。
      */
+    internal var callFactory: Call.Factory? = null
     private val client by lazy {
         OkHttpClient.Builder()
             .proxyAuthenticator(AppProxy.okHttpAuthenticator)
@@ -108,7 +109,7 @@ class LocalModelDownloader @Inject constructor(
             .url(url)
             .apply { if (offset > 0L) header("Range", "bytes=$offset-") }
             .build()
-        val call = client.newCall(request)
+        val call = (callFactory ?: client).newCall(request)
         withDownloadCall(call) { res ->
             when (res.code) {
                 HTTP_PARTIAL_CONTENT -> Unit

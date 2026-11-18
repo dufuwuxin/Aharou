@@ -17,6 +17,10 @@ public interface TerminalSessionClient {
 
     void onPasteTextFromClipboard(TerminalSession session);
 
+    default void onInputRejected(TerminalSession session, int byteCount) {
+        logWarn("TerminalSession", "Input not sent: queue full or closed, bytes=" + byteCount);
+    }
+
     void onBell(TerminalSession session);
 
     void onColorsChanged(TerminalSession session);
