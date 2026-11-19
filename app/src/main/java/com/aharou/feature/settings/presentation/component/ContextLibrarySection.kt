@@ -6,6 +6,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.platform.testTag
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
@@ -86,8 +88,10 @@ internal fun ContextLibrarySection(viewModel: ContextLibraryViewModel = hiltView
     }
     val up = {
         if (tab != 0) tab = 0
-        else folder = folder?.takeIf { it.contains('/') }?.let { contextParentFolder(it) }
-        query = ""
+        else {
+            folder = folder?.takeIf { it.contains('/') }?.let { contextParentFolder(it) }
+            query = ""
+        }
     }
     BackHandler(enabled = tab != 0 || folder != null) { up() }
     if (creatingFolder) AlertDialog(
@@ -144,10 +148,16 @@ internal fun ContextLibrarySection(viewModel: ContextLibraryViewModel = hiltView
         val paths = state.folders[category].orEmpty() + state.entries.filter { it.category == category }.map { it.folder }
         if (query.isNotBlank()) emptyList() else contextChildFolders(paths, currentFolder.orEmpty())
     }
-    LazyColumn(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(Spacing.md),
+    Column(Modifier.fillMaxSize()) {
+        Column(Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.sm),
+            verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+            Text(stringResource(R.string.context_library_heading), style = MaterialTheme.typography.headlineSmall)
+            SegmentedTabs(tab, listOf(stringResource(R.string.context_tab_library), stringResource(R.string.context_tab_preview),
+                stringResource(R.string.context_graph_title), stringResource(R.string.context_resource_tree)), { tab = it })
+        }
+    LazyColumn(modifier = Modifier.weight(1f).fillMaxWidth().testTag("context_library_content"),
+        verticalArrangement = Arrangement.spacedBy(Spacing.md),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(Spacing.lg)) {
-        item { ContextOverview(state.entries) }
-        item { SegmentedTabs(tab, listOf(stringResource(R.string.context_tab_library), stringResource(R.string.context_tab_preview), stringResource(R.string.context_graph_title), stringResource(R.string.context_resource_tree)), { tab = it }) }
         if (state.error) item { ContextNotice(stringResource(R.string.context_operation_error), error = true) }
         if (tab == 1) item { ContextLibraryPreview(state, viewModel::preview, viewModel::clearPreview) }
         else if (tab == 3) item {
@@ -160,6 +170,9 @@ internal fun ContextLibrarySection(viewModel: ContextLibraryViewModel = hiltView
             )
         }
         else {
+            item { AppTextField(query, { query = it }, label = stringResource(R.string.context_search_placeholder),
+                modifier = Modifier.fillMaxWidth().testTag("context_library_search")) }
+            item { ContextOverview(state.entries) }
             item { ContextChoiceRow(ContextCategory.entries.map { stringResource(it.label()) }, category.ordinal,
                 { category = ContextCategory.entries[it]; folder = null; query = "" }) }
             item { Text(stringResource(category.explanation()), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
@@ -176,13 +189,10 @@ internal fun ContextLibrarySection(viewModel: ContextLibraryViewModel = hiltView
                     }) { Text(stringResource(R.string.context_delete_folder)) }
                 }
             }
-            item { AppTextField(query, { query = it }, placeholder = stringResource(R.string.context_search_placeholder)) }
-            if (currentFolder != null || query.isNotBlank()) {
-                item { ContextChoiceRow(listOf(stringResource(R.string.context_scope_all)) + MemoryScope.entries.map { stringResource(it.label()) },
+            item { ContextChoiceRow(listOf(stringResource(R.string.context_scope_all)) + MemoryScope.entries.map { stringResource(it.label()) },
                     (scope?.ordinal ?: -1) + 1, { scope = MemoryScope.entries.getOrNull(it - 1) }) }
                 item { ContextChoiceRow(listOf(stringResource(R.string.context_load_all)) + ContextLoad.entries.map { stringResource(it.label()) },
                     (loading?.ordinal ?: -1) + 1, { loading = ContextLoad.entries.getOrNull(it - 1) }) }
-            }
             item {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
                     Button(onClick = { editorRoot = state.workspaceRoot; creating = true }, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.context_add_entry)) }
@@ -202,6 +212,7 @@ internal fun ContextLibrarySection(viewModel: ContextLibraryViewModel = hiltView
                 items(visible, key = { it.id }) { entry -> ContextEntryCard(entry, query) { editorRoot = state.workspaceRoot; editor = entry } }
             }
         }
+    }
     }
 }
 

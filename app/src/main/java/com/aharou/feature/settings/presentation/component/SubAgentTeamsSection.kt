@@ -1,6 +1,13 @@
 package com.aharou.feature.settings.presentation.component
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.platform.testTag
+import com.aharou.core.ui.AppTextField
+import com.aharou.core.ui.SegmentedTabs
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -75,66 +82,10 @@ internal fun SubAgentTeamsSection(
     var pendingDelete by remember { mutableStateOf<AgentTeamEntry?>(null) }
     var editorTarget by remember { mutableStateOf<EditorTarget?>(null) }
 
-    Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-        Column(modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.sm)) {
-            SettingsGroup {
-                SettingsRow(
-                    icon = FeatherIcons.Plus,
-                    title = stringResource(R.string.team_new),
-                    onClick = {
-                        viewModel.resetSaveState()
-                        editorTarget = EditorTarget(null)
-                    }
-                )
-                SettingsDivider()
-                SettingsRow(
-                    icon = FeatherIcons.Users,
-                    title = stringResource(R.string.team_create_member),
-                    subtitle = stringResource(R.string.settings_team_experts_desc),
-                    onClick = onCreateRoleCard
-                )
-            }
-        }
-
-        if (teams.isEmpty()) {
-            Text(
-                text = stringResource(R.string.team_list_empty),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.xl)
-            )
-        } else {
-            Column(
-                modifier = Modifier
-                    .padding(horizontal = Spacing.lg)
-                    .padding(bottom = Spacing.xl),
-                verticalArrangement = Arrangement.spacedBy(Spacing.sm)
-            ) {
-                AgentDefinitionScope.entries.forEach { scope ->
-                    val scoped = teams.filter { it.scope == scope }
-                    if (scoped.isEmpty()) return@forEach
-                    SettingsGroupHeader(
-                        text = stringResource(
-                            if (scope == AgentDefinitionScope.GLOBAL) R.string.team_scope_global
-                            else R.string.team_scope_project
-                        )
-                    )
-                    SettingsGroup {
-                        scoped.forEachIndexed { index, entry ->
-                            if (index > 0) SettingsDivider()
-                            SwipeToDeleteRow(
-                                onDelete = { pendingDelete = entry },
-                                onClick = { detail = entry }
-                            ) {
-                                TeamRow(entry)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        TeamWorkflowsSection(availableMembers = availableMembers)
-    }
+    TeamLibraryBrowser(teams, availableMembers.size,
+        onCreateTeam = { viewModel.resetSaveState(); editorTarget = EditorTarget(null) },
+        onCreateRole = onCreateRoleCard, onOpenTeam = { detail = it }, onDeleteTeam = { pendingDelete = it },
+        workflows = { TeamWorkflowsSection(availableMembers = availableMembers) })
 
     detail?.let { entry ->
         TeamDetailSheet(
@@ -188,6 +139,80 @@ internal fun SubAgentTeamsSection(
                 }
             }
         )
+    }
+}
+
+@Composable
+internal fun TeamLibraryBrowser(
+    teams: List<AgentTeamEntry>, memberCount: Int,
+    onCreateTeam: () -> Unit, onCreateRole: () -> Unit,
+    onOpenTeam: (AgentTeamEntry) -> Unit, onDeleteTeam: (AgentTeamEntry) -> Unit,
+    workflows: @Composable () -> Unit,
+) {
+    var tab by rememberSaveable { mutableStateOf(0) }
+    var query by rememberSaveable { mutableStateOf("") }
+    var scope by rememberSaveable { mutableStateOf<AgentDefinitionScope?>(null) }
+    val visible = remember(teams, query, scope) {
+        val text = query.trim()
+        teams.filter { entry -> (scope == null || entry.scope == scope) &&
+            (text.isEmpty() || entry.team.name.contains(text, ignoreCase = true) ||
+                entry.team.description.contains(text, ignoreCase = true)) }
+    }
+    val teamScroll = rememberScrollState()
+    val workflowScroll = rememberScrollState()
+    Column(Modifier.fillMaxSize()) {
+        Column(Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.sm),
+            verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+            Text(stringResource(R.string.team_library_heading), style = MaterialTheme.typography.headlineSmall)
+            Text(stringResource(R.string.team_library_summary, teams.size, memberCount),
+                style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            SegmentedTabs(tab, listOf(stringResource(R.string.team_library_teams),
+                stringResource(R.string.team_library_workflows)), { tab = it })
+        }
+        Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(if (tab == 0) teamScroll else workflowScroll)) {
+            if (tab == 1) workflows()
+            else Column(Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.sm),
+                verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                    Button(onClick = onCreateTeam, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) {
+                        Text(stringResource(R.string.team_new))
+                    }
+                    OutlinedButton(onClick = onCreateRole, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) {
+                        Text(stringResource(R.string.team_create_member))
+                    }
+                }
+                AppTextField(query, { query = it }, label = stringResource(R.string.team_search_label),
+                    modifier = Modifier.fillMaxWidth().testTag("team_library_search"))
+                ContextChoiceRow(listOf(stringResource(R.string.team_scope_all)) + AgentDefinitionScope.entries.map {
+                    stringResource(if (it == AgentDefinitionScope.GLOBAL) R.string.team_scope_global else R.string.team_scope_project)
+                }, (scope?.ordinal ?: -1) + 1, { scope = AgentDefinitionScope.entries.getOrNull(it - 1) })
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(stringResource(R.string.team_search_count, visible.size), modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (query.isNotEmpty() || scope != null) TextButton(onClick = { query = ""; scope = null }) {
+                        Text(stringResource(R.string.common_clear))
+                    }
+                }
+                if (visible.isEmpty()) Text(stringResource(if (teams.isEmpty()) R.string.team_list_empty else R.string.team_search_empty),
+                    style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.testTag("team_library_empty"))
+                AgentDefinitionScope.entries.forEach { group ->
+                    val scoped = visible.filter { it.scope == group }
+                    if (scoped.isNotEmpty()) {
+                        SettingsGroupHeader(stringResource(if (group == AgentDefinitionScope.GLOBAL)
+                            R.string.team_scope_global else R.string.team_scope_project))
+                        SettingsGroup {
+                            scoped.forEachIndexed { index, entry ->
+                                if (index > 0) SettingsDivider()
+                                SwipeToDeleteRow(onDelete = { onDeleteTeam(entry) }, onClick = { onOpenTeam(entry) }) {
+                                    TeamRow(entry)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

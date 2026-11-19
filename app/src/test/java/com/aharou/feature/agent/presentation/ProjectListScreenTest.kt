@@ -16,6 +16,7 @@ import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
@@ -148,9 +149,9 @@ class ProjectListScreenTest {
     private fun fillAndSubmit() {
         compose.onNodeWithTag("create_project_or_session").performClick()
         compose.onNodeWithTag("create_project").assertIsEnabled().performClick()
-        compose.onAllNodes(hasSetTextAction()).assertCountEquals(2)
-        compose.onAllNodes(hasSetTextAction())[0].performTextInput(project.title)
-        compose.onAllNodes(hasSetTextAction())[1].performTextInput(project.purpose)
+        compose.onAllNodes(hasSetTextAction() and !hasTestTag("project_search")).assertCountEquals(2)
+        compose.onAllNodes(hasSetTextAction() and !hasTestTag("project_search"))[0].performTextInput(project.title)
+        compose.onAllNodes(hasSetTextAction() and !hasTestTag("project_search"))[1].performTextInput(project.purpose)
         compose.onNodeWithTag("save_project_drafts").assertIsEnabled().performClick()
         compose.onNodeWithTag("save_project_drafts").assertIsNotEnabled()
             .assertTextContains(compose.activity.getString(R.string.project_creating))
@@ -178,7 +179,7 @@ class ProjectListScreenTest {
         compose.onNodeWithTag("project_home_heading").assertExists()
         compose.onNodeWithTag("project_empty_state").assertExists()
         compose.onNodeWithTag("project_empty_create").assertIsEnabled().performClick()
-        compose.onAllNodes(hasSetTextAction()).assertCountEquals(2)
+        compose.onAllNodes(hasSetTextAction() and !hasTestTag("project_search")).assertCountEquals(2)
         verify(exactly = 0) { viewModel.createProject(any(), any()) }
         compose.runOnIdle { assertEquals(emptyList<String>(), opened) }
     }
@@ -187,8 +188,8 @@ class ProjectListScreenTest {
         mount()
         initialize()
         compose.onNodeWithTag("project_empty_create").performClick()
-        compose.onAllNodes(hasSetTextAction())[0].performTextInput(project.title)
-        compose.onAllNodes(hasSetTextAction())[1].performTextInput(project.purpose)
+        compose.onAllNodes(hasSetTextAction() and !hasTestTag("project_search"))[0].performTextInput(project.title)
+        compose.onAllNodes(hasSetTextAction() and !hasTestTag("project_search"))[1].performTextInput(project.purpose)
         compose.onNodeWithTag("save_project_drafts").performClick()
         compose.onNodeWithTag("save_project_drafts").assertIsNotEnabled()
         persistAndSelect()
@@ -214,7 +215,7 @@ class ProjectListScreenTest {
         compose.onNodeWithTag("create_project").assertIsNotEnabled()
         initialize()
         compose.onNodeWithTag("create_project").assertIsEnabled().performClick()
-        compose.onAllNodes(hasSetTextAction()).assertCountEquals(2)
+        compose.onAllNodes(hasSetTextAction() and !hasTestTag("project_search")).assertCountEquals(2)
         compose.runOnIdle {
             assertEquals("/initial", rootState.workspace)
             assertEquals("projects", nav.currentDestination?.route)
@@ -229,7 +230,7 @@ class ProjectListScreenTest {
         moveHost(Lifecycle.State.STARTED)
         compose.onNodeWithTag("create_project_or_session").performClick()
         compose.onNodeWithTag("create_project").assertIsEnabled().performClick()
-        compose.onAllNodes(hasSetTextAction()).assertCountEquals(2)
+        compose.onAllNodes(hasSetTextAction() and !hasTestTag("project_search")).assertCountEquals(2)
         compose.runOnIdle { assertEquals("/initial", rootState.workspace) }
     }
 
@@ -241,7 +242,7 @@ class ProjectListScreenTest {
         }
         compose.onNodeWithTag("create_project_or_session").performClick()
         compose.onNodeWithTag("create_project").assertIsEnabled().performClick()
-        compose.onAllNodes(hasSetTextAction()).assertCountEquals(2)
+        compose.onAllNodes(hasSetTextAction() and !hasTestTag("project_search")).assertCountEquals(2)
         compose.runOnIdle {
             assertEquals("projects", nav.currentDestination?.route)
             assertEquals(1, launcherConsumptions)
@@ -258,7 +259,7 @@ class ProjectListScreenTest {
         compose.onNodeWithTag("create_project").assertIsNotEnabled()
         initialize()
         compose.onNodeWithTag("create_project").assertIsEnabled().performClick()
-        compose.onAllNodes(hasSetTextAction()).assertCountEquals(2)
+        compose.onAllNodes(hasSetTextAction() and !hasTestTag("project_search")).assertCountEquals(2)
         compose.runOnIdle {
             assertEquals("/initial", rootState.workspace)
             assertEquals("projects", nav.currentDestination?.route)
@@ -282,8 +283,8 @@ class ProjectListScreenTest {
         initialize()
         fillAndSubmit()
         publish(state.value.copy(creating = false, busy = false, error = "TASK_OPERATION_FAILED"))
-        compose.onAllNodes(hasSetTextAction())[0].assertTextContains(project.title)
-        compose.onAllNodes(hasSetTextAction())[1].assertTextContains(project.purpose)
+        compose.onAllNodes(hasSetTextAction() and !hasTestTag("project_search"))[0].assertTextContains(project.title)
+        compose.onAllNodes(hasSetTextAction() and !hasTestTag("project_search"))[1].assertTextContains(project.purpose)
         compose.onNodeWithTag("save_project_drafts").assertIsEnabled()
         compose.runOnIdle {
             assertEquals(emptyList<String>(), opened)

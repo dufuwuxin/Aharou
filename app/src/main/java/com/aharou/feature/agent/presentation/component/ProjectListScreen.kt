@@ -45,6 +45,14 @@ fun ProjectListScreen(viewModel: ProjectTaskViewModel, createRequested: Boolean,
     val scope = rememberCoroutineScope()
     val projectListState = rememberLazyListState()
     var createMenu by remember { mutableStateOf(false) }
+    var projectQuery by rememberSaveable { mutableStateOf("") }
+    val visibleProjects = remember(state.projects, projectQuery) {
+        val query = projectQuery.trim()
+        state.projects.filter { project ->
+            query.isEmpty() || listOf(project.title, project.purpose, project.requirements, project.workspace)
+                .any { it.contains(query, ignoreCase = true) }
+        }
+    }
     var name by rememberSaveable { mutableStateOf("") }
     var purpose by rememberSaveable { mutableStateOf("") }
     var submitted by rememberSaveable { mutableStateOf(false) }
@@ -81,7 +89,23 @@ fun ProjectListScreen(viewModel: ProjectTaskViewModel, createRequested: Boolean,
         if (page == 1) Box(Modifier.fillMaxSize()) { sessionsContent() }
         else Column(Modifier.fillMaxSize()) {
         state.error?.let { Text(stringResource(R.string.project_task_error, projectTaskExecutionReasonLabel(it)), color = MaterialTheme.colorScheme.error) }
+        AppTextField(projectQuery, { projectQuery = it },
+            label = stringResource(R.string.project_search_label),
+            modifier = Modifier.fillMaxWidth().testTag("project_search"))
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(stringResource(R.string.project_search_count, visibleProjects.size, state.projects.size),
+                style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f))
+            if (projectQuery.isNotEmpty()) TextButton(onClick = { projectQuery = "" }) {
+                Text(stringResource(R.string.common_clear))
+            }
+        }
         LazyColumn(Modifier.weight(1f), state = projectListState, contentPadding = PaddingValues(bottom = 80.dp), verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
+            if (state.loading) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
+            if (!state.loading && state.projects.isNotEmpty() && visibleProjects.isEmpty()) item {
+                Text(stringResource(R.string.project_search_empty),
+                    style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag("project_search_empty"))
+            }
             if (state.projects.isEmpty() && !state.loading) item {
                 Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surface,
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
@@ -98,7 +122,7 @@ fun ProjectListScreen(viewModel: ProjectTaskViewModel, createRequested: Boolean,
                     }
                 }
             }
-            items(state.projects, key = { it.id }) { project ->
+            items(visibleProjects, key = { it.id }) { project ->
                 Box {
                 Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surface,
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),

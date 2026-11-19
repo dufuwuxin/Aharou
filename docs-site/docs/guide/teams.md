@@ -2,6 +2,10 @@
 
 Teams use Markdown files in `~/.aharou/teams/` or the workspace's `.aharou/teams/`. Project definitions override global definitions with the same name. Editing a team affects the next run; it does not rewrite an in-flight run.
 
+## Browsing teams and workflows
+
+The team workbench has separate Teams and Workflows views with persistent navigation at the top. Search team names or descriptions and filter by global or current-project scope. Clear restores all results. Switching to workflows and back preserves the team query, scope and scroll position. Team rows keep their detail view and swipe-to-delete action; Create Team and Create Role Card use the existing editors. Filtering never starts a team or changes execution permissions.
+
 ## One administrator
 
 The existing YAML `admins` list remains supported and must contain exactly one entry. A member administrator must still belong to `members`. To make the main agent the administrator, use the reserved value `__main_agent__`:

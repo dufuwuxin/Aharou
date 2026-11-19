@@ -4338,4 +4338,16 @@
     <string name="script_tools_timeout">限时（秒，1–1800）</string>
     <string name="script_tools_output_limit">输出上限（字符，1–65536）</string>
     <string name="terminal_input_rejected">本次输入未发送：输入队列已满（每会话上限 1 MiB）或通道已关闭，请检查终端后重试。剪贴板未改动。</string>
+    <string name="project_search_label">搜索项目、目标或工作目录</string>
+    <string name="project_search_count">显示 %1$d / %2$d 个项目</string>
+    <string name="project_search_empty">没有匹配的项目，可清除搜索或从右下角创建项目。</string>
+    <string name="context_library_heading">记忆与上下文</string>
+    <string name="team_library_heading">团队工作台</string>
+    <string name="team_library_summary">%1$d 个团队 · %2$d 张可用角色卡</string>
+    <string name="team_library_teams">团队</string>
+    <string name="team_library_workflows">工作流</string>
+    <string name="team_search_label">搜索团队名称或简介</string>
+    <string name="team_scope_all">全部范围</string>
+    <string name="team_search_count">找到 %1$d 个团队</string>
+    <string name="team_search_empty">没有匹配的团队，试试其它关键词或范围。</string>
 </resources>
