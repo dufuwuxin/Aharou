@@ -9,9 +9,7 @@ import com.aharou.feature.agent.domain.model.AgentMessage
 import com.aharou.feature.agent.domain.model.CONTEXT_COMPACTION_MARKER
 import com.aharou.feature.agent.domain.model.CONTEXT_SUMMARY_LEGACY_PREFIX
 import com.aharou.feature.agent.domain.tool.ToolCall
-import com.aharou.feature.agent.domain.tool.KEEP_RECENT_TOOL_RESULTS
 import com.aharou.feature.agent.domain.tool.boundedJsonForParse
-import com.aharou.feature.agent.domain.tool.foldStoredToolResults
 import com.aharou.feature.agent.presentation.AgentAttachment
 import com.aharou.feature.agent.presentation.DIRECTORY_MIME_TYPE
 import com.aharou.feature.agent.presentation.MessageRole
@@ -438,7 +436,6 @@ class MessagePersistenceUseCase @Inject constructor(
 
         // 第二遍：构建消息，过滤掉无法配对的工具调用 / 工具结果。
         val result = mutableListOf<AgentMessage>()
-        var remainingTools = stored.count { it.role == MessageRole.TOOL.name && it.toolCallId in validIds }
         for (storedEntity in stored) {
             if (storedEntity.role == MessageRole.TOOL.name && storedEntity.toolCallId !in validIds) continue
             val e = messageArchiveStore.restoreBounded(storedEntity, MAX_HISTORY_FIELD_BYTES)
@@ -522,10 +519,7 @@ class MessagePersistenceUseCase @Inject constructor(
                             toolName = e.toolName ?: "unknown",
                             result = e.content
                         )
-                        remainingTools--
-                        result.add(if (remainingTools >= KEEP_RECENT_TOOL_RESULTS) {
-                            foldStoredToolResults(listOf(message), keepRecent = 0).single()
-                        } else message)
+                        result.add(message)
                     }
                 }
             }

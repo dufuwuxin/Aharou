@@ -48,10 +48,11 @@ class ContinuationRunnerTest {
             mockk(relaxed = true), sessions, mockk(relaxed = true), mockk(relaxed = true), persistence,
             checkpoints, mockk(relaxed = true), mockk(relaxed = true), mockk(relaxed = true),
             workspaces, questions, gate, mockk(relaxed = true))
-        runner.run(AgentTurnRequest("s", "resume", projectRoot = "/project", isAutoTrigger = true,
+        runner.run(AgentTurnRequest("s", "", projectRoot = "/project", isAutoTrigger = true,
             skipTitleUpdate = true, persistUserMessage = false)).toList()
         assertEquals(original, captured.captured.history)
         assertFalse(captured.captured.currentInputCountsAsRound)
+        assertEquals("original task", captured.captured.currentUserText)
         assertEquals("/project", captured.captured.projectRoot)
         coVerify(exactly = 0) { checkpoints.createCheckpoint(any(), any(), any()) }
         coVerify(exactly = 0) { sessions.updateTitle(any(), any()) }

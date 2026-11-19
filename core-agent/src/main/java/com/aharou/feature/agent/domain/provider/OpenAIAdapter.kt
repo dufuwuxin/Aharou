@@ -31,6 +31,8 @@ import com.aharou.feature.agent.data.remote.openai.OpenAIFunctionDefinition
 import com.aharou.feature.agent.data.remote.openai.OpenAIImagePart
 import com.aharou.feature.agent.data.remote.openai.StreamOptions
 
+private val codexProcessInstallationId = java.util.UUID.randomUUID().toString()
+
 class OpenAIAdapter @Inject constructor(
     private val api: OpenAIApi
 ) : AIProvider {
@@ -49,7 +51,7 @@ class OpenAIAdapter @Inject constructor(
 
     /**
      * 是否在 Chat Completion 路径发送 `prompt_cache_key`（缓存 shard 路由）。
-     * 默认关闭——OpenAI 官方 Chat Completion 不接受未知字段（400）；仅第三方兼容服务（DeepInfra/Cerebras 等）支持。
+     * 默认关闭以保留旧配置兼容；OpenAI 官方支持，第三方兼容服务是否接受由用户按端点设置。
      * Responses API 路径官方原生支持，无条件发送，不受本开关影响。
      */
     var chatCacheKeyEnabled: Boolean = false
@@ -57,9 +59,12 @@ class OpenAIAdapter @Inject constructor(
     /** 自定义请求头：占位符替换后写出，完全覆盖同名默认头。 */
     override var customHeaders: Map<String, String> = emptyMap()
 
-    /** Codex 标识用的安装 / 会话 id：进程内保持稳定，避免每次请求都换新的。 */
-    private val codexInstallationId: String by lazy { java.util.UUID.randomUUID().toString() }
-    private val codexSessionId: String by lazy { java.util.UUID.randomUUID().toString() }
+    /** Adapters are rebuilt on retry; routing identity follows the conversation, not the instance. */
+    private val codexInstallationId: String get() = codexProcessInstallationId
+    private val fallbackCodexSessionId: String by lazy { java.util.UUID.randomUUID().toString() }
+    private val codexSessionId: String get() = logSessionId?.takeIf(String::isNotBlank)?.let {
+        java.util.UUID.nameUUIDFromBytes(("aharou-codex:${providerId.length}:$providerId:$it").toByteArray(Charsets.UTF_8)).toString()
+    } ?: fallbackCodexSessionId
 
     /** 每次请求换一个 turn id；header 与请求体里的 codex 痕迹必须一致，因此提出来存。 */
     @Volatile
@@ -167,7 +172,7 @@ class OpenAIAdapter @Inject constructor(
             ?: message?.reasoning?.takeIf { it.isNotEmpty() }
         val usage = response.usage
 
-        return sanitizeTruncatedToolCalls(AIResponse(content = content, toolCalls = toolCalls, stopReason = finishReason, reasoning = reasoning, inputTokens = usage?.prompt_tokens ?: 0, outputTokens = usage?.completion_tokens ?: 0, cachedInputTokens = usage?.prompt_tokens_details?.cached_tokens ?: 0, cacheCreationTokens = usage?.prompt_tokens_details?.cache_write_tokens ?: 0, images = images))
+        return sanitizeTruncatedToolCalls(AIResponse(content = content, toolCalls = toolCalls, stopReason = finishReason, reasoning = reasoning, inputTokens = usage?.prompt_tokens ?: 0, outputTokens = usage?.completion_tokens ?: 0, cachedInputTokens = usage?.prompt_tokens_details?.cached_tokens ?: usage?.prompt_cache_hit_tokens ?: 0, cacheCreationTokens = usage?.prompt_tokens_details?.cache_write_tokens ?: 0, images = images))
     }
 
     /**
@@ -505,7 +510,8 @@ class OpenAIAdapter @Inject constructor(
                             obj.get("usage")?.takeIf { it.isJsonObject }?.asJsonObject?.let { u ->
                                 streamInputTokens = u.get("prompt_tokens")?.takeIf { !it.isJsonNull }?.asInt ?: streamInputTokens
                                 streamOutputTokens = u.get("completion_tokens")?.takeIf { !it.isJsonNull }?.asInt ?: streamOutputTokens
-                                streamCachedInputTokens = u.getAsJsonObject("prompt_tokens_details")?.get("cached_tokens")?.takeIf { !it.isJsonNull }?.asInt ?: streamCachedInputTokens
+                                streamCachedInputTokens = u.getAsJsonObject("prompt_tokens_details")?.get("cached_tokens")?.takeIf { !it.isJsonNull }?.asInt
+                                    ?: u.get("prompt_cache_hit_tokens")?.takeIf { !it.isJsonNull }?.asInt ?: streamCachedInputTokens
                                 streamCacheCreationTokens = u.getAsJsonObject("prompt_tokens_details")?.get("cache_write_tokens")?.takeIf { !it.isJsonNull }?.asInt ?: streamCacheCreationTokens
                             }
                             val choice = obj.getAsJsonArray("choices")?.firstOrNull()?.asJsonObject ?: continue

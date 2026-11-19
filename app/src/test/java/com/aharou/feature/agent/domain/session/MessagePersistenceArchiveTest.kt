@@ -17,7 +17,6 @@ import io.mockk.mockk
 import io.mockk.slot
 import io.mockk.spyk
 import org.junit.Assert.assertFalse
-import com.aharou.feature.agent.domain.tool.foldStoredToolResults
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -50,7 +49,7 @@ class MessagePersistenceArchiveTest {
         }
 
     @Test
-    fun oldArchivedToolsFoldBeforeCachingButArchivesAndRecentToolsStayComplete() = runTest {
+    fun replayKeepsArchivedReceiptsStableWhileCacheBudgetRemainsBounded() = runTest {
         val store = MessageArchiveStore(File(temporaryFolder.root, "fold"))
         val calls = (0..10).joinToString(",") { """{"id":"call$it","name":"readFile","arguments":{}}""" }
         val assistant = entity("assistant", MessageRole.ASSISTANT, 1).copy(
@@ -67,11 +66,11 @@ class MessagePersistenceArchiveTest {
         coEvery { dao.getHistoryRowsBySessionOnce("session") } returns stored.map { it.toHistoryRow() }
         val history = persistence(store).buildHistory("session", "[running]")
         val tools = history.filterIsInstance<AgentMessage.ToolResultMessage>()
-        val expected = foldStoredToolResults(originals.map {
+        val expected = originals.map {
             AgentMessage.ToolResultMessage(id = it.toolCallId!!, messageId = it.id, toolName = "readFile", result = it.content)
-        })
+        }
         assertEquals(expected, tools)
-        assertTrue(tools.first().result.length < 200)
+        assertEquals(originals.first().content, tools.first().result)
         assertEquals(originals[1].content, tools[1].result)
         assertEquals(originals.takeLast(8).map { it.content }, tools.takeLast(8).map { it.result })
         assertEquals(originals, stored.drop(1).map { store.restore(it) })

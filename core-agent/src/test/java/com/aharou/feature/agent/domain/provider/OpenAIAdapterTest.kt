@@ -232,6 +232,29 @@ class OpenAIAdapterTest {
     }
 
     @Test
+    fun complete_readsNativeDeepSeekCacheUsageWithoutDoubleCounting() = runTest {
+        val api = api()
+        coEvery { api.createChatCompletion(any(), any(), any(), any()) } returns
+            response(usage = Usage(100, 5, 105, prompt_cache_hit_tokens = 80))
+        val result = adapter(api).complete("", emptyList())
+        assertEquals(100, result.inputTokens)
+        assertEquals(80, result.cachedInputTokens)
+        coEvery { api.createChatCompletion(any(), any(), any(), any()) } returns
+            response(usage = Usage(100, 5, 105, PromptTokensDetails(cached_tokens = 0), prompt_cache_hit_tokens = 80))
+        assertEquals(0, adapter(api).complete("", emptyList()).cachedInputTokens)
+    }
+
+    @Test
+    fun stream_readsNativeDeepSeekCacheUsage() = runTest {
+        val api = api()
+        every { api.streamChatCompletion(any(), any(), any(), any()) } returns
+            sseCall("data: {\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":5,\"prompt_cache_hit_tokens\":80}}\n\ndata: [DONE]\n\n")
+        val response = adapter(api).completeStream("", emptyList()).toList().filterIsInstance<com.aharou.feature.agent.domain.provider.AIStreamChunk.Final>().single().response
+        assertEquals(100, response.inputTokens)
+        assertEquals(80, response.cachedInputTokens)
+    }
+
+    @Test
     fun complete_chatCacheKey_sentWhenEnabled() = runTest {
         val api = api()
         val reqSlot = slot<ChatCompletionRequest>()

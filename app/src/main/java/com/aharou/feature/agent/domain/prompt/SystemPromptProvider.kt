@@ -23,6 +23,8 @@ import javax.inject.Singleton
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
 
+data class RequestPrompt(val system: String, val transientContext: String = "")
+
 /** Application-managed prompt text is read only from editable native memory entries. */
 @Singleton
 @Suppress("unused") // Keep the public injection constructor compatible with existing consumers.
@@ -46,9 +48,16 @@ class SystemPromptProvider @Inject constructor(
     private val hostPlugins: dagger.Lazy<com.aharou.feature.plugin.runtime.HostPluginRuntime>? = null,
 ) {
     suspend fun buildForRequest(agentContext: AgentContext, native: String): String {
+        val parts = buildRequest(agentContext, native)
+        return listOf(parts.system, parts.transientContext).filter { it.isNotBlank() }.joinToString("\n\n")
+    }
+
+    suspend fun buildRequest(agentContext: AgentContext, native: String): RequestPrompt {
         val live = liveContextScripts?.get()?.build(agentContext).orEmpty()
         val current = listOf(native, live).filter { it.isNotBlank() }.joinToString("\n\n")
-        return hostPlugins?.get()?.onContext(agentContext, current) ?: current
+        val hooked = hostPlugins?.get()?.onContext(agentContext, current) ?: current
+        // A plugin may intentionally replace the whole prompt; retain that existing contract.
+        return if (hooked != current) RequestPrompt(hooked) else RequestPrompt(native, live)
     }
 
     interface PromptSource { fun build(ctx: AgentContext): String? }

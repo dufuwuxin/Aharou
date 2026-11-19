@@ -8,6 +8,7 @@ internal class LlmCallBudgetState(
     private data class Recovery(var compactionFailed: Boolean = false, var overflowAttempted: Boolean = false)
     private val recoveries = mutableMapOf<String, Recovery>()
     private var providerKey = providerKey
+    val historyProjector = RequestHistoryProjector()
     private val recovery: Recovery get() = recoveries.getOrPut(providerKey) { Recovery() }
 
     var compactionAttemptFailed: Boolean

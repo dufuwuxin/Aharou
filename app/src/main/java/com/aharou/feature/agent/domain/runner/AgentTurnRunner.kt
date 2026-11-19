@@ -7,6 +7,7 @@ import com.aharou.feature.agent.data.local.entity.ChatSessionEntity
 import com.aharou.feature.agent.domain.checkpoint.CheckpointManager
 import com.aharou.feature.agent.domain.model.AgentContext
 import com.aharou.feature.agent.domain.model.AgentImage
+import com.aharou.feature.agent.domain.model.AgentMessage
 import com.aharou.feature.agent.domain.model.AgentMode
 import com.aharou.feature.agent.domain.model.ModelIdentity
 import com.aharou.feature.agent.domain.model.ReasoningEffort
@@ -293,7 +294,8 @@ class AgentTurnRunner @Inject constructor(
             projectRoot = effectiveProjectRoot,
             language = turn.currentFile?.let { detectLanguage(it) },
             history = history,
-            currentUserText = turn.text,
+            currentUserText = if (turn.text.isBlank() && turn.isAutoTrigger && !turn.persistUserMessage)
+                history.filterIsInstance<AgentMessage.UserMessage>().lastOrNull { it.countsAsRound }?.content.orEmpty() else turn.text,
             currentInputCountsAsRound = !(turn.isAutoTrigger && !turn.persistUserMessage),
             inputImages = turn.inputImages,
             sessionId = sessionId,

@@ -3006,10 +3006,10 @@ class AIAgentViewModel @Inject constructor(
         setAgentState(sessionId, AgentUIState.Idle)
         if (turnHasProgressAfter(sessionId, userMessage.timestamp)) {
             executeAgentRequestStream(
-                request = RESUMED_TURN_PROMPT,
+                request = "",
                 projectRoot = workspaceOf(sessionId),
                 targetSessionId = sessionId,
-                // 续跑轮不落用户消息、不建检查点、不改标题：引导语只是给模型的，不该变成聊天记录里的气泡。
+                // 重试只重放已有进度，不追加续跑指令或新的用户轮次。
                 isAutoTrigger = true,
                 persistUserMessage = false,
                 skipTitleUpdate = true

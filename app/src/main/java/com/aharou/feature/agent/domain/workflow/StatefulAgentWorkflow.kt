@@ -51,7 +51,6 @@ import com.aharou.feature.agent.domain.tool.ToolRegistry
 import com.aharou.feature.agent.domain.tool.ToolResult
 import com.aharou.feature.agent.domain.tool.ToolOutputStore
 import com.aharou.feature.agent.domain.tool.ToolStreamEvent
-import com.aharou.feature.agent.domain.tool.foldStoredToolResults
 import com.aharou.feature.agent.domain.tool.toTransportString
 import com.aharou.feature.agent.presentation.AgentAttachment
 import com.aharou.feature.vault.VaultRepository
@@ -438,16 +437,7 @@ class StatefulAgentWorkflow @Inject constructor(
         val actionQueue = ArrayDeque<AgentAction>()
         // 模式提醒仅在模式变化时随最新用户消息注入一次（不进 system，避免切换时 system 前缀变化打断缓存）。
         val modeReminder = takeModeReminderIfChanged(currentContext.sessionId, currentContext.mode)
-        actionQueue.addLast(
-            AgentAction.InitRequest(
-                currentContext.history + AgentMessage.UserMessage(
-                    id = currentContext.inputMessageId,
-                    content = if (modeReminder == null) userRequest else "$userRequest\n\n$modeReminder",
-                    images = currentContext.inputImages,
-                    countsAsRound = currentContext.currentInputCountsAsRound
-                )
-            )
-        )
+        actionQueue.addLast(AgentAction.InitRequest(initialRequestMessages(userRequest, currentContext, modeReminder)))
 
         // 提示词构建会读取技能/子代理/记忆等文件（远程经 SFTP），须离开收集本工作流的线程（主线程）。
         val promptStartedNs = System.nanoTime()
@@ -602,17 +592,20 @@ class StatefulAgentWorkflow @Inject constructor(
         val inputBudget = ContextWatermarks.from(ModelContextPolicy.effectiveInputBudget(callMetadata),
             contextPreferences.soft, contextPreferences.hard).maxTokens
         val requestVersion = injectedContexts.beginRequest(currentContext.sessionId)
-        val baseRequestPrompt = appendMiddlewarePrompt(providerInUse.providerId, promptProvider.buildForRequest(currentContext.copy(history = state.messages), systemPrompt))
-        var requestSystemPrompt = baseRequestPrompt
+        val requestPrompt = promptProvider.buildRequest(currentContext.copy(history = state.messages), systemPrompt)
+        val requestSystemPrompt = appendMiddlewarePrompt(providerInUse.providerId, requestPrompt.system)
         val promptTools = requestTools(currentTools, currentContext)
         val compactionProvider = resolveCompactionFallbackProvider(currentContext.sessionId) ?: providerInUse
         val reuseMainPrefix = compactionProvider.providerId == providerInUse.providerId && compactionProvider.model == providerInUse.model  // 前缀缓存只同 provider 同 model 内生效，配了独立压缩模型就不复用主前缀
         var compactedMessages = state.messages
         // 送模型前的图片投影只算这一次：压缩触发估算、超预算判定与实际发送共用同一份结果。
         val supportsVision = callMetadata.supportsVision
-        var history = com.aharou.feature.agent.domain.tool.projectFileHistory(foldStoredToolResults(keepNewestImages(sanitizeImagesForModel(state.messages, supportsVision)).trimToRecentRounds(contextPreferences.rounds, contextPreferences.preserveSummary), contextPreferences.keepTools))
-        var sendProjection = history.messages
-        requestSystemPrompt = baseRequestPrompt + com.aharou.feature.agent.domain.context.ContextLibraryPlanner.safe(history.index)
+        val normalizedMessages = sanitizeImagesForModel(state.messages, supportsVision)
+        val rawProjection = budget.historyProjector.project(normalizedMessages, supportsVision, contextPreferences, false, requestPrompt.transientContext)
+        val rawEstimate = withContext(Dispatchers.Default) { ContextTokenEstimator.estimate(requestSystemPrompt, rawProjection, promptTools) }
+        val compactReceipts = contextPreferences.keepTools == 0 || ContextTokenEstimator.calibrated(rawEstimate,
+            budget.baselineEstimate, budget.baselineUsage) >= ContextWatermarks.from(ModelContextPolicy.effectiveInputBudget(callMetadata), contextPreferences.soft, contextPreferences.hard).warnTokens
+        var sendProjection = if (compactReceipts) budget.historyProjector.project(normalizedMessages, supportsVision, contextPreferences, true, requestPrompt.transientContext) else rawProjection
         if (!budget.compactionAttemptFailed) {
             telemetry.compactionStart()
             val estimate = withContext(Dispatchers.Default) { ContextTokenEstimator.estimate(requestSystemPrompt, sendProjection, promptTools) }
@@ -633,9 +626,7 @@ class StatefulAgentWorkflow @Inject constructor(
         }
         // 压缩真的改写过消息时内容变了，投影得按新的那份重算；源没变就沿用上面那份（同一个对象）。
         if (compactedMessages !== initialState.messages) {
-            history = com.aharou.feature.agent.domain.tool.projectFileHistory(foldStoredToolResults(keepNewestImages(sanitizeImagesForModel(compactedMessages, supportsVision)).trimToRecentRounds(contextPreferences.rounds, contextPreferences.preserveSummary), contextPreferences.keepTools))
-            sendProjection = history.messages
-            requestSystemPrompt = baseRequestPrompt + com.aharou.feature.agent.domain.context.ContextLibraryPlanner.safe(history.index)
+            sendProjection = budget.historyProjector.project(sanitizeImagesForModel(compactedMessages, supportsVision), supportsVision, contextPreferences, compactReceipts, requestPrompt.transientContext)
         }
         val requestEstimate = withContext(Dispatchers.Default) { ContextTokenEstimator.estimate(requestSystemPrompt, sendProjection, promptTools) }
         val predictedInput = ContextTokenEstimator.calibrated(requestEstimate, budget.baselineEstimate, budget.baselineUsage)

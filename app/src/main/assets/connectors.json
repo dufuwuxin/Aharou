@@ -15,6 +15,24 @@
   ],
   "connectors": [
     {
+      "id": "somcp",
+      "name": "SOMCP",
+      "category": "dev",
+      "url": "http://127.0.0.1:8000/mcp",
+      "auth": {
+        "kind": "key",
+        "header": "Authorization",
+        "prefix": "Bearer ",
+        "where": "安装并启动同一手机上的 SOMCP，在其服务设置中复制访问 Token；默认端口 8000。"
+      },
+      "docs": "https://github.com/bilieebiliee1-design/SOMCP",
+      "color": "#607D8B",
+      "about": {
+        "zh": "连接同机 SOMCP，分析 SO/ELF、反汇编、补丁会话与构建导出；需先启动 SOMCP 服务。",
+        "en": "Connect to SOMCP on this device for SO/ELF analysis, disassembly, patch sessions and exports. Start SOMCP first."
+      }
+    },
+    {
       "id": "notion",
       "name": "Notion",
       "category": "work",

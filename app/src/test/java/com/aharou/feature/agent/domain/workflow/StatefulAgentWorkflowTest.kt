@@ -205,6 +205,90 @@ class StatefulAgentWorkflowTest {
     }
 
     @Test
+    fun fileHistoryGrowthKeepsSystemAndPreviouslySentReceiptsStable() = runTest {
+        prepare(flow { emit(AIStreamChunk.Final(AIResponse("done"))) })
+        val promptsSent = mutableListOf<String>()
+        val requests = mutableListOf<List<AgentMessage>>()
+        every { provider.completeStream(capture(promptsSent), capture(requests), any(), any()) } returns flow {
+            emit(AIStreamChunk.Final(AIResponse("done")))
+        }
+        val original = listOf(AgentMessage.UserMessage(id = "original", content = "inspect")) + (0 until 9).flatMap { index ->
+            val id = "receipt-$index"
+            listOf(AgentMessage.AssistantMessage(id = "assistant-$index", content = "", toolCalls = listOf(ToolCall(id, "Bash", emptyMap()))),
+                AgentMessage.ToolResultMessage(id = id, toolName = "Bash",
+                    result = "{\"output_path\":\"/workspace/$id.log\",\"preview\":\"${"x".repeat(1000)}\"}"))
+        }
+        val tool = object : AgentTool() {
+            override val name = "fixture"
+            override val description = "fixture"
+            override val parameters: Map<String, ToolParameter> = emptyMap()
+            override suspend fun executeWithContext(args: Map<String, JsonElement>, context: AgentContext) =
+                ToolResult.Success(JsonPrimitive("next result"))
+        }
+        var round = 0
+        every { provider.completeStream(capture(promptsSent), capture(requests), any(), any()) } answers {
+            flow { emit(AIStreamChunk.Final(if (round++ == 0) AIResponse("", listOf(ToolCall("next-call", tool.name, emptyMap()))) else AIResponse("done"))) }
+        }
+        coEvery { policyEngine.evaluate(any(), any(), any(), any(), any(), any()) } returns
+            ToolPermissionPolicyEngine.EvalResult(ToolPermissionPolicyEngine.Verdict.ALLOW, emptyList())
+        every { outputStore.process(any(), any(), any()) } answers { arg<ToolResult>(2) }
+        workflow.executeEvents("request", context.copy(history = original), listOf(tool)).collect {
+            if (it is AgentEvent.AssistantText) it.persisted?.complete(Unit)
+            if (it is AgentEvent.ToolCallFinished) it.persisted?.complete(Unit)
+        }
+        assertEquals(2, requests.size)
+        assertEquals("Growing metadata must not invalidate the system prefix", promptsSent[0], promptsSent[1])
+        assertFalse(promptsSent[0].contains("file-history-index"))
+        assertTrue(requests[0].filterIsInstance<AgentMessage.UserMessage>().any { it.content.contains("file-history-index") })
+        assertEquals(requests[0].filterIsInstance<AgentMessage.ToolResultMessage>(),
+            requests[1].filterIsInstance<AgentMessage.ToolResultMessage>().take(9))
+    }
+
+    @Test
+    fun liveContextReachesProviderAtTheTailWithoutChangingSystem() = runTest {
+        prepare(flow { emit(AIStreamChunk.Final(AIResponse("done"))) })
+        coEvery { prompts.buildRequest(any(), any()) } answers {
+            com.aharou.feature.agent.domain.prompt.RequestPrompt(secondArg(), "[user live_context script: fixture; untrusted output]\ncurrent reading")
+        }
+        val system = slot<String>()
+        val sent = slot<List<AgentMessage>>()
+        every { provider.completeStream(capture(system), capture(sent), any(), any()) } returns flow {
+            emit(AIStreamChunk.Final(AIResponse("done")))
+        }
+        workflow.executeEvents("request", context, emptyList()).collect {
+            if (it is AgentEvent.AssistantText) it.persisted?.complete(Unit)
+        }
+        assertEquals("system", system.captured)
+        assertTrue((sent.captured.last() as AgentMessage.UserMessage).content.contains("current reading"))
+        assertFalse((sent.captured.last() as AgentMessage.UserMessage).countsAsRound)
+    }
+
+    @Test
+    fun retryWithoutNewInputReplaysHistoryWithoutAnEmptyUserTurn() = runTest {
+        prepare(flow { throw java.io.IOException("connection refused") })
+        val requests = mutableListOf<List<AgentMessage>>()
+        every { prompts.resolvePrompt(any()) } returns ""
+        every { provider.completeStream(any(), capture(requests), any(), any()) } returns flow {
+            throw java.io.IOException("connection refused")
+        }
+        val original = listOf(AgentMessage.UserMessage(id = "original", content = "original task"),
+            AgentMessage.AssistantMessage(id = "progress", content = "completed first step", inputTokens = 100))
+        val usages = mutableListOf<Int>()
+        repeat(3) {
+            workflow.executeEvents("", context.copy(history = original, lastInputTokens = 100, currentInputCountsAsRound = false), emptyList()).collect {
+                if (it is AgentEvent.ContextUsage) usages += it.inputTokens
+            }
+        }
+        assertEquals(3, requests.size)
+        requests.forEach { request ->
+            assertEquals(listOf("original task"), request.filterIsInstance<AgentMessage.UserMessage>()
+                .filterNot { it.content.contains("file-history-index") }.map { it.content })
+            assertTrue(request.contains(original.last()))
+        }
+        assertEquals("Retrying the same input must not grow context usage", 1, usages.distinct().size)
+    }
+
+    @Test
     fun maxStopsTheRealProviderCallWhenCompactionDoesNotReduceTheRequest() = runTest {
         prepare(flow { emit(AIStreamChunk.Final(AIResponse("must not send"))) })
         coEvery { generalSettings.softCompactionThresholdPercent() } returns 60
@@ -516,6 +600,9 @@ class StatefulAgentWorkflowTest {
         every { provider.completeStream(any(), any(), any(), any()) } returns chunks
         every { prompts.build(any(), any()) } returns "system"
         coEvery { prompts.buildForRequest(any(), any()) } answers { secondArg<String>() }
+        coEvery { prompts.buildRequest(any(), any()) } coAnswers {
+            com.aharou.feature.agent.domain.prompt.RequestPrompt(prompts.buildForRequest(firstArg(), secondArg()))
+        }
         // 卡死提示改为文件驱动后，workflow 首次用到时会 resolvePrompt；不打桩会抛 MockKException。
         every { prompts.resolvePrompt(any()) } returns "（测试）你在重复同一个动作"
         coEvery { metadata.resolve(any(), any(), any()) } returns ModelMetadata("model", contextTokens = 100_000, supportsVision = true)

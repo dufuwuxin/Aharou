@@ -56,6 +56,20 @@ class NativeMemoryPromptTest {
             loading, null, category = category, folder = folder))
     }
 
+    @Test fun liveScriptChangesDoNotRewriteTheSystemPrefix() = kotlinx.coroutines.test.runTest {
+        val live = mockk<com.aharou.feature.agent.domain.tool.script.LiveContextScriptRunner>()
+        coEvery { live.build(any()) } answers { firstArg<AgentContext>().currentUserText }
+        val dynamicProvider = SystemPromptProvider(mockk(), skills, PromptFileResolver(mockk(), mockk(), library),
+            mockk(), mockk(), teams, rules, dao, mockk(), mockk(), mockk(), projectTaskContext,
+            InjectedContextStore(), library, dagger.Lazy { registry }, dagger.Lazy { live })
+        val first = dynamicProvider.buildRequest(context.copy(currentUserText = "live-one"), "native")
+        val second = dynamicProvider.buildRequest(context.copy(currentUserText = "live-two"), "native")
+        assertEquals("native", first.system)
+        assertEquals(first.system, second.system)
+        assertEquals("live-one", first.transientContext)
+        assertEquals("live-two", second.transientContext)
+    }
+
     @Test fun skillsAndRulesAreGroupedByTheirActualAdmittedIdentity() {
         add("catalogs", "{{AICODE_SKILLS}}\n{{AICODE_RULES}}", ContextCategory.MAIN_INJECTED)
         val skill = com.aharou.feature.agent.domain.skill.Skill("visible", "public summary", instructions = "private body", typeId = "engineering")
