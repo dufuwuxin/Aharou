@@ -47,6 +47,33 @@ class ProjectHomePagerTest {
         compose.onNodeWithText(compose.activity.getString(R.string.project_sessions)).assertIsSelected()
         compose.onNodeWithTag("session_counter").assertTextEquals("count=1")
     }
+    @Test fun searchFiltersProjectsAndSurvivesSessionNavigationWithoutOpeningAnything() {
+        val vm = mockk<ProjectTaskViewModel>()
+        val first = com.aharou.feature.agent.domain.task.ProjectPlan(
+            id = "alpha", workspace = "/projects/alpha", title = "Alpha", purpose = "API migration")
+        val second = first.copy(id = "beta", title = "Beta", workspace = "/projects/beta", purpose = "UI cleanup")
+        val state = MutableStateFlow(ProjectTaskUiState(workspace = "/A", loading = false, projects = listOf(first, second)))
+        every { vm.state } returns state
+        every { vm.canContinueInOwnedWorkspace(any()) } returns false
+        var opened = 0
+        compose.setContent { MaterialTheme {
+            ProjectListScreen(vm, false, {}, { opened++ }, {}, {}, { Text("Sessions") })
+        } }
+        compose.onNodeWithTag("project_search").performTextInput("migration")
+        compose.onNodeWithTag("project_alpha").assertExists()
+        compose.onNodeWithTag("project_beta").assertDoesNotExist()
+        compose.onNodeWithText(compose.activity.getString(R.string.project_sessions)).performClick()
+        compose.onNodeWithText("Sessions").assertIsDisplayed()
+        compose.onNodeWithText(compose.activity.getString(R.string.project_home)).performClick()
+        compose.onNodeWithTag("project_search").assertTextContains("migration")
+        compose.onNodeWithTag("project_search").performTextReplacement("absent")
+        compose.onNodeWithTag("project_search_empty").assertExists()
+        compose.onNodeWithText(compose.activity.getString(R.string.common_clear)).performClick()
+        compose.onNodeWithTag("project_alpha").assertExists()
+        compose.onNodeWithTag("project_beta").assertExists()
+        org.junit.Assert.assertEquals(0, opened)
+    }
+
     @Test fun projectMenuFloatsWithoutHeaderBackAndRetainsInjectedActions() {
         val vm = mockk<ProjectTaskViewModel>(relaxed = true)
         every { vm.state } returns MutableStateFlow(ProjectTaskUiState(loading = false,
