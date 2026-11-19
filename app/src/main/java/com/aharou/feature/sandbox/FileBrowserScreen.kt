@@ -80,6 +80,11 @@ fun FileBrowserScreen(
 ) {
     val state by viewModel.uiState.collectAsState()
     var deleteTarget by remember { mutableStateOf<FileItem?>(null) }
+    var analysisTarget by remember { mutableStateOf<FileItem?>(null) }
+    analysisTarget?.let { item ->
+        GeneralFileAnalysisScreen(item, onBack = { analysisTarget = null })
+        return
+    }
 
     // When navigated into a subdirectory, the top-bar back button and the
     // system back gesture both pop one directory level first. The
@@ -196,6 +201,7 @@ fun FileBrowserScreen(
                                     }
                                 },
                                 onDelete = { deleteTarget = item },
+                                onAnalyze = { analysisTarget = item },
                             )
                             HorizontalDivider(modifier = Modifier.padding(start = 56.dp))
                         }
@@ -281,6 +287,7 @@ private fun FileItemRow(
     currentLinuxPath: String?,
     onClick: () -> Unit,
     onDelete: () -> Unit,
+    onAnalyze: () -> Unit,
 ) {
     // T-pwa-3: long-press menu for .html / .htm files whose host path
     // sits under a recognised PRoot bind mount (`/var/aharou/shared` or
@@ -358,6 +365,10 @@ private fun FileItemRow(
             }
         }
 
+        // Analysis is available for every file type, independently of its normal preview renderer.
+        if (!item.isDirectory) IconButton(onClick = onAnalyze, modifier = Modifier.size(32.dp)) {
+            Icon(Icons.Filled.Code, contentDescription = stringResource(R.string.file_analysis_action), modifier = Modifier.size(18.dp))
+        }
         // Delete button for non-directory items
         if (!item.isDirectory) {
             IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {

@@ -558,7 +558,7 @@ class StatefulAgentWorkflow @Inject constructor(
     /** 会话是否收到了「用户打断」：peek 到就打勾并 ack 掉（一次性消费），主循环与收流两处共用。 */
     /** 随请求发送的工具（延迟加载的 MCP 工具要 tool_search 展开过）；压缩与预算估算共用此口径。 */
     private fun requestTools(tools: List<AgentTool>, context: AgentContext) =
-        toolRegistry.requestTools(tools, context)
+        toolRegistry.requestTools(tools, context).sortedBy { it.name }
 
     private fun consumeUserInterrupt(sessionId: String?): Boolean {
         if (sessionId == null) return false
@@ -604,8 +604,10 @@ class StatefulAgentWorkflow @Inject constructor(
             contextPreferences.soft, contextPreferences.hard).maxTokens
         val requestVersion = injectedContexts.beginRequest(currentContext.sessionId)
         val requestContext = currentContext.copy(history = state.messages)
-        val liveContext = promptProvider.buildLiveContext(requestContext)
-        val baseRequestPrompt = appendMiddlewarePrompt(providerInUse.providerId, promptProvider.buildForRequest(requestContext, systemPrompt))
+        val nativeParts = withContext(Dispatchers.IO) { promptProvider.buildRequestParts(requestContext) }
+        val liveContext = listOf(nativeParts.data, promptProvider.buildLiveContext(requestContext))
+            .filter { it.isNotBlank() }.joinToString("\n\n")
+        val baseRequestPrompt = appendMiddlewarePrompt(providerInUse.providerId, promptProvider.buildForRequest(requestContext, nativeParts.system))
         var requestSystemPrompt = baseRequestPrompt
         val promptTools = requestTools(currentTools, currentContext)
         val compactionProvider = resolveCompactionFallbackProvider(currentContext.sessionId) ?: providerInUse
@@ -717,7 +719,8 @@ class StatefulAgentWorkflow @Inject constructor(
                 requestPrefixTracker.record("$session:${providerInUse.providerId}:${providerInUse.model}",
                     outbound.systemPrompt, messagesToSend, promptTools)?.let { change ->
                     FileLogger.i(TAG, "request.prefix systemChanged=${change.systemChanged} toolsChanged=${change.toolsChanged} " +
-                        "unchangedMessages=${change.unchangedMessages} previousMessages=${change.previousMessages} currentMessages=${change.currentMessages}")
+                        "unchangedMessages=${change.unchangedMessages} previousMessages=${change.previousMessages} currentMessages=${change.currentMessages} " +
+                        "estimatedReusableTokens=${change.estimatedReusableTokens} tokenMethod=local_estimate_not_provider_billing")
                 }
             }
             injectedContexts.recordRequest(currentContext.sessionId, RequestContextComposition.capture(requestVersion, outbound.systemPrompt, messagesToSend, promptTools))

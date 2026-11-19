@@ -26,13 +26,16 @@ class SomcpPreviewViewModel @Inject constructor(private val service: SomcpAnalys
     private var job: Job? = null
     private var epoch = 0L
 
-    fun load(file: File, action: String = "overview", offset: Int = 0, query: String = "") {
+    fun load(file: File, action: String = "overview", offset: Int = 0, query: String = "", general: Boolean = false) {
         job?.cancel()
         val request = ++epoch
         mutable.value = SomcpPreviewState(loading = true, action = action, offset = offset, query = query)
         job = viewModelScope.launch {
             try {
-                val report = withTimeout(30_000) { service.analyzeSelectedFile(file, action, offset, 50, query) }
+                val report = withTimeout(30_000) {
+                    if (general) service.inspectSelectedFile(file, action, offset, 50, query)
+                    else service.analyzeSelectedFile(file, action, offset, 50, query)
+                }
                 if (request == epoch) mutable.value = mutable.value.copy(loading = false, report = report)
             } catch (_: TimeoutCancellationException) {
                 if (request == epoch) mutable.value = mutable.value.copy(loading = false, error = "ELF_ANALYSIS_TIMEOUT")

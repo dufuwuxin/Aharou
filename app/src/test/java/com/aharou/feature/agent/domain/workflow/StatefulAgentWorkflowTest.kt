@@ -516,6 +516,9 @@ class StatefulAgentWorkflowTest {
         every { provider.model } returns "model"
         every { provider.completeStream(any(), any(), any(), any()) } returns chunks
         every { prompts.build(any(), any()) } returns "system"
+        every { prompts.buildRequestParts(any()) } answers {
+            com.aharou.feature.agent.domain.context.ContextPromptParts(prompts.build(firstArg(), true), "")
+        }
         coEvery { prompts.buildForRequest(any(), any()) } answers { secondArg<String>() }
         coEvery { prompts.buildLiveContext(any()) } returns ""
         // 卡死提示改为文件驱动后，workflow 首次用到时会 resolvePrompt；不打桩会抛 MockKException。

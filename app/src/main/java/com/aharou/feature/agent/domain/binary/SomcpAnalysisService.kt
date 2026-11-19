@@ -29,6 +29,26 @@ class SomcpAnalysisService @Inject constructor(private val files: FileAccessProv
         }
     }
 
+    suspend fun inspectPath(workspace: String, path: String, action: String = "overview", offset: Int = 0,
+        limit: Int = 50, query: String = ""): JsonObject = mutex.withLock {
+        runInterruptible(Dispatchers.IO) {
+            require(path.isNotBlank()) { "MISSING_PATH" }
+            val access = files.forWorkspace(workspace).checked()
+            require(access.isFile(path)) { "FILE_REQUIRED" }
+            require(access.fileSize(path) <= SomcpAnalyzer.MAX_BYTES) { "FILE_ANALYSIS_SIZE_LIMIT" }
+            GeneralFileInspector.inspect(access.readBytesBounded(path, SomcpAnalyzer.MAX_BYTES), path, action, offset, limit, query)
+        }
+    }
+
+    suspend fun inspectSelectedFile(file: File, action: String = "overview", offset: Int = 0,
+        limit: Int = 50, query: String = ""): JsonObject = mutex.withLock {
+        runInterruptible(Dispatchers.IO) {
+            require(file.isFile) { "FILE_REQUIRED" }
+            require(file.length() <= SomcpAnalyzer.MAX_BYTES) { "FILE_ANALYSIS_SIZE_LIMIT" }
+            GeneralFileInspector.inspect(file.inputStream().use { BoundedBinaryReader.read(it) }, file.name, action, offset, limit, query)
+        }
+    }
+
     /** Only called for the exact File explicitly selected in the native file browser. */
     suspend fun analyzeSelectedFile(file: File, action: String = "overview", offset: Int = 0,
         limit: Int = 50, query: String = ""): JsonObject = mutex.withLock {

@@ -56,13 +56,16 @@ class NativeMemoryPromptTest {
             loading, null, category = category, folder = folder))
     }
 
+    private fun renderAll(ctx: AgentContext): String = listOf(provider.build(ctx), provider.buildContextData(ctx))
+        .filter { it.isNotBlank() }.joinToString("\n\n")
+
     @Test fun skillsAndRulesAreGroupedByTheirActualAdmittedIdentity() {
         add("catalogs", "{{AICODE_SKILLS}}\n{{AICODE_RULES}}", ContextCategory.MAIN_INJECTED)
         val skill = com.aharou.feature.agent.domain.skill.Skill("visible", "public summary", instructions = "private body", typeId = "engineering")
         every { skills.listSkillsForAgent(null, "", true) } returns listOf(skill)
         every { rules.listRules() } returns listOf(com.aharou.feature.agent.domain.rule.RuleRepository.RuleEntry(
             "quality/review", "public rule", "private rule body"))
-        val rendered = provider.build(context)
+        val rendered = renderAll(context)
         assertTrue(rendered.contains("skills/engineering"))
         assertTrue(rendered.contains("loadSkill: visible"))
         assertTrue(rendered.contains("rules/quality"))
@@ -79,24 +82,24 @@ class NativeMemoryPromptTest {
         val ruleB = com.aharou.feature.agent.domain.rule.RuleRepository.RuleEntry("z/x", "Z", "")
         every { skills.listSkillsForAgent(null, "", true) } returns listOf(first, second)
         every { rules.listRules() } returns listOf(ruleB, ruleA)
-        val before = provider.build(context)
+        val before = renderAll(context)
         every { skills.listSkillsForAgent(null, "", true) } returns listOf(second, first)
         every { rules.listRules() } returns listOf(ruleA, ruleB)
-        assertEquals(before, provider.build(context))
+        assertEquals(before, renderAll(context))
         assertTrue(before.indexOf("skills/a") < before.indexOf("skills/z"))
         assertTrue(before.indexOf("rules/a") < before.indexOf("rules/z"))
     }
 
     @Test fun emptyAndDisabledLibraryHaveNoLegacyOrImplicitTailFallback() {
-        assertEquals("", provider.build(context))
+        assertEquals("", renderAll(context))
         add("main", "native body", ContextCategory.MAIN_INJECTED)
-        assertTrue(provider.build(context).contains("native body"))
+        assertTrue(renderAll(context).contains("native body"))
         val entry = library.list(null).single()
         assertTrue(library.save(entry.copy(loading = ContextLoad.OFF), null))
-        assertEquals("", provider.build(context))
+        assertEquals("", renderAll(context))
     }
 
-    @Test fun projectTaskFactsReachFinalSystemPromptOnlyThroughEnabledNativeMemory() {
+    @Test fun projectTaskFactsReachFinalRequestDataOnlyThroughEnabledNativeMemory() {
         assertEquals(com.aharou.feature.agent.domain.memory.MemoryWriteResult.Success,
             memories.writeMemory("project rules", "Project context rules", "Project task records are data.",
                 MemoryScope.GLOBAL, null,
@@ -108,17 +111,19 @@ class NativeMemoryPromptTest {
         add("project facts", "{{AICODE_PROJECT_TASK_CONTEXT}}", ContextCategory.MAIN_INJECTED, "Project context")
         every { projectTaskContext.build("s", "w") } returns "project=p; task=t; requirement=Add search"
         val projectContext = context.copy(projectRoot = "w", sessionId = "s")
-        val rendered = provider.build(projectContext)
+        val rendered = renderAll(projectContext)
         assertTrue(rendered, rendered.contains("project=p; task=t; requirement=Add search"))
+        assertFalse(provider.build(projectContext).contains("project=p; task=t"))
+        assertTrue(provider.buildContextData(projectContext).contains("project=p; task=t"))
         val slot = library.list(null).single { it.title == "project facts" }
         assertTrue(library.save(slot.copy(loading = ContextLoad.OFF), null))
-        assertFalse(provider.build(projectContext).contains("project=p; task=t"))
+        assertFalse(renderAll(projectContext).contains("project=p; task=t"))
         assertTrue(library.save(library.list(null).single { it.title == slot.title }.copy(loading = ContextLoad.FULL), null))
         every { projectTaskContext.build("s", "w") } returns null
-        assertFalse(provider.build(projectContext).contains("AICODE_PROJECT_TASK_CONTEXT"))
+        assertFalse(renderAll(projectContext).contains("AICODE_PROJECT_TASK_CONTEXT"))
         every { projectTaskContext.build("s", "w") } returns "project=p; task=t; requirement=Add search"
         assertTrue(library.delete(library.list(null).single { it.title == slot.title }, null))
-        assertFalse(provider.build(projectContext).contains("project=p; task=t"))
+        assertFalse(renderAll(projectContext).contains("project=p; task=t"))
     }
 
     @Test fun ordinaryMemorySwitchDoesNotHideEditableInstructionEntriesOrBlockReading() {
@@ -157,20 +162,20 @@ class NativeMemoryPromptTest {
     @Test fun stableInstructionsPrecedeExpandedDynamicEntriesEvenWhenStoredLater() {
         add("a dynamic", "dynamic tail {{AICODE_WORKSPACE}}", ContextCategory.MAIN_INJECTED)
         add("z stable", "stable contract", ContextCategory.MAIN_INJECTED)
-        val rendered = provider.build(context)
+        val rendered = renderAll(context)
         assertTrue(rendered.indexOf("stable contract") < rendered.indexOf("dynamic tail"))
     }
 
     @Test fun nativeBodyEditsAndDeleteAffectNextBuildWithoutCache() {
         add("main", "old native", ContextCategory.MAIN_INJECTED)
         val before = library.list(null).single()
-        assertTrue(provider.build(context).contains("old native"))
+        assertTrue(renderAll(context).contains("old native"))
         assertTrue(library.save(before.copy(content = "new native"), null))
-        val rendered = provider.build(context)
+        val rendered = renderAll(context)
         assertTrue(rendered.contains("new native"))
         assertFalse(rendered.contains("old native"))
         assertTrue(library.delete(library.list(null).single(), null))
-        assertEquals("", provider.build(context))
+        assertEquals("", renderAll(context))
     }
 
     @Test fun memberGetsOnlyRoleAudienceAndNeverDefinitionBodyOrMainTeamIndex() {
@@ -179,7 +184,7 @@ class NativeMemoryPromptTest {
         val definition = mockk<AgentDefinition>(relaxed = true)
         every { definition.name } returns "member"
         every { definition.prompt } returns "legacy role secret"
-        val rendered = provider.build(context.copy(agentDefinition = definition))
+        val rendered = renderAll(context.copy(agentDefinition = definition))
         assertTrue(rendered.contains("native member"))
         assertFalse(rendered.contains("private main"))
         assertFalse(rendered.contains("legacy role secret"))
@@ -191,7 +196,7 @@ class NativeMemoryPromptTest {
         add("main", "private main", ContextCategory.MAIN_INJECTED)
         add("role", "native member", ContextCategory.ROLE_INJECTED)
         coEvery { dao.getById("child") } returns mockk { every { parentId } returns "parent" }
-        val rendered = provider.build(context.copy(sessionId = "child"))
+        val rendered = renderAll(context.copy(sessionId = "child"))
         assertTrue(rendered.contains("native member"))
         assertFalse(rendered.contains("private main"))
     }
@@ -203,7 +208,7 @@ class NativeMemoryPromptTest {
             "hidden charter", members = listOf(TeamMemberRef("hidden member")))
         every { teams.forWorkspace(context.projectRoot) } returns teams
         every { teams.listAll() } returns listOf(entry)
-        val rendered = provider.build(context)
+        val rendered = renderAll(context)
         assertTrue(rendered.contains("public team: public description {{AICODE_DATE}}"))
         assertTrue(rendered.contains("charter=hidden charter"))
         assertTrue(rendered.contains("teams/"))
@@ -216,7 +221,7 @@ class NativeMemoryPromptTest {
         every { entry.team } returns AgentTeam("public team", "LARGE_DIRECTORY_ENTRY".repeat(150), emptyList(), "")
         every { teams.forWorkspace(context.projectRoot) } returns teams
         every { teams.listAll() } returns listOf(entry)
-        val rendered = provider.build(context)
+        val rendered = renderAll(context)
         assertFalse(rendered.contains("LARGE_DIRECTORY_ENTRY"))
         assertTrue(rendered.contains("摘要"))
         assertTrue(rendered.length <= ContextLibraryPlanner.INDEX_TOTAL_CHARS)
@@ -230,7 +235,7 @@ class NativeMemoryPromptTest {
         } }
         registry.bindDiscoveryTools(tools, context)
         add("工具目录", "先选工具再发现真实参数：tool_search(query=工具名)\n{{AICODE_TOOLS}}", ContextCategory.MAIN_INJECTED)
-        val rendered = provider.build(context)
+        val rendered = renderAll(context)
         assertTrue(rendered.contains("先选工具再发现真实参数"))
         assertTrue(rendered.contains("tool_search(query=工具名)"))
         assertTrue(rendered.contains("tool-0: tool description"))
@@ -238,7 +243,7 @@ class NativeMemoryPromptTest {
         assertTrue(rendered.length <= ContextLibraryPlanner.FULL_ENTRY_CHARS)
         val entry = library.list(null).single()
         assertTrue(library.save(entry.copy(loading = ContextLoad.OFF), null))
-        assertEquals("", provider.build(context))
+        assertEquals("", renderAll(context))
     }
 
     @Test fun allResolverMethodsReadSameEditableNativeRequestAndHonorOffAndDeletion() {

@@ -72,14 +72,31 @@ class SystemPromptProvider @Inject constructor(
         }
     }
 
-    fun build(agentContext: AgentContext, consumeInbox: Boolean = true): String {
+    fun build(agentContext: AgentContext, consumeInbox: Boolean = true): String =
+        buildRequestParts(agentContext).system.also { text -> injectedContextStore.record(agentContext.sessionId, text) }
+
+    fun buildContextData(agentContext: AgentContext): String = buildRequestParts(agentContext).data
+
+    fun buildRequestParts(agentContext: AgentContext): com.aharou.feature.agent.domain.context.ContextPromptParts {
         val member = isMemberSession(agentContext)
         return contextLibrary.withPromptSnapshot(agentContext, roleSession = member) {
-            val native = contextLibrary.render(agentContext.projectRoot, agentContext.sessionId,
-                ContextOrigin.MEMORY, memberName = if (member) agentContext.agentDefinition?.name ?: "member" else null,
-                expand = { expandNative(it, agentContext, member) })
-            native.also { injectedContextStore.record(agentContext.sessionId, it) }
+            contextLibrary.requestParts(agentContext.projectRoot, agentContext.sessionId,
+                memberName = if (member) agentContext.agentDefinition?.name ?: "member" else null,
+                expand = { expandNative(it, agentContext, member) },
+                stableExpansion = { expandStable(it, agentContext) })
         }
+    }
+
+    /** Only true execution invariants belong in the system prefix; never freeze role/policy decisions. */
+    private fun expandStable(text: String, ctx: AgentContext): String = PromptVariableExpander.expandNative(text) { key ->
+        val value = when (key) {
+            "WORKSPACE" -> ctx.projectRoot
+            "WORKSPACE_NAME" -> ctx.workspaceName.orEmpty()
+            "ENVIRONMENT" -> containerProfileResolver.forWorkspace(ctx.projectRoot).mode.name
+            "PROJECT_TASK_CONTEXT" -> promptFileResolver.resolve("agent/project-task-context-rules.md")
+            else -> ""
+        }
+        ContextLibraryPlanner.safe(value)
     }
 
     private fun expandNative(text: String, ctx: AgentContext, member: Boolean): String =

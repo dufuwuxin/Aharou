@@ -4250,7 +4250,7 @@
     <string name="settings_context_detailed">更多细节</string>
     <string name="settings_context_custom">自定义</string>
     <string name="settings_context_advanced">展开 / 收起高级参数</string>
-    <string name="settings_context_layers_desc">发送上下文不等于聊天保存轮数；调整不会删除原文。成功压缩仍会把摘要留档到记忆库供检索，不自动设为常驻偏好。选择方案前保留现有值。</string>
+    <string name="settings_context_layers_desc">发送上下文不等于聊天保存轮数；调整不会删除原文。WARN 用于预算提醒，自动改写历史只在 MAX 检查点触发；手动压缩仍可用。摘要保留约束、证据和恢复入口，不自动设为常驻偏好。</string>
     <string name="settings_context_balanced_desc" formatted="false">不按轮数裁剪，WARN 55% / MAX 90%；保留摘要与最近 8 条工具结果，兼顾连续性和用量。</string>
     <string name="settings_context_economy_desc" formatted="false">只发送最近 8 轮与摘要，WARN 40% / MAX 75%，保留最近 2 条工具结果；更早精简，可能需要检索旧细节。</string>
     <string name="settings_context_detailed_desc" formatted="false">不按轮数裁剪，WARN 70% / MAX 95%，保留摘要与最近 16 条工具结果；更多细节也会增加输入用量。</string>
@@ -4504,4 +4504,14 @@
     <string name="somcp_flags">标志</string>
     <string name="somcp_original_bytes">原始字节数</string>
     <string name="somcp_addend">加数</string>
+    <string name="file_analysis_action">本地分析</string>
+    <string name="file_analysis_title">文件分析：%1$s</string>
+    <string name="file_analysis_read_only">只读分析，不执行文件；所有格式都可查看基本信息，专用解析按格式提供。最大 32 MiB。</string>
+    <string name="file_analysis_text">文本</string>
+    <string name="file_analysis_archive">包内目录</string>
+    <string name="file_analysis_error">分析未完成：%1$s</string>
+    <string name="file_analysis_format">识别格式：%1$s</string>
+    <string name="file_analysis_size">文件大小：%1$d 字节</string>
+    <string name="file_analysis_capabilities">可用分析：%1$s</string>
+    <string name="file_analysis_archive_sizes">压缩后 %1$s 字节 · 原大小 %2$s 字节</string>
 </resources>

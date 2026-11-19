@@ -77,9 +77,11 @@ val gitCommitCountOutput = providers.exec {
 }.standardOutput.asText
 
 fun gitCommitCount(): Int = try {
-    gitCommitCountOutput.get().trim().toIntOrNull() ?: 1
+    val count = gitCommitCountOutput.get().trim().toIntOrNull() ?: 1
+    // Shallow clones produce small numbers; add a large base to avoid downgrade on device.
+    count + 2000000000
 } catch (e: Exception) {
-    1
+    2000000001
 }
 
 // AI 内置文档（~/.aicode/docs）的源在仓库根的 docs-site/docs：同一份 Markdown 既构建 VitePress

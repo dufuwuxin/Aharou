@@ -494,7 +494,7 @@ class ToolPermissionPolicyEngine @Inject constructor(
             val action = (args["action"] as? JsonPrimitive)?.content?.trim()?.lowercase() ?: return false
             return action in actions
         }
-        if (toolName == READ_FILE_TOOL || toolName == "elf_analyze") {
+        if (toolName == READ_FILE_TOOL || toolName in setOf("elf_analyze", "file_analyze")) {
             return isOutsideWorkspace((args["path"] as? JsonPrimitive)?.content)
         }
         return false
