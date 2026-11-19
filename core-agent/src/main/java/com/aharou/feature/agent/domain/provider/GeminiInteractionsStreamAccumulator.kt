@@ -28,7 +28,7 @@ data class InteractionsOutput(
 internal data class InteractionsUsage(
     val inputTokens: Int = 0,
     val outputTokens: Int = 0,
-    val cachedInputTokens: Int = 0
+    val cachedInputTokens: Int = -1
 )
 
 /**
@@ -41,7 +41,7 @@ internal fun parseInteractionsUsage(usage: JsonObject?): InteractionsUsage {
     return InteractionsUsage(
         inputTokens = usage.int("total_input_tokens"),
         outputTokens = usage.int("total_output_tokens") + usage.int("total_thought_tokens"),
-        cachedInputTokens = usage.int("total_cached_tokens")
+        cachedInputTokens = usage.get("total_cached_tokens")?.takeIf { !it.isJsonNull }?.asInt ?: -1
     )
 }
 

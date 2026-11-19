@@ -53,9 +53,11 @@ class HostPluginRuntimeTest {
             liveContextScripts = Lazy { live }, hostPlugins = Lazy { runtime },
         )
         val context = com.aharou.feature.agent.domain.model.AgentContext(null, null, temp.root.path, null)
-        assertTrue(provider.buildForRequest(context, "native").contains("live_one_native_hook"))
+        assertEquals("native_native_hook", provider.buildForRequest(context, "native"))
+        assertEquals("live_one", provider.buildLiveContext(context))
         val next = provider.buildForRequest(context, "native")
-        assertTrue(next.contains("live_two_native_hook"))
+        assertEquals("native_native_hook", next)
+        assertEquals("live_two", provider.buildLiveContext(context))
         assertFalse(next.contains("live_one"))
         assertEquals(2, calls)
         runtime.unload("fixture")

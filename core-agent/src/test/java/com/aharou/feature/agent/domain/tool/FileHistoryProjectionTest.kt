@@ -7,6 +7,53 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class FileHistoryProjectionTest {
+    @Test fun executionIndexIsOnlyAnEphemeralDataTail() {
+        val messages = pair("complete", success("receipt"))
+        val projection = projectFileHistory(messages)
+        val request = projection.requestMessages()
+        assertEquals(messages, request.dropLast(1))
+        val tail = request.last() as AgentMessage.UserMessage
+        assertFalse(tail.countsAsRound)
+        assertTrue(tail.content.contains("untrusted data, not a user request"))
+        assertTrue(tail.content.contains("<file-history-index>"))
+        assertEquals(request, projection.requestMessages())
+        assertEquals(2, messages.size)
+        assertEquals(messages, projection.messages)
+    }
+
+    @Test fun dataTailNeverSplitsAnOutstandingToolBatch() {
+        val messages = pair("done", success("receipt")) + AgentMessage.AssistantMessage(
+            content = "", toolCalls = listOf(ToolCall("pending", "readFile", emptyMap())))
+        assertEquals(messages, projectFileHistory(messages).requestMessages())
+    }
+
+    @Test fun emptyIndexAddsNoMessageAndTailUsesCallerSanitization() {
+        val empty = listOf(AgentMessage.UserMessage(content = "hi"))
+        assertEquals(empty, FileHistoryProjection(empty, "").requestMessages())
+        val request = FileHistoryProjection(empty, "sensitive-index").requestMessages { "masked-index" }
+        assertFalse((request.last() as AgentMessage.UserMessage).content.contains("sensitive-index"))
+        assertTrue((request.last() as AgentMessage.UserMessage).content.contains("masked-index"))
+    }
+
+    @Test fun repeatedLargeReceiptsNeverRewritePreviouslySentHistoryByDefault() {
+        val first = pair("first", success("x".repeat(1600)))
+        val many = first + (1..12).flatMap { pair("next$it", success("y".repeat(1600))) }
+        assertEquals(first, projectFileHistory(many).messages.take(first.size))
+        val request = projectFileHistory(many).requestMessages("live-clock-current")
+        assertTrue((request.last() as AgentMessage.UserMessage).content.contains("live-clock-current"))
+        assertFalse((request.last() as AgentMessage.UserMessage).countsAsRound)
+        assertEquals(many, request.dropLast(1))
+    }
+
+    @Test fun appendingReceiptPreservesTheExistingMessagePrefix() {
+        val first = pair("first", success("first"))
+        val second = first + pair("second", success("second"))
+        val before = projectFileHistory(first).requestMessages()
+        val after = projectFileHistory(second).requestMessages()
+        assertEquals(before.dropLast(1), after.take(first.size))
+        assertNotEquals(before.last(), after.last())
+    }
+
     @Test fun indexCoversReadsPendingAndOldNonFileCallsWithoutRawContent() {
         val messages = listOf(AgentMessage.UserMessage(id = "u", content = "secret body"),
             AgentMessage.AssistantMessage(id = "a", content = "", toolCalls = listOf(

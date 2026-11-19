@@ -116,7 +116,12 @@ class ToolCallReceiptRepository @Inject constructor(
             argsPreview = truncate(args.toString()),
             status = statusOf(result).name,
             errorCode = (result as? ToolResult.Error)?.code,
-            resultPreview = truncate(summary),
+            resultPreview = if (toolName == "editFile" && result is ToolResult.Success &&
+                result.data is JsonObject && (result.data as JsonObject)["hunks"] != null) {
+                // Keep valid JSON for small edit receipts so the project UI can display actual result hunks.
+                // Never persist an unbounded diff or infer changes from requested arguments.
+                VaultRedactor.redact(summary).takeIf { it.length <= 12_000 } ?: truncate(summary)
+            } else truncate(summary),
             outputPath = OUTPUT_PATH_REGEX.find(summary)?.groupValues?.get(1),
             durationMs = durationMs,
             buildAuthJson = if (category == ReceiptCategory.BUILD) readBuildAuth(projectRoot) else null,

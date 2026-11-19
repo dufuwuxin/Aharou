@@ -19,6 +19,15 @@ interface ToolCallReceiptDao {
     )
     fun observeSession(sessionId: String, limit: Int): Flow<List<ToolCallReceiptEntity>>
 
+    /** Project-only activity across explicitly linked task sessions; workspace join prevents cross-project leakage. */
+    @Query(
+        "SELECT r.* FROM tool_call_receipts r " +
+            "INNER JOIN chat_sessions s ON s.id = r.sessionId " +
+            "WHERE s.workspacePath = :workspace AND r.sessionId IN (:sessionIds) " +
+            "ORDER BY r.createdAt DESC, r.id DESC LIMIT :limit"
+    )
+    fun observeProject(workspace: String, sessionIds: List<String>, limit: Int): Flow<List<ToolCallReceiptEntity>>
+
     @Query(
         "SELECT r.* FROM tool_call_receipts r " +
             "INNER JOIN chat_sessions s ON s.id = r.sessionId " +

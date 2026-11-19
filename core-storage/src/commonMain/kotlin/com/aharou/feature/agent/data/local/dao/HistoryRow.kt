@@ -27,6 +27,7 @@ data class HistoryRow(
     val isContextExcluded: Boolean,
     val isContextSummary: Boolean,
     val isCompactionMarker: Boolean,
+    val isError: Boolean = false,
 )
 
 /** 测试与内存态（幽灵消息）转投影，让两条来源走同一套回放逻辑。 */
@@ -48,9 +49,10 @@ fun AgentMessageEntity.toHistoryRow(): HistoryRow = HistoryRow(
     isContextExcluded = isContextExcluded,
     isContextSummary = isContextSummary,
     isCompactionMarker = isCompactionMarker,
+    isError = isError,
 )
 
-/** 投影还原成实体：未投影的列（toolArgs / isError / 输出用量）在回放里不参与判断，取默认值。 */
+/** 投影还原成实体：未投影的列（toolArgs / 输出用量）在回放里不参与判断，取默认值。 */
 fun HistoryRow.toEntity(): AgentMessageEntity = AgentMessageEntity(
     id = id,
     sessionId = sessionId,
@@ -69,4 +71,5 @@ fun HistoryRow.toEntity(): AgentMessageEntity = AgentMessageEntity(
     isContextExcluded = isContextExcluded,
     isContextSummary = isContextSummary,
     isCompactionMarker = isCompactionMarker,
+    isError = isError,
 )

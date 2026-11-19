@@ -35,7 +35,7 @@ interface AgentMessageDao {
      */
     @Query("SELECT id, sessionId, role, content, timestamp, toolCallsJson, toolCallId, toolName, " +
         "attachmentsJson, reasoning, signature, thinkingBlocksJson, inputTokens, isCompacted, " +
-        "isContextExcluded, isContextSummary, isCompactionMarker " +
+        "isContextExcluded, isContextSummary, isCompactionMarker, isError " +
         "FROM agent_messages WHERE sessionId = :sessionId ORDER BY timestamp ASC")
     suspend fun getHistoryRowsBySessionOnce(sessionId: String): List<HistoryRow>
 

@@ -34,7 +34,7 @@ sealed class AgentEvent {
         val signature: String = "",
         val inputTokens: Int = 0,
         val outputTokens: Int = 0,
-        val cachedInputTokens: Int = 0,
+        val cachedInputTokens: Int = -1,
         /** Anthropic thinking / redacted_thinking 内容块的原样快照（JSON 数组文本），随 reasoning 落库供后续轮原样回传。 */
         val thinkingBlocksJson: String = "",
         /** 模型直出图片（Gemini 图像模型）落盘后构造的文件卡片，随消息落库供 UI 渲染。 */

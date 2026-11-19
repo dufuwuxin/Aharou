@@ -145,6 +145,7 @@ class StatefulAgentWorkflow @Inject constructor(
     private val memoryCompactor: Lazy<MemoryCompactor>, private val toolInjectionGate: ToolInjectionGate, // Lazy breaks compactor cycle
     private val languageRoutingFactory: com.aharou.core.translation.LanguageRoutingProvider.Factory? = null
 ) : AgentWorkflow {
+    private val requestPrefixTracker = RequestPrefixTracker()
     /** 卡死提示文案：从 prompts 文件读一次并缓存，用户可编辑该文件定制。 */
     private val stuckNudgeText: String get() = promptProvider.resolvePrompt(STUCK_NUDGE_FILE)
     internal companion object {
@@ -602,7 +603,9 @@ class StatefulAgentWorkflow @Inject constructor(
         val inputBudget = ContextWatermarks.from(ModelContextPolicy.effectiveInputBudget(callMetadata),
             contextPreferences.soft, contextPreferences.hard).maxTokens
         val requestVersion = injectedContexts.beginRequest(currentContext.sessionId)
-        val baseRequestPrompt = appendMiddlewarePrompt(providerInUse.providerId, promptProvider.buildForRequest(currentContext.copy(history = state.messages), systemPrompt))
+        val requestContext = currentContext.copy(history = state.messages)
+        val liveContext = promptProvider.buildLiveContext(requestContext)
+        val baseRequestPrompt = appendMiddlewarePrompt(providerInUse.providerId, promptProvider.buildForRequest(requestContext, systemPrompt))
         var requestSystemPrompt = baseRequestPrompt
         val promptTools = requestTools(currentTools, currentContext)
         val compactionProvider = resolveCompactionFallbackProvider(currentContext.sessionId) ?: providerInUse
@@ -610,9 +613,10 @@ class StatefulAgentWorkflow @Inject constructor(
         var compactedMessages = state.messages
         // 送模型前的图片投影只算这一次：压缩触发估算、超预算判定与实际发送共用同一份结果。
         val supportsVision = callMetadata.supportsVision
-        var history = com.aharou.feature.agent.domain.tool.projectFileHistory(foldStoredToolResults(keepNewestImages(sanitizeImagesForModel(state.messages, supportsVision)).trimToRecentRounds(contextPreferences.rounds, contextPreferences.preserveSummary), contextPreferences.keepTools))
-        var sendProjection = history.messages
-        requestSystemPrompt = baseRequestPrompt + com.aharou.feature.agent.domain.context.ContextLibraryPlanner.safe(history.index)
+        var history = com.aharou.feature.agent.domain.tool.projectFileHistory(budget.toolResultProjection.project(keepNewestImages(sanitizeImagesForModel(state.messages, supportsVision)).trimToRecentRounds(contextPreferences.rounds, contextPreferences.preserveSummary), contextPreferences.keepTools))
+        var sendProjection = history.requestMessages(liveContext) { com.aharou.feature.agent.domain.context.ContextLibraryPlanner.safe(it) }
+        // Execution metadata changes on every tool call: keep it after history, not in system.
+        requestSystemPrompt = baseRequestPrompt
         if (!budget.compactionAttemptFailed) {
             telemetry.compactionStart()
             val estimate = withContext(Dispatchers.Default) { ContextTokenEstimator.estimate(requestSystemPrompt, sendProjection, promptTools) }
@@ -633,9 +637,9 @@ class StatefulAgentWorkflow @Inject constructor(
         }
         // 压缩真的改写过消息时内容变了，投影得按新的那份重算；源没变就沿用上面那份（同一个对象）。
         if (compactedMessages !== initialState.messages) {
-            history = com.aharou.feature.agent.domain.tool.projectFileHistory(foldStoredToolResults(keepNewestImages(sanitizeImagesForModel(compactedMessages, supportsVision)).trimToRecentRounds(contextPreferences.rounds, contextPreferences.preserveSummary), contextPreferences.keepTools))
-            sendProjection = history.messages
-            requestSystemPrompt = baseRequestPrompt + com.aharou.feature.agent.domain.context.ContextLibraryPlanner.safe(history.index)
+            history = com.aharou.feature.agent.domain.tool.projectFileHistory(budget.toolResultProjection.project(keepNewestImages(sanitizeImagesForModel(compactedMessages, supportsVision)).trimToRecentRounds(contextPreferences.rounds, contextPreferences.preserveSummary), contextPreferences.keepTools))
+            sendProjection = history.requestMessages(liveContext) { com.aharou.feature.agent.domain.context.ContextLibraryPlanner.safe(it) }
+            requestSystemPrompt = baseRequestPrompt
         }
         val requestEstimate = withContext(Dispatchers.Default) { ContextTokenEstimator.estimate(requestSystemPrompt, sendProjection, promptTools) }
         val predictedInput = ContextTokenEstimator.calibrated(requestEstimate, budget.baselineEstimate, budget.baselineUsage)
@@ -709,6 +713,13 @@ class StatefulAgentWorkflow @Inject constructor(
             outboundMasker = outboundMaskerOrNull(generalSettingsRepository.privacyMaskingEnabled())
             val outbound = maskedOutboundRequest(requestSystemPrompt, sendProjection, outboundMasker)
             val messagesToSend = outbound.messages
+            currentContext.sessionId?.let { session ->
+                requestPrefixTracker.record("$session:${providerInUse.providerId}:${providerInUse.model}",
+                    outbound.systemPrompt, messagesToSend, promptTools)?.let { change ->
+                    FileLogger.i(TAG, "request.prefix systemChanged=${change.systemChanged} toolsChanged=${change.toolsChanged} " +
+                        "unchangedMessages=${change.unchangedMessages} previousMessages=${change.previousMessages} currentMessages=${change.currentMessages}")
+                }
+            }
             injectedContexts.recordRequest(currentContext.sessionId, RequestContextComposition.capture(requestVersion, outbound.systemPrompt, messagesToSend, promptTools))
             // 采样循环检测：命中后 takeWhile 会取消上游流，模型不再继续把重复内容刷下去。
             var samplingLoopCut = false
@@ -893,7 +904,7 @@ class StatefulAgentWorkflow @Inject constructor(
                                 kind = callKind,
                                 inputTokens = usage?.inputTokens ?: 0,
                                 outputTokens = usage?.outputTokens ?: 0,
-                                cachedInputTokens = usage?.cachedInputTokens ?: 0,
+                                cachedInputTokens = usage?.cachedInputTokens ?: -1,
                                 cacheCreationTokens = usage?.cacheCreationTokens ?: 0,
                                 ttfbMillis = ttfbElapsed?.toInt(),
                                 durationMillis = durationMillis,
@@ -1306,7 +1317,7 @@ class StatefulAgentWorkflow @Inject constructor(
                         kind = "title",
                         inputTokens = usage?.inputTokens ?: 0,
                         outputTokens = usage?.outputTokens ?: 0,
-                        cachedInputTokens = usage?.cachedInputTokens ?: 0,
+                        cachedInputTokens = usage?.cachedInputTokens ?: -1,
                         cacheCreationTokens = usage?.cacheCreationTokens ?: 0,
                         ttfbMillis = null,
                         durationMillis = durationMillis,

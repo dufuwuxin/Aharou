@@ -118,7 +118,7 @@ class AgentTurnTelemetry private constructor(
             // 缓存命中率按厂商口径算：cached / input（input 已含 cached 部分）。
             // 没有这两个字段，调缓存就只能靠猜。
             "cachedInputTokens" to cachedInputTokens,
-            "cacheHitPct" to if (inputTokens > 0) cachedInputTokens * 100 / inputTokens else 0,
+            "cacheHitPct" to if (inputTokens > 0 && cachedInputTokens >= 0) cachedInputTokens * 100 / inputTokens else null,
             "durationMs" to start?.let { SystemClock.elapsedRealtime() - it })
     }
 

@@ -64,14 +64,17 @@ class ProjectPlannerTest {
         assertTrue(result.tasks.all { it.projectId == "p" && it.workspace == "w" && it.status == ProjectTaskStatus.DRAFT })
     }
 
-    @Test fun answersAreCutToTheTaskAndDepthLimits() = runBlocking {
+    @Test fun oversizedAndOverdeepAnswersFallBackInsteadOfSavingAPartialPlan() = runBlocking {
         answer("{\"tasks\":[" + (1..40).joinToString(",") { "{\"key\":\"k$it\",\"title\":\"t$it\"}" } + "]}")
-        assertEquals(ProjectPlanner.MAX_TASKS, planner.plan(project, "x", emptyList(), emptyList()).tasks.size)
+        val oversized = planner.plan(project, "x", emptyList(), emptyList())
+        assertTrue(oversized.ruleFallback)
+        assertEquals(listOf("x"), oversized.tasks.map { it.requirement })
         answer("{\"tasks\":[" + (0..6).joinToString(",") {
             "{\"key\":\"d$it\",\"title\":\"level $it\"" + (if (it > 0) ",\"parentKey\":\"d${it - 1}\"" else "") + "}"
         } + "]}")
-        val chain = planner.plan(project, "x", emptyList(), emptyList()).tasks
-        assertEquals((0..ProjectTaskGraph.MAX_TREE_DEPTH).map { "level $it" }, chain.map { it.title })
+        val deep = planner.plan(project, "x", emptyList(), emptyList())
+        assertTrue(deep.ruleFallback)
+        assertEquals(listOf("x"), deep.tasks.map { it.requirement })
     }
 
     @Test fun aFixedParentHoldsEveryNewTopLevelTaskInBothModelAndRulePaths() = runBlocking {

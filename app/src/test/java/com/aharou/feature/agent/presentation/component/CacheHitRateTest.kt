@@ -28,8 +28,9 @@ class CacheHitRateTest {
     }
 
     @Test
-    fun no_cache_hit_or_no_usage_shows_nothing() {
-        assertNull(formatCacheHitRate(inputTokens = 1_000, cachedInputTokens = 0))
+    fun reportedMissIsZeroButMissingUsageIsUnknown() {
+        assertEquals("0%", formatCacheHitRate(inputTokens = 1_000, cachedInputTokens = 0))
+        assertNull(formatCacheHitRate(inputTokens = 1_000, cachedInputTokens = -1))
         assertNull(formatCacheHitRate(inputTokens = 0, cachedInputTokens = 0))
         assertNull(formatCacheHitRate(inputTokens = 0, cachedInputTokens = 500))
     }

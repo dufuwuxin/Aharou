@@ -71,6 +71,22 @@ class NativeMemoryPromptTest {
         assertFalse(rendered.contains("private rule body"))
     }
 
+    @Test fun catalogOrderIsStableWhenRepositoriesReturnDifferentOrders() {
+        add("catalogs", "{{AICODE_SKILLS}}\n{{AICODE_RULES}}", ContextCategory.MAIN_INJECTED)
+        val first = com.aharou.feature.agent.domain.skill.Skill("a", "A", instructions = "", typeId = "z")
+        val second = com.aharou.feature.agent.domain.skill.Skill("b", "B", instructions = "", typeId = "a")
+        val ruleA = com.aharou.feature.agent.domain.rule.RuleRepository.RuleEntry("a/x", "A", "")
+        val ruleB = com.aharou.feature.agent.domain.rule.RuleRepository.RuleEntry("z/x", "Z", "")
+        every { skills.listSkillsForAgent(null, "", true) } returns listOf(first, second)
+        every { rules.listRules() } returns listOf(ruleB, ruleA)
+        val before = provider.build(context)
+        every { skills.listSkillsForAgent(null, "", true) } returns listOf(second, first)
+        every { rules.listRules() } returns listOf(ruleA, ruleB)
+        assertEquals(before, provider.build(context))
+        assertTrue(before.indexOf("skills/a") < before.indexOf("skills/z"))
+        assertTrue(before.indexOf("rules/a") < before.indexOf("rules/z"))
+    }
+
     @Test fun emptyAndDisabledLibraryHaveNoLegacyOrImplicitTailFallback() {
         assertEquals("", provider.build(context))
         add("main", "native body", ContextCategory.MAIN_INJECTED)

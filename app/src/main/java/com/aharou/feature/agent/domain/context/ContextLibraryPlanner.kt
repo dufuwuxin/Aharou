@@ -28,6 +28,7 @@ object ContextLibraryPlanner {
         for (entry in entries.distinctBy { it.id }.sortedWith(
             compareBy<ContextEntry> { it.dynamic || it.content.contains("{{AICODE_") || it.category == ContextCategory.TEMPORARY }
                 .thenByDescending { it.worldbook.priority }
+                .thenBy { it.id }
         )) {
             // Filter before charging budgets: another audience must not crowd out this one.
             if (entry.category.isInjection && entry.category != injectionCategory) {

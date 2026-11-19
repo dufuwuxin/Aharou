@@ -31,6 +31,15 @@ data class ProjectTaskSnapshot(val formatVersion: Int = 1, val version: Long = 0
 /** [ruleFallback]: the model was unavailable or its answer invalid, so line rules split the tasks. */
 data class ProjectPlanOutcome(val project: ProjectPlan, val ruleFallback: Boolean)
 
+/** Unsaved proposal tied to the exact project input. Confirmation never reruns the model. */
+data class ProjectRequirementPreview(
+    val project: ProjectPlan,
+    val existingTasks: List<ProjectTask>,
+    val requirement: String,
+    val tasks: List<ProjectTask>,
+    val ruleFallback: Boolean
+)
+
 /**
  * Private AtomicFile, not Room: legacy goals and conversations are never migrated or deleted.
  * The planner is a Provider because it reaches the agent workflow, whose tools read this repository.
@@ -262,6 +271,33 @@ class ProjectTaskRepository @Inject constructor(@ApplicationContext context: Con
         persist(workspace, next)
         mutable.value = mutable.value + (workspace to next)
         return updated
+    }
+
+    suspend fun previewRequirements(projectId: String, text: String, workspace: String): ProjectRequirementPreview =
+        withContext(Dispatchers.IO) {
+            require(text.isNotBlank()) { "REQUIRED_FIELDS" }
+            val current = snapshot(workspace)
+            val project = current.projects.single { it.id == projectId }
+            val existing = current.tasks.filter { it.projectId == projectId }
+            val planner = plannerProvider.get()
+            val planned = planner.plan(project, text, existing, planner.members())
+            ProjectRequirementPreview(project, existing, text, planned.tasks, planned.ruleFallback)
+        }
+
+    suspend fun applyRequirementsPreview(preview: ProjectRequirementPreview): ProjectPlanOutcome =
+        withContext(Dispatchers.IO) { applyPreviewLocked(preview) }
+
+    @Synchronized
+    private fun applyPreviewLocked(preview: ProjectRequirementPreview): ProjectPlanOutcome {
+        val current = snapshot(preview.project.workspace)
+        check(current.projects.singleOrNull { it.id == preview.project.id } == preview.project &&
+            current.tasks.filter { it.projectId == preview.project.id } == preview.existingTasks) { "PROJECT_PLAN_STALE" }
+        require(preview.requirement.isNotBlank() && preview.tasks.isNotEmpty() && preview.tasks.all {
+            it.title.isNotBlank() && it.requirement.isNotBlank() && it.projectId == preview.project.id &&
+                it.workspace == preview.project.workspace && !it.isRequirementBranch && it.status == ProjectTaskStatus.DRAFT
+        }) { "INVALID_TASK_GRAPH" }
+        return ProjectPlanOutcome(appendTasksLocked(preview.project.id, preview.project.workspace,
+            preview.tasks, preview.requirement), preview.ruleFallback)
     }
 
     suspend fun appendRequirements(projectId: String, text: String, workspace: String): ProjectPlanOutcome =

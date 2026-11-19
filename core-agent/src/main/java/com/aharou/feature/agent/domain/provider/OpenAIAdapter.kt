@@ -167,7 +167,7 @@ class OpenAIAdapter @Inject constructor(
             ?: message?.reasoning?.takeIf { it.isNotEmpty() }
         val usage = response.usage
 
-        return sanitizeTruncatedToolCalls(AIResponse(content = content, toolCalls = toolCalls, stopReason = finishReason, reasoning = reasoning, inputTokens = usage?.prompt_tokens ?: 0, outputTokens = usage?.completion_tokens ?: 0, cachedInputTokens = usage?.prompt_tokens_details?.cached_tokens ?: 0, cacheCreationTokens = usage?.prompt_tokens_details?.cache_write_tokens ?: 0, images = images))
+        return sanitizeTruncatedToolCalls(AIResponse(content = content, toolCalls = toolCalls, stopReason = finishReason, reasoning = reasoning, inputTokens = usage?.prompt_tokens ?: 0, outputTokens = usage?.completion_tokens ?: 0, cachedInputTokens = usage?.prompt_tokens_details?.cached_tokens ?: -1, cacheCreationTokens = usage?.prompt_tokens_details?.cache_write_tokens ?: 0, images = images))
     }
 
     /**
@@ -458,7 +458,7 @@ class OpenAIAdapter @Inject constructor(
             var finishReason: String? = null
             var streamInputTokens = 0
             var streamOutputTokens = 0
-            var streamCachedInputTokens = 0
+            var streamCachedInputTokens = -1
             var streamCacheCreationTokens = 0
 
             val body = firstContent.awaitBody(api.streamChatCompletion(

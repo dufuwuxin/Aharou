@@ -126,7 +126,7 @@ class MessagePersistenceUseCase @Inject constructor(
         attachments: List<AgentAttachment> = emptyList(),
         inputTokens: Int = 0,
         outputTokens: Int = 0,
-        cachedInputTokens: Int = 0,
+        cachedInputTokens: Int = -1,
         isCompacted: Boolean = false,
         isContextExcluded: Boolean = false
     ) {
@@ -407,7 +407,8 @@ class MessagePersistenceUseCase @Inject constructor(
     private suspend fun buildHistoryUncached(sessionId: String, pendingToolMarker: String): List<AgentMessage> {
         val stored = agentMessageDao.getHistoryRowsBySessionOnce(sessionId)
             .map { it.toEntity() }
-            .filter { !it.isCompacted && !it.isContextExcluded }
+            .filter { !it.isCompacted && !it.isContextExcluded &&
+                !(it.isError && it.role == MessageRole.ASSISTANT.name) }
         // 回放只要「解析得动、拼得进上下文」的量：超长字段有界读回（带截断标记），
         // 否则几千条消息的会话会在每轮 LLM 调用前把档案里所有大字段同时拉上堆。
         // 第一遍：求 assistant 声明的 toolCallId 与 tool 结果 toolCallId 的交集。
@@ -438,7 +439,6 @@ class MessagePersistenceUseCase @Inject constructor(
 
         // 第二遍：构建消息，过滤掉无法配对的工具调用 / 工具结果。
         val result = mutableListOf<AgentMessage>()
-        var remainingTools = stored.count { it.role == MessageRole.TOOL.name && it.toolCallId in validIds }
         for (storedEntity in stored) {
             if (storedEntity.role == MessageRole.TOOL.name && storedEntity.toolCallId !in validIds) continue
             val e = messageArchiveStore.restoreBounded(storedEntity, MAX_HISTORY_FIELD_BYTES)
@@ -522,10 +522,9 @@ class MessagePersistenceUseCase @Inject constructor(
                             toolName = e.toolName ?: "unknown",
                             result = e.content
                         )
-                        remainingTools--
-                        result.add(if (remainingTools >= KEEP_RECENT_TOOL_RESULTS) {
-                            foldStoredToolResults(listOf(message), keepRecent = 0).single()
-                        } else message)
+                        // Keep source history independent of request retention settings. The per-execution
+                        // StableToolResultProjection freezes a send view without rewriting these rows.
+                        result.add(message)
                     }
                 }
             }

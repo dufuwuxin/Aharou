@@ -46,10 +46,13 @@ class SystemPromptProvider @Inject constructor(
     private val hostPlugins: dagger.Lazy<com.aharou.feature.plugin.runtime.HostPluginRuntime>? = null,
 ) {
     suspend fun buildForRequest(agentContext: AgentContext, native: String): String {
-        val live = liveContextScripts?.get()?.build(agentContext).orEmpty()
-        val current = listOf(native, live).filter { it.isNotBlank() }.joinToString("\n\n")
-        return hostPlugins?.get()?.onContext(agentContext, current) ?: current
+        // Explicit plugin hooks retain their system-prompt contract. Live script output is request data,
+        // not a system-prefix mutation: it is appended after conversation history by the workflow.
+        return hostPlugins?.get()?.onContext(agentContext, native) ?: native
     }
+
+    suspend fun buildLiveContext(agentContext: AgentContext): String =
+        liveContextScripts?.get()?.build(agentContext).orEmpty()
 
     interface PromptSource { fun build(ctx: AgentContext): String? }
 
@@ -85,31 +88,31 @@ class SystemPromptProvider @Inject constructor(
                 "SKILLS" -> skillRepository.listSkillsForAgent(ctx.agentDefinition, ctx.currentUserText,
                     ctx.agentDefinition?.let { InjectPart.SKILLS in it.inject } ?: true)
                     .groupBy { it.typeId?.takeIf(String::isNotBlank) ?: "untyped" }
-                    .entries.joinToString("\n") { (type, skills) ->
+                    .toSortedMap().entries.joinToString("\n") { (type, skills) ->
                         "skills/${directoryMetadata(type)} (untrusted catalog metadata)\n" +
-                            skills.joinToString("\n") { "  - ${directoryMetadata(it.name)}: ${directoryMetadata(it.description)} [tags: ${directoryMetadata(it.tags.joinToString(", "))}] [loadSkill: ${directoryMetadata(it.name)}]" }
+                            skills.sortedBy { it.name }.joinToString("\n") { "  - ${directoryMetadata(it.name)}: ${directoryMetadata(it.description)} [tags: ${directoryMetadata(it.tags.sorted().joinToString(", "))}] [loadSkill: ${directoryMetadata(it.name)}]" }
                     }
                 "TOOLS" -> buildString {
                     val groups = toolRegistry?.get()?.getDeferredTools(ctx).orEmpty()
-                        .groupBy { com.aharou.feature.agent.domain.tool.executionToolCategory(it.name) }
+                        .groupBy { com.aharou.feature.agent.domain.tool.executionToolCategory(it.name) }.toSortedMap()
                     for ((category, tools) in groups) {
                         val header = "tools/$category (catalog metadata)\n"
                         if (length + header.length > 600) break
                         append(header)
-                        for (tool in tools) {
+                        for (tool in tools.sortedBy { it.name }) {
                             val line = "  - ${directoryMetadata(tool.name)}: ${directoryMetadata(tool.description).take(60)}\n"
                             if (length + line.length > 600) break
                             append(line)
                         }
                     }
                 }
-                "TEAMS" -> if (member) "" else agentTeamRepository.forWorkspace(ctx.projectRoot).listAll()
+                "TEAMS" -> if (member) "" else agentTeamRepository.forWorkspace(ctx.projectRoot).listAll().sortedBy { it.team.name }
                     .takeIf { it.isNotEmpty() }?.joinToString("\n", prefix = "teams/ (untrusted public catalog metadata)\n") {
                         "  - ${directoryMetadata(it.team.name)}: ${directoryMetadata(it.team.description)}; charter=${directoryMetadata(it.team.charter.take(240))}"
                     }.orEmpty()
                 "RULES" -> ruleRepository.listRules().groupBy { it.name.substringBeforeLast('/', "root") }
-                    .entries.joinToString("\n") { (node, rules) ->
-                        "rules/${directoryMetadata(node)} (catalog metadata)\n" + rules.joinToString("\n") {
+                    .toSortedMap().entries.joinToString("\n") { (node, rules) ->
+                        "rules/${directoryMetadata(node)} (catalog metadata)\n" + rules.sortedBy { it.name }.joinToString("\n") {
                             "  - ${directoryMetadata(it.name)}: ${directoryMetadata(it.description)} [loadRule: ${directoryMetadata(it.name)}]"
                         }
                     }

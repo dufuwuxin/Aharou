@@ -72,7 +72,9 @@ data class CallSummary(
     val errors: Int,
     val avgTtfbMillis: Double?,
     val avgDurationMillis: Double?,
-    val retryCount: Long = 0
+    val retryCount: Long = 0,
+    val cacheReportedInputTokens: Long = 0,
+    val cacheUnreportedCalls: Int = 0
 )
 
 /** 调用明细分页记录：单次调用 + 渠道名（LEFT JOIN ai_providers 取，渠道被删除后仍显示）。 */
@@ -99,7 +101,7 @@ interface LlmCallRecordDao {
         SELECT (createdAt + :tzOffsetMillis) / 86400000 AS day,
                SUM(inputTokens) AS inputTokens,
                SUM(outputTokens) AS outputTokens,
-               SUM(cachedInputTokens) AS cachedInputTokens,
+               SUM(CASE WHEN cachedInputTokens >= 0 THEN cachedInputTokens ELSE 0 END) AS cachedInputTokens,
                COUNT(*) AS calls,
                SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS errors,
                AVG(ttfbMillis) AS avgTtfbMillis,
@@ -126,7 +128,7 @@ interface LlmCallRecordDao {
         SELECT (createdAt + :tzOffsetMillis) / 3600000 AS day,
                SUM(inputTokens) AS inputTokens,
                SUM(outputTokens) AS outputTokens,
-               SUM(cachedInputTokens) AS cachedInputTokens,
+               SUM(CASE WHEN cachedInputTokens >= 0 THEN cachedInputTokens ELSE 0 END) AS cachedInputTokens,
                COUNT(*) AS calls,
                SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS errors,
                AVG(ttfbMillis) AS avgTtfbMillis,
@@ -155,7 +157,7 @@ interface LlmCallRecordDao {
                COUNT(*) AS calls,
                SUM(r.inputTokens) AS inputTokens,
                SUM(r.outputTokens) AS outputTokens,
-               SUM(r.cachedInputTokens) AS cachedInputTokens,
+               SUM(CASE WHEN r.cachedInputTokens >= 0 THEN r.cachedInputTokens ELSE 0 END) AS cachedInputTokens,
                SUM(CASE WHEN r.status = 'error' THEN 1 ELSE 0 END) AS errors,
                SUM(r.retryCount) AS retryCount
         FROM llm_call_records r
@@ -180,7 +182,7 @@ interface LlmCallRecordDao {
                COUNT(*) AS calls,
                SUM(inputTokens) AS inputTokens,
                SUM(outputTokens) AS outputTokens,
-               SUM(cachedInputTokens) AS cachedInputTokens,
+               SUM(CASE WHEN cachedInputTokens >= 0 THEN cachedInputTokens ELSE 0 END) AS cachedInputTokens,
                SUM(cacheCreationTokens) AS cacheCreationTokens,
                AVG(ttfbMillis) AS avgTtfbMillis,
                AVG(durationMillis) AS avgDurationMillis,
@@ -206,7 +208,7 @@ interface LlmCallRecordDao {
         SELECT providerId AS providerId,
                model AS model,
                SUM(inputTokens) AS inputTokens,
-               SUM(cachedInputTokens) AS cachedInputTokens,
+               CASE WHEN MIN(cachedInputTokens) < 0 THEN -1 ELSE SUM(cachedInputTokens) END AS cachedInputTokens,
                SUM(outputTokens) AS outputTokens,
                SUM(cacheCreationTokens) AS cacheCreationTokens
         FROM llm_call_records
@@ -226,9 +228,11 @@ interface LlmCallRecordDao {
     @Query(
         """
         SELECT COUNT(*) AS calls,
+               SUM(CASE WHEN cachedInputTokens >= 0 THEN inputTokens ELSE 0 END) AS cacheReportedInputTokens,
+               SUM(CASE WHEN cachedInputTokens < 0 THEN 1 ELSE 0 END) AS cacheUnreportedCalls,
                SUM(inputTokens) AS inputTokens,
                SUM(outputTokens) AS outputTokens,
-               SUM(cachedInputTokens) AS cachedInputTokens,
+               SUM(CASE WHEN cachedInputTokens >= 0 THEN cachedInputTokens ELSE 0 END) AS cachedInputTokens,
                SUM(cacheCreationTokens) AS cacheCreationTokens,
                SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS errors,
                AVG(ttfbMillis) AS avgTtfbMillis,

@@ -241,15 +241,16 @@ class StatefulAgentWorkflowTest {
     @Test
     fun liveContextPreparationReachesTheActualProviderWithCurrentRequestContext() = runTest {
         prepare(flow { emit(AIStreamChunk.Final(AIResponse("done"))) })
-        coEvery { prompts.buildForRequest(any(), any()) } answers {
-            secondArg<String>() + "\\nlive-" + firstArg<AgentContext>().currentUserText
-        }
+        coEvery { prompts.buildLiveContext(any()) } answers { "live-" + firstArg<AgentContext>().currentUserText }
         val sent = slot<String>()
-        every { provider.completeStream(capture(sent), any(), any(), any()) } returns flow { emit(AIStreamChunk.Final(AIResponse("done"))) }
+        val history = slot<List<AgentMessage>>()
+        every { provider.completeStream(capture(sent), capture(history), any(), any()) } returns flow { emit(AIStreamChunk.Final(AIResponse("done"))) }
         workflow.executeEvents("request", context.copy(currentUserText = "request"), emptyList()).collect { event ->
             if (event is AgentEvent.AssistantText) event.persisted?.complete(Unit)
         }
-        assertTrue(sent.captured.contains("live-request"))
+        assertFalse(sent.captured.contains("live-request"))
+        assertTrue((history.captured.last() as AgentMessage.UserMessage).content.contains("live-request"))
+        assertFalse((history.captured.last() as AgentMessage.UserMessage).countsAsRound)
     }
 
     @Test
@@ -516,6 +517,7 @@ class StatefulAgentWorkflowTest {
         every { provider.completeStream(any(), any(), any(), any()) } returns chunks
         every { prompts.build(any(), any()) } returns "system"
         coEvery { prompts.buildForRequest(any(), any()) } answers { secondArg<String>() }
+        coEvery { prompts.buildLiveContext(any()) } returns ""
         // 卡死提示改为文件驱动后，workflow 首次用到时会 resolvePrompt；不打桩会抛 MockKException。
         every { prompts.resolvePrompt(any()) } returns "（测试）你在重复同一个动作"
         coEvery { metadata.resolve(any(), any(), any()) } returns ModelMetadata("model", contextTokens = 100_000, supportsVision = true)
@@ -723,7 +725,8 @@ class StatefulAgentWorkflowTest {
         coVerify(exactly = 1) { persistence.persist("session", MessageRole.ASSISTANT, "partial text",
             id = requireNotNull(snapshot).messageId, reasoning = "partial reasoning", toolCalls = emptyList(),
             signature = "", thinkingBlocksJson = "", attachments = emptyList(), inputTokens = 0,
-            outputTokens = 0, cachedInputTokens = 0) }
+            outputTokens = 0, cachedInputTokens = -1) }
+        assertEquals(-1, requireNotNull(snapshot).cachedInputTokens)
     }
 
     @Test

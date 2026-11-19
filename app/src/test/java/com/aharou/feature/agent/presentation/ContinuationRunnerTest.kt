@@ -57,5 +57,24 @@ class ContinuationRunnerTest {
         coVerify(exactly = 0) { sessions.updateTitle(any(), any()) }
         coVerify(exactly = 0) { persistence.persist(any(), MessageRole.USER, any(), id = any(), attachments = any()) }
         coVerify(exactly = 0) { persistence.deleteMessagesFromTimestamp(any(), any()) }
+
+        // A no-progress retry reuses the same stored input. Three attempts must not delete the
+        // original, add a checkpoint, change its ID, or duplicate the user in preceding history.
+        coEvery { persistence.buildHistory("s", any()) } returns original.take(1)
+        repeat(3) {
+            runner.run(AgentTurnRequest("s", "original task", projectRoot = "/project", isAutoTrigger = true,
+                skipTitleUpdate = true, persistUserMessage = false, replayUserMessageId = "u")).toList()
+            assertTrue(captured.captured.history.isEmpty())
+            assertEquals("u", captured.captured.inputMessageId)
+            assertTrue(captured.captured.currentInputCountsAsRound)
+        }
+        coVerify(exactly = 0) { checkpoints.createCheckpoint(any(), any(), any()) }
+        coVerify(exactly = 0) { persistence.persist(any(), MessageRole.USER, any(), id = any(), attachments = any()) }
+        coVerify(exactly = 0) { persistence.deleteMessagesFromTimestamp(any(), any()) }
+        try {
+            runner.run(AgentTurnRequest("s", "original task", isAutoTrigger = true,
+                persistUserMessage = false, replayUserMessageId = "stale")).toList()
+            fail("stale input replay accepted")
+        } catch (expected: IllegalStateException) { assertEquals("RETRY_TARGET_CHANGED", expected.message) }
     }
 }

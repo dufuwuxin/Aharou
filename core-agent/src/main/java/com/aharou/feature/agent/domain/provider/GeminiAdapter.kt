@@ -153,7 +153,7 @@ class GeminiAdapter @Inject constructor(
         // candidatesTokenCount 不含思考 token，而思考按输出价计费，故两者相加才是真实输出量。
         val outputTokens = (usageMetadata?.get("candidatesTokenCount")?.takeIf { !it.isJsonNull }?.asInt ?: 0) +
             (usageMetadata?.get("thoughtsTokenCount")?.takeIf { !it.isJsonNull }?.asInt ?: 0)
-        val cachedInputTokens = usageMetadata?.get("cachedContentTokenCount")?.takeIf { !it.isJsonNull }?.asInt ?: 0
+        val cachedInputTokens = usageMetadata?.get("cachedContentTokenCount")?.takeIf { !it.isJsonNull }?.asInt ?: -1
 
         // 响应结构损坏（解析过程抛异常）且没有可展示的正文/原因：返回明确的中止结果而非崩溃，
         // stopReason=failed 命中 isAborted，上层会展示错误文案。
@@ -224,7 +224,7 @@ class GeminiAdapter @Inject constructor(
                 var currentFinishReason: String? = null
                 var streamInputTokens = 0
                 var streamOutputTokens = 0
-                var streamCachedInputTokens = 0
+                var streamCachedInputTokens = -1
 
                 val body = firstContent.awaitBody(api.streamGenerateContent(url = url, apiKey = apiKey.takeIf { it.isNotBlank() }, extraHeaders = extraHeaders(), request = request))
 

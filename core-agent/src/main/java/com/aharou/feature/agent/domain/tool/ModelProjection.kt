@@ -65,7 +65,8 @@ fun foldStoredToolResults(messages: List<AgentMessage>, keepRecent: Int = KEEP_R
 /** 结果里带“已落盘”标记时给出折叠后的引用文本；否则 null（不动）。 */
 private fun foldedReference(message: AgentMessage.ToolResultMessage): String? {
     val raw = message.result
-    if (raw.isBlank() || !raw.contains("\"output_path\"")) return null
+    // Acknowledged notifications must stay in the request; never hide them in an archive reference.
+    if (message.images.isNotEmpty() || raw.contains("\"notifications\"") || raw.isBlank() || !raw.contains("\"output_path\"")) return null
     val path = findStoredField(raw, OUTPUT_PATH_FIELD) ?: return null
     val total = findStoredField(raw, OUTPUT_TOTAL_CHARS_FIELD)?.toLongOrNull()
     return buildString {

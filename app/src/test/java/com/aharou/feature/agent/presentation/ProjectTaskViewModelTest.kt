@@ -60,6 +60,29 @@ class ProjectTaskViewModelTest {
         Dispatchers.resetMain()
     }
 
+    @Test fun previewAndRuleFallbackNeverAutomaticallyStartExecution() = runTest(dispatcher) {
+        val project = ProjectPlan(id = "p", workspace = "/first", title = "p", requirements = "old")
+        val snapshot = ProjectTaskSnapshot(projects = listOf(project), tasks = listOf(projectTask))
+        (repository.snapshots as MutableStateFlow<Map<String, ProjectTaskSnapshot>>).value = mapOf("/first" to snapshot)
+        coEvery { repository.load("/first") } returns snapshot
+        val preview = com.aharou.feature.agent.data.task.ProjectRequirementPreview(project, snapshot.tasks,
+            "new", listOf(projectTask.copy(id = "new")), true)
+        coEvery { repository.previewRequirements("p", "new", "/first") } returns preview
+        coEvery { repository.applyRequirementsPreview(preview) } returns ProjectPlanOutcome(project, true)
+        viewModel.workspace("/first"); runCurrent()
+        viewModel.previewRequirements("p", "new"); runCurrent()
+        org.junit.Assert.assertEquals(preview, viewModel.state.value.requirementPreview)
+        coVerify(exactly = 0) { repository.applyRequirementsPreview(any()) }
+        coVerify(exactly = 0) { workflow.run(any(), any(), any()) }
+        viewModel.confirmRequirementPreview("request", startExecution = true); runCurrent()
+        coVerify(exactly = 1) { repository.applyRequirementsPreview(preview) }
+        coVerify(exactly = 0) { workflow.run(any(), any(), any()) }
+        org.junit.Assert.assertEquals("request", viewModel.state.value.appendSucceededRequest)
+        coEvery { repository.appendRequirements("p", "more", "/first") } returns ProjectPlanOutcome(project, true)
+        viewModel.appendRequirements("p", "more", "fallback"); runCurrent()
+        coVerify(exactly = 0) { workflow.run(any(), any(), any()) }
+    }
+
     @Test fun deletionUsesProjectWorkspaceAndKeepsConversations() = runTest(dispatcher) {
         val project = ProjectPlan(id = "owned", workspace = "/owned", title = "p", requirements = "r")
         (repository.snapshots as MutableStateFlow<Map<String, ProjectTaskSnapshot>>).value = mapOf("/owned" to ProjectTaskSnapshot(projects = listOf(project)))

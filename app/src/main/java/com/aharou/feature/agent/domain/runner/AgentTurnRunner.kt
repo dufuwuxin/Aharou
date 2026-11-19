@@ -6,6 +6,7 @@ import com.aharou.feature.agent.data.local.dao.ChatSessionDao
 import com.aharou.feature.agent.data.local.entity.ChatSessionEntity
 import com.aharou.feature.agent.domain.checkpoint.CheckpointManager
 import com.aharou.feature.agent.domain.model.AgentContext
+import com.aharou.feature.agent.domain.model.AgentMessage
 import com.aharou.feature.agent.domain.model.AgentImage
 import com.aharou.feature.agent.domain.model.AgentMode
 import com.aharou.feature.agent.domain.model.ModelIdentity
@@ -72,6 +73,8 @@ data class AgentTurnRequest(
      * 置 false 用于「调用方已先落过一条可见命令文本（如 /init）」的场景，避免同一轮落出两条用户消息。
      */
     val persistUserMessage: Boolean = true,
+    /** Retry a failed request from its existing final user row; never delete/reinsert that row. */
+    val replayUserMessageId: String? = null,
 )
 
 /**
@@ -220,10 +223,16 @@ class AgentTurnRunner @Inject constructor(
         // 进程死掉后才作答的提问先补回会话，否则模型看不到用户的选择。
         flushAnsweredQuestions(sessionId)
         // 必须在插入本次用户消息之前取历史：workflow 会自己把 userRequest 加进去，避免重复。
-        val history = messagePersistenceUseCase.buildHistory(sessionId, SessionUseCase.PENDING_TOOL_MARKER)
+        val storedHistory = messagePersistenceUseCase.buildHistory(sessionId, SessionUseCase.PENDING_TOOL_MARKER)
+        val replayId = turn.replayUserMessageId
+        if (replayId != null) check(turn.isAutoTrigger && !turn.persistUserMessage &&
+            (storedHistory.lastOrNull() as? AgentMessage.UserMessage)?.id == replayId) { "RETRY_TARGET_CHANGED" }
+        // The workflow appends the current input exactly once. Retain the stored row as the source
+        // of truth and omit it only from this request's preceding-history view.
+        val history = if (replayId == null) storedHistory else storedHistory.dropLast(1)
         val isFirst = history.isEmpty()
 
-        val userMsgId = UUID.randomUUID().toString()
+        val userMsgId = replayId ?: UUID.randomUUID().toString()
         if (!turn.isAutoTrigger) {
             messagePersistenceUseCase.persist(
                 sessionId,
@@ -294,7 +303,7 @@ class AgentTurnRunner @Inject constructor(
             language = turn.currentFile?.let { detectLanguage(it) },
             history = history,
             currentUserText = turn.text,
-            currentInputCountsAsRound = !(turn.isAutoTrigger && !turn.persistUserMessage),
+            currentInputCountsAsRound = replayId != null || !(turn.isAutoTrigger && !turn.persistUserMessage),
             inputImages = turn.inputImages,
             sessionId = sessionId,
             inputMessageId = userMsgId,

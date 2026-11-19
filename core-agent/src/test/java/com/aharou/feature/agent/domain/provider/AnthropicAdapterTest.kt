@@ -130,6 +130,15 @@ class AnthropicAdapterTest {
         )
     }
 
+    @Test fun missingCacheUsageIsUnknownAndNeverReducesTotalInput() = runTest {
+        val api = FakeApi(response(usage = AnthropicUsage(input_tokens = 100, output_tokens = 5)))
+        val missing = adapter(api).complete("sys", listOf(AgentMessage.UserMessage(content = "hi")))
+        assertEquals(100, missing.inputTokens)
+        assertEquals(-1, missing.cachedInputTokens)
+        api.response = response(usage = AnthropicUsage(input_tokens = 100, output_tokens = 5, cache_read_input_tokens = 0))
+        assertEquals(0, adapter(api).complete("sys", listOf(AgentMessage.UserMessage(content = "hi"))).cachedInputTokens)
+    }
+
     @Test
     fun stop_details_and_cache_creation_are_surfaced() = runTest {
         val api = FakeApi(

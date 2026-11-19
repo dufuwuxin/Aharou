@@ -5,6 +5,7 @@ internal class LlmCallBudgetState(
     var baselineEstimate: Int,
     var baselineUsage: Int
 ) {
+    val toolResultProjection = com.aharou.feature.agent.domain.tool.StableToolResultProjection()
     private data class Recovery(var compactionFailed: Boolean = false, var overflowAttempted: Boolean = false)
     private val recoveries = mutableMapOf<String, Recovery>()
     private var providerKey = providerKey

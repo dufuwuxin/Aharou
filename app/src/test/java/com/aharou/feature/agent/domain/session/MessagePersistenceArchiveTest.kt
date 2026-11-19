@@ -49,8 +49,27 @@ class MessagePersistenceArchiveTest {
             it.get(useCase) as Map<*, *>
         }
 
+    @Test fun repeatedErrorsNeverGrowReplayAndToolFailuresRemainPaired() = runTest {
+        val store = MessageArchiveStore(File(temporaryFolder.root, "retry"))
+        val original = listOf(
+            entity("u", MessageRole.USER, 1).copy(content = "task"),
+            entity("a", MessageRole.ASSISTANT, 2).copy(content = "saved progress",
+                toolCallsJson = """[{"id":"call","name":"readFile","arguments":{}}]"""),
+            entity("t", MessageRole.TOOL, 3).copy(content = "permission denied", isError = true,
+                toolCallId = "call", toolName = "readFile"))
+        coEvery { dao.getHistoryRowsBySessionOnce("session") } returns original.map { it.toHistoryRow() }
+        val before = persistence(store).buildHistory("session", "[running]")
+        repeat(3) { attempt ->
+            val errors = (0..attempt).map { entity("err$it", MessageRole.ASSISTANT, 4L + it)
+                .copy(content = "HTTP 503 attempt $it", isError = true) }
+            coEvery { dao.getHistoryRowsBySessionOnce("session") } returns (original + errors).map { it.toHistoryRow() }
+            assertEquals(before, persistence(store).buildHistory("session", "[running]"))
+        }
+        assertEquals("permission denied", (before.last() as AgentMessage.ToolResultMessage).result)
+    }
+
     @Test
-    fun oldArchivedToolsFoldBeforeCachingButArchivesAndRecentToolsStayComplete() = runTest {
+    fun archivedToolsStayCompleteAndRequestRetentionOwnsTheSendProjection() = runTest {
         val store = MessageArchiveStore(File(temporaryFolder.root, "fold"))
         val calls = (0..10).joinToString(",") { """{"id":"call$it","name":"readFile","arguments":{}}""" }
         val assistant = entity("assistant", MessageRole.ASSISTANT, 1).copy(
@@ -67,13 +86,16 @@ class MessagePersistenceArchiveTest {
         coEvery { dao.getHistoryRowsBySessionOnce("session") } returns stored.map { it.toHistoryRow() }
         val history = persistence(store).buildHistory("session", "[running]")
         val tools = history.filterIsInstance<AgentMessage.ToolResultMessage>()
-        val expected = foldStoredToolResults(originals.map {
+        val expected = originals.map {
             AgentMessage.ToolResultMessage(id = it.toolCallId!!, messageId = it.id, toolName = "readFile", result = it.content)
-        })
+        }
         assertEquals(expected, tools)
-        assertTrue(tools.first().result.length < 200)
-        assertEquals(originals[1].content, tools[1].result)
-        assertEquals(originals.takeLast(8).map { it.content }, tools.takeLast(8).map { it.result })
+        val projected = com.aharou.feature.agent.domain.tool.StableToolResultProjection().project(history, 8)
+            .filterIsInstance<AgentMessage.ToolResultMessage>()
+        assertEquals(foldStoredToolResults(expected, 8), projected)
+        assertTrue(projected.first().result.length < 200)
+        assertEquals(originals[1].content, projected[1].result)
+        assertEquals(originals.takeLast(8).map { it.content }, projected.takeLast(8).map { it.result })
         assertEquals(originals, stored.drop(1).map { store.restore(it) })
         val restoredAssistant = history.first() as AgentMessage.AssistantMessage
         assertEquals("assistant", restoredAssistant.id)

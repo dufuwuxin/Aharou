@@ -80,6 +80,9 @@ class ProjectPlanner @Inject constructor(
                     .append(" status=").append(if (task.task.isRequirementBranch) "REQUIREMENT_BRANCH" else task.task.status.name)
                     .append(" title=").append(task.task.title)
             }
+            append("\nPlanning contract: cover every independently deliverable request; put shared constraints in each relevant requirement. ")
+            append("Do not collapse unrelated deliverables into one task. Return the full plan, never a truncated subset. ")
+            append("At most $MAX_TASKS tasks; split a large deliverable into explicit phases with complete requirements and acceptance.")
             append("\n\nRequirements:\n").append(requirements)
         }
         val planned = completeJson(PLAN_PROMPT_FILE, input)?.let { mapPlan(it, draft, scope, members, parentId) }
@@ -129,10 +132,14 @@ class ProjectPlanner @Inject constructor(
     /** Null means the answer is unusable and the caller falls back to rules. */
     internal fun mapPlan(json: JsonObject, project: ProjectPlan, scope: List<ProjectTask>, members: List<String>,
         parentId: String? = null): List<ProjectTask>? {
-        val items = (json["tasks"] as? JsonArray)?.mapNotNull { it as? JsonObject } ?: return null
+        val values = json["tasks"] as? JsonArray ?: return null
+        val items = values.map { it as? JsonObject ?: return null }
+        // Never accept a valid-looking partial plan after silently cutting tasks, depth or source text.
+        if (items.size !in 1..MAX_TASKS || items.any { it.text("title").length > TITLE_MAX ||
+            it.text("requirement").length > REQUIREMENT_MAX || it.text("acceptance").length > REQUIREMENT_MAX }) return null
         val allowedParents = parentId?.let { setOf(it) } ?: scope.map { it.id }.toSet()
         val tasks = mapTasks(items, project, scope, members, parentId, allowedParents, ProjectTaskStatus.DRAFT)
-        return tasks.takeIf { it.isNotEmpty() && ProjectTaskGraph.validate(scope + it) == null }
+        return tasks.takeIf { it.size == items.size && ProjectTaskGraph.validate(scope + it) == null }
     }
 
     /** Edits and reruns only reach the anchor's own branch; added tasks hang inside that branch (anchor by default). */
@@ -229,7 +236,7 @@ class ProjectPlanner @Inject constructor(
         .mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.trim() }.filter { it.isNotBlank() }
 
     companion object {
-        /** One planning answer adds at most this many tasks; longer answers are cut in their own order. */
+        /** Reject an oversized model answer as a whole; never silently save a partial plan. */
         const val MAX_TASKS = 30
         const val PLAN_PROMPT_FILE = "agent/project-plan.md"
         const val REVISE_PROMPT_FILE = "agent/project-revise.md"

@@ -62,6 +62,38 @@ class ProjectTaskRepositoryTest {
     private val workspaces = mockk<com.aharou.feature.workspace.data.repository.WorkspaceRepository>()
     private fun repository(planner: ProjectPlanner = realPlanner) = ProjectTaskRepository(context, Provider { planner }, Provider { workspaces })
 
+    @Test fun requirementPreviewIsReadOnlyAndConfirmationCommitsTheEditedProposalExactlyOnce() = runBlocking {
+        val store = repository()
+        val project = store.createProject("p", "old", "/preview").project
+        val before = store.load("/preview")
+        val preview = store.previewRequirements(project.id, "first\nsecond", "/preview")
+        assertEquals(before, store.load("/preview"))
+        assertTrue(preview.ruleFallback)
+        assertEquals(2, preview.tasks.size)
+        val edited = preview.copy(tasks = preview.tasks.mapIndexed { index, task ->
+            if (index == 0) task.copy(title = "edited", acceptance = "observable result") else task })
+        store.applyRequirementsPreview(edited)
+        val saved = store.load("/preview")
+        assertEquals(before.tasks.size + 2, saved.tasks.size)
+        assertTrue(saved.tasks.any { it.title == "edited" && it.acceptance == "observable result" })
+        assertTrue(saved.projects.single().requirements.endsWith("first\nsecond"))
+        try { store.applyRequirementsPreview(edited); fail("same preview applied twice") }
+        catch (expected: IllegalStateException) { assertEquals("PROJECT_PLAN_STALE", expected.message) }
+        assertEquals(saved, store.load("/preview"))
+    }
+
+    @Test fun interveningTaskEditRejectsTheWholePreviewWithoutPartialWrites() = runBlocking {
+        val store = repository()
+        val project = store.createProject("p", "old", "/stale").project
+        val preview = store.previewRequirements(project.id, "new", "/stale")
+        val task = store.load("/stale").tasks.first()
+        store.save(task.copy(requirement = "changed elsewhere"))
+        val latest = store.load("/stale")
+        try { store.applyRequirementsPreview(preview); fail("stale preview accepted") }
+        catch (expected: IllegalStateException) { assertEquals("PROJECT_PLAN_STALE", expected.message) }
+        assertEquals(latest, store.load("/stale"))
+    }
+
     @Test fun ownedWorkspaceDirectoryIsStableDiscoverableAndCannotBeRenamedOrReclaimed() = runBlocking {
         val resolver = mockk<com.aharou.feature.agent.domain.container.ContainerProfileResolver>()
         every { resolver.forWorkspace(any()) } returns com.aharou.feature.agent.domain.container.ContainerProfile.BUILTIN_UBUNTU
