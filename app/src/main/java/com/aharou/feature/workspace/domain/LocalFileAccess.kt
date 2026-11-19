@@ -161,6 +161,13 @@ class LocalFileAccess @Inject constructor(
         }
     }
 
+    override fun readBytesBounded(path: String, maxBytes: Int): ByteArray {
+        val file = resolve(path)
+        require(file.isFile) { "ELF_FILE_REQUIRED" }
+        require(file.length() <= maxBytes) { "ELF_SIZE_LIMIT" }
+        return file.inputStream().use { com.aharou.feature.agent.domain.binary.BoundedBinaryReader.read(it, maxBytes) }
+    }
+
     override fun readBytes(path: String): ByteArray {
         val file = resolve(path)
         if (!file.exists()) throw NoSuchFileException(file)

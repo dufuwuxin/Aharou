@@ -99,6 +99,7 @@ class DelegatingFileAccess private constructor(
         delegate().listFilesRecursive(path, maxDepth)
 
     override fun readBytes(path: String): ByteArray = delegate().readBytes(path)
+    override fun readBytesBounded(path: String, maxBytes: Int): ByteArray = delegate().checked().readBytesBounded(path, maxBytes)
 
     override fun writeBytes(path: String, bytes: ByteArray, overwrite: Boolean) =
         delegate().writeBytes(path, bytes, overwrite)

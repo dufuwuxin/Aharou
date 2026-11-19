@@ -114,6 +114,10 @@ interface FileAccessProvider {
      */
     fun readBytes(path: String): ByteArray
 
+    /** Reject oversized files while reading, including files that grow after stat(). */
+    fun readBytesBounded(path: String, maxBytes: Int): ByteArray =
+        throw UnsupportedOperationException("Bounded binary reads are unavailable for this backend")
+
     /**
      * 写入文件原始字节。父目录不存在则自动创建。[overwrite] 为 false 且文件已存在时抛 [FileAlreadyExistsException]。
      * 供 [GenerateImageTool] 等需要落盘二进制数据（图片等）的工具使用，也用于上传附件等二进制写入；

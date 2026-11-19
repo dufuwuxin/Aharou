@@ -113,6 +113,10 @@ data class FileItem(
     val isApkFile: Boolean
         get() = file.extension.lowercase() in setOf("apk", "apks", "xapk")
 
+    /** Candidate only; file preview checks the ELF magic on an IO thread before selecting a renderer. */
+    val isElfCandidate: Boolean
+        get() = !isDirectory && file.extension.lowercase() in setOf("so", "elf", "o", "out", "bin", "")
+
     val isArchiveFile: Boolean
         get() = file.extension.lowercase() in setOf("zip", "jar", "apk", "aar")
 
