@@ -16,6 +16,8 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/setup-verification
+      - name: Reproduce adapter session identity regression
+        run: ./gradlew :core-agent:test --tests 'com.aharou.feature.agent.domain.provider.CodexCacheIdentityTest' --console=plain
       - name: Reproduce two real request regressions on unchanged production code
         run: >-
           ./gradlew :app:testArmsoloDebugUnitTest
@@ -27,6 +29,8 @@ jobs:
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
           name: cache-baseline-raw-xml
-          path: app/build/test-results/testArmsoloDebugUnitTest/
+          path: |
+            app/build/test-results/testArmsoloDebugUnitTest/
+            core-agent/build/test-results/test/
           if-no-files-found: error
           retention-days: 7
