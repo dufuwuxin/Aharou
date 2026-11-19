@@ -64,11 +64,12 @@ class SettingsNavigationTest(unittest.TestCase):
 
     def test_team_create_role_card_opens_empty_editor_and_returns_to_team(self):
         team = source(SETTINGS / "SubAgentTeamsSection.kt")
-        start = team.rfind("SettingsRow(", 0, team.index("R.string.team_create_member"))
-        row = block(team[start:], "SettingsRow", "(", ")")
-        self.assertIn("onClick = onCreateRoleCard", row)
-        self.assertNotIn("onOpenExperts", row)
-        self.assertNotIn("expertCount", row)
+        button = block(team, "OutlinedButton(onClick = onCreateRole,")
+        self.assertIn("R.string.team_create_member", button)
+        browser = block(team, "TeamLibraryBrowser", "(", ")")
+        self.assertIn("onCreateRole = onCreateRoleCard", browser)
+        self.assertNotIn("onOpenExperts", button)
+        self.assertNotIn("expertCount", button)
         route = block(self.screen, "SettingsSection.Teams -> SubAgentTeamsSection", "(", ")")
         create = block(route, "onCreateRoleCard =")
         self.assertIn("editingSubAgent = null", create)
