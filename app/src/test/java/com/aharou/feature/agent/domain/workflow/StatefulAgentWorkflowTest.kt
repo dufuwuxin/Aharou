@@ -205,6 +205,71 @@ class StatefulAgentWorkflowTest {
     }
 
     @Test
+    fun fileHistoryGrowthKeepsSystemAndPreviouslySentReceiptsStable() = runTest {
+        prepare(flow { emit(AIStreamChunk.Final(AIResponse("done"))) })
+        val promptsSent = mutableListOf<String>()
+        val requests = mutableListOf<List<AgentMessage>>()
+        every { provider.completeStream(capture(promptsSent), capture(requests), any(), any()) } returns flow {
+            emit(AIStreamChunk.Final(AIResponse("done")))
+        }
+        val original = listOf(AgentMessage.UserMessage(id = "original", content = "inspect")) + (0 until 9).flatMap { index ->
+            val id = "receipt-$index"
+            listOf(AgentMessage.AssistantMessage(id = "assistant-$index", content = "", toolCalls = listOf(ToolCall(id, "Bash", emptyMap()))),
+                AgentMessage.ToolResultMessage(id = id, toolName = "Bash",
+                    result = "{\"output_path\":\"/workspace/$id.log\",\"preview\":\"${"x".repeat(1000)}\"}"))
+        }
+        val tool = object : AgentTool() {
+            override val name = "fixture"
+            override val description = "fixture"
+            override val parameters: Map<String, ToolParameter> = emptyMap()
+            override suspend fun executeWithContext(args: Map<String, JsonElement>, context: AgentContext) =
+                ToolResult.Success(JsonPrimitive("next result"))
+        }
+        var round = 0
+        every { provider.completeStream(capture(promptsSent), capture(requests), any(), any()) } answers {
+            flow { emit(AIStreamChunk.Final(if (round++ == 0) AIResponse("", listOf(ToolCall("next-call", tool.name, emptyMap()))) else AIResponse("done"))) }
+        }
+        coEvery { policyEngine.evaluate(any(), any(), any(), any(), any(), any()) } returns
+            ToolPermissionPolicyEngine.EvalResult(ToolPermissionPolicyEngine.Verdict.ALLOW, emptyList())
+        every { outputStore.process(any(), any(), any()) } answers { arg<ToolResult>(2) }
+        workflow.executeEvents("request", context.copy(history = original), listOf(tool)).collect {
+            if (it is AgentEvent.AssistantText) it.persisted?.complete(Unit)
+            if (it is AgentEvent.ToolCallFinished) it.persisted?.complete(Unit)
+        }
+        assertEquals(2, requests.size)
+        assertEquals("Growing metadata must not invalidate the system prefix", promptsSent[0], promptsSent[1])
+        assertFalse(promptsSent[0].contains("file-history-index"))
+        assertTrue(requests[0].filterIsInstance<AgentMessage.UserMessage>().any { it.content.contains("file-history-index") })
+        assertEquals(requests[0].filterIsInstance<AgentMessage.ToolResultMessage>(),
+            requests[1].filterIsInstance<AgentMessage.ToolResultMessage>().take(9))
+    }
+
+    @Test
+    fun retryWithoutNewInputReplaysHistoryWithoutAnEmptyUserTurn() = runTest {
+        prepare(flow { throw java.io.IOException("connection refused") })
+        val requests = mutableListOf<List<AgentMessage>>()
+        every { prompts.resolvePrompt(any()) } returns ""
+        every { provider.completeStream(any(), capture(requests), any(), any()) } returns flow {
+            throw java.io.IOException("connection refused")
+        }
+        val original = listOf(AgentMessage.UserMessage(id = "original", content = "original task"),
+            AgentMessage.AssistantMessage(id = "progress", content = "completed first step", inputTokens = 100))
+        val usages = mutableListOf<Int>()
+        repeat(3) {
+            workflow.executeEvents("", context.copy(history = original, lastInputTokens = 100, currentInputCountsAsRound = false), emptyList()).collect {
+                if (it is AgentEvent.ContextUsage) usages += it.inputTokens
+            }
+        }
+        assertEquals(3, requests.size)
+        requests.forEach { request ->
+            assertEquals(listOf("original task"), request.filterIsInstance<AgentMessage.UserMessage>()
+                .filterNot { it.content.contains("file-history-index") }.map { it.content })
+            assertTrue(request.contains(original.last()))
+        }
+        assertEquals("Retrying the same input must not grow context usage", 1, usages.distinct().size)
+    }
+
+    @Test
     fun maxStopsTheRealProviderCallWhenCompactionDoesNotReduceTheRequest() = runTest {
         prepare(flow { emit(AIStreamChunk.Final(AIResponse("must not send"))) })
         coEvery { generalSettings.softCompactionThresholdPercent() } returns 60

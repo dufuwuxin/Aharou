@@ -1,0 +1,32 @@
+name: Cache regression baseline
+on:
+  push:
+    branches: [feat/cache-baseline-red-20261119]
+permissions:
+  contents: read
+jobs:
+  reproduce:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      AHAROU_CI_BUILD: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/setup-verification
+      - name: Reproduce two real request regressions on unchanged production code
+        run: >-
+          ./gradlew :app:testArmsoloDebugUnitTest
+          --tests 'com.aharou.feature.agent.domain.workflow.StatefulAgentWorkflowTest.fileHistoryGrowthKeepsSystemAndPreviouslySentReceiptsStable'
+          --tests 'com.aharou.feature.agent.domain.workflow.StatefulAgentWorkflowTest.retryWithoutNewInputReplaysHistoryWithoutAnEmptyUserTurn'
+          --console=plain
+      - name: Preserve raw regression results
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: cache-baseline-raw-xml
+          path: app/build/test-results/testArmsoloDebugUnitTest/
+          if-no-files-found: error
+          retention-days: 7
