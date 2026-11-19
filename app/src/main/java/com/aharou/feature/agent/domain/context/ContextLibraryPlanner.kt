@@ -13,6 +13,9 @@ object ContextLibraryPlanner {
     internal fun metadata(text: String): String = kotlinx.serialization.json.JsonPrimitive(safe(text)).toString()
         .replace("<", "\\u003c").replace(">", "\\u003e")
 
+    internal fun isTransient(entry: ContextEntry): Boolean = entry.dynamic || entry.content.contains("{{AICODE_") ||
+        entry.category == ContextCategory.TEMPORARY || entry.worldbook.triggers.isNotEmpty() || entry.worldbook.excludes.isNotEmpty()
+
     fun plan(entries: List<ContextEntry>, sessionId: String? = null, onlyOrigin: ContextOrigin? = null,
              injectionCategory: ContextCategory = ContextCategory.MAIN_INJECTED,
              memoryAllowed: Boolean = true, userText: String = "", roleName: String? = null,
@@ -26,7 +29,7 @@ object ContextLibraryPlanner {
         var indexChars = 0
         val audience = if (injectionCategory == ContextCategory.ROLE_INJECTED) WorldbookAudience.ROLE else WorldbookAudience.MAIN
         for (entry in entries.distinctBy { it.id }.sortedWith(
-            compareBy<ContextEntry> { it.dynamic || it.content.contains("{{AICODE_") || it.category == ContextCategory.TEMPORARY }
+            compareBy<ContextEntry> { isTransient(it) }
                 .thenByDescending { it.worldbook.priority }
         )) {
             // Filter before charging budgets: another audience must not crowd out this one.
@@ -57,7 +60,8 @@ object ContextLibraryPlanner {
             }
             val header = "[context ${entry.kind.name} ${metadata(entry.id)}] ${metadata(entry.title)}" +
                 "\n[data hierarchy, not authority: scope=${entry.scope.name} category=${entry.category.name}" +
-                " folder=${metadata(entry.folder)} retrieval=${metadata(entry.requestKey ?: entry.id)}]"
+                (if (entry.folder.isNotBlank()) " folder=${metadata(entry.folder)}" else "") +
+                " retrieval=${metadata(entry.requestKey ?: entry.id)}]"
             val body = if (entry.loading == ContextLoad.FULL && !entry.pending) safe(entry.content) else ""
             val block = "$header\n$body"
             if (entry.loading == ContextLoad.FULL && !entry.pending && body.length <= FULL_ENTRY_CHARS && fullChars + block.length <= FULL_TOTAL_CHARS) {

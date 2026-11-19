@@ -24,8 +24,13 @@ data class SkillUiEntry(
     val typeId: String? = null,
     val typeName: String? = null,
     val resourcePaths: List<String> = emptyList(),
-    val resourceTexts: Map<String, String> = emptyMap()
-)
+    val resourceTexts: Map<String, String> = emptyMap(),
+    val typeIds: List<String> = emptyList(),
+    val typeNames: List<String> = emptyList()
+) {
+    val selectedTypeIds: List<String> get() = com.aharou.feature.agent.domain.skill.normalizedSkillTypeIds(typeId, typeIds)
+    val classificationLabels: List<String> get() = typeNames.ifEmpty { listOfNotNull(typeName).ifEmpty { selectedTypeIds } }
+}
 
 /** 技能编辑页的保存结果：UI 据此决定是退回列表还是就地报错。 */
 sealed interface SkillSaveState {
@@ -101,7 +106,28 @@ internal fun SkillUiEntry.matchesSkillQuery(query: String): Boolean =
         val value = term.substringAfter(':', "").removeSurrounding("\"")
         when {
             term.startsWith("tag:", true) -> value.isNotBlank() && tags.any { it.equals(value, true) }
-            term.startsWith("type:", true) -> value.isNotBlank() && (typeId?.equals(value, true) == true || typeName?.equals(value, true) == true)
-            else -> listOf(name, description).plus(keywords).any { it.contains(term.removeSurrounding("\""), true) }
+            term.startsWith("type:", true) -> value.isNotBlank() && (selectedTypeIds + classificationLabels).any { it.equals(value, true) }
+            else -> listOf(name, description).plus(keywords).plus(tags).plus(classificationLabels).any { it.contains(term.removeSurrounding("\""), true) }
         }
     }
+
+internal fun toggleSkillType(ids: List<String>, id: String): List<String> =
+    if (id in ids) ids.filterNot { it == id } else ids + id
+
+internal fun skillSelectionId(entry: SkillUiEntry): String = "${entry.scope.name}:${entry.name}"
+
+internal data class SkillTagGroup(val label: String?, val entries: List<SkillUiEntry>)
+
+/** Multi-tag rows share a selection identity while lazy-list rows remain group-specific. */
+internal fun groupSkillsByTag(entries: List<SkillUiEntry>): List<SkillTagGroup> {
+    val groups = linkedMapOf<String?, MutableList<SkillUiEntry>>()
+    entries.distinctBy(::skillSelectionId).forEach { entry ->
+        val labels = (entry.tags + entry.classificationLabels).map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+        if (labels.isEmpty()) groups.getOrPut(null) { mutableListOf() }.add(entry)
+        else labels.forEach { groups.getOrPut(it) { mutableListOf() }.add(entry) }
+    }
+    val entryOrder = compareBy<SkillUiEntry> { it.disabled }.thenBy { it.name.lowercase() }.thenBy { it.scope.name }
+    val labels = groups.keys.filterNotNull().sortedWith(compareBy<String> { it.lowercase() }.thenBy { it })
+    return labels.map { SkillTagGroup(it, groups.getValue(it).sortedWith(entryOrder)) } +
+        listOfNotNull(groups[null]?.let { SkillTagGroup(null, it.sortedWith(entryOrder)) })
+}

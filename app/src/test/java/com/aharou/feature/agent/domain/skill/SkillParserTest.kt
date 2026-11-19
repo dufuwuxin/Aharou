@@ -125,4 +125,35 @@ class SkillParserTest {
         assertEquals("type", parsed.typeId)
     }
 
+
+    @Test
+    fun orderedMultiTypesRoundTripAndRetainLegacyReference() {
+        val parsed = SkillParser.parseText("""
+            ---
+            name: multi
+            type_ids: [second, first, second]
+            type_id: legacy
+            tags: [custom]
+            required_tools: [Bash, readFile]
+            ---
+            body
+        """.trimIndent(), "multi")
+        assertEquals(listOf("second", "first", "legacy"), parsed.selectedTypeIds)
+        assertEquals("second", parsed.typeId)
+        val restored = SkillParser.parseText(SkillParser.serialize(parsed.name, parsed.description,
+            parsed.requiredTools, parsed.instructions, tags = parsed.tags, typeId = parsed.typeId,
+            typeIds = parsed.selectedTypeIds), "fallback")
+        assertEquals(parsed, restored)
+    }
+
+    @Test
+    fun oldSingleTypeFixtureRemainsEditableAndCanClearAllTypes() {
+        val legacy = SkillParser.parseText("---\nname: old\ntype_id: report\ntags: [free]\n---\nbody", "old")
+        assertEquals(listOf("report"), legacy.selectedTypeIds)
+        assertEquals("report", legacy.typeId)
+        val cleared = SkillParser.parseText(SkillParser.serialize(legacy.name, legacy.description,
+            legacy.requiredTools, legacy.instructions, tags = legacy.tags), "old")
+        assertEquals(emptyList<String>(), cleared.selectedTypeIds)
+        assertEquals(listOf("free"), cleared.tags)
+    }
 }

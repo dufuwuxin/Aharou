@@ -59,6 +59,8 @@ object SkillParser {
             emptyList()
         }
 
+        val typeIds = normalizedSkillTypeIds(frontmatter["type_id"] as? String,
+            (frontmatter["type_ids"] as? List<*>)?.filterIsInstance<String>().orEmpty())
         return Skill(
             name = name,
             description = description,
@@ -70,7 +72,8 @@ object SkillParser {
                 ?.map { it.trim() }?.filter { it.isNotEmpty() }?.distinct() ?: emptyList(),
             tags = (frontmatter["tags"] as? List<*>)?.filterIsInstance<String>()
                 ?.map { it.trim() }?.filter { it.isNotEmpty() }?.distinct() ?: emptyList(),
-            typeId = (frontmatter["type_id"] as? String)?.trim()?.takeIf { it.isNotEmpty() }
+            typeId = typeIds.firstOrNull(),
+            typeIds = typeIds
         )
     }
 
@@ -104,7 +107,8 @@ object SkillParser {
         keywordEnabled: Boolean = false,
         keywords: List<String> = emptyList(),
         tags: List<String> = emptyList(),
-        typeId: String? = null
+        typeId: String? = null,
+        typeIds: List<String> = emptyList()
     ): String = buildString {
         appendLine("---")
         appendLine("name: ${Frontmatter.quote(name)}")
@@ -115,7 +119,9 @@ object SkillParser {
             appendLine("keywords: [${keywords.joinToString(", ") { Frontmatter.quote(it) }}]")
         }
         if (tags.isNotEmpty()) appendLine("tags: [${tags.joinToString(", ") { quoteMetadata(it) }}]")
-        typeId?.takeIf { it.isNotBlank() }?.let { appendLine("type_id: ${quoteMetadata(it)}") }
+        val selectedTypes = normalizedSkillTypeIds(typeId, typeIds)
+        selectedTypes.firstOrNull()?.let { appendLine("type_id: ${quoteMetadata(it)}") }
+        if (selectedTypes.isNotEmpty()) appendLine("type_ids: [${selectedTypes.joinToString(", ") { quoteMetadata(it) }}]")
         appendLine("---")
         appendLine(instructions.trim())
     }

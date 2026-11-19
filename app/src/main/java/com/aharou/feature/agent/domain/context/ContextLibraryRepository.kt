@@ -177,7 +177,8 @@ class ContextLibraryRepository @Inject constructor(
 
     fun render(projectRoot: String?, sessionId: String?, origin: ContextOrigin, enabled: Boolean = true,
                memberName: String? = null, inheritsMainRules: Boolean = false, query: String = "",
-               ordinaryMemoryEnabled: Boolean = true, expand: ((String) -> String)? = null): String {
+               ordinaryMemoryEnabled: Boolean = true, expand: ((String) -> String)? = null,
+               transientContext: ((String) -> Unit)? = null): String {
         if (!enabled) return ""
         if (expand != null) {
             val active = snapshot.get()
@@ -190,9 +191,13 @@ class ContextLibraryRepository @Inject constructor(
                     else entry.copy(content = content, dynamic = entry.content.contains("{{AICODE_"))
                 }
             }
-            return ContextLibraryPlanner.plan(entries, sessionId, origin, audience,
+            val preview = ContextLibraryPlanner.plan(entries, sessionId, origin, audience,
                 ordinaryMemoryEnabled && active?.memoryAllowed != false && memoryStore?.isMemoryEnabled() != false,
-                active?.userText ?: query, active?.roleName ?: memberName, active?.roleTags.orEmpty()).rendered
+                active?.userText ?: query, active?.roleName ?: memberName, active?.roleTags.orEmpty())
+            if (transientContext == null) return preview.rendered
+            val transientIds = entries.filter(ContextLibraryPlanner::isTransient).mapTo(HashSet()) { it.id }
+            transientContext(preview.renderedEntries.filterKeys { it in transientIds }.values.joinToString("\n\n"))
+            return preview.renderedEntries.filterKeys { it !in transientIds }.values.joinToString("\n\n")
         }
         return plan(projectRoot, sessionId, ordinaryMemoryEnabled, memberName, query).rendered
     }

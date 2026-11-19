@@ -20,6 +20,18 @@ object ConfigBuiltins {
 
     fun registerInto(registry: ConfigRegistry, context: Context) {
         val appContext = context.applicationContext
+        FullAccessCapability.initialize(appContext)
+        registry.register(com.aharou.core.config.fields.ReadOnlyField(
+            path = "permissions.full_access", displayName = "全部权限", description = "只能由用户在特殊权限页面开启或撤销；允许同UID宿主文件与反射操作。",
+            valueSchema = ConfigSchema.Bool, reader = { ConfigValue.Bool(FullAccessCapability.enabled.value) },
+        ))
+        com.aharou.feature.settings.data.local.ProviderLibraryPreferences.initialize(appContext)
+        registry.register(ClosureField(
+            path = "providers.hidden_types", displayName = "隐藏供应商类型", description = "只隐藏供应商品牌分组，不停用已配置供应商；每行一个品牌标识。",
+            valueSchema = ConfigSchema.Str(maxLength = 4000), revertable = true,
+            reader = { ConfigValue.Str(com.aharou.feature.settings.data.local.ProviderLibraryPreferences.hiddenTypes.value.sorted().joinToString("\n")) },
+            writer = { com.aharou.feature.settings.data.local.ProviderLibraryPreferences.setHidden((it as ConfigValue.Str).value.lineSequence().map(String::trim).filter(String::isNotBlank).toSet()) },
+        ))
         val memoryStore = com.aharou.core.memory.AharouMemoryStore(appContext)
         com.aharou.core.memory.NativeProfileMemory.migrate(memoryStore.dir, memoryStore.isMemoryEnabled())
 

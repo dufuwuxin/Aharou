@@ -20,6 +20,7 @@ class SessionUseCase @Inject constructor(
     /** 智能托管按会话存开关：删会话时要把它的键清掉，不留垃圾。 */
     private val stewardSettings: StewardSettingsStore
 ) {
+    @Inject lateinit var modelRoutes: com.aharou.feature.settings.data.repository.ModelRouteGroupRepository
     @Inject lateinit var projectTasks: javax.inject.Provider<com.aharou.feature.agent.data.task.ProjectTaskRepository>
 
     private val workspaceBindings = java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.CompletableDeferred<Unit>>()
@@ -111,12 +112,14 @@ class SessionUseCase @Inject constructor(
             chatSessionDao.delete(child.id)
             messageArchiveStore.deleteSession(child.id)
             stewardSettings.forgetSession(child.id)
+            if (::modelRoutes.isInitialized) modelRoutes.markMember(child.id, false)
             deleted.add(child.id)
         }
         agentMessageDao.deleteBySession(id)
         chatSessionDao.delete(id)
         messageArchiveStore.deleteSession(id)
         stewardSettings.forgetSession(id)
+        if (::modelRoutes.isInitialized) modelRoutes.markMember(id, false)
         return deleted
     }
 
@@ -127,7 +130,10 @@ class SessionUseCase @Inject constructor(
         sessions.forEach { session -> agentMessageDao.deleteBySession(session.id) }
         chatSessionDao.deleteByWorkspace(workspacePath)
         sessions.forEach { session -> messageArchiveStore.deleteSession(session.id) }
-        sessions.forEach { session -> stewardSettings.forgetSession(session.id) }
+        sessions.forEach { session ->
+            stewardSettings.forgetSession(session.id)
+            if (::modelRoutes.isInitialized) modelRoutes.markMember(session.id, false)
+        }
         return sessions.size
     }
 

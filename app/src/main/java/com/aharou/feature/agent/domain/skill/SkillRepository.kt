@@ -125,8 +125,9 @@ class SkillRepository @Inject constructor(
             else -> SkillScope.BUILTIN
         }
         val skill = entriesIn(scope).firstOrNull { it.name.equals(name, true) }
-        val type = skill?.typeId?.let { skillTypes.get(it, scope) ?: return null }
-        val content = listOfNotNull(type?.semantics, type?.functions, body).filter { it.isNotBlank() }.joinToString("\n\n")
+        val types = skill?.selectedTypeIds.orEmpty().map { skillTypes.get(it, scope) ?: return null }
+        val guidance = types.flatMap { listOf(it.semantics, it.functions) }.filter { it.isNotBlank() }.distinct()
+        val content = (guidance + body).joinToString("\n\n")
         return content + (skill?.dirPath?.let { SkillResources.manifest(fileAccess, it, skill.requiredTools) }
             ?: if (skill?.requiredTools.isNullOrEmpty()) "" else "\n\nRequired tools (no permission grant): ${skill?.requiredTools?.joinToString(", ")}")
     }
@@ -185,8 +186,9 @@ class SkillRepository @Inject constructor(
         val name = form.name.trim()
         if (!isValidName(name)) return@save SkillSaveError.INVALID_NAME
         if (form.instructions.isBlank()) return@save SkillSaveError.EMPTY_INSTRUCTIONS
-        val typeId = form.typeId?.trim()?.takeIf { it.isNotEmpty() }
-        if (typeId != null && skillTypes.get(typeId, scope) == null) return@save SkillSaveError.UNKNOWN_TYPE
+        val typeIds = normalizedSkillTypeIds(form.typeId, form.typeIds)
+        val typeId = typeIds.firstOrNull()
+        if (typeIds.any { skillTypes.get(it, scope) == null }) return@save SkillSaveError.UNKNOWN_TYPE
         val tags = form.tags.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
         val scopeSkills = entriesIn(scope)
         val keywordEnabled = form.keywordEnabled
@@ -215,7 +217,8 @@ class SkillRepository @Inject constructor(
             keywordEnabled = keywordEnabled,
             keywords = keywords,
             tags = tags,
-            typeId = typeId
+            typeId = typeId,
+            typeIds = typeIds
         )
 
         val provider = fileAccess.checked()
@@ -247,6 +250,7 @@ class SkillRepository @Inject constructor(
                 fields["keywords"] = keywords
                 fields["tags"] = tags
                 if (typeId == null) fields.remove("type_id") else fields["type_id"] = typeId
+                if (typeIds.isEmpty()) fields.remove("type_ids") else fields["type_ids"] = typeIds
                 "---\n${yaml.dump(fields)}---\n${form.instructions.trim()}\n"
             }
             try {
@@ -360,7 +364,7 @@ class SkillRepository @Inject constructor(
             if (content != null && path.substringAfterLast('/') in setOf("SKILL.md", "CLAUDE.md")) {
                 val parsed = SkillParser.parseText(content, name)
                 check(mayModify(parsed.name)) { "Builtin skill editing is disabled" }
-                check(parsed.typeId == null || SkillTypeRepository(access).get(parsed.typeId, scope) != null) { "Unknown skill type" }
+                check(parsed.selectedTypeIds.all { SkillTypeRepository(access).get(it, scope) != null }) { "Unknown skill type" }
             }
         }
         override fun writeFile(path: String, content: String, overwrite: Boolean, encoding: java.nio.charset.Charset) {
@@ -453,7 +457,7 @@ class SkillRepository @Inject constructor(
         if (name.lowercase() in existingNamesIn(toScope)) return SkillMoveResult.NAME_CONFLICT
 
         val sourceSkill = entriesIn(fromScope).firstOrNull { it.name.equals(name, ignoreCase = true) }
-        if (sourceSkill?.typeId?.let { skillTypes.get(it, toScope) == null } == true) return SkillMoveResult.FAILED
+        if (sourceSkill?.selectedTypeIds.orEmpty().any { skillTypes.get(it, toScope) == null }) return SkillMoveResult.FAILED
         val source = sourceSkill?.dirPath
         if (source.isNullOrBlank()) {
             FileLogger.w(TAG, "移动技能失败（找不到源目录）：$name ($fromScope)")

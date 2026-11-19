@@ -6,6 +6,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -19,6 +21,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -52,6 +55,8 @@ import com.aharou.core.theme.semanticColors
 import com.aharou.core.ui.AdaptiveModalBottomSheet
 import com.aharou.feature.agent.domain.skill.SkillScope
 import com.aharou.core.ui.AppTextField
+import com.aharou.feature.settings.presentation.groupSkillsByTag
+import com.aharou.feature.settings.presentation.skillSelectionId
 import com.aharou.feature.settings.presentation.matchesSkillQuery
 import com.aharou.feature.settings.presentation.SkillUiEntry
 import compose.icons.FeatherIcons
@@ -64,11 +69,12 @@ import compose.icons.feathericons.Globe
 import compose.icons.feathericons.Trash2
 
 /**
- * 技能二级页：与「工具授权」一致的折叠分组列表——「内置 / 当前项目 / 全局」三组各自可折叠，
+ * 技能二级页：按标签与分类分组，作用域筛选独立保留。
  * 每行一个技能（图标 + 名称 + 描述），点击行进入详情。
  * 用户可管理的两组支持左滑删除；长按任一行弹操作单（搬运 / 导出 / 删除，内置技能只有导出）。
  * 装到哪个作用域由右上角「＋」里的选择决定（与市场安装共用）。
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun SkillsSection(
     projectName: String?,
@@ -79,12 +85,26 @@ internal fun SkillsSection(
     onOpenDetail: (SkillUiEntry) -> Unit
 ) {
     var query by rememberSaveable { mutableStateOf("") }
+    var scopeFilter by rememberSaveable { mutableStateOf<SkillScope?>(null) }
     Column(modifier = Modifier.fillMaxSize()) {
         AppTextField(value = query, onValueChange = { query = it },
             placeholder = stringResource(R.string.skills_search_hint),
             modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.lg), singleLine = true)
         SkillTypeManager()
-        val filtered = entries.filter { it.matchesSkillQuery(query) }
+        FlowRow(modifier = Modifier.padding(horizontal = Spacing.lg), horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+            FilterChip(selected = scopeFilter == null, onClick = { scopeFilter = null },
+                label = { Text(stringResource(R.string.skills_scope_all)) })
+            SkillScope.entries.forEach { scope ->
+                FilterChip(selected = scopeFilter == scope, onClick = { scopeFilter = scope }, label = {
+                    Text(stringResource(when (scope) {
+                        SkillScope.BUILTIN -> R.string.skills_builtin
+                        SkillScope.PROJECT -> R.string.skills_scope_project
+                        SkillScope.GLOBAL -> R.string.skills_scope_global
+                    }))
+                })
+            }
+        }
+        val filtered = entries.filter { (scopeFilter == null || it.scope == scopeFilter) && it.matchesSkillQuery(query) }
         if (entries.isNotEmpty() && filtered.isEmpty()) {
             Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                 Text(stringResource(R.string.skills_search_empty), color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -105,10 +125,7 @@ private fun SkillsListContent(
     onExport: (SkillUiEntry) -> Unit,
     onOpenDetail: (SkillUiEntry) -> Unit
 ) {
-    // 已禁用的沉到组末尾：禁用项一多，混在中间会把启用的冲散。
-    val builtinSkills = entries.filter { it.builtin }.sortedBy { it.disabled }
-    val projectSkills = entries.filter { it.scope == SkillScope.PROJECT }.sortedBy { it.disabled }
-    val globalSkills = entries.filter { it.scope == SkillScope.GLOBAL }.sortedBy { it.disabled }
+    val groups = remember(entries) { groupSkillsByTag(entries) }
 
     if (entries.isEmpty()) {
         Box(
@@ -150,16 +167,14 @@ private fun SkillsListContent(
         return
     }
 
-    var builtinExpanded by rememberSaveable { mutableStateOf(true) }
-    var projectExpanded by rememberSaveable { mutableStateOf(true) }
-    var globalExpanded by rememberSaveable { mutableStateOf(true) }
+    var collapsedTags by rememberSaveable { mutableStateOf(emptyList<String>()) }
     // 长按某一行弹出的操作单；null 表示没弹
     var actionEntry by remember { mutableStateOf<SkillUiEntry?>(null) }
 
     val settingsViewModel = rememberSettingsViewModel()
     val selection = rememberListSelectionState()
     // 选中 id 带作用域：同名技能可能项目与全局各一份；内置技能不在候选里，全选也不会把它们算进去
-    val selectionIds = entries.filterNot { it.builtin }.map(::skillSelectionId)
+    val selectionIds = entries.filterNot { it.builtin }.map(::skillSelectionId).distinct()
     LaunchedEffect(selectionIds) { selection.retain(selectionIds) }
     var showBatchDelete by remember { mutableStateOf(false) }
     // 内置技能随 App 打包，不可删也不参与多选
@@ -209,130 +224,31 @@ private fun SkillsListContent(
                 }
             }
         }
-        // 折叠头与卡片之间原本靠 Column 的 spacedBy 拉开 8dp，Lazy 里改成标题条目自带下内边距；
-        // 每行套 LazyGroupItem 拼出卡片圆角，整组收起/展开用 animateItem 保出淡入淡出的过渡
-        if (builtinSkills.isNotEmpty()) {
-            item(key = "header_builtin", contentType = "group_header") {
+        groups.forEach { group ->
+            val groupKey = group.label?.let { "tag:$it" } ?: "untagged"
+            val expanded = groupKey !in collapsedTags
+            item(key = "header:$groupKey", contentType = "group_header") {
                 CollapsibleGroupHeader(
-                    text = stringResource(R.string.skills_builtin),
-                    expanded = builtinExpanded,
-                    onToggle = { builtinExpanded = !builtinExpanded },
+                    text = group.label ?: stringResource(R.string.skills_tags_ungrouped),
+                    expanded = expanded,
+                    onToggle = { collapsedTags = if (expanded) collapsedTags + groupKey else collapsedTags - groupKey },
                     modifier = Modifier.padding(bottom = Spacing.sm)
                 )
             }
-            if (builtinExpanded) {
-                itemsIndexed(
-                    items = builtinSkills,
-                    key = { _, entry -> "skill_builtin:${entry.name}" },
+            if (expanded) {
+                itemsIndexed(items = group.entries,
+                    key = { _, entry -> "${groupKey.length}:$groupKey:${skillSelectionId(entry)}" },
                     contentType = { _, _ -> "skill" }
                 ) { index, entry ->
-                    LazyGroupItem(
-                        index = index,
-                        count = builtinSkills.size,
-                        modifier = Modifier
-                            .animateItem()
-                            .padding(bottom = if (index == builtinSkills.lastIndex) Spacing.sm else 0.dp)
+                    LazyGroupItem(index = index, count = group.entries.size,
+                        modifier = Modifier.animateItem().padding(bottom = if (index == group.entries.lastIndex) Spacing.sm else 0.dp)
                     ) {
                         if (index > 0) SettingsDivider()
-                        SkillRow(
-                            entry = entry,
-                            onDelete = { onDelete(entry) },
-                            onLongClick = { actionEntry = entry },
-                            onClick = { onOpenDetail(entry) },
-                            selectionMode = selection.selectionMode
-                        )
-                    }
-                }
-            }
-        }
-
-        item(key = "header_project", contentType = "group_header") {
-            CollapsibleGroupHeader(
-                text = if (projectName != null) {
-                    stringResource(R.string.perm_current_project, projectName)
-                } else {
-                    stringResource(R.string.perm_current_project_none)
-                },
-                expanded = projectExpanded,
-                onToggle = { projectExpanded = !projectExpanded },
-                modifier = Modifier.padding(bottom = Spacing.sm)
-            )
-        }
-        if (projectExpanded) {
-            if (projectSkills.isEmpty()) {
-                item(key = "empty_project", contentType = "group_empty") {
-                    LazyGroupItem(
-                        index = 0,
-                        count = 1,
-                        modifier = Modifier.padding(bottom = Spacing.sm)
-                    ) {
-                        SkillEmptyHint(stringResource(R.string.skills_no_project_skills))
-                    }
-                }
-            } else {
-                itemsIndexed(
-                    items = projectSkills,
-                    key = { _, entry -> "skill_project:${entry.name}" },
-                    contentType = { _, _ -> "skill" }
-                ) { index, entry ->
-                    LazyGroupItem(
-                        index = index,
-                        count = projectSkills.size,
-                        modifier = Modifier
-                            .animateItem()
-                            .padding(bottom = if (index == projectSkills.lastIndex) Spacing.sm else 0.dp)
-                    ) {
-                        if (index > 0) SettingsDivider()
-                        SkillRow(
-                            entry = entry,
-                            onDelete = { onDelete(entry) },
-                            onLongClick = { actionEntry = entry },
-                            onClick = { onOpenDetail(entry) },
+                        SkillRow(entry = entry, onDelete = if (entry.builtin) null else ({ onDelete(entry) }),
+                            onLongClick = { actionEntry = entry }, onClick = { onOpenDetail(entry) },
                             selectionMode = selection.selectionMode,
                             selected = selection.isSelected(skillSelectionId(entry)),
-                            onToggleSelect = { selection.toggle(skillSelectionId(entry)) }
-                        )
-                    }
-                }
-            }
-        }
-
-        item(key = "header_global", contentType = "group_header") {
-            CollapsibleGroupHeader(
-                text = stringResource(R.string.perm_global),
-                expanded = globalExpanded,
-                onToggle = { globalExpanded = !globalExpanded },
-                modifier = Modifier.padding(bottom = Spacing.sm)
-            )
-        }
-        if (globalExpanded) {
-            if (globalSkills.isEmpty()) {
-                item(key = "empty_global", contentType = "group_empty") {
-                    LazyGroupItem(index = 0, count = 1) {
-                        SkillEmptyHint(stringResource(R.string.skills_no_global_skills))
-                    }
-                }
-            } else {
-                itemsIndexed(
-                    items = globalSkills,
-                    key = { _, entry -> "skill_global:${entry.name}" },
-                    contentType = { _, _ -> "skill" }
-                ) { index, entry ->
-                    LazyGroupItem(
-                        index = index,
-                        count = globalSkills.size,
-                        modifier = Modifier.animateItem()
-                    ) {
-                        if (index > 0) SettingsDivider()
-                        SkillRow(
-                            entry = entry,
-                            onDelete = { onDelete(entry) },
-                            onLongClick = { actionEntry = entry },
-                            onClick = { onOpenDetail(entry) },
-                            selectionMode = selection.selectionMode,
-                            selected = selection.isSelected(skillSelectionId(entry)),
-                            onToggleSelect = { selection.toggle(skillSelectionId(entry)) }
-                        )
+                            onToggleSelect = { selection.toggle(skillSelectionId(entry)) })
                     }
                 }
             }
@@ -340,7 +256,7 @@ private fun SkillsListContent(
     }
 
     if (showBatchDelete) {
-        val selectedEntries = entries.filter { skillSelectionId(it) in selection.selectedIds }
+        val selectedEntries = entries.filter { skillSelectionId(it) in selection.selectedIds }.distinctBy(::skillSelectionId)
         BatchDeleteConfirmDialog(
             title = stringResource(R.string.common_delete),
             message = stringResource(R.string.common_batch_delete_confirm, selectedEntries.size),
@@ -413,7 +329,6 @@ private fun SkillRow(
 }
 
 /** 选中 id：「作用域:名称」——同名技能可能项目与全局各一份。 */
-private fun skillSelectionId(entry: SkillUiEntry): String = "${entry.scope.name}:${entry.name}"
 
 /**
  * 长按技能行的操作单：搬动（全局 ⇄ 当前项目）与导出。
@@ -532,13 +447,17 @@ private fun SkillRowContent(
                 } else {
                     McpPill(
                         text = stringResource(if (entry.disabled) R.string.common_disabled else R.string.common_enabled),
-                        textColor = if (entry.disabled) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.tertiary,
-                        backgroundColor = (if (entry.disabled) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.tertiary).copy(alpha = 0.12f)
+                        textColor = if (entry.disabled) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.primary,
+                        backgroundColor = (if (entry.disabled) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.primary).copy(alpha = 0.12f)
                     )
                 }
             }
-            val metadata = listOfNotNull(entry.typeName ?: entry.typeId,
-                entry.tags.takeIf { it.isNotEmpty() }?.joinToString(" · "))
+            val scopeLabel = stringResource(when (entry.scope) {
+                SkillScope.BUILTIN -> R.string.skills_builtin
+                SkillScope.PROJECT -> R.string.skills_scope_project
+                SkillScope.GLOBAL -> R.string.skills_scope_global
+            })
+            val metadata = listOf(scopeLabel) + entry.classificationLabels + entry.tags
             if (metadata.isNotEmpty()) Text(metadata.joinToString(" · "),
                 style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(

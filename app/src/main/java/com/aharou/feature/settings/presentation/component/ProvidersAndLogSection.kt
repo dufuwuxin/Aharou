@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -53,7 +54,7 @@ import sh.calvin.reorderable.rememberReorderableLazyListState
  * 每行为一组圆角卡片，长按内容区域可调整提供商顺序（持久化到 sortOrder）。
  */
 @Composable
-internal fun ProvidersSection(
+internal fun ProviderConnectionsList(
     providers: List<AIProviderConfig>,
     onEdit: (AIProviderConfig) -> Unit,
     onDelete: (AIProviderConfig) -> Unit,
@@ -71,9 +72,9 @@ internal fun ProvidersSection(
     LazyColumn(
         state = lazyListState,
         modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = Spacing.lg)
-            .padding(bottom = Spacing.xl),
+            .fillMaxWidth()
+            .heightIn(max = 560.dp)
+            .padding(horizontal = Spacing.lg),
         contentPadding = PaddingValues(top = Spacing.sm),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {

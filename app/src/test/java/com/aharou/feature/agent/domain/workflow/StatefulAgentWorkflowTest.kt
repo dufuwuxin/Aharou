@@ -124,7 +124,9 @@ class StatefulAgentWorkflowTest {
         modelMetadataService = metadata,
         compactionModelSettingsRepository = compactionSettings,
         titleModelSettingsRepository = mockk(),
-        defaultModelSettingsRepository = mockk(),
+        defaultModelSettingsRepository = mockk {
+            coEvery { resolveRouting(any(), any()) } returns null
+        },
         generalSettingsRepository = generalSettings,
         sessionUseCase = sessions,
         messagePersistenceUseCase = persistence,
@@ -169,6 +171,8 @@ class StatefulAgentWorkflowTest {
         // 这些用例不覆盖跨供应商回退，显式打成未激活。
         coEvery { failoverCoordinator.overrideConfig(any()) } returns null
         coEvery { failoverCoordinator.next(any(), any()) } returns null
+        coEvery { failoverCoordinator.nextForProvider(any(), any()) } returns null
+        every { failoverCoordinator.bindOrigin(any(), any()) } answers { firstArg() }
         every { failoverCoordinator.isActive(any()) } returns false
     }
 
@@ -242,6 +246,66 @@ class StatefulAgentWorkflowTest {
         assertTrue(requests[0].filterIsInstance<AgentMessage.UserMessage>().any { it.content.contains("file-history-index") })
         assertEquals(requests[0].filterIsInstance<AgentMessage.ToolResultMessage>(),
             requests[1].filterIsInstance<AgentMessage.ToolResultMessage>().take(9))
+    }
+
+    @Test
+    fun nativeDynamicContextReachesProviderAtTheTailWithoutChangingSystem() = runTest {
+        prepare(flow { emit(AIStreamChunk.Final(AIResponse("done"))) })
+        every { prompts.buildNativeRequest(any()) } returns
+            com.aharou.feature.agent.domain.prompt.RequestPrompt("system", "native dynamic reading")
+        coEvery { prompts.buildRequest(any(), any(), any()) } answers {
+            com.aharou.feature.agent.domain.prompt.RequestPrompt(secondArg(), thirdArg())
+        }
+        val system = slot<String>()
+        val sent = slot<List<AgentMessage>>()
+        every { provider.completeStream(capture(system), capture(sent), any(), any()) } returns flow {
+            emit(AIStreamChunk.Final(AIResponse("done")))
+        }
+        workflow.executeEvents("request", context, emptyList()).collect {
+            if (it is AgentEvent.AssistantText) it.persisted?.complete(Unit)
+        }
+        assertEquals("system", system.captured)
+        assertTrue((sent.captured.last() as AgentMessage.UserMessage).content.contains("native dynamic reading"))
+        assertFalse((sent.captured.last() as AgentMessage.UserMessage).countsAsRound)
+    }
+
+    @Test
+    fun toolEditsRefreshNativeContextBeforeTheNextProviderRequest() = runTest {
+        prepare(flow { emit(AIStreamChunk.Final(AIResponse("done"))) })
+        var reading = "before edit"
+        every { prompts.buildNativeRequest(any()) } answers {
+            com.aharou.feature.agent.domain.prompt.RequestPrompt("stable system", reading)
+        }
+        coEvery { prompts.buildRequest(any(), any(), any()) } answers {
+            com.aharou.feature.agent.domain.prompt.RequestPrompt(secondArg(), thirdArg())
+        }
+        val tool = object : AgentTool() {
+            override val name = "fixture"
+            override val description = "fixture"
+            override val parameters: Map<String, ToolParameter> = emptyMap()
+            override suspend fun executeWithContext(args: Map<String, JsonElement>, context: AgentContext): ToolResult {
+                reading = "after edit"
+                return ToolResult.Success(JsonPrimitive("updated"))
+            }
+        }
+        val systems = mutableListOf<String>()
+        val requests = mutableListOf<List<AgentMessage>>()
+        var round = 0
+        every { provider.completeStream(capture(systems), capture(requests), any(), any()) } answers {
+            flow { emit(AIStreamChunk.Final(if (round++ == 0) AIResponse("", listOf(ToolCall("edit-native", tool.name, emptyMap()))) else AIResponse("done"))) }
+        }
+        coEvery { policyEngine.evaluate(any(), any(), any(), any(), any(), any()) } returns
+            ToolPermissionPolicyEngine.EvalResult(ToolPermissionPolicyEngine.Verdict.ALLOW, emptyList())
+        every { outputStore.process(any(), any(), any()) } answers { arg<ToolResult>(2) }
+        workflow.executeEvents("request", context, listOf(tool)).collect {
+            if (it is AgentEvent.AssistantText) it.persisted?.complete(Unit)
+            if (it is AgentEvent.ToolCallFinished) it.persisted?.complete(Unit)
+        }
+        assertEquals(2, requests.size)
+        assertEquals(listOf("stable system", "stable system"), systems)
+        assertTrue((requests[0].last() as AgentMessage.UserMessage).content.contains("before edit"))
+        assertTrue((requests[1].last() as AgentMessage.UserMessage).content.contains("after edit"))
+        assertFalse((requests[1].last() as AgentMessage.UserMessage).content.contains("before edit"))
     }
 
     @Test
@@ -599,6 +663,9 @@ class StatefulAgentWorkflowTest {
         every { provider.model } returns "model"
         every { provider.completeStream(any(), any(), any(), any()) } returns chunks
         every { prompts.build(any(), any()) } returns "system"
+        every { prompts.buildNativeRequest(any()) } answers {
+            com.aharou.feature.agent.domain.prompt.RequestPrompt(prompts.build(firstArg()))
+        }
         coEvery { prompts.buildForRequest(any(), any()) } answers { secondArg<String>() }
         coEvery { prompts.buildRequest(any(), any()) } coAnswers {
             com.aharou.feature.agent.domain.prompt.RequestPrompt(prompts.buildForRequest(firstArg(), secondArg()))

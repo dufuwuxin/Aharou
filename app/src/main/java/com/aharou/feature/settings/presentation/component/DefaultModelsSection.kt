@@ -46,6 +46,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -120,6 +121,11 @@ internal fun DefaultModelsSection(
     /** 各场景「实际生效的模型」只读视图；默认自取，调用方无需传。 */
     sceneViewModel: ModelSceneViewModel = hiltViewModel(),
 ) {
+    var routesOpen by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    if (routesOpen) {
+        ModelRouteGroupsSection(providers = providers, onBack = { routesOpen = false })
+        return
+    }
     val sceneResolutions by sceneViewModel.resolutions.collectAsStateWithLifecycle()
     var showVisionSheet by remember { mutableStateOf(false) }
     var showCompactionSheet by remember { mutableStateOf(false) }
@@ -168,6 +174,10 @@ internal fun DefaultModelsSection(
         verticalArrangement = Arrangement.spacedBy(Spacing.sm)
     ) {
         ModelCatalogRefreshRow()
+        SettingsGroup {
+            SettingsRow(title = stringResource(R.string.route_groups_title), subtitle = stringResource(R.string.route_groups_summary),
+                onClick = { routesOpen = true }, modifier = Modifier.testTag("default_model_route_groups"))
+        }
         SettingsGroup {
             SettingsRow(
                 icon = FeatherIcons.Image,

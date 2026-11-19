@@ -21,7 +21,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -100,8 +99,14 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
     val sessionMenu = LocalProjectChatMenu.current
     val header: @Composable (@Composable (() -> Unit) -> Unit) -> Unit = { mapMenu ->
         Column(verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
-        Box(Modifier.fillMaxWidth().height(0.dp)) {
-            Popup(alignment = Alignment.TopEnd) {
+        Surface(shape = RoundedCornerShape(Radius.mdLarge), color = MaterialTheme.semanticColors.cardSurface,
+            modifier = Modifier.fillMaxWidth().testTag("project_workbench_header")) {
+            Row(Modifier.fillMaxWidth().padding(start = Spacing.md), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f).padding(vertical = Spacing.sm), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+                Text(project?.title.orEmpty(), style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(stringResource(R.string.project_workbench_progress, executableTasks.count { ProjectWorkflowPlan.delivered(it) }, executableTasks.size),
+                    style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             Box {
                 IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(48.dp)) {
                     Icon(FeatherIcons.MoreVertical, stringResource(R.string.project_view_actions))
@@ -141,7 +146,7 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
                     sessionMenu { menuOpen = false }
                 }
             }
-        }
+            }
         }
         tasks.firstOrNull { it.id == requirementBranchId && it.isRequirementBranch }?.let { selected ->
             Text(stringResource(R.string.project_branch_composer, selected.title),

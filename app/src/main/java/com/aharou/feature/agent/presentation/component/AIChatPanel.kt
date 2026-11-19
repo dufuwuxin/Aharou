@@ -86,6 +86,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aharou.R
+import com.aharou.feature.settings.domain.model.AIProviderConfig
 import com.aharou.core.theme.Spacing
 import com.aharou.core.ui.ImageViewerHost
 import com.aharou.core.ui.LocalImageViewer
@@ -228,13 +229,21 @@ fun AIChatPanel(
     val defaultProviderId = settingsViewModel?.defaultModelProviderId?.collectAsStateWithLifecycle()?.value ?: ""
     val defaultModelName = settingsViewModel?.defaultModel?.collectAsStateWithLifecycle()?.value ?: ""
     // 未绑定会话回退：新会话默认模型（主页空会话中选择后记忆），未设置则为 null（UI 显示默认图标/顶栏模型名留空）。
-    val defaultFallbackProvider = providers
+    val routeViewModel: com.aharou.feature.settings.presentation.ModelRouteGroupViewModel = androidx.hilt.navigation.compose.hiltViewModel()
+    val routeGroups by routeViewModel.groups.collectAsStateWithLifecycle()
+    fun resolveRoute(selection: String?): AIProviderConfig? = routeGroups.firstOrNull { it.selectionId == selection }?.let { group ->
+        val member = group.models.firstOrNull() ?: return@let null
+        providers.firstOrNull { it.id == member.providerId && it.hasUsableApiKey && member.model in it.models }
+            ?.copy(selectedModel = member.model)
+    }
+    val defaultFallbackProvider = resolveRoute(defaultProviderId) ?: providers
         .find { it.id == defaultProviderId }
         ?.takeIf { it.hasUsableApiKey }
         ?.let { if (defaultModelName.isNotBlank() && defaultModelName in it.models) it.copy(selectedModel = defaultModelName) else it }
     val boundProvider = run {
         val (boundProviderId, boundModel) = sessionProviderModel
-        if (!boundProviderId.isNullOrBlank()) {
+        if (boundProviderId?.startsWith("route:") == true) resolveRoute(boundProviderId)
+        else if (!boundProviderId.isNullOrBlank()) {
             // 与 workflow.resolveProviderConfig 保持一致：绑定 provider 须启用且已填 apiKey，否则回退默认模型
             providers.find { it.id == boundProviderId }
                 ?.takeIf { it.hasUsableApiKey }

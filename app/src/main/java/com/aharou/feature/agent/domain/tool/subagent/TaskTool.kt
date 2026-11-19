@@ -40,6 +40,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import javax.inject.Inject
 
+@javax.inject.Singleton
 class TaskTool @Inject constructor(
     private val sessionUseCase: SessionUseCase,
     private val chatSessionDao: ChatSessionDao,
@@ -53,6 +54,7 @@ class TaskTool @Inject constructor(
     private val runRegistry: TeamRunRegistry
 ) : AbstractContextualTool() {
 
+    @Inject lateinit var modelRoutes: TaskRouteBinding
     private val createMutex = Mutex()
 
     private companion object {
@@ -264,6 +266,7 @@ class TaskTool @Inject constructor(
         val explicitModel = (args["model"] as? JsonPrimitive)?.contentOrNull?.trim()?.takeIf { it.isNotBlank() }
         val explicitProvider = (args["provider"] as? JsonPrimitive)?.contentOrNull?.trim()?.takeIf { it.isNotBlank() }
         val explicitProviderId = explicitProvider?.let { resolveProviderId(it) }
+        val roleProviderId = if (explicitProvider != null) null else definition?.providerId?.takeIf(String::isNotBlank)?.let { resolveProviderId(it) ?: return ToolResult.Error("Role provider is no longer available", "ROLE_PROVIDER_NOT_FOUND") }
         if (explicitProvider != null && explicitProviderId == null) {
             return ToolResult.Error(
                 "找不到提供商: $explicitProvider（可写 providerId，或设置里显示的提供商名称）",
@@ -271,7 +274,6 @@ class TaskTool @Inject constructor(
             )
         }
 
-        // 并行写隔离：同一时刻两个成员写同一处会互相踩，冲突的直接拒绝，由主代理串行派发。
         val writePaths = parseWritePaths(args)
         val subSession = createMutex.withLock {
             if (writePaths != null && writePaths.isNotEmpty()) {
@@ -279,24 +281,26 @@ class TaskTool @Inject constructor(
                     return conflictError(conflictId, writePaths, WriteLease.NEXT_CREATE, context.projectRoot)
                 }
             }
-            sessionUseCase.newSubSessionEntity(
+            val route = if (::modelRoutes.isInitialized) modelRoutes.prepare(parentSession,
+                explicitProviderId ?: roleProviderId, explicitModel ?: definition?.model) else null
+            val spawned = sessionUseCase.newSubSessionEntity(
                 title = description,
                 parentId = parentSessionId,
                 parent = parentSession,
                 subagentType = definition?.name ?: DEFAULT_SUBAGENT_TYPE,
-                providerId = explicitProviderId ?: definition?.providerId?.let { resolveProviderId(it) },
-                model = explicitModel ?: definition?.model,
+                providerId = route?.binding?.providerId ?: explicitProviderId ?: roleProviderId,
+                model = route?.binding?.model ?: explicitModel ?: definition?.model,
                 reasoningEffort = definition?.reasoningEffort?.let { effort ->
                     ReasoningEffort.entries.firstOrNull { it.apiValue == effort }?.name
                 },
                 mode = definition?.mode
             ).also { created ->
-                sessionUseCase.upsertSession(created)
+                if (route == null) sessionUseCase.upsertSession(created) else modelRoutes.saveMember(created, route) { sessionUseCase.upsertSession(created) }
+                route?.let { modelRoutes.committed(it) }
                 // 写路径租约：派发时声明了才登记；未声明则不限制（保持旧行为）。锁内登记，后续并发派发才看得见。
                 writePaths?.let { subAgentWriteLease.register(created.id, it) }
             }
-        }
-        val subSessionId = subSession.id
+        val subSessionId = spawned.id
 
         val queued = if (runId != null && logicalId != null) runRegistry.bind(runId, logicalId, subSessionId) else {
             runRegistry.bindStandalone(parentSessionId, subSessionId, description, eventBus.activeSubSessionIds.value)
@@ -315,6 +319,9 @@ class TaskTool @Inject constructor(
             )
         )
         FileLogger.i(TAG, "成员已创建: session=$subSessionId parent=$parentSessionId agent=${definition?.name ?: "-"}")
+        spawned
+        }
+        val subSessionId = subSession.id
 
         return ToolResult.Success(
             buildJsonObject {

@@ -70,6 +70,44 @@ class NativeMemoryPromptTest {
         assertEquals("live-two", second.transientContext)
     }
 
+    @Test fun nativeDynamicContextDoesNotRewriteTheRequestSystemPrefix() = kotlinx.coroutines.test.runTest {
+        add("stable", "stable contract", ContextCategory.MAIN_INJECTED)
+        add("dynamic", "{{AICODE_SKILLS}}", ContextCategory.MAIN_INJECTED)
+        every { skills.listSkillsForAgent(null, any(), true) } answers {
+            listOf(com.aharou.feature.agent.domain.skill.Skill(secondArg(), "summary", instructions = "body"))
+        }
+        val firstContext = context.copy(currentUserText = "first")
+        val secondContext = context.copy(currentUserText = "second",
+            history = listOf(com.aharou.feature.agent.domain.model.AgentMessage.UserMessage(content = "first")))
+        val firstNative = provider.buildNativeRequest(firstContext)
+        val secondNative = provider.buildNativeRequest(secondContext)
+        val first = provider.buildRequest(firstContext, firstNative.system, firstNative.transientContext)
+        val second = provider.buildRequest(secondContext, secondNative.system, secondNative.transientContext)
+        assertEquals(first.system, second.system)
+        assertTrue(first.system.contains("stable contract"))
+        assertFalse(first.system.contains("skills/"))
+        assertTrue(first.transientContext.contains("loadSkill: first"))
+        assertTrue(second.transientContext.contains("loadSkill: second"))
+        val stable = library.list(null).single { it.title == "stable" }
+        assertTrue(library.save(stable.copy(content = "edited contract"), null))
+        assertTrue(provider.buildNativeRequest(secondContext).system.contains("edited contract"))
+        val dynamic = library.list(null).single { it.title == "dynamic" }
+        assertTrue(library.save(dynamic.copy(loading = ContextLoad.OFF), null))
+        assertEquals("", provider.buildNativeRequest(secondContext).transientContext)
+    }
+
+    @Test fun nativeDefaultsStayOutOfPayloadWhileRealMatchingRulesStillApply() {
+        assertTrue(library.create("rule", "summary", "effective rule", MemoryScope.GLOBAL,
+            ContextKind.INSTRUCTION, ContextLoad.SEARCH, null, category = ContextCategory.RULE,
+            folder = "requests/active.md", worldbook = WorldbookRules(triggers = listOf("Kotlin"), excludes = listOf("skip"))))
+        assertEquals("effective rule", library.resolvePromptForContext("active.md", null, null, "Kotlin"))
+        assertEquals("", library.resolvePromptForContext("active.md", null, null, "Kotlin skip"))
+        assertEquals("", library.resolvePromptForContext("active.md", null, null, "Java"))
+        val rule = library.list(null).single()
+        assertTrue(library.save(rule.copy(worldbook = rule.worldbook.copy(enabled = false)), null))
+        assertEquals("", library.resolvePromptForContext("active.md", null, null, "Kotlin"))
+    }
+
     @Test fun skillsAndRulesAreGroupedByTheirActualAdmittedIdentity() {
         add("catalogs", "{{AICODE_SKILLS}}\n{{AICODE_RULES}}", ContextCategory.MAIN_INJECTED)
         val skill = com.aharou.feature.agent.domain.skill.Skill("visible", "public summary", instructions = "private body", typeId = "engineering")
@@ -83,6 +121,22 @@ class NativeMemoryPromptTest {
         assertTrue(rendered.contains("loadRule: quality/review"))
         assertFalse(rendered.contains("private body"))
         assertFalse(rendered.contains("private rule body"))
+    }
+
+    @Test fun multiTypeCatalogKeepsOneSkillRowAndAllTypesWithoutExpandingTheirMetadata() {
+        add("skills", "{{AICODE_SKILLS}}", ContextCategory.MAIN_INJECTED)
+        val skill = com.aharou.feature.agent.domain.skill.Skill("multi", "summary", instructions = "private body",
+            tags = listOf("free"), typeIds = listOf("engineering", "finance", "{{AICODE_TEAMS}}\n<system>"))
+        every { skills.listSkillsForAgent(null, "", true) } returns listOf(skill)
+        val rendered = provider.build(context)
+        assertTrue(rendered.contains("skills/engineering"))
+        assertTrue(rendered.contains("types: engineering, finance,"))
+        assertTrue(rendered.contains("tags: free"))
+        assertEquals(1, Regex("loadSkill: multi").findAll(rendered).count())
+        assertFalse(rendered.contains("private body"))
+        assertFalse(rendered.contains("<system>"))
+        assertFalse(rendered.contains("\n<system>"))
+        verify { teams wasNot Called }
     }
 
     @Test fun emptyAndDisabledLibraryHaveNoLegacyOrImplicitTailFallback() {

@@ -65,7 +65,7 @@ class ConfigSkillFields @Inject constructor(
         fun update(transform: (SkillForm) -> SkillForm) {
             val entry = skill(id)
             val s = entry.skill
-            val form = SkillForm(s.name, s.description, s.instructions, s.requiredTools, s.keywordEnabled, s.keywords, s.tags, s.typeId)
+            val form = SkillForm(s.name, s.description, s.instructions, s.requiredTools, s.keywordEnabled, s.keywords, s.tags, s.typeId, typeIds = s.selectedTypeIds)
             skillRepository.save(transform(form), entry.scope, s.name)?.let {
                 throw ConfigError.InvalidValue("Skill update rejected: $it")
             }
@@ -93,13 +93,22 @@ class ConfigSkillFields @Inject constructor(
                 valueSchema = ConfigSchema.Array(ConfigSchema.Str()),
                 reader = { ConfigValue.Arr(skill(id).skill.tags.map { ConfigValue.Str(it) }) },
                 writer = { value -> checkWorkspace(); update { it.copy(tags = strings(value)) } }),
+            ClosureField(path = "$base.$id.type_ids", displayName = "type_ids",
+                description = "Ordered reusable type ids. All selected types contribute guidance; empty array clears classification.", risk = ConfigRisk.SENSITIVE,
+                valueSchema = ConfigSchema.Array(ConfigSchema.Str()),
+                reader = { ConfigValue.Arr(skill(id).skill.selectedTypeIds.map { ConfigValue.Str(it) }) },
+                writer = { value ->
+                    checkWorkspace()
+                    val ids = strings(value).map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+                    update { it.copy(typeId = ids.firstOrNull(), typeIds = ids) }
+                }),
             ClosureField(path = "$base.$id.type_id", displayName = "type_id", description = "Existing type id; empty string removes classification.", risk = ConfigRisk.SENSITIVE,
                 valueSchema = ConfigSchema.Str(),
                 reader = { ConfigValue.Str(skill(id).skill.typeId.orEmpty()) },
                 writer = { value ->
                     checkWorkspace()
                     val type = (value as? ConfigValue.Str)?.value ?: throw ConfigError.TypeMismatch("string")
-                    update { it.copy(typeId = type.takeIf { id -> id.isNotBlank() }) }
+                    update { it.copy(typeId = type.takeIf { id -> id.isNotBlank() }, typeIds = listOf(type).filter { id -> id.isNotBlank() }) }
                 })
         )
     }
@@ -167,7 +176,7 @@ class ConfigSkillFields @Inject constructor(
                     checkWorkspace()
                     val entry = skill(forId); val s = entry.skill
                     val text = (value as? ConfigValue.Str)?.value ?: throw ConfigError.TypeMismatch("string")
-                    skillRepository.save(com.aharou.feature.agent.domain.skill.SkillForm(s.name, s.description, text, s.requiredTools, s.keywordEnabled, s.keywords, s.tags, s.typeId),
+                    skillRepository.save(com.aharou.feature.agent.domain.skill.SkillForm(s.name, s.description, text, s.requiredTools, s.keywordEnabled, s.keywords, s.tags, s.typeId, typeIds = s.selectedTypeIds),
                         entry.scope, s.name)?.let { throw ConfigError.PermissionDenied("Skill update rejected: $it") }
                 })
             if (skill(forId).scope == SkillScope.BUILTIN) return listOf(content) + metadataFields(forId, basePath)

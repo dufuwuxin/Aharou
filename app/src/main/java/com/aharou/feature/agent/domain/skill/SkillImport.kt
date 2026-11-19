@@ -82,7 +82,7 @@ internal object SkillImporter {
             return SkillImportReport(emptyList(), fatal = SkillImportError.EMPTY_CONTENT)
         }
         val content = SkillParser.serialize(name, parsed.description, parsed.requiredTools, parsed.instructions,
-            parsed.keywordEnabled, parsed.keywords, parsed.tags, parsed.typeId)
+            parsed.keywordEnabled, parsed.keywords, parsed.tags, parsed.typeId, parsed.selectedTypeIds)
         return try {
             provider.writeFile("${rootFor(skillsRoot, name)}/$SKILL_FILE", content, overwrite = true)
             SkillImportReport(imported = listOf(name))

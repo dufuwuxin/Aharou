@@ -31,7 +31,7 @@ class ToolRegistry @Inject constructor(
     }
 
     fun requestTools(allowed: List<AgentTool>, context: AgentContext): List<AgentTool> =
-        allowed.filter { it.name == "memory" || it.name == "tool_search" || isActivated(it.name, context) }
+        allowed.filter { livePermission(it) && (it.name == "memory" || it.name == "tool_search" || isActivated(it.name, context)) }
 
     private fun scope(context: AgentContext) =
         (context.sessionId ?: context.inputMessageId) to context.projectRoot
@@ -70,7 +70,7 @@ class ToolRegistry @Inject constructor(
             // 但 **MCP 工具是各服务器连上后异步追加的**，哪个服务器先回就先注册。
             // 连接快慢一抖，tools 数组顺序就变——而 tools 排在 system prompt 之前，
             // 是整条前缀里最靠前的一段，顺序一变整段缓存全废。
-            val registered = tools.values.toList()
+            val registered = tools.values.filter(::livePermission)
             val names = registered.mapTo(HashSet()) { it.name }
             return (registered + custom.filterNot { it.name in names }).sortedBy { it.name }
         }
@@ -80,7 +80,7 @@ class ToolRegistry @Inject constructor(
 
     /** Discovery is limited to the current turn's execution snapshot, including ordinary/custom tools. */
     fun getDeferredTools(context: AgentContext): List<AgentTool> =
-        synchronized(discoveryTools) { discoveryTools[discoveryScope(context)].orEmpty() }
+        synchronized(discoveryTools) { discoveryTools[discoveryScope(context)].orEmpty().filter(::livePermission) }
 
     /** 展开一批延迟加载工具，使其进入后续每轮的 tools 数组。 */
     fun activate(names: Collection<String>, context: AgentContext) {
@@ -92,6 +92,8 @@ class ToolRegistry @Inject constructor(
 
     fun isActivated(name: String, context: AgentContext): Boolean =
         synchronized(activated) { activated[scope(context)]?.contains(name) == true }
+
+    private fun livePermission(tool: AgentTool) = tool.name != "app_control" || com.aharou.core.config.FullAccessCapability.enabled.value
 
     fun hasTool(name: String): Boolean {
         return tools.containsKey(name) || customTools().any { it.name == name }
