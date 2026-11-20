@@ -93,13 +93,17 @@ class HostPluginBridge @Inject constructor(
             context.sessionId, context.projectRoot, context)
         when (verdict) {
             is PermissionVerdict.Deny -> ToolResult.Error(verdict.reason, verdict.code).toTransportString()
-            PermissionVerdict.Allow -> tool.executeWithContext(args, context).toTransportString()
+            PermissionVerdict.Allow -> tool.executeWithContext(args, context).also { result ->
+                if (result is ToolResult.Success) policy.markSuccessfulPrivateRead(tool.name, args, context.sessionId)
+            }.toTransportString()
             is PermissionVerdict.Ask -> {
                 val batch = PendingPermissionBatch(UUID.randomUUID().toString(), context.sessionId.orEmpty(), listOf(verdict.request))
                 val choices = gate.awaitBatch(batch, listOf(verdict), context.projectRoot)
                 if (choices[verdict.request.id] == null || choices[verdict.request.id] == PermissionChoice.REJECT) {
                     ToolResult.Error("Tool invocation was not approved", "PERMISSION_DENIED").toTransportString()
-                } else tool.executeWithContext(args, context).toTransportString()
+                } else tool.executeWithContext(args, context).also { result ->
+                    if (result is ToolResult.Success) policy.markSuccessfulPrivateRead(tool.name, args, context.sessionId)
+                }.toTransportString()
             }
         }
     }

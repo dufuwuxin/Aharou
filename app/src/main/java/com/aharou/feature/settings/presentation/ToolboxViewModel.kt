@@ -187,7 +187,9 @@ class ToolboxViewModel @Inject constructor(
                     val output = if (verdict.verdict == ToolPermissionPolicyEngine.Verdict.DENY) {
                         ToolResult.Error(verdict.denyReason.orEmpty(), "PERMISSION_DENIED")
                     } else {
-                        tool.executeWithContext(args, AgentContext(null, null, root, null))
+                        tool.executeWithContext(args, AgentContext(null, null, root, null)).also { output ->
+                            if (output is ToolResult.Success) policy.markSuccessfulPrivateRead(tool.name, args, null)
+                        }
                     }
                     Triple(output, truncated, exitCode)
                 }

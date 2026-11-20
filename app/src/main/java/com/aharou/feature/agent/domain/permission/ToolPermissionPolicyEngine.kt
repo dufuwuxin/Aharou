@@ -293,11 +293,8 @@ class ToolPermissionPolicyEngine @Inject constructor(
             )
         }
 
-        // 污点追踪：只读/自动放行的工具也可能读私密数据（如 readFile/memory），故先于一切放行分支判定。
-        // 任何模式都翻不过（AUTO 已在上方提前返回，不在此列）。
-        if (isPrivateRead(toolName, args)) {
-            TaintTracker.taint(sessionId.orEmpty())
-        }
+        // 污点追踪只在工具成功执行后记账；此处仅阻止已经污染会话的外发。
+        // 这样被拒绝、用户取消或执行失败的读取不会污染会话。
         if (isTaintedEgress(sessionId, toolName, args, capabilities)) {
             val target = EgressPolicy.egressTarget(args)
             return audit(
@@ -507,6 +504,11 @@ class ToolPermissionPolicyEngine @Inject constructor(
         val normalized = normalizePath(path)
         if (!normalized.startsWith("/")) return false
         return normalized != WORKSPACE_CONTAINER_PREFIX && !normalized.startsWith("$WORKSPACE_CONTAINER_PREFIX/")
+    }
+
+    /** 由执行协调层在工具成功返回后调用，避免拒绝或失败的读取污染会话。 */
+    fun markSuccessfulPrivateRead(toolName: String, args: Map<String, JsonElement>, sessionId: String?) {
+        if (isPrivateRead(toolName, args)) TaintTracker.taint(sessionId.orEmpty())
     }
 
     /** 污点会话里的出站调用且目标是「非白名单主机或未知」→ 需确认。 */

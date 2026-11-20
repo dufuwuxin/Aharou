@@ -1160,6 +1160,9 @@ class StatefulAgentWorkflow @Inject constructor(
         return try {
             withContext(Dispatchers.IO) {
                 val result = tool.executeWithContext(vault.execArgs(tool.acceptsSecrets, toolCall.arguments), context)
+                if (result is ToolResult.Success) {
+                    policyEngine.markSuccessfulPrivateRead(name, toolCall.arguments, context.sessionId)
+                }
                 val attachments = if (name == "sendFile" || name == "generateImage") extractAttachments(result) else emptyList()
                 val images = if (result is ToolResult.Success) result.images else emptyList()
                 val transportResult = if (attachments.isNotEmpty()) stripAttachments(result) else result
@@ -1405,6 +1408,9 @@ class StatefulAgentWorkflow @Inject constructor(
                     }
                 }
                 val result = finalResult ?: ToolResult.Error("流式工具未返回结果", "MISSING_STREAM_RESULT")
+                if (result is ToolResult.Success) {
+                    policyEngine.markSuccessfulPrivateRead(toolCall.name, toolCall.arguments, context.sessionId)
+                }
                 val processed = toolOutputStore.process(toolCall.name, toolCall.id, result.redactWith(vault))
                 val images = if (result is ToolResult.Success) result.images else emptyList()
                 ToolRunResult(processed.toTransportString(), processed is ToolResult.Error, images = images)
