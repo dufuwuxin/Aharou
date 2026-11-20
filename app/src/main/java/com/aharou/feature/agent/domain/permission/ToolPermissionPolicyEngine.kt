@@ -129,8 +129,7 @@ class ToolPermissionPolicyEngine @Inject constructor(
         private val MEMORY_READ_ACTIONS = setOf("read", "list", "search", "log", "fact", "mindstream", "core", "library_read", "library_list", "library_search")
         const val READ_FILE_TOOL = "readFile"
         private val PRIVATE_READ_ACTIONS = mapOf(
-            MEMORY_TOOL to MEMORY_READ_ACTIONS,
-            "app_control" to setOf("read", "list", "reflect")
+            MEMORY_TOOL to MEMORY_READ_ACTIONS
         )
 
         /** 工作区外文件读取的容器前缀（读这些路径算私密数据）。 */

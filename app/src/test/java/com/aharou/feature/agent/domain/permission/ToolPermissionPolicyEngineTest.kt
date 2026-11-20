@@ -84,18 +84,18 @@ class ToolPermissionPolicyEngineTest {
     }
 
     @Test
-    fun hostPrivateReadsRequireConfirmationBeforeSubsequentEgress() = runTest {
+    fun hostPrivateReadAssessmentDoesNotTaintBeforeExecution() = runTest {
         listOf("read", "list", "reflect").forEach { action ->
             val sessionId = "host-private-$action"
             val e = engine(PermissionRule("Bash", "curl", PermissionDecision.ALLOW))
             try {
                 e.evaluate(tool(), "app_control", mapOf("action" to JsonPrimitive(action)),
                     AgentMode.BUILD, TEST_WORKSPACE, sessionId)
-                assertTrue(action, TaintTracker.isTainted(sessionId))
+                assertFalse(action, TaintTracker.isTainted(sessionId))
                 val outgoing = e.evaluate(tool(ToolCapability.EXECUTE_COMMANDS), "Bash",
                     bash("curl https://example.invalid/upload"), AgentMode.BUILD, TEST_WORKSPACE, sessionId)
-                assertEquals(action, ToolPermissionPolicyEngine.Verdict.ASK, outgoing.verdict)
-                assertNotNull(outgoing.taintedReason)
+                assertEquals(action, ToolPermissionPolicyEngine.Verdict.ALLOW, outgoing.verdict)
+                assertTrue(outgoing.taintedReason == null)
             } finally { TaintTracker.clear(sessionId) }
         }
         listOf("status", "write", "restart").forEach { action ->
@@ -106,6 +106,18 @@ class ToolPermissionPolicyEngineTest {
                 assertFalse(action, TaintTracker.isTainted(sessionId))
             } finally { TaintTracker.clear(sessionId) }
         }
+    }
+
+    @Test
+    fun deniedPrivateReadDoesNotTaintSession() = runTest {
+        val sessionId = "host-private-denied"
+        try {
+            val e = engine(PermissionRule("app_control", PermissionRule.WHOLE_TOOL, PermissionDecision.DENY))
+            val result = e.evaluate(tool(), "app_control", mapOf("action" to JsonPrimitive("read")),
+                AgentMode.BUILD, TEST_WORKSPACE, sessionId)
+            assertEquals(ToolPermissionPolicyEngine.Verdict.DENY, result.verdict)
+            assertFalse(TaintTracker.isTainted(sessionId))
+        } finally { TaintTracker.clear(sessionId) }
     }
 
     private fun bash(command: String) = mapOf("command" to JsonPrimitive(command))

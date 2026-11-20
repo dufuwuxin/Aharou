@@ -7,6 +7,7 @@ import android.os.Handler
 import android.os.Looper
 import com.aharou.core.config.FullAccessCapability
 import com.aharou.feature.agent.domain.model.AgentContext
+import com.aharou.feature.agent.domain.permission.TaintTracker
 import com.aharou.feature.agent.domain.tool.AgentTool
 import com.aharou.feature.agent.domain.tool.ParameterType
 import com.aharou.feature.agent.domain.tool.ToolCapability
@@ -107,6 +108,10 @@ class AppControlTool @Inject constructor(@param:ApplicationContext private val a
                     else -> error("Unknown action")
             }
             check(FullAccessCapability.isGranted(revision)) { "Full access was revoked during execution" }
+            if (text("action") in setOf("read", "list") ||
+                text("action") == "reflect" && text("operation") !in setOf("reflect.set", "reflect.release")) {
+                TaintTracker.taint(context.sessionId.orEmpty())
+            }
             ToolResult.Success(result)
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (failure: Exception) { ToolResult.Error(failure.message ?: failure.javaClass.simpleName, "APP_CONTROL_FAILED") }
