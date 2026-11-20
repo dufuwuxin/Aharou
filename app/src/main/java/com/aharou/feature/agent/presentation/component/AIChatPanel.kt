@@ -233,8 +233,7 @@ fun AIChatPanel(
     val routeGroups by routeViewModel.groups.collectAsStateWithLifecycle()
     fun resolveRoute(selection: String?): AIProviderConfig? = routeGroups.firstOrNull { it.selectionId == selection }?.let { group ->
         val member = group.models.firstOrNull() ?: return@let null
-        providers.firstOrNull { it.id == member.providerId && it.hasUsableApiKey && member.model in it.models }
-            ?.copy(selectedModel = member.model)
+        providers.firstOrNull { it.id == member.providerId && it.hasUsableApiKey && member.model in it.models }?.copy(selectedModel = member.model)
     }
     val defaultFallbackProvider = resolveRoute(defaultProviderId) ?: providers
         .find { it.id == defaultProviderId }
