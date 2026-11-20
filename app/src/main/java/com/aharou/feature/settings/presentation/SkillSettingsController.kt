@@ -175,6 +175,8 @@ class SkillSettingsController @Inject constructor(
                     keywordEnabled = entry.skill.keywordEnabled,
                     keywords = entry.skill.keywords,
                         tags = entry.skill.tags,
+                        typeIds = entry.skill.selectedTypeIds,
+                        typeNames = entry.skill.selectedTypeIds.map { skillRepository.skillTypes.get(it, entry.scope)?.name ?: it },
                         typeId = entry.skill.typeId,
                         typeName = entry.skill.typeId?.let { skillRepository.skillTypes.get(it, entry.scope)?.name },
                         builtin = entry.scope == SkillScope.BUILTIN

@@ -32,9 +32,15 @@ class ProviderFailoverCoordinator @Inject constructor(
      *
      * 链在第一次切换时就固化下来，避免用户中途改设置让「往下走」跳到别的链上。
      */
-    private class Plan(val chain: List<FallbackTarget>, val cursor: Int)
+    private class Plan(val chain: List<FallbackTarget>, val cursor: Int, val origin: Pair<String, String>)
 
     private val plans = ConcurrentHashMap<String, Plan>()
+    private val origins = java.util.Collections.synchronizedMap(java.util.WeakHashMap<AIProvider, AIProviderConfig>())
+
+    fun bindOrigin(provider: AIProvider, config: AIProviderConfig): AIProvider = provider.also { origins[it] = config }
+
+    suspend fun nextForProvider(sessionId: String?, provider: AIProvider): AIProviderConfig? =
+        origins[provider]?.let { next(sessionId, it) }
 
     private fun sessionKey(sessionId: String?): String =
         sessionId?.takeIf { it.isNotBlank() } ?: NO_SESSION
@@ -47,9 +53,10 @@ class ProviderFailoverCoordinator @Inject constructor(
      * 已激活时返回当前这一跳的配置；这一跳被删 / 禁用 / 丢 Key 就撤销覆盖返回 null，
      * 由调用方按「主供应商」继续，而不是整轮卡在坏目标上。
      */
-    suspend fun overrideConfig(sessionId: String?): AIProviderConfig? {
+    suspend fun overrideConfig(sessionId: String?, origin: AIProviderConfig? = null): AIProviderConfig? {
         val key = sessionKey(sessionId)
         val plan = plans[key] ?: return null
+        if (origin != null && plan.origin != (origin.id to origin.effectiveModel)) { plans.remove(key, plan); return null }
         val config = plan.chain.getOrNull(plan.cursor)?.let { resolve(it) }
         if (config == null) {
             plans.remove(key, plan)
@@ -67,13 +74,13 @@ class ProviderFailoverCoordinator @Inject constructor(
      */
     suspend fun next(sessionId: String?, origin: AIProviderConfig): AIProviderConfig? {
         val key = sessionKey(sessionId)
-        val existing = plans.computeIfAbsent(key) { Plan(chainOf(origin), -1) }
+        val existing = plans.computeIfAbsent(key) { Plan(chainOf(origin), -1, origin.id to origin.effectiveModel) }
         val chain = existing.chain
         var index = existing.cursor + 1
         while (index < chain.size) {
             val config = resolve(chain[index])
             if (config != null) {
-                if (!plans.replace(key, existing, Plan(chain, index))) return null
+                if (!plans.replace(key, existing, Plan(chain, index, existing.origin))) return null
                 FileLogger.w(
                     TAG,
                     "备用模型切换：${origin.name} -> ${config.name}(${config.effectiveModel})，第 ${index + 1}/${chain.size} 跳"

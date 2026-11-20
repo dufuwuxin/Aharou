@@ -8,9 +8,9 @@ import kotlinx.serialization.json.*
 /** Trusted same-UID bridge, not a sandbox or a DEX method-body rewriter. */
 class HostPluginReflection(private val applicationContext: () -> Any) {
     private val prefix = UUID.randomUUID().toString()
-    private val objects = mutableMapOf<String, Any>()
+    private val objects = java.util.concurrent.ConcurrentHashMap<String, Any>()
     private var serial = 0L
-    private var closed = false
+    @Volatile private var closed = false
 
     @Synchronized
     fun call(operation: String, args: JsonObject): String {
@@ -52,10 +52,10 @@ class HostPluginReflection(private val applicationContext: () -> Any) {
             }
             else -> error("Unknown reflection operation")
         }
+        check(!closed) { "Plugin host was released" }
         return encode(result).toString()
     }
 
-    @Synchronized
     fun close() { closed = true; objects.clear() }
 
     private fun accessible(member: AccessibleObject) { member.isAccessible = true }
@@ -117,7 +117,9 @@ class HostPluginReflection(private val applicationContext: () -> Any) {
         is Number -> JsonPrimitive(value)
         else -> {
             val id = "$prefix:${++serial}"
+            check(!closed) { "Plugin host was released" }
             objects[id] = value
+            if (closed) { objects.remove(id); error("Plugin host was released") }
             buildJsonObject { put("handle", id) }
         }
     }

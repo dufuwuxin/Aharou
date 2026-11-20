@@ -477,6 +477,7 @@ object AgentModule {
         codeStructureTool: CodeStructureTool,
         gitBlameTool: GitBlameTool,
         customToolSource: CustomToolSource,
+        appControlTool: com.aharou.feature.plugin.runtime.AppControlTool,
         guard: ToolCallGuard
     ): ToolRegistry {
         return ToolRegistry(guard, customToolSource).apply {
@@ -510,6 +511,7 @@ object AgentModule {
             register("browser", browserTool)
             register("config", configTool)
             register("prompt_edit", promptEditTool)
+            register("app_control", appControlTool)
             register("vscreen", vdTool)
             register("a11y", a11yTool)
             register("open_app", openAppTool)

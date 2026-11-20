@@ -12,6 +12,46 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SkillTypeRepositoryTest {
+    @get:org.junit.Rule val temporary = org.junit.rules.TemporaryFolder()
+
+    private fun repositoryFixture(types: SkillTypeRepository, text: String): Pair<SkillRepository, java.io.File> {
+        val root = temporary.newFolder()
+        val dir = java.io.File(root, "editable").apply { mkdirs() }
+        java.io.File(dir, "SKILL.md").writeText(text)
+        java.io.File(dir, "scripts").mkdirs()
+        java.io.File(dir, "scripts/run.py").writeText("print('keep')")
+        val access = object : FileAccessProvider by com.aharou.testutil.TestFileAccessProvider() {
+            override fun checked(): FileAccessProvider = this
+            private fun isCatalog(path: String) = path.endsWith("/skill-types.json")
+            override fun isFile(path: String): Boolean = if (isCatalog(path)) true else java.io.File(path).isFile
+            override fun readFile(path: String): String = if (isCatalog(path)) {
+                com.google.gson.Gson().toJson(types.list(if (path.startsWith("~/.aharou/")) SkillScope.GLOBAL else SkillScope.PROJECT))
+            } else java.io.File(path).readText()
+            private val mapper = mockk<com.aharou.feature.workspace.domain.WorkspacePathMapper>().apply {
+                every { toHostFile(any(), any()) } answers { java.io.File(firstArg<String>()) }
+            }
+            private val local = com.aharou.feature.workspace.domain.LocalFileAccess(mapper)
+            override fun requireResourcePath(root: String, relative: String) = local.requireResourcePath(root, relative)
+        }
+        val projectRoot = temporary.newFolder()
+        val global = mockk<GlobalDirectorySkillSource>().apply {
+            every { skillsRoot } returns root.path
+            every { listSkills() } answers { root.listFiles().orEmpty().filter { it.isDirectory }.mapNotNull { SkillParser.parse(access, it.path, "zh") } }
+            every { loadInstructions(any()) } answers { SkillParser.parse(access, java.io.File(root, firstArg<String>()).path, "zh")?.instructions }
+        }
+        val project = mockk<ProjectDirectorySkillSource>().apply {
+            every { skillsRoot } returns projectRoot.path
+            every { listSkills() } answers { projectRoot.listFiles().orEmpty().filter { it.isDirectory }.mapNotNull { SkillParser.parse(access, it.path, "zh") } }
+            every { loadInstructions(any()) } answers { SkillParser.parse(access, java.io.File(projectRoot, firstArg<String>()).path, "zh")?.instructions }
+        }
+        val builtin = mockk<BuiltinSkillSource>().apply { every { listSkills() } returns emptyList() }
+        val config = mockk<SkillConfigRepository>().apply { every { disabledNames() } returns emptySet() }
+        val agents = mockk<com.aharou.feature.agent.domain.subagent.AgentDefinitionRepository>().apply {
+            every { listAll() } returns emptyList()
+        }
+        return SkillRepository(builtin, global, project, config, access, agents, types) to dir
+    }
+
     private class Fixture {
         val files = mutableMapOf<String, String>()
         var workspace = "A"
@@ -127,4 +167,85 @@ class SkillTypeRepositoryTest {
         assertTrue(f.files.isEmpty())
     }
 
+
+    @Test fun twoSelectionsSaveReopenLoadAndArchiveWithoutLosingToolsOrResources() {
+        val f = Fixture()
+        f.repository.save(SkillType("report", "Report", "shared", "report functions"), SkillScope.GLOBAL)
+        f.repository.save(SkillType("code", "Code", "shared", "code functions"), SkillScope.GLOBAL)
+        val (repo, dir) = repositoryFixture(f.repository,
+            "---\nname: editable\ntype_id: report\ntags: [custom]\nrequired_tools: [Bash, readFile]\ncustom_field: preserve\n---\nold")
+        val before = repo.listAllSkills().single().skill
+        val selected = com.aharou.feature.settings.presentation.toggleSkillType(before.selectedTypeIds, "code")
+        assertNull(repo.save(SkillForm(before.name, before.description, "specialty", before.requiredTools,
+            tags = before.tags, typeId = selected.firstOrNull(), typeIds = selected), SkillScope.GLOBAL, before.name))
+        val reopened = repo.listAllSkills().single().skill
+        assertEquals(listOf("report", "code"), reopened.selectedTypeIds)
+        assertEquals("report", reopened.typeId)
+        assertEquals(listOf("custom"), reopened.tags)
+        assertEquals(listOf("Bash", "readFile"), reopened.requiredTools)
+        val loaded = repo.loadInstructionsForAgent("editable", null, "", true)!!
+        assertTrue(loaded.startsWith("shared\n\nreport functions\n\ncode functions\n\nspecialty"))
+        assertEquals(1, Regex("shared").findAll(loaded).count())
+        assertTrue(loaded.contains("Required tools: Bash, readFile"))
+        assertTrue(loaded.contains("scripts/run.py"))
+        assertEquals("print('keep')", java.io.File(dir, "scripts/run.py").readText())
+        assertTrue(java.io.File(dir, "SKILL.md").readText().contains("custom_field: preserve"))
+        val zip = repo.exportZip("editable", SkillScope.GLOBAL)!!
+        val target = temporary.newFolder()
+        val report = SkillImporter.importArchive(com.aharou.testutil.TestFileAccessProvider(), target.path,
+            emptySet(), zip.inputStream(), "restored")
+        assertEquals(listOf("editable"), report.imported)
+        val restored = SkillParser.parse(com.aharou.testutil.TestFileAccessProvider(), java.io.File(target, "editable").path, "zh")!!
+        assertEquals(reopened.selectedTypeIds, restored.selectedTypeIds)
+        assertEquals(reopened.requiredTools, restored.requiredTools)
+        assertEquals("print('keep')", java.io.File(target, "editable/scripts/run.py").readText())
+    }
+
+    @Test fun productionImportMoveAndConfigWritersPreserveAllSelectedTypes() {
+        val f = Fixture()
+        f.repository.save(SkillType("report", "Report", "shared", "report functions"), SkillScope.GLOBAL)
+        f.repository.save(SkillType("code", "Code", "shared", "code functions"), SkillScope.GLOBAL)
+        val (repo, dir) = repositoryFixture(f.repository, "---\nname: editable\ntype_ids: [report, code]\nrequired_tools: [Bash]\n---\nbody")
+        val zip = repo.exportZip("editable", SkillScope.GLOBAL)!!
+        assertEquals(SkillMoveResult.OK, repo.moveSkill("editable", SkillScope.GLOBAL, SkillScope.PROJECT))
+        val moved = repo.listAllSkills().single()
+        assertEquals(SkillScope.PROJECT, moved.scope)
+        assertEquals(listOf("report", "code"), moved.skill.selectedTypeIds)
+        assertTrue(repo.loadInstructionsForAgent("editable", null, "", true)!!.contains("code functions"))
+        val restored = repo.importZip(zip.inputStream(), "restored", SkillScope.GLOBAL)
+        assertNull(restored.fatal)
+        assertEquals(listOf("editable"), restored.imported)
+        val parsed = SkillParser.parse(com.aharou.testutil.TestFileAccessProvider(), dir.path, "zh")!!
+        assertEquals(listOf("report", "code"), parsed.selectedTypeIds)
+        val config = mockk<SkillConfigRepository>()
+        val registry = com.aharou.core.config.ConfigRegistry.isolated()
+        com.aharou.feature.agent.data.ConfigSkillFields(repo, config, f.repository).registerInto(registry)
+        registry.resolveField("skill.skills.editable.type_ids")!!.write(com.aharou.core.config.ConfigValue.Arr(listOf("code", "report").map { com.aharou.core.config.ConfigValue.Str(it) }))
+        registry.resolveField("skill.skills.editable.instructions")!!.write(com.aharou.core.config.ConfigValue.Str("updated body"))
+        assertEquals(listOf("code", "report"), repo.listAllSkills().single().skill.selectedTypeIds)
+        assertTrue(repo.loadInstructionsForAgent("editable", null, "", true)!!.contains("updated body"))
+        registry.resolveField("skill.skills.editable.type_id")!!.write(com.aharou.core.config.ConfigValue.Str("report"))
+        assertEquals(listOf("report"), repo.listAllSkills().single().skill.selectedTypeIds)
+    }
+
+    @Test fun missingSecondaryTypeRejectsSaveImportAndMoveWithoutTouchingSource() {
+        val f = Fixture()
+        f.repository.save(SkillType("report", "Report", "shared", ""), SkillScope.GLOBAL)
+        val (repo, dir) = repositoryFixture(f.repository,
+            "---\nname: editable\ntype_ids: [report, private]\n---\nbody")
+        val before = java.io.File(dir, "SKILL.md").readText()
+        assertNull(repo.loadInstructions("editable"))
+        assertEquals(SkillSaveError.UNKNOWN_TYPE, repo.save(SkillForm("editable", "", "new",
+            typeIds = listOf("report", "private")), SkillScope.GLOBAL, "editable"))
+        assertEquals(SkillMoveResult.FAILED, repo.moveSkill("editable", SkillScope.GLOBAL, SkillScope.PROJECT))
+        every { f.provider.exists(any()) } returns false
+        every { f.provider.requireResourcePath(any(), any()) } returns Unit
+        val catalogBefore = f.files.toMap()
+        val imported = repo.importMarkdown(before, "editable", SkillScope.GLOBAL, boundAccess = f.provider)
+        assertEquals(SkillImportError.IO_FAILED, imported.fatal)
+        assertTrue(imported.imported.isEmpty())
+        assertEquals(catalogBefore, f.files)
+        assertEquals(before, java.io.File(dir, "SKILL.md").readText())
+        assertTrue(java.io.File(dir, "scripts/run.py").exists())
+    }
 }

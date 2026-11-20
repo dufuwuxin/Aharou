@@ -57,9 +57,20 @@ class StewardController @Inject constructor(
         }
     }
 
-    fun currentTurn(sessionId: String): StewardTurnPolicy.Ticket? {
+    fun startTurn(sessionId: String, instruction: String? = null) {
+        val runtime = runtimes[sessionId] ?: return
+        synchronized(runtime) {
+            if (!isEnabled(sessionId)) return
+            runtime.policy.enable(instruction ?: runtime.policy.instruction, sessionId)
+            runtime.judging = null
+            if (instruction != null) runtime.loopCount = 0
+            publish(sessionId, runtime, if (runtime.policy.instruction.isBlank()) StewardStatus.Idle else StewardStatus.Monitoring)
+        }
+    }
+
+    fun currentTurn(sessionId: String, requireInstruction: Boolean = true): StewardTurnPolicy.Ticket? {
         val runtime = runtimes[sessionId] ?: return null
-        return synchronized(runtime) { if (isEnabled(sessionId)) runtime.policy.ticket(sessionId) else null }
+        return synchronized(runtime) { if (isEnabled(sessionId)) runtime.policy.ticket(sessionId, requireInstruction) else null }
     }
 
     fun isCurrent(ticket: StewardTurnPolicy.Ticket): Boolean {
@@ -110,7 +121,8 @@ class StewardController @Inject constructor(
             val next = synchronized(runtime) {
                 if (!isCurrent(ticket)) return false
                 if (judgement == null) {
-                    publish(sessionId, runtime, StewardStatus.Monitoring)
+                    FileLogger.w(TAG, "Steward stopped for $sessionId: judge_unavailable")
+                    publish(sessionId, runtime, StewardStatus.Stopped)
                     return false
                 }
                 if (judgement.completed) {
@@ -120,6 +132,7 @@ class StewardController @Inject constructor(
                 val instruction = judgement.nextInstruction?.trim().orEmpty()
                 val limit = if (settings.unlimited(sessionId)) HARD_MAX_LOOPS else settings.maxLoops(sessionId)
                 if (instruction.isEmpty() || runtime.loopCount >= limit) {
+                    FileLogger.w(TAG, "Steward stopped for $sessionId: ${if (instruction.isEmpty()) "empty_instruction" else "loop_limit"}")
                     publish(sessionId, runtime, StewardStatus.Stopped)
                     return false
                 }
@@ -135,13 +148,13 @@ class StewardController @Inject constructor(
             return true
         } catch (e: CancellationException) {
             synchronized(runtime) {
-                if (isCurrent(ticket)) publish(sessionId, runtime, StewardStatus.Monitoring)
+                if (isCurrent(ticket)) publish(sessionId, runtime, StewardStatus.Stopped)
             }
             throw e
         } catch (e: Exception) {
             FileLogger.w(TAG, "Steward continuation failed for $sessionId", e)
             synchronized(runtime) {
-                if (isCurrent(ticket)) publish(sessionId, runtime, StewardStatus.Monitoring)
+                if (isCurrent(ticket)) publish(sessionId, runtime, StewardStatus.Stopped)
             }
             return false
         } finally {

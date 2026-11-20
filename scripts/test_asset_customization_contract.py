@@ -50,14 +50,14 @@ CONTRACTS = (
          "parser consumes saved type reference", 'val type = frontmatter["type_id"]'),
     rule(SKILL + "SkillParser.kt", "serialize", r"tags\.(?:joinToString|forEach).*?(?:Frontmatter\.quote|quoteMetadata)\(",
          "serialize quotes tag values", 'tags.joinToString { quoteMetadata(it) }'),
-    rule(SKILL + "SkillParser.kt", "serialize", r"(?:Frontmatter\.quote\(typeId\)|typeId\?.*?quoteMetadata\(it\))",
-         "serialize quotes type reference", "typeId?.let { quoteMetadata(it) }"),
+    rule(SKILL + "SkillParser.kt", "serialize", r"selectedTypes\.firstOrNull\(\)\?\.let.*?quoteMetadata\(it\).*?selectedTypes\.joinToString.*?quoteMetadata\(it\)",
+         "serialize quotes legacy and all selected type references", "selectedTypes.firstOrNull()?.let { quoteMetadata(it) }; selectedTypes.joinToString { quoteMetadata(it) }"),
     rule(SKILL + "SkillRepository.kt", "save", r"(?:tags\s*=\s*form\.tags|val\s+tags\s*=\s*form\.tags.*?tags\s*=\s*tags)",
          "save preserves form tags", "val tags = form.tags; SkillParser.serialize(tags = tags)"),
-    rule(SKILL + "SkillRepository.kt", "save", r"(?:typeId\s*=\s*form\.typeId|val\s+typeId\s*=\s*form\.typeId.*?typeId\s*=\s*typeId)",
-         "save preserves form type", "val typeId = form.typeId; SkillParser.serialize(typeId = typeId)"),
-    rule(SKILL + "SkillRepository.kt", "exportBuiltin", r"tags\s*=\s*skill\.tags.*?typeId\s*=\s*skill\.typeId",
-         "builtin export preserves metadata", "SkillParser.serialize(tags = skill.tags, typeId = skill.typeId)"),
+    rule(SKILL + "SkillRepository.kt", "save", r"val\s+typeIds\s*=\s*normalizedSkillTypeIds\(form\.typeId,\s*form\.typeIds\).*?SkillParser\.serialize\(.*?typeId\s*=\s*typeId.*?typeIds\s*=\s*typeIds",
+         "save preserves legacy and all form types", "val typeIds = normalizedSkillTypeIds(form.typeId, form.typeIds); SkillParser.serialize(typeId = typeId, typeIds = typeIds)"),
+    rule(SKILL + "SkillRepository.kt", "exportBuiltin", r"SkillExporter\.zipOf\(skill\.name,\s*builtinFiles\(skill\.name\)\).*?builtinSkillSource\.resourceFiles\(name\)",
+         "builtin export preserves original metadata and resources", "SkillExporter.zipOf(skill.name, builtinFiles(skill.name)); builtinSkillSource.resourceFiles(name)"),
     rule(SKILL + "SkillTypeRepository.kt", None, r"fun\s+list\(.*?fun\s+(?:save|get)\(",
          "types have independent repository", "fun list() {} fun save() {}"),
     rule(SKILL + "SkillTypeRepository.kt", "save", r"\b(?:writeFile|writeText)\(",
@@ -82,12 +82,12 @@ CONTRACTS = (
          r'\bregister\("prompt_edit",\s*\w*[Pp]romptEdit\w*\)',
          "prompt_edit has a real registry consumer", 'registry.register("prompt_edit", promptEditTool)'),
     rule(SKILL + "SkillRepository.kt", "loadInstructions",
-         r"listOf\(type\.semantics,\s*type\.functions,\s*body\)",
-         "common type guidance precedes specialty body", "listOf(type.semantics, type.functions, body)"),
+         r"types\.flatMap\s*\{\s*listOf\(it\.semantics,\s*it\.functions\)\s*\}.*?guidance\s*\+\s*body",
+         "all selected type guidance precedes specialty body", "val guidance = types.flatMap { listOf(it.semantics, it.functions) }; guidance + body"),
     rule(SKILL + "SkillRepository.kt", "save",
-         r"skillTypes\.get\(typeId,\s*scope\)\s*==\s*null.*?return@save",
-         "unknown type references are rejected before persistence",
-         "if (skillTypes.get(typeId, scope) == null) return@save error"),
+         r"typeIds\.any\s*\{\s*skillTypes\.get\(it,\s*scope\)\s*==\s*null\s*\}.*?return@save\s+SkillSaveError\.UNKNOWN_TYPE",
+         "any unknown selected type rejects persistence",
+         "if (typeIds.any { skillTypes.get(it, scope) == null }) return@save SkillSaveError.UNKNOWN_TYPE"),
     rule(SKILL + "SkillTypeRepository.kt", "list",
          r"if\s*\(scope\s*==\s*SkillScope\.PROJECT\).*?listLocal\(scope\).*?else\s+global",
          "only project callers may inherit project type definitions",
@@ -131,6 +131,20 @@ class ContractControls(unittest.TestCase):
         for contract in CONTRACTS:
             with self.subTest(reason=contract.reason):
                 self.assertTrue(contract.accepts(contract.fixture))
+
+    def test_first_type_only_and_reserialized_builtin_regressions_are_rejected(self):
+        regressions = {
+            "serialize quotes legacy and all selected type references": "selectedTypes.firstOrNull()?.let { quoteMetadata(it) }",
+            "save preserves legacy and all form types": "val typeIds = normalizedSkillTypeIds(form.typeId, form.typeIds); SkillParser.serialize(typeId = typeId)",
+            "builtin export preserves original metadata and resources": "SkillParser.serialize(tags = skill.tags, typeId = skill.typeId)",
+            "all selected type guidance precedes specialty body": "val guidance = listOf(types.first().semantics, types.first().functions); guidance + body",
+            "any unknown selected type rejects persistence": "if (skillTypes.get(typeIds.first(), scope) == null) return@save SkillSaveError.UNKNOWN_TYPE",
+        }
+        for contract in CONTRACTS:
+            if contract.reason in regressions:
+                with self.subTest(reason=contract.reason):
+                    fixture = f"fun {contract.entry}() {{ {regressions[contract.reason]} }}"
+                    self.assertFalse(contract.accepts(fixture))
 
     def test_missing_implementation_is_rejected(self):
         for contract in CONTRACTS:

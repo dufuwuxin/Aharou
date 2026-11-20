@@ -76,6 +76,7 @@ class ModelSceneResolver @Inject constructor(
         if (!provider.hasUsableApiKey) {
             return failure(scene, SceneBindingIssue.NO_USABLE_API_KEY)
         }
+        if (scene == ModelScene.MAIN_CHAT && defaultModel.getDefaultProviderId().startsWith("route:") && binding.model !in provider.models) return failure(scene, SceneBindingIssue.RESOLVE_FAILED)
         return SceneResolution.Bound(
             scene = scene,
             providerId = provider.id,
@@ -86,10 +87,12 @@ class ModelSceneResolver @Inject constructor(
     }
 
     private suspend fun readBinding(scene: ModelScene): SceneBinding = when (scene) {
-        ModelScene.MAIN_CHAT -> SceneBinding(
-            defaultModel.getDefaultProviderId(),
-            defaultModel.getDefaultModel(),
-        )
+        ModelScene.MAIN_CHAT -> {
+            val provider = defaultModel.getDefaultProviderId()
+            val groupId = com.aharou.feature.settings.domain.model.ModelRouteGroup.idFromSelection(provider)
+            val member = groupId?.let { defaultModel.getRouteGroup(it)?.models?.firstOrNull() }
+            SceneBinding(member?.providerId ?: provider, member?.model ?: defaultModel.getDefaultModel())
+        }
         ModelScene.TITLE -> SceneBinding(titleModel.getTitleProviderId(), titleModel.getTitleModel())
         ModelScene.COMPACTION -> SceneBinding(
             compactionModel.getCompactionProviderId(),

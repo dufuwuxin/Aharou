@@ -26,6 +26,18 @@ import javax.inject.Inject
 @HiltViewModel
 class SpecialPermissionsViewModel @Inject constructor(private val workspaces: WorkspaceRepository) : ViewModel() {
     val address = TeamEditCapability.address
+    val fullFailure = kotlinx.coroutines.flow.MutableStateFlow(false)
+    private val fullRequests = kotlinx.coroutines.channels.Channel<Boolean>(kotlinx.coroutines.channels.Channel.CONFLATED)
+    init {
+        viewModelScope.launch(Dispatchers.IO) {
+            for (enabled in fullRequests) {
+                try { com.aharou.core.config.FullAccessCapability.setEnabled(enabled); fullFailure.value = false }
+                catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                catch (_: Exception) { fullFailure.value = true }
+            }
+        }
+    }
+    fun toggleFull(enabled: Boolean) { fullRequests.trySend(enabled) }
     fun toggleBuiltin(enabled: Boolean) = viewModelScope.launch(Dispatchers.IO) {
         com.aharou.core.config.BuiltinSkillEditCapability.setEnabled(enabled)
     }
@@ -38,6 +50,8 @@ class SpecialPermissionsViewModel @Inject constructor(private val workspaces: Wo
 internal fun SpecialPermissionsSection(onOpen: (SettingsSection) -> Unit, viewModel: SpecialPermissionsViewModel = hiltViewModel()) {
     val address by viewModel.address.collectAsStateWithLifecycle()
     val builtinEditing by com.aharou.core.config.BuiltinSkillEditCapability.enabled.collectAsStateWithLifecycle()
+    val fullAccess by com.aharou.core.config.FullAccessCapability.enabled.collectAsStateWithLifecycle()
+    val saveFailed by viewModel.fullFailure.collectAsStateWithLifecycle()
     val clipboard = LocalClipboardManager.current
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(Spacing.md), verticalArrangement = Arrangement.spacedBy(Spacing.lg)) {
         SettingsGroup {
@@ -46,6 +60,11 @@ internal fun SpecialPermissionsSection(onOpen: (SettingsSection) -> Unit, viewMo
             SettingsRow(title = stringResource(R.string.config_audit_title), onClick = { onOpen(SettingsSection.ConfigAudit) })
             SettingsDivider()
             SettingsRow(title = stringResource(R.string.settings_app_permissions), onClick = { onOpen(SettingsSection.AppPermissions) })
+        }
+        if (saveFailed) Text(stringResource(R.string.permission_save_failed), color = MaterialTheme.colorScheme.error)
+        SettingsGroup {
+            SettingsRow(title = stringResource(R.string.full_access_title), subtitle = stringResource(R.string.full_access_scope),
+                trailing = { AppSwitch(checked = fullAccess, onCheckedChange = viewModel::toggleFull) })
         }
         SettingsGroup {
             SettingsRow(title = stringResource(R.string.builtin_skill_edit_title), subtitle = stringResource(R.string.builtin_skill_edit_scope),

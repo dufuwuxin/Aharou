@@ -30,8 +30,8 @@ class StewardTurnPolicy {
         }
     }
 
-    fun ticket(sessionId: String): Ticket? =
-        if (enabled && this.sessionId == sessionId && instruction.isNotBlank()) Ticket(generation, sessionId) else null
+    fun ticket(sessionId: String, requireInstruction: Boolean = true): Ticket? =
+        if (enabled && this.sessionId == sessionId && (!requireInstruction || instruction.isNotBlank())) Ticket(generation, sessionId) else null
 
     fun isCurrent(ticket: Ticket): Boolean =
         enabled && ticket.generation == generation && ticket.sessionId == sessionId

@@ -18,8 +18,11 @@ data class Skill(
     val keywordEnabled: Boolean = false,
     val keywords: List<String> = emptyList(),
     val tags: List<String> = emptyList(),
-    val typeId: String? = null
-)
+    val typeId: String? = null,
+    val typeIds: List<String> = emptyList()
+) {
+    val selectedTypeIds: List<String> get() = normalizedSkillTypeIds(typeId, typeIds)
+}
 
 /** 设置页新建/编辑技能时提交的表单快照。 */
 data class SkillForm(
@@ -33,8 +36,13 @@ data class SkillForm(
     val tags: List<String> = emptyList(),
     val typeId: String? = null,
     /** Only explicitly edited resources are written; other files, including binaries, remain untouched. */
-    val resourceEdits: Map<String, String> = emptyMap()
+    val resourceEdits: Map<String, String> = emptyMap(),
+    val typeIds: List<String> = emptyList()
 )
+
+/** New ordered selections take precedence; a legacy reference is never silently discarded. */
+fun normalizedSkillTypeIds(typeId: String?, typeIds: List<String>): List<String> =
+    (typeIds + listOfNotNull(typeId)).map { it.trim() }.filter { it.isNotEmpty() }.distinct()
 
 /** 保存技能失败的原因。 */
 enum class SkillSaveError {

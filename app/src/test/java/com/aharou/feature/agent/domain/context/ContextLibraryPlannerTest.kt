@@ -32,6 +32,22 @@ class ContextLibraryPlannerTest {
         assertEquals(preview.rendered, preview.renderedEntries.getValue("visible"))
     }
 
+    @Test fun defaultRuleMetadataIsNotSentAndDisabledEntriesCannotSpendBudgets() {
+        val visible = entry("visible", ContextLoad.FULL)
+        val disabled = visible.copy(id = "disabled", worldbook = WorldbookRules(enabled = false), content = "hidden")
+        val off = visible.copy(id = "off", loading = ContextLoad.OFF, content = "hidden")
+        val expired = visible.copy(id = "expired", enabled = false, content = "hidden")
+        val preview = ContextLibraryPlanner.plan(listOf(disabled, off, expired, visible))
+        assertEquals(listOf(visible), preview.full)
+        assertFalse(preview.rendered.contains("hidden"))
+        listOf("enabled=", "trust=", "confidence=", "excludes=", "priority=", "folder=\"\"").forEach {
+            assertFalse("Unexpected default metadata: $it", preview.rendered.contains(it))
+        }
+        val matched = visible.copy(worldbook = WorldbookRules(triggers = listOf("Kotlin"), excludes = listOf("skip")))
+        assertEquals(listOf(matched), ContextLibraryPlanner.plan(listOf(matched), userText = "Kotlin").full)
+        assertTrue(ContextLibraryPlanner.plan(listOf(matched), userText = "Kotlin skip").full.isEmpty())
+    }
+
     @get:Rule val temp = TemporaryFolder()
     private fun entry(id: String, load: ContextLoad, scope: MemoryScope = MemoryScope.GLOBAL) = ContextEntry(
         id, id, "summary", "body", scope, ContextKind.REFERENCE, load, ContextOrigin.MEMORY, id

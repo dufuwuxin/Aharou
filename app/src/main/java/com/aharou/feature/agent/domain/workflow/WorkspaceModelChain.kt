@@ -13,11 +13,14 @@ class WorkspaceModelChain @Inject constructor(
     private val settings: WorkspaceModelChainRepository,
     private val providers: AIProviderRepository
 ) {
+    @Inject lateinit var defaultModels: com.aharou.feature.settings.data.repository.DefaultModelSettingsRepository
+    @Inject lateinit var sessions: com.aharou.feature.agent.domain.session.SessionUseCase
     private data class Plan(val workspace: String, val chain: List<FallbackTarget>, val cursor: Int, val revision: Long)
     private val plans = ConcurrentHashMap<String, Plan>()
 
     suspend fun begin(workspace: String, session: String?, mainChat: Boolean): AIProviderConfig? {
         if (session == null) return null
+        if (::defaultModels.isInitialized && ::sessions.isInitialized && defaultModels.isRouteSelection(sessions.getSessionById(session))) { plans.remove(session); return null }
         if (!mainChat) { plans.remove(session); return null }
         val chain = settings.get(workspace)
         if (chain.isEmpty()) { plans.remove(session); return null }

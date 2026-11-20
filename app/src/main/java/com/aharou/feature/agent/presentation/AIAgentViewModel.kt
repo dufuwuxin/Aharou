@@ -1785,7 +1785,6 @@ class AIAgentViewModel @Inject constructor(
             }
         }
     }
-
     fun enqueueAgentRequest(
         request: String,
         modelRequest: String = request,
@@ -1802,6 +1801,7 @@ class AIAgentViewModel @Inject constructor(
         // 软打断的会话不算忙：软打断=「停下听我说」，这时发的话要直接进会话，不该排队
         val isCurrentRunning = sid != null && sid !in stoppingSessions && (sessionJobs[sid]?.isCompleted == false || sid in _runningCommandSessions.value)
         if (isCurrentRunning) {
+            if (!isAutoTrigger && !request.startsWith(BACKGROUND_NOTIFICATION_PREFIX)) sid?.let { turnEndBridge.onRequestStarted(it, request, false) }
             val req = QueuedRequest(
                 id = UUID.randomUUID().toString(),
                 request = request,
@@ -2230,7 +2230,7 @@ class AIAgentViewModel @Inject constructor(
                                 }
                             }
                         }
-                        stewardNext = turnEndBridge.onTurnFinished(sessionId, !failed)
+                        stewardNext = stewardNext ?: turnEndBridge.onTurnFinished(sessionId, !failed && sessionId !in stoppingSessions && _queuedRequests.value[sessionId].orEmpty().none { !it.isAutoTrigger && !it.request.startsWith(BACKGROUND_NOTIFICATION_PREFIX) })
                     }
                     is AgentEvent.ModeChanged -> {
                         // 模式切换事件：PlanApprovalManager 已在 workflow 层面挂起等待用户批准

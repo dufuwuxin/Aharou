@@ -293,6 +293,7 @@ internal fun ModelSheet(
         modelMetadata = modelMetadata,
         onSelect = onSelect,
         onClear = null,
+        footer = { ChatRouteGroupChoices(onSelect, onDismiss) },
         onDismiss = onDismiss
     )
 }

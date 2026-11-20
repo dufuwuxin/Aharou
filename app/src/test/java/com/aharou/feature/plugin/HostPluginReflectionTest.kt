@@ -48,6 +48,29 @@ class HostPluginReflectionTest {
         assertEquals(JsonPrimitive("7"), call("invoke", "target" to target, "name" to JsonPrimitive("toString")))
     }
 
+    class BlockingFixture {
+        val entered = java.util.concurrent.CountDownLatch(1)
+        val release = java.util.concurrent.CountDownLatch(1)
+        fun block(): String { entered.countDown(); check(release.await(5, java.util.concurrent.TimeUnit.SECONDS)); return "late" }
+    }
+
+    @Test fun closingWhileAnInvocationIsBlockedDoesNotWaitOrPublishItsResult() {
+        val fixture = BlockingFixture()
+        val bridge = HostPluginReflection { fixture }
+        val handle = Json.parseToJsonElement(bridge.call("reflect.context", JsonObject(emptyMap())))
+        val pool = java.util.concurrent.Executors.newFixedThreadPool(2)
+        try {
+            val invoke = pool.submit<Boolean> {
+                runCatching { bridge.call("reflect.invoke", buildJsonObject { put("target", handle); put("name", "block") }) }.isFailure
+            }
+            assertTrue(fixture.entered.await(2, java.util.concurrent.TimeUnit.SECONDS))
+            pool.submit<Unit> { bridge.close() }.get(1, java.util.concurrent.TimeUnit.SECONDS)
+            fixture.release.countDown()
+            assertTrue(invoke.get(2, java.util.concurrent.TimeUnit.SECONDS))
+            assertTrue(runCatching { bridge.call("reflect.context", JsonObject(emptyMap())) }.isFailure)
+        } finally { fixture.release.countDown(); pool.shutdownNow() }
+    }
+
     @Test fun foreignHandlesAreRejectedAndCloseReleasesAllHandles() {
         val handle = call("context")
         val other = HostPluginReflection { Fixture() }

@@ -52,8 +52,9 @@ class SystemPromptProvider @Inject constructor(
         return listOf(parts.system, parts.transientContext).filter { it.isNotBlank() }.joinToString("\n\n")
     }
 
-    suspend fun buildRequest(agentContext: AgentContext, native: String): RequestPrompt {
-        val live = liveContextScripts?.get()?.build(agentContext).orEmpty()
+    suspend fun buildRequest(agentContext: AgentContext, native: String, nativeTransientContext: String = ""): RequestPrompt {
+        val live = listOf(nativeTransientContext, liveContextScripts?.get()?.build(agentContext).orEmpty())
+            .filter { it.isNotBlank() }.joinToString("\n\n")
         val current = listOf(native, live).filter { it.isNotBlank() }.joinToString("\n\n")
         val hooked = hostPlugins?.get()?.onContext(agentContext, current) ?: current
         // A plugin may intentionally replace the whole prompt; retain that existing contract.
@@ -78,12 +79,20 @@ class SystemPromptProvider @Inject constructor(
         }
     }
 
-    fun build(agentContext: AgentContext, consumeInbox: Boolean = true): String {
+    fun buildNativeRequest(agentContext: AgentContext): RequestPrompt {
+        var transient = ""
+        val system = buildNative(agentContext) { transient = it }
+        return RequestPrompt(system, transient)
+    }
+
+    fun build(agentContext: AgentContext, consumeInbox: Boolean = true): String = buildNative(agentContext)
+
+    private fun buildNative(agentContext: AgentContext, transientContext: ((String) -> Unit)? = null): String {
         val member = isMemberSession(agentContext)
         return contextLibrary.withPromptSnapshot(agentContext, roleSession = member) {
             val native = contextLibrary.render(agentContext.projectRoot, agentContext.sessionId,
                 ContextOrigin.MEMORY, memberName = if (member) agentContext.agentDefinition?.name ?: "member" else null,
-                expand = { expandNative(it, agentContext, member) })
+                expand = { expandNative(it, agentContext, member) }, transientContext = transientContext)
             native.also { injectedContextStore.record(agentContext.sessionId, it) }
         }
     }
@@ -93,10 +102,10 @@ class SystemPromptProvider @Inject constructor(
             val value = when (key) {
                 "SKILLS" -> skillRepository.listSkillsForAgent(ctx.agentDefinition, ctx.currentUserText,
                     ctx.agentDefinition?.let { InjectPart.SKILLS in it.inject } ?: true)
-                    .groupBy { it.typeId?.takeIf(String::isNotBlank) ?: "untyped" }
+                    .groupBy { it.selectedTypeIds.firstOrNull() ?: "untyped" }
                     .entries.joinToString("\n") { (type, skills) ->
                         "skills/${directoryMetadata(type)} (untrusted catalog metadata)\n" +
-                            skills.joinToString("\n") { "  - ${directoryMetadata(it.name)}: ${directoryMetadata(it.description)} [tags: ${directoryMetadata(it.tags.joinToString(", "))}] [loadSkill: ${directoryMetadata(it.name)}]" }
+                            skills.joinToString("\n") { "  - ${directoryMetadata(it.name)}: ${directoryMetadata(it.description)} [tags: ${directoryMetadata(it.tags.joinToString(", "))}] [types: ${directoryMetadata(it.selectedTypeIds.joinToString(", "))}] [loadSkill: ${directoryMetadata(it.name)}]" }
                     }
                 "TOOLS" -> buildString {
                     val groups = toolRegistry?.get()?.getDeferredTools(ctx).orEmpty()

@@ -65,7 +65,10 @@ class StewardJudge @Inject constructor(
             val inputTemplate = contextLibrary.resolvePromptForContext(INPUT_PROMPT_KEY,
                 session?.workspacePath, sessionId, originalInstruction, audience, role?.name,
                 role?.tags.orEmpty(), memoryAllowed).trim()
-            if (systemPrompt.isEmpty() || inputTemplate.isEmpty()) return null
+            if (systemPrompt.isEmpty() || inputTemplate.isEmpty()) {
+                FileLogger.w(TAG, "Steward judge unavailable: systemPrompt=${systemPrompt.isNotEmpty()}, inputTemplate=${inputTemplate.isNotEmpty()}; check native entry enablement and context filters")
+                return null
+            }
             val prompt = inputTemplate
                 .replace(PLACEHOLDER_INSTRUCTION, originalInstruction)
                 .replace(PLACEHOLDER_REPORT, lastReport.ifBlank { NO_REPORT_PLACEHOLDER })

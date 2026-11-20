@@ -861,6 +861,7 @@ fun SettingsScreen(
                         section = SettingsSection.ProviderEditor
                     },
                     onDelete = { viewModel.deleteProvider(it.id) },
+                    onAdd = { preset -> editingProvider = null; providerPresetPrefill = preset; section = SettingsSection.ProviderEditor },
                     onReorder = { fromIndex, toIndex ->
                         viewModel.reorderProviders(fromIndex, toIndex)
                     }

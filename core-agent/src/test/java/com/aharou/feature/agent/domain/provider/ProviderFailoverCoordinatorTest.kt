@@ -60,6 +60,33 @@ class ProviderFailoverCoordinatorTest {
     }
 
     @Test
+    fun fallbackUsesBoundLogicalModelDespiteProviderDefaultsOrWireModelMapping() = runTest {
+        val default = provider("a", model = "M0", models = listOf("M0", "M1"), chain = listOf(FallbackTarget("b", "backup")))
+        val selected = default.copy(selectedModel = "M1")
+        val coordinator = ProviderFailoverCoordinator(FakeRepository(listOf(default, provider("b"))))
+        val adapter = io.mockk.mockk<AIProvider>()
+        io.mockk.every { adapter.model } returns "mapped-wire-model"
+        assertTrue(coordinator.bindOrigin(adapter, selected) === adapter)
+        assertEquals("b", coordinator.nextForProvider("main", adapter)?.id)
+        assertEquals("b", coordinator.overrideConfig("main", selected)?.id)
+        assertNull(coordinator.overrideConfig("main", default))
+    }
+
+    @Test
+    fun changedRoutePrimaryDoesNotReuseThePreviousPrimaryFallback() = runTest {
+        val a = provider("a", chain = listOf(FallbackTarget("b", "backup-b")))
+        val c = provider("c", chain = listOf(FallbackTarget("d", "backup-d")))
+        val coordinator = ProviderFailoverCoordinator(FakeRepository(listOf(a, c, provider("b"), provider("d"))))
+        assertEquals("b", coordinator.next("main", a)?.id)
+        assertEquals("b", coordinator.overrideConfig("main", a)?.id)
+        assertNull(coordinator.overrideConfig("main", c))
+        assertFalse(coordinator.isActive("main"))
+        assertEquals("d", coordinator.next("main", c)?.id)
+        assertEquals("d", coordinator.overrideConfig("main", c)?.id)
+        assertNull(coordinator.overrideConfig("main", c.copy(selectedModel = "changed-model")))
+    }
+
+    @Test
     fun manualSelectionResetDoesNotRetainAnOldFallbackOrAffectAnotherSession() = runTest {
         val a = provider("a", chain = listOf(FallbackTarget("b", "backup-b")))
         val coordinator = ProviderFailoverCoordinator(FakeRepository(listOf(a, provider("b"))))

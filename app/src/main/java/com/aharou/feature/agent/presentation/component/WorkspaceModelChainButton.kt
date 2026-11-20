@@ -58,6 +58,7 @@ internal fun WorkspaceModelChainSheet(
             onClear = if (!loading && !busy && !failed) ({ chain = emptyList() }) else null,
             onDismiss = { if (!busy) onDismiss() },
             footer = {
+                ChatRouteGroupChoices(onSelectModel, { if (!busy) onDismiss() }, enabled = !loading && !busy && !failed)
                 Text(stringResource(R.string.workspace_model_chain_select_hint), style = MaterialTheme.typography.bodySmall)
                 if (failed) Text(stringResource(R.string.workspace_model_chain_error), color = MaterialTheme.colorScheme.error)
                 TextButton(enabled = !loading && !busy && !failed, onClick = {

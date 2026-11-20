@@ -25,6 +25,20 @@ class RequestHistoryProjectionTest {
             result = "{\"output_path\":\"/workspace/$index.log\",\"preview\":\"${"x".repeat(1000)}\"}")
     )
 
+    @Test fun changingTransientContextAndAppendingMessagesPreserveTheHistoricalPrefix() {
+        val projector = RequestHistoryProjector()
+        val original = context.history
+        val appended = original + AgentMessage.AssistantMessage(content = "response") +
+            AgentMessage.UserMessage(content = "next request")
+        val first = projector.project(original, true, ContextPreferences(), false, "dynamic one")
+        val next = projector.project(appended, true, ContextPreferences(), false, "dynamic two")
+        assertEquals(original, first.dropLast(1))
+        assertEquals(first.dropLast(1), next.take(original.size))
+        assertEquals(appended, next.dropLast(1))
+        assertEquals("dynamic two", (next.last() as AgentMessage.UserMessage).content)
+        assertFalse((next.last() as AgentMessage.UserMessage).countsAsRound)
+    }
+
     @Test fun foldedReceiptsDoNotMoveAsNewResultsArriveAndRawHistoryRemainsComplete() {
         val projector = RequestHistoryProjector()
         val original = context.history + (0..9).flatMap(::batch)

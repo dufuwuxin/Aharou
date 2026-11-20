@@ -462,3 +462,7 @@ The unified tool browser and six-action creation sheet reuse existing execution 
 - 工作流正式会话请求的逐轮入口调用 `SystemPromptProvider.buildForRequest`，以当前 AgentContext 经 `LiveContextScriptRunner` → `ExecuteCommandTool` + `PermissionGate` 执行。输出只拼接本次提示，无持久历史追加；拒绝/异常/超时继续原请求，取消传播，关闭无调用。角色工具快照不允许 Bash 时不执行。
 - SDK `onContext` 已接入上述真实注入消费者；JS 和 DEX 透传默认一致，失败留诊断且不自动停用。宿主桥的 `reflect.class/context/new/invoke/get/set/release` 提供实例隔离句柄与 private 宿主反射，退休/候选失败均释放；不声称修改任意 DEX 方法体，不改变登录鉴权/SSE，也不绕过 tool.invoke 的 PermissionGate。
 - 本节仅记录源码接线。新增 manager/livecontext/runtime/bridge/reflection 回归源文件；本轮未运行 Gradle，Android DEX/JNI 与界面实测仍无证据。
+
+## Ordered model groups and host full access
+
+Route groups can be created and selected in default models and chat model sheets. The config channel exposes the same ordered group collection. Following members receive stable per-run allocations; explicit role models take precedence. The host full-access switch is user-owned; config can read its state, while the permission-gated app_control tool provides same-UID files, session-isolated reflection and restart. It does not grant root or mutate a signed APK. Provider visibility is shared between the brand library and config; hidden brands keep their configured connections enabled.

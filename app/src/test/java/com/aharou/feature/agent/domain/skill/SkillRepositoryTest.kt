@@ -768,6 +768,14 @@ class SkillRepositoryTest {
             assertTrue(binary.contentEquals(File(root, "retained/asset.bin").readBytes()))
             assertTrue(File(root, "retained/SKILL.md").readText().contains("custom_metadata: keep"))
             val exported = requireNotNull(repo.exportZip("retained", SkillScope.BUILTIN))
+            val entries = java.util.zip.ZipInputStream(exported.inputStream()).use { zip ->
+                generateSequence { zip.nextEntry }.filterNot { it.isDirectory }.associate { it.name to zip.readBytes() }
+            }
+            val retainedFiles = listOf("SKILL.md", "scripts/old.py", "asset.bin")
+            assertEquals(retainedFiles.map { "retained/$it" }.toSet(), entries.keys)
+            for (path in retainedFiles) {
+                org.junit.Assert.assertArrayEquals(path, File(dir, path).readBytes(), entries.getValue("retained/$path"))
+            }
             val unpacked = File(temp, "imported").absolutePath
             val imported = SkillImporter.importArchive(provider, unpacked, emptySet(), exported.inputStream(), "retained")
             assertEquals(listOf("retained"), imported.imported)

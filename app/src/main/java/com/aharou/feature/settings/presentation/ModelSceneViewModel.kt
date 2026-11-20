@@ -46,6 +46,7 @@ class ModelSceneViewModel @Inject constructor(
         providerRepository.getAllProviders(),
         defaultModel.providerIdFlow,
         defaultModel.modelFlow,
+        defaultModel.routeGroupsFlow,
         titleModel.providerIdFlow,
         titleModel.modelFlow,
         compactionModel.providerIdFlow,

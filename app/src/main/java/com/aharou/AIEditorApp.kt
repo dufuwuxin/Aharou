@@ -198,6 +198,9 @@ class AIEditorApp : Application(), Configuration.Provider {
     @Inject
     lateinit var configModelRoleFields: com.aharou.feature.settings.data.ConfigModelRoleFields
 
+    @Inject
+    lateinit var configModelRouteFields: com.aharou.feature.agent.data.ConfigModelRouteFields
+
     /** 环境变量集合注册。 */
     @Inject
     lateinit var configEnvFields: com.aharou.feature.settings.data.ConfigEnvFields
@@ -391,6 +394,7 @@ class AIEditorApp : Application(), Configuration.Provider {
         configProviderFields.registerInto(configRegistry)
         configMemorySyncFields.registerInto(configRegistry)
         configModelRoleFields.registerInto(configRegistry)
+        configModelRouteFields.registerInto(configRegistry)
         configEnvFields.registerInto(configRegistry)
         configScheduledTaskFields.registerInto(configRegistry)
         configRuleFields.registerInto(configRegistry); configReminderFields.registerInto(configRegistry)

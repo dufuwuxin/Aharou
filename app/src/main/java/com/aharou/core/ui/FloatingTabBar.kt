@@ -37,6 +37,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
@@ -90,6 +91,8 @@ fun FloatingTabBar(
     onDragStateChange: (Boolean) -> Unit = {},
 ) {
     val coroutineScope = rememberCoroutineScope()
+    var scrollJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    var dragGeneration by remember { mutableStateOf(0L) }
     val dragStateChange by rememberUpdatedState(onDragStateChange)
     val isLight = MaterialTheme.colorScheme.background.luminance() > 0.5f
 
@@ -230,7 +233,7 @@ fun FloatingTabBar(
                 .pointerInput(items, gesturesEnabled) {
                     if (!gesturesEnabled) return@pointerInput
                     detectDragGestures(
-                        onDragStart = { dragStateChange(true) },
+                        onDragStart = { dragGeneration++; scrollJob?.cancel(); dragStateChange(true) },
                         onDrag = { change, _ ->
                             change.consume()
                             val x = change.position.x
@@ -243,7 +246,8 @@ fun FloatingTabBar(
                                 val progress = (boundedX - minX) / totalDistance
                                 val targetPageFloat = (progress * items.lastIndex).coerceIn(0f, items.lastIndex.toFloat())
 
-                                coroutineScope.launch {
+                                scrollJob?.cancel()
+                                scrollJob = coroutineScope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
                                     val page = targetPageFloat.roundToInt().coerceIn(0, items.lastIndex)
                                     val offsetFraction = (targetPageFloat - page).coerceIn(-0.5f, 0.5f)
                                     pagerState.scrollToPage(page, offsetFraction)
@@ -251,25 +255,29 @@ fun FloatingTabBar(
                             }
                         },
                         onDragEnd = {
-                            coroutineScope.launch {
+                            val generation = dragGeneration
+                            scrollJob?.cancel()
+                            scrollJob = coroutineScope.launch {
                                 val targetPage = (pagerState.currentPage + pagerState.currentPageOffsetFraction).roundToInt()
                                 try {
                                     pagerState.animateScrollToPage(
                                         page = targetPage.coerceIn(0, items.lastIndex),
                                         animationSpec = spring(dampingRatio = 0.78f, stiffness = 380f)
                                     )
-                                } finally { dragStateChange(false) }
+                                } finally { if (generation == dragGeneration) dragStateChange(false) }
                             }
                         },
                         onDragCancel = {
-                            coroutineScope.launch {
+                            val generation = dragGeneration
+                            scrollJob?.cancel()
+                            scrollJob = coroutineScope.launch {
                                 val targetPage = (pagerState.currentPage + pagerState.currentPageOffsetFraction).roundToInt()
                                 try {
                                     pagerState.animateScrollToPage(
                                         page = targetPage.coerceIn(0, items.lastIndex),
                                         animationSpec = spring(dampingRatio = 0.78f, stiffness = 380f)
                                     )
-                                } finally { dragStateChange(false) }
+                                } finally { if (generation == dragGeneration) dragStateChange(false) }
                             }
                         }
                     )
@@ -374,7 +382,8 @@ fun FloatingTabBar(
                                 indication = null,
                                 role = Role.Tab,
                                 onClick = {
-                                    coroutineScope.launch {
+                                    dragGeneration++; scrollJob?.cancel(); dragStateChange(false)
+                                    scrollJob = coroutineScope.launch {
                                         pagerState.animateScrollToPage(
                                             page = index,
                                             animationSpec = spring(dampingRatio = 0.78f, stiffness = 380f)

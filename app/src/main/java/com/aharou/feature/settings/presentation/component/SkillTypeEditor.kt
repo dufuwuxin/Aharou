@@ -54,7 +54,7 @@ private fun rememberSkillTypeController(): SkillSettingsController {
 
 /** The same scoped collection supports both the skill picker and standalone type management. */
 @Composable
-internal fun SkillTypeSelector(scope: SkillScope, typeId: String?, onTypeChange: ((String?) -> Unit)?) {
+internal fun SkillTypeSelector(scope: SkillScope, typeIds: List<String>, onTypeChange: ((List<String>) -> Unit)?) {
     val controller = rememberSkillTypeController()
     val workspaceFlow = controller.skillTypeWorkspaceChanges
     val workspaceState = workspaceFlow?.collectAsStateWithLifecycle()
@@ -78,15 +78,16 @@ internal fun SkillTypeSelector(scope: SkillScope, typeId: String?, onTypeChange:
         Text(stringResource(R.string.skills_type_scope_hint), style = MaterialTheme.typography.bodySmall)
         if (failed) Text(stringResource(R.string.skills_type_save_failed), color = MaterialTheme.colorScheme.error)
         if (onTypeChange != null) {
-            FilterChip(selected = typeId == null, onClick = { onTypeChange(null) },
+            Text(stringResource(R.string.skills_types_multi_hint), style = MaterialTheme.typography.bodySmall)
+            FilterChip(selected = typeIds.isEmpty(), onClick = { onTypeChange(emptyList()) },
                 label = { Text(stringResource(R.string.skills_type_none)) })
-            if (typeId != null && !loading && types.none { it.id == typeId }) {
+            if (!loading && typeIds.any { id -> types.none { it.id == id } }) {
                 Text(stringResource(R.string.skills_editor_error_unknown_type), color = MaterialTheme.colorScheme.error)
             }
         }
         types.forEach { type ->
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-                if (onTypeChange != null) FilterChip(selected = typeId == type.id, onClick = { onTypeChange(type.id) },
+                if (onTypeChange != null) FilterChip(selected = type.id in typeIds, onClick = { onTypeChange(com.aharou.feature.settings.presentation.toggleSkillType(typeIds, type.id)) },
                     modifier = Modifier.weight(1f), label = { Text(type.name) })
                 else Text(type.name, modifier = Modifier.weight(1f))
                 TextButton(onClick = { editing = type }) { Text(stringResource(R.string.common_edit)) }
@@ -115,7 +116,7 @@ internal fun SkillTypeManager() {
                     FilterChip(scope == SkillScope.GLOBAL, { scope = SkillScope.GLOBAL }, label = { Text(stringResource(R.string.skills_scope_global)) })
                     FilterChip(scope == SkillScope.PROJECT, { scope = SkillScope.PROJECT }, label = { Text(stringResource(R.string.skills_scope_project)) })
                 }
-                SkillTypeSelector(scope, null, null)
+                SkillTypeSelector(scope, emptyList(), null)
             }
         },
         confirmButton = { TextButton(onClick = { open = false }) { Text(stringResource(R.string.common_back)) } }

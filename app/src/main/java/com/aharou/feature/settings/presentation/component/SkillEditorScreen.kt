@@ -73,7 +73,7 @@ internal fun SkillEditorScreen(
     var resourcePath by rememberSaveable { mutableStateOf("") }
     var resourceText by rememberSaveable { mutableStateOf("") }
     var resourceError by rememberSaveable { mutableStateOf(false) }
-    var typeId by rememberSaveable { mutableStateOf(initial?.typeId) }
+    var typeIds by rememberSaveable { mutableStateOf(initial?.selectedTypeIds.orEmpty()) }
     var keywordEnabled by rememberSaveable { mutableStateOf(initial?.keywordEnabled ?: false) }
     var keywordInputs by rememberSaveable {
         mutableStateOf(initial?.keywords.orEmpty().let { it + List((2 - it.size).coerceAtLeast(0)) { "" } })
@@ -126,7 +126,8 @@ internal fun SkillEditorScreen(
                                     keywordEnabled = keywordEnabled,
                                     keywords = keywords,
                                     tags = tags.lines().map { it.trim() }.filter { it.isNotEmpty() }.distinct(),
-                                    typeId = typeId
+                                    typeId = typeIds.firstOrNull(),
+                                    typeIds = typeIds
                                 ),
                                 scope
                             )
@@ -216,7 +217,7 @@ internal fun SkillEditorScreen(
                     AppTextField(value = tags, onValueChange = { tags = it },
                         label = stringResource(R.string.skills_tags),
                         placeholder = stringResource(R.string.skills_tags_hint), singleLine = false)
-                    SkillTypeSelector(scope, typeId, { typeId = it })
+                    SkillTypeSelector(scope, typeIds, { typeIds = it })
                 }
             }
 
