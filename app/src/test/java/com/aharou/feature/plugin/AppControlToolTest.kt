@@ -1,6 +1,7 @@
 package com.aharou.feature.plugin
 
 import android.content.Context
+import android.content.SharedPreferences
 import androidx.test.core.app.ApplicationProvider
 import com.aharou.core.config.FullAccessCapability
 import com.aharou.feature.agent.domain.model.AgentContext
@@ -12,6 +13,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.*
 import org.junit.After
 import org.junit.Assert.*
+import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -23,11 +25,30 @@ import org.robolectric.annotation.Config
 @org.robolectric.annotation.SQLiteMode(org.robolectric.annotation.SQLiteMode.Mode.LEGACY)
 class AppControlToolTest {
     private val application = ApplicationProvider.getApplicationContext<Context>()
-    private val tool = AppControlTool(application)
+    private lateinit var tool: AppControlTool
+    private val preferencesField = FullAccessCapability::class.java.getDeclaredField("preferences").apply { isAccessible = true }
+    private var previousPreferences: SharedPreferences? = null
+    private var previousEnabled = false
     private val context = AgentContext(null, null, application.filesDir.absolutePath, null, sessionId = "main")
     private fun args(action: String, vararg values: Pair<String, JsonElement>) = mapOf("action" to JsonPrimitive(action), *values)
     private fun value(text: String) = JsonPrimitive(text)
-    @After fun revoke() { FullAccessCapability.setEnabled(false) }
+    @Before fun isolatePermissionStore() {
+        // A reused Robolectric sandbox can hold a store from a previous Application instance.
+        previousPreferences = preferencesField.get(FullAccessCapability) as SharedPreferences?
+        previousEnabled = FullAccessCapability.enabled.value
+        preferencesField.set(FullAccessCapability, null)
+        tool = AppControlTool(application)
+    }
+
+    @After fun revoke() {
+        try {
+            if (::tool.isInitialized) FullAccessCapability.setEnabled(false)
+        } finally {
+            val previous = previousPreferences
+            preferencesField.set(FullAccessCapability, previous)
+            if (previous != null && previousEnabled) FullAccessCapability.setEnabled(true)
+        }
+    }
 
     @Test fun disabledToolIsNotAdvertisedAndCannotExecuteEvenWithAnOldReference() = runBlocking {
         val registry = ToolRegistry().apply { register(tool.name, tool) }
