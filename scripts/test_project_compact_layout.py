@@ -36,7 +36,8 @@ class ProjectCompactLayoutContract(unittest.TestCase):
         header = region(workbench, "val header:")
         self.assertNotIn('testTag("project_compact_header")', header)
         self.assertNotIn("IconButton(onClick = onBack", header)
-        self.assertIn("Popup(alignment = Alignment.TopEnd)", header)
+        self.assertRegex(header, r"(?m)^        Surface\(shape = RoundedCornerShape\(Radius\.mdLarge\)")
+        self.assertEqual(1, header.count('testTag("project_workbench_header")'))
         host = region(header, '            Box ')
         self.assertIn("IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(48.dp))", host)
         self.assertIn("DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false })", host)
@@ -92,10 +93,10 @@ class ProjectCompactLayoutContract(unittest.TestCase):
         self.assert_header(WORKBENCH)
         for original, replacement in (("mapMenu { menuOpen = false }", ""),
                                       ("DropdownMenu(expanded = menuOpen,", "RemovedMenu(expanded = menuOpen,"),
-                                      ("Popup(alignment = Alignment.TopEnd)", "FloatingMenu(alignment = Alignment.TopEnd)"),
+                                      ("Surface(shape = RoundedCornerShape(Radius.mdLarge)", "RemovedSurface(shape = RoundedCornerShape(Radius.mdLarge)"),
                                       ("Modifier.size(48.dp)", "Modifier.size(24.dp)"),
-                                      ("Popup(alignment = Alignment.TopEnd)", 'Popup(alignment = Alignment.TopEnd).testTag("project_compact_header")'),
-                                      ("Popup(alignment = Alignment.TopEnd)", "IconButton(onClick = onBack) {}; Popup(alignment = Alignment.TopEnd)")):
+                                      ('testTag("project_workbench_header")', 'testTag("project_compact_header")'),
+                                      ('testTag("project_workbench_header")', 'testTag("project_workbench_header"); IconButton(onClick = onBack) {}')):
             mutant = WORKBENCH.replace(original, replacement, 1)
             self.assertNotEqual(mutant, WORKBENCH)
             with self.assertRaises(AssertionError):
@@ -169,7 +170,8 @@ class ProjectCompactLayoutContract(unittest.TestCase):
 
     def test_icon_controls_have_48dp_targets(self):
         header = region(WORKBENCH, "val header:")
-        self.assertIn("Popup(alignment = Alignment.TopEnd)", header)
+        self.assertRegex(header, r"(?m)^        Surface\(shape = RoundedCornerShape\(Radius\.mdLarge\)")
+        self.assertEqual(1, header.count('testTag("project_workbench_header")'))
         buttons = list(re.finditer(r"\bIconButton(?=\()", header))
         self.assertEqual(1, len(buttons))
         for button in buttons:
