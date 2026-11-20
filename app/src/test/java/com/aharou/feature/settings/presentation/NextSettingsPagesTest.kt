@@ -118,20 +118,29 @@ class NextSettingsPagesTest {
 
     @Test fun providerBrandsAddConnectionAndHideWithoutDisablingTheProvider() {
         ProviderLibraryPreferences.initialize(compose.activity)
+        val previousHidden = ProviderLibraryPreferences.hiddenTypes.value
         ProviderLibraryPreferences.setHidden(emptySet())
-        var added = ""
-        compose.setContent { AIEditorTheme {
-            ProvidersSection(listOf(provider), {}, {}, { _, _ -> }, { added = it.name })
-        } }
-        compose.onNodeWithTag("provider_brand_openai").performScrollTo().performClick()
-        compose.onNodeWithTag("provider_add_url_openai").performScrollTo().performClick()
-        assertTrue(added.isNotBlank())
-        compose.onNodeWithText(compose.activity.getString(R.string.providers_hide_type)).performClick()
-        compose.waitForIdle()
-        assertTrue("openai" in ProviderLibraryPreferences.hiddenTypes.value)
-        assertTrue(provider.isEnabled)
-        compose.onNodeWithTag("providers_show_hidden").performClick()
-        compose.onNodeWithTag("provider_brand_openai").performScrollTo().assertExists()
-        ProviderLibraryPreferences.setHidden(emptySet())
+        try {
+            var added = ""
+            compose.setContent { AIEditorTheme {
+                ProvidersSection(listOf(provider), {}, {}, { _, _ -> }, { added = it.name })
+            } }
+            val list = compose.onNode(hasScrollToIndexAction())
+            val brand = "provider_brand_openai"
+            val addConnection = "provider_add_url_openai"
+            list.performScrollToNode(hasTestTag(brand))
+            compose.onNodeWithTag(brand).performClick()
+            list.performScrollToNode(hasTestTag(addConnection))
+            compose.onNodeWithTag(addConnection).performClick()
+            compose.runOnIdle { assertTrue(added.isNotBlank()) }
+            compose.onNodeWithText(compose.activity.getString(R.string.providers_hide_type)).performClick()
+            compose.waitUntil { "openai" in ProviderLibraryPreferences.hiddenTypes.value }
+            assertTrue(provider.isEnabled)
+            compose.onNodeWithTag("providers_show_hidden").performClick()
+            list.performScrollToNode(hasTestTag(brand))
+            compose.onNodeWithTag(brand).assertIsDisplayed()
+        } finally {
+            ProviderLibraryPreferences.setHidden(previousHidden)
+        }
     }
 }
