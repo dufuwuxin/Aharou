@@ -109,6 +109,7 @@ import com.aharou.feature.onboarding.domain.OnboardingStep
 import com.aharou.feature.onboarding.presentation.onboardingTarget
 import com.aharou.feature.settings.presentation.SettingsViewModel
 import com.aharou.feature.settings.domain.model.DashboardContext
+import com.aharou.feature.settings.domain.model.ModelRouteGroup
 import com.aharou.feature.settings.domain.model.ProviderDashboardState
 import com.aharou.feature.settings.domain.model.modelMetadataKey
 import com.aharou.feature.settings.domain.model.resolveModelRoute
@@ -123,6 +124,19 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+internal fun resolveChatRoutePreview(
+    selection: String?,
+    routeGroups: List<ModelRouteGroup>,
+    providers: List<AIProviderConfig>,
+    readError: Boolean,
+): AIProviderConfig? {
+    if (readError) return null
+    val group = routeGroups.firstOrNull { it.selectionId == selection } ?: return null
+    return runCatching {
+        resolveModelRoute(group) { providerId -> providers.firstOrNull { it.id == providerId } }
+    }.getOrNull()
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AIChatPanel(
@@ -232,11 +246,9 @@ fun AIChatPanel(
     // 未绑定会话回退：新会话默认模型（主页空会话中选择后记忆），未设置则为 null（UI 显示默认图标/顶栏模型名留空）。
     val routeViewModel: com.aharou.feature.settings.presentation.ModelRouteGroupViewModel = androidx.hilt.navigation.compose.hiltViewModel()
     val routeGroups by routeViewModel.groups.collectAsStateWithLifecycle()
-    fun resolveRoute(selection: String?): AIProviderConfig? = routeGroups.firstOrNull { it.selectionId == selection }?.let { group ->
-        runCatching {
-            resolveModelRoute(group) { providerId -> providers.firstOrNull { it.id == providerId } }
-        }.getOrNull()
-    }
+    val routeReadError by routeViewModel.readError.collectAsStateWithLifecycle()
+    fun resolveRoute(selection: String?): AIProviderConfig? =
+        resolveChatRoutePreview(selection, routeGroups, providers, routeReadError)
     val defaultFallbackProvider = resolveRoute(defaultProviderId) ?: providers
         .find { it.id == defaultProviderId }
         ?.takeIf { it.hasUsableApiKey }

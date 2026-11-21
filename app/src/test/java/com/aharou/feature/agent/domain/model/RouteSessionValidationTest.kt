@@ -5,6 +5,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.aharou.feature.agent.data.local.entity.ChatSessionEntity
 import com.aharou.feature.agent.domain.session.SessionUseCase
 import com.aharou.feature.agent.domain.workflow.WorkspaceModelChain
+import com.aharou.feature.agent.presentation.component.resolveChatRoutePreview
 import com.aharou.feature.settings.data.repository.DefaultModelSettingsRepository
 import com.aharou.feature.settings.data.repository.ModelRouteGroupRepository
 import com.aharou.feature.settings.data.repository.WorkspaceModelChainRepository
@@ -35,6 +36,16 @@ class RouteSessionValidationTest {
     private val defaults = DefaultModelSettingsRepository(ApplicationProvider.getApplicationContext<Context>(), groups)
     private val child = ChatSessionEntity("child", "member", 1, 1, providerId = "b", model = "B", parentId = "parent")
     private val provider = AIProviderConfig("b", "B", ProviderType.OPENAI, "fixture", baseUrl = "https://example.invalid", defaultModel = "B", models = listOf("B"))
+
+    @Test fun routePreviewHidesRetainedMembersOnReadErrorAndRecovers() {
+        val group = ModelRouteGroup("g", "Group", listOf(ModelRouteMember("b", "B")))
+        val retainedGroups = listOf(group)
+        val enabledProviders = listOf(provider)
+
+        assertEquals("B", resolveChatRoutePreview(group.selectionId, retainedGroups, enabledProviders, false)?.effectiveModel)
+        assertNull(resolveChatRoutePreview(group.selectionId, retainedGroups, enabledProviders, true))
+        assertEquals("B", resolveChatRoutePreview(group.selectionId, retainedGroups, enabledProviders, false)?.effectiveModel)
+    }
 
     @Test fun routeSkipsDisabledOrMissingFirstProvider() = runTest {
         val group = ModelRouteGroup("g", "Group", listOf(ModelRouteMember("a", "A"), ModelRouteMember("b", "B")))
