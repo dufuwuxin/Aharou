@@ -329,6 +329,7 @@ class ProjectRequirementBranchTest {
                 put("androidx.lifecycle.ViewModelProvider.DefaultKey:${ModelRouteGroupViewModel::class.java.canonicalName}",
                     mockk<ModelRouteGroupViewModel>(relaxed = true).also { routes ->
                         every { routes.groups } returns MutableStateFlow(emptyList())
+                        every { routes.readError } returns MutableStateFlow(false)
                     })
                 put("androidx.lifecycle.ViewModelProvider.DefaultKey:${StewardPanelViewModel::class.java.canonicalName}",
                     StewardPanelViewModel(StewardController(StewardSettingsStore.Noop, mockk()),
