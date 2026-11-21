@@ -176,7 +176,9 @@ internal class RevericMarketRepository internal constructor(
     @Inject constructor(@ApplicationContext context: Context) : this(context, newClient())
 
     companion object {
-        internal fun newClient(): OkHttpClient = OkHttpClient.Builder()
+        internal fun newClient(): OkHttpClient = newClient(OkHttpClient.Builder())
+
+        internal fun newClient(builder: OkHttpClient.Builder): OkHttpClient = builder
             .proxySelector(AppProxy.selector).proxyAuthenticator(AppProxy.okHttpAuthenticator)
             .authenticator(Authenticator.NONE).cookieJar(CookieJar.NO_COOKIES)
             .followRedirects(false).followSslRedirects(false).connectTimeout(20, TimeUnit.SECONDS)

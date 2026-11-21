@@ -36,6 +36,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.withContext
 import okhttp3.Call
+import okhttp3.ConnectionSpec
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Request
@@ -166,7 +167,9 @@ class RevericMarketRepositoryTest {
     }
 
     @Test fun productionClientDisablesBothRedirectModesAndOriginCredentials() {
-        val production = RevericMarketRepository.newClient()
+        val production = RevericMarketRepository.newClient(
+            OkHttpClient.Builder().connectionSpecs(listOf(ConnectionSpec.CLEARTEXT))
+        )
         assertFalse(production.followRedirects)
         assertFalse(production.followSslRedirects)
         assertSame(AppProxy.selector, production.proxySelector)
