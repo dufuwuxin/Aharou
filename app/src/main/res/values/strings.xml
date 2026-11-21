@@ -4433,7 +4433,7 @@
     <string name="npm_market_field_integrity">完整性声明（dist.integrity）</string>
     <string name="reveric_tab">Reveric</string>
     <string name="reveric_source">官方目录：downloads.reveric.app/plugins/index.json</string>
-    <string name="reveric_scope">浏览官方目录，下载原始 ZIP 供 AI 改写。此处不适配、不安装、不执行插件；API 与平台仅表示 Reveric 兼容线索，不代表 Aharou 可运行。第三方文本及摘要不构成安全认证。</string>
+    <string name="reveric_scope">浏览官方目录，下载原始 ZIP 供 AI 改写。此处不适配、不安装、不执行插件；API 与平台仅表示 Reveric 兼容线索，不代表 Aharou 可运行。第三方文本及摘要不构成安全认证。系统选址可能先创建空文件；下载或校验失败后，请检查并清理所选文件。</string>
     <string name="reveric_filter">本地筛选名称、描述或作者</string>
     <string name="reveric_refresh">刷新目录</string>
     <string name="reveric_download">下载</string>
