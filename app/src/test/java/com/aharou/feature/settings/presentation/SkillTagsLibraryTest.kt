@@ -78,7 +78,8 @@ class SkillTagsLibraryTest {
 
 @RunWith(RobolectricTestRunner::class)
 @Config(application = ProjectTaskConversationTestApplication::class, sdk = [35], qualifiers = "w360dp-h640dp")
-@GraphicsMode(GraphicsMode.Mode.LEGACY)
+// LEGACY reports identical 36px metrics for all three text styles, invalidating row-height checks.
+@GraphicsMode(GraphicsMode.Mode.NATIVE)
 @SQLiteMode(SQLiteMode.Mode.LEGACY)
 @ConscryptMode(ConscryptMode.Mode.OFF)
 class SkillTagsLibraryComposeTest {
@@ -104,7 +105,9 @@ class SkillTagsLibraryComposeTest {
         val rowMatcher = hasAnyAncestor(hasTestTag("skill_row:${skillSelectionId(multi)}"))
         val rowNodes = compose.onAllNodes(rowMatcher, useUnmergedTree = true).fetchSemanticsNodes()
         val firstRow = row(multi).assertIsDisplayed().fetchSemanticsNode().boundsInRoot
-        assertTrue("Skill row height=${firstRow.height}, density=${compose.density.density}, bounds=$firstRow, " +
+        println("Skill row height=${firstRow.height}, density=${compose.density.density}, fontScale=${compose.density.fontScale}")
+        assertTrue("Skill row height=${firstRow.height}, density=${compose.density.density}, " +
+            "fontScale=${compose.density.fontScale}, bounds=$firstRow, " +
             "descendants=${rowNodes.joinToString { "${it.boundsInRoot}: ${it.config}" }}",
             firstRow.height <= with(compose.density) { 120.dp.toPx() })
         compose.onNodeWithTag("skills_tag_bar").performScrollToNode(hasTestTag("skills_tag:tag:tag-30"))
