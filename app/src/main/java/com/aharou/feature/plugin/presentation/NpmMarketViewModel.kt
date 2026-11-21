@@ -39,6 +39,7 @@ internal data class NpmMarketUiState(
 }
 
 internal const val NPM_QUERY_LIMIT = 200
+internal const val NPM_DISCOVERY_QUERY = "keywords:mcp"
 private const val NPM_PAGE_SIZE = 20
 
 internal interface NpmMarketSource {
@@ -59,7 +60,13 @@ internal class NpmMarketStateOwner(
     private var detailGeneration = 0L
 
     fun query(value: String) {
-        if (value == state.value.query) return
+        val previous = state.value.query
+        if (value == previous) return
+        if (value.isBlank() && previous.isBlank()) {
+            mutableState.update { it.copy(query = value) }
+            browse()
+            return
+        }
         searchGeneration++
         searchJob?.cancel()
         dismissDetails()
@@ -69,12 +76,24 @@ internal class NpmMarketStateOwner(
             searchStatus = if (tooLong) NpmLoadStatus.ERROR else NpmLoadStatus.IDLE,
             searchError = if (tooLong) NpmRegistryError.INVALID_INPUT else null,
         )
+        if (value.isBlank()) browse()
+    }
+
+    fun browse() {
+        val current = state.value
+        if (current.query.isNotBlank() || current.searchStatus != NpmLoadStatus.IDLE) return
+        mutableState.update { it.copy(activeQuery = NPM_DISCOVERY_QUERY) }
+        loadPage(0)
     }
 
     fun search() {
         if (state.value.searchStatus == NpmLoadStatus.LOADING) return
         val query = state.value.query.trim()
-        if (query.length !in 1..NPM_QUERY_LIMIT) {
+        if (query.isEmpty()) {
+            browse()
+            return
+        }
+        if (query.length > NPM_QUERY_LIMIT) {
             mutableState.update { it.copy(searchStatus = NpmLoadStatus.ERROR, searchError = NpmRegistryError.INVALID_INPUT) }
             return
         }
@@ -175,6 +194,7 @@ internal class NpmMarketViewModel @Inject constructor(repository: NpmRegistryRep
 
     val state = owner.state
     fun query(value: String) = owner.query(value)
+    fun browse() = owner.browse()
     fun search() = owner.search()
     fun previous() = owner.previous()
     fun next() = owner.next()

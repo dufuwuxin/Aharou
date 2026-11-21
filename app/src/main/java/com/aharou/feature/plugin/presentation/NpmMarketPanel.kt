@@ -20,6 +20,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -43,6 +44,7 @@ import com.aharou.feature.settings.presentation.component.SettingsGroup
 @Composable
 internal fun NpmMarketPanel(viewModel: NpmMarketViewModel, modifier: Modifier = Modifier) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    LaunchedEffect(viewModel) { viewModel.browse() }
     LazyColumn(
         modifier = modifier,
         contentPadding = PaddingValues(horizontal = Spacing.lg, vertical = Spacing.md),
@@ -69,6 +71,12 @@ internal fun NpmMarketPanel(viewModel: NpmMarketViewModel, modifier: Modifier = 
                     modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
                     Text(stringResource(R.string.npm_market_search))
                 }
+            }
+        }
+        if (state.query.isBlank() && state.activeQuery == NPM_DISCOVERY_QUERY) {
+            item {
+                Text(stringResource(R.string.npm_market_discovery, NPM_DISCOVERY_QUERY),
+                    style = MaterialTheme.typography.labelMedium)
             }
         }
         item {

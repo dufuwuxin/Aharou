@@ -65,17 +65,97 @@ class NpmMarketPanelTest {
         assertEquals(listOf(0, 20, 40, 20), source.calls.map { it.split(':')[2].toInt() })
     }
 
-    @Test fun blankAndOverlongQueriesNeverReachSource() = runTest {
+    @Test fun overlongQueryNeverReachesSource() = runTest {
         val source = FakeSource()
         val owner = NpmMarketStateOwner(source, this)
-        for (query in listOf("  ", "x".repeat(201))) {
-            owner.query(query)
-            assertFalse(owner.state.value.canSearch)
-            owner.search()
-            advanceUntilIdle()
-            assertEquals(NpmRegistryError.INVALID_INPUT, owner.state.value.searchError)
-        }
+        owner.query("x".repeat(201))
+        assertFalse(owner.state.value.canSearch)
+        owner.search()
+        advanceUntilIdle()
+        assertEquals(NpmRegistryError.INVALID_INPUT, owner.state.value.searchError)
         assertTrue(source.calls.isEmpty())
+    }
+
+    @Test fun firstEntryLoadsDefaultOnceWithoutPopulatingTheInput() = runTest {
+        val source = FakeSource()
+        val owner = NpmMarketStateOwner(source, this)
+        owner.browse()
+        owner.browse()
+        advanceUntilIdle()
+        owner.browse()
+        owner.query("  ")
+        owner.search()
+        advanceUntilIdle()
+        assertEquals(listOf("search:keywords:mcp:0:20"), source.calls)
+        assertEquals("  ", owner.state.value.query)
+        assertFalse(owner.state.value.canSearch)
+        assertEquals(NpmLoadStatus.READY, owner.state.value.searchStatus)
+        assertEquals("keywords:mcp", owner.state.value.activeQuery)
+    }
+
+    @Test fun blankSearchUsesDefaultAndClearingExplicitResultsReturnsToFirstDefaultPage() = runTest {
+        val source = FakeSource()
+        val owner = NpmMarketStateOwner(source, this)
+        owner.search()
+        advanceUntilIdle()
+        assertEquals("", owner.state.value.query)
+        owner.query("compose")
+        advanceUntilIdle()
+        assertEquals(listOf("search:keywords:mcp:0:20"), source.calls)
+        owner.search()
+        advanceUntilIdle()
+        owner.next()
+        advanceUntilIdle()
+        owner.query("")
+        advanceUntilIdle()
+        assertEquals(listOf("search:keywords:mcp:0:20", "search:compose:0:20", "search:compose:20:20",
+            "search:keywords:mcp:0:20"), source.calls)
+        assertEquals("", owner.state.value.query)
+        assertEquals(0, owner.state.value.page?.from)
+    }
+
+    @Test fun defaultFailureRetriesAndPagesUsingTheDiscoveryQuery() = runTest {
+        val source = FakeSource()
+        val result = source.searchResult
+        source.searchResult = { _, _, _ -> throw NpmRegistryException(NpmRegistryError.RATE_LIMITED) }
+        val owner = NpmMarketStateOwner(source, this)
+        owner.browse()
+        advanceUntilIdle()
+        assertEquals(NpmRegistryError.RATE_LIMITED, owner.state.value.searchError)
+        owner.browse()
+        advanceUntilIdle()
+        assertEquals(listOf("search:keywords:mcp:0:20"), source.calls)
+        source.searchResult = result
+        owner.retrySearch()
+        advanceUntilIdle()
+        owner.next()
+        advanceUntilIdle()
+        assertEquals(20, owner.state.value.page?.from)
+        owner.previous()
+        advanceUntilIdle()
+        assertEquals(listOf("search:keywords:mcp:0:20", "search:keywords:mcp:0:20", "search:keywords:mcp:20:20",
+            "search:keywords:mcp:0:20"), source.calls)
+    }
+
+    @Test fun clearingWhileSearchIsPendingRejectsLateExplicitResults() = runTest {
+        val late = CompletableDeferred<NpmSearchPage>()
+        val source = FakeSource().apply {
+            searchResult = { query, from, size ->
+                if (query == "old") withContext(NonCancellable) { late.await() }
+                else NpmSearchPage(listOf(metadata("default-fixture")), 1, from, size, null)
+            }
+        }
+        val owner = NpmMarketStateOwner(source, this)
+        owner.query("old")
+        owner.search()
+        runCurrent()
+        owner.query("")
+        runCurrent()
+        late.complete(NpmSearchPage(listOf(metadata("old")), 1, 0, 20, null))
+        advanceUntilIdle()
+        assertEquals(listOf("search:old:0:20", "search:keywords:mcp:0:20"), source.calls)
+        assertEquals("keywords:mcp", owner.state.value.activeQuery)
+        assertEquals("default-fixture", owner.state.value.page!!.packages.single().name)
     }
 
     @Test fun leadingWhitespaceCannotTurnOverlongInputIntoTruncatedSearch() = runTest {
