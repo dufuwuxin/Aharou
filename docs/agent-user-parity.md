@@ -195,6 +195,8 @@
 | 启用/停用 server | `SettingsScreen.kt:1077`（`setMcpServerEnabled`） | 有 | `config` `mcp.servers.<id>.enabled`（`ConfigMcpFields.kt:174`） | 无 |
 | 重连接 / 刷新连接 | `SettingsScreen.kt:755`（`viewModel.reloadMcp()`） | 无 | 未找到（`config set enabled` 是否触发重连未核实） | **缺口**：连不上时只能改配置或等下轮会话，没有“立刻重连”的动作 |
 
+The consolidated source also includes a separate in-process, read-only file inspector: `file_analyze` covers format/header/hash, text pages and archive entry listings; `elf_analyze` covers bounded ELF metadata, sections, symbols, dependencies, strings and relocations. Both are registered through `AgentModule` and use the workspace file backend via `SomcpAnalysisService`. File-browser analysis opens `GeneralFileAnalysisScreen` and its ELF detail. These tools do not execute or modify the inspected file, do not extract archives, and do not include dynamic debugging or Rizin/LIEF decompilation. Device execution remains unverified.
+
 SOMCP is included in the HTTP connector catalog. The existing connector installer stores its access token in Vault, writes the placeholder into MCP configuration, and reloads that server. The MCP config channel can edit its address, authentication and enabled state. The user still starts SOMCP and grants its file access in that application; neither catalog presence nor a fixture establishes that its analysis backends run on this device.
 
 ## 7. 规则文件
