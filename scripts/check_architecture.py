@@ -6,7 +6,7 @@
 
 退出码 0 通过 / 1 有违规，供 CI 与 Gradle preBuild 复用。
 
-模式：默认跑三项检查；`--check-ratchet` 额外与 origin/master 上的基线比对（CI 用，防止一条
+模式：默认跑三项检查；`--check-ratchet` 额外与 origin/main 上的基线比对（CI 用，防止一条
 `--sync-baseline` 把棘轮抬高）；`--sync-baseline` 显式写回当前行数（本地手动操作）。
 """
 import json
@@ -210,7 +210,7 @@ def sync_baseline(policy, baseline):
     return 0
 
 
-def check_ratchet(errors, ref="origin/master"):
+def check_ratchet(errors, ref="origin/main"):
     """基线只许缩：与 ref 上的基线逐项比对。
 
     `--sync-baseline` 一条命令就能把棘轮抬到当前行数，本地保留它作为显式操作没问题；

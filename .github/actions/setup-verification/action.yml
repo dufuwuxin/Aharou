@@ -11,7 +11,7 @@ runs:
     - name: Set up Gradle
       uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5
       with:
-        cache-read-only: ${{ github.ref != 'refs/heads/master' }}
+        cache-read-only: ${{ github.ref != 'refs/heads/main' }}
     - name: Cache Robolectric runtime
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
       with:

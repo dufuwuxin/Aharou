@@ -20,13 +20,13 @@ import _gh  # noqa: E402
 def parse_args():
     p = argparse.ArgumentParser(
         description="经 GitHub API 把本地 HEAD 推到远端分支（git push 不通时用）。",
-        epilog="示例：python3 scripts/push/gh_api_push.py master\n"
-               "      python3 scripts/push/gh_api_push.py master ~/workspace --dry-run\n"
+        epilog="示例：python3 scripts/push/gh_api_push.py main\n"
+               "      python3 scripts/push/gh_api_push.py main ~/workspace --dry-run\n"
                "token 依次取：GITHUB_TOKEN → git credential fill（host=github.com）→ "
                "~/.aharou/memory/SECRETS.md；任何输出都不打印 token。",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p.add_argument("branch", nargs="?", default="master", help="远端分支名（默认 master）")
+    p.add_argument("branch", nargs="?", default="main", help="远端分支名（默认 main）")
     p.add_argument("repo_dir", nargs="?", default=".", help="本地仓库目录（默认当前目录）")
     p.add_argument("--repo", help="GitHub 仓库 owner/name（默认从 origin 解析）")
     p.add_argument("--dry-run", action="store_true",

@@ -27,12 +27,21 @@ class FormalReleaseOnlyTest(unittest.TestCase):
         for check in ("check_migrations.py", "check_skills.py", "check_architecture.py"):
             self.assertIn(check, source)
 
-    def test_release_keeps_master_ancestry_signing_and_tests(self) -> None:
+    def test_release_keeps_main_ancestry_signing_and_tests(self) -> None:
         source = (WORKFLOWS / "android-release.yml").read_text(encoding="utf-8")
-        for gate in ("git merge-base --is-ancestor", "origin/master", "Restore release keystore",
+        for gate in ("git merge-base --is-ancestor", "origin/main", "Restore release keystore",
                      ":app:testArmsoloDebugUnitTest", ":app:assembleArmsoloRelease",
                      "softprops/action-gh-release@"):
             self.assertIn(gate, source)
+
+    def test_automation_keeps_a_single_main_branch(self) -> None:
+        source = (WORKFLOWS / "ci.yml").read_text(encoding="utf-8")
+        self.assertEqual(source.count("branches: [ main ]"), 2)
+        sync = (WORKFLOWS / "sync-models.yml").read_text(encoding="utf-8")
+        self.assertIn("git push origin HEAD:main", sync)
+        self.assertNotIn("git push -f", sync)
+        self.assertNotIn("checkout --orphan", sync)
+        self.assertNotIn("HEAD:data", sync)
 
     def test_detector_rejects_reintroduced_beta_build_or_release(self) -> None:
         for source in ("run: ./gradlew :app:assembleArmsoloBeta", "run: gh release create beta-latest",
