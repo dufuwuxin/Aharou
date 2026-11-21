@@ -72,7 +72,9 @@ class NpmRegistryRepositoryTest {
         assertEquals(listOf("@s/pkg", "1.2.3"), requests.single().url.pathSegments)
         assertEquals("registry.npmjs.org", requests.single().url.host)
         assertEquals(setOf("name", "version", "description", "license", "repository", "deprecated", "integrity"),
-            NpmPackageMetadata::class.java.declaredFields.filterNot { it.isSynthetic }.map { it.name }.toSet())
+            NpmPackageMetadata::class.java.declaredFields
+                .filterNot { it.isSynthetic || it.name == "\$stable" }
+                .map { it.name }.toSet())
     }
 
     @Test fun missingOrWronglyTypedFieldsRemainNull() = runBlocking {
