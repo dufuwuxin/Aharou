@@ -101,8 +101,11 @@ class SkillTagsLibraryComposeTest {
         assertTrue(bar.bottom <= search.top)
         assertTrue(bar.height <= with(compose.density) { 56.dp.toPx() })
         assertTrue(list.height >= with(compose.density) { 360.dp.toPx() })
+        val rowMatcher = hasAnyAncestor(hasTestTag("skill_row:${skillSelectionId(multi)}"))
+        val rowNodes = compose.onAllNodes(rowMatcher, useUnmergedTree = true).fetchSemanticsNodes()
         val firstRow = row(multi).assertIsDisplayed().fetchSemanticsNode().boundsInRoot
-        assertTrue("Skill row height=${firstRow.height}, density=${compose.density.density}, bounds=$firstRow",
+        assertTrue("Skill row height=${firstRow.height}, density=${compose.density.density}, bounds=$firstRow, " +
+            "descendants=${rowNodes.joinToString { "${it.boundsInRoot}: ${it.config}" }}",
             firstRow.height <= with(compose.density) { 120.dp.toPx() })
         compose.onNodeWithTag("skills_tag_bar").performScrollToNode(hasTestTag("skills_tag:tag:tag-30"))
         compose.onNodeWithTag("skills_tag:tag:tag-30").assertIsDisplayed().performClick().assertIsSelected()
