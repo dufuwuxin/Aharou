@@ -102,7 +102,8 @@ class SkillTagsLibraryComposeTest {
         assertTrue(bar.height <= with(compose.density) { 56.dp.toPx() })
         assertTrue(list.height >= with(compose.density) { 360.dp.toPx() })
         val firstRow = row(multi).assertIsDisplayed().fetchSemanticsNode().boundsInRoot
-        assertTrue(firstRow.height <= with(compose.density) { 120.dp.toPx() })
+        assertTrue("Skill row height=${firstRow.height}, density=${compose.density.density}, bounds=$firstRow",
+            firstRow.height <= with(compose.density) { 120.dp.toPx() })
         compose.onNodeWithTag("skills_tag_bar").performScrollToNode(hasTestTag("skills_tag:tag:tag-30"))
         compose.onNodeWithTag("skills_tag:tag:tag-30").assertIsDisplayed().performClick().assertIsSelected()
         row(multi).assertIsDisplayed()
@@ -147,7 +148,7 @@ class SkillTagsLibraryComposeTest {
         compose.onNodeWithText(compose.activity.getString(R.string.provider_models_selected_count, 2)).assertIsDisplayed()
         compose.onNodeWithContentDescription(compose.activity.getString(R.string.common_delete)).performClick()
         compose.onNodeWithText(compose.activity.getString(R.string.common_batch_delete_confirm, 2)).assertIsDisplayed()
-        compose.onNode(hasText(compose.activity.getString(R.string.common_delete)) and hasAnyAncestor(isDialog())).performClick()
+        compose.onNode(hasText(compose.activity.getString(R.string.common_delete)) and hasClickAction() and hasAnyAncestor(isDialog())).performClick()
         compose.runOnIdle { assertEquals(setOf(multi, project), deleted.toSet()) }
         compose.onNodeWithTag("skills_selection_bar").assertDoesNotExist()
     }

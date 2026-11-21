@@ -85,7 +85,8 @@ class ProviderVisibilityTest {
 
         manage.performClick()
         compose.waitForIdle()
-        compose.onNodeWithTag("provider_visibility_openai").assertIsOn()
+        compose.onNodeWithTag("provider_visibility_openai").assertDoesNotExist()
+        compose.onNodeWithTag("provider_brand_openai").assertExists()
         search.performTextClearance()
         list.performScrollToKey("brand:openai")
         compose.onNodeWithTag("provider_brand_openai").performClick()

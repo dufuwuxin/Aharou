@@ -327,7 +327,7 @@ class ProjectRequirementBranchTest {
                         every { scheduled.sessions } returns MutableStateFlow(emptyList())
                     })
                 put("androidx.lifecycle.ViewModelProvider.DefaultKey:${ModelRouteGroupViewModel::class.java.canonicalName}",
-                    mockk<ModelRouteGroupViewModel>().also { routes ->
+                    mockk<ModelRouteGroupViewModel>(relaxed = true).also { routes ->
                         every { routes.groups } returns MutableStateFlow(emptyList())
                     })
                 put("androidx.lifecycle.ViewModelProvider.DefaultKey:${StewardPanelViewModel::class.java.canonicalName}",

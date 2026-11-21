@@ -140,11 +140,13 @@ class LibraryPagesNavigationTest {
         compose.onNodeWithTag("context_library_content").performScrollToNode(hasTestTag("context_library_search"))
         compose.onNodeWithTag("context_library_search").performTextInput("Target")
         val up = hasText(compose.activity.getString(R.string.context_folder_up)) and hasClickAction()
-        compose.onNodeWithTag("context_library_content").performScrollToNode(up)
-        compose.onNode(up).performClick()
+        compose.onNode(up).assertDoesNotExist()
+        compose.runOnIdle { compose.activity.onBackPressedDispatcher.onBackPressed() }
         compose.onNodeWithTag("context_library_content").performScrollToNode(hasTestTag("context_library_search"))
         assertEquals("", compose.onNodeWithTag("context_library_search").fetchSemanticsNode()
             .config[androidx.compose.ui.semantics.SemanticsProperties.EditableText].text)
+        compose.onNodeWithTag("context_library_content").performScrollToNode(up)
+        compose.onNode(up).assertIsDisplayed().performClick()
         compose.onNode(up).assertDoesNotExist()
     }
 
