@@ -262,6 +262,7 @@ android {
         unitTests.isIncludeAndroidResources = true
         // 失败用例打印完整堆栈：CI 日志默认只留首行，定位迁移校验差异时看不到 Room 的期望/实际结构
         unitTests.all {
+            it.maxHeapSize = "2g"
             it.testLogging {
                 exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
             }
