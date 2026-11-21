@@ -8,6 +8,7 @@ import com.aharou.feature.agent.domain.model.AgentContext
 import com.aharou.feature.agent.domain.permission.PermissionChoice
 import com.aharou.feature.agent.domain.permission.ToolPermissionPolicyEngine
 import com.aharou.feature.agent.domain.receipt.ToolCallReceiptRepository
+import com.aharou.feature.agent.domain.tool.AgentTool
 import com.aharou.feature.agent.domain.tool.PendingPermissionBatch
 import com.aharou.feature.agent.domain.tool.ToolPermissionManager
 import com.aharou.feature.agent.domain.tool.ToolRegistry
@@ -17,6 +18,7 @@ import com.aharou.feature.agent.domain.workflow.PermissionGate
 import com.aharou.feature.agent.domain.workflow.PermissionVerdict
 import com.aharou.feature.workspace.domain.FileAccessProvider
 import com.aharou.plugin.api.PluginHost
+import com.google.gson.GsonBuilder
 import dagger.Lazy
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
@@ -37,6 +39,7 @@ class HostPluginBridge @Inject constructor(
 ) {
     fun createHost(root: File, invocationContext: () -> AgentContext?): PluginHost = object : PluginHost {
         private val reflection = HostPluginReflection { context.applicationContext }
+        private val gson = GsonBuilder().serializeNulls().create()
         @Volatile private var closed = false
         override fun close() { closed = true; reflection.close() }
         override fun apiVersion() = 1
@@ -48,6 +51,25 @@ class HostPluginBridge @Inject constructor(
             val args = Json.parseToJsonElement(argumentsJson).jsonObject
             if (operation.startsWith("reflect.")) return reflection.call(operation, args)
             return when (operation) {
+                "host.capabilities" -> buildJsonObject {
+                    put("apiVersion", apiVersion())
+                    put("operations", buildJsonArray {
+                        listOf("host.capabilities", "file.read", "file.write", "log",
+                            "tool.list", "tool.describe", "tool.invoke", "config.get", "config.set",
+                            "reflect.context", "reflect.class", "reflect.new", "reflect.invoke",
+                            "reflect.get", "reflect.set", "reflect.release").forEach { add(it) }
+                    })
+                }.toString()
+                "tool.list", "tool.describe" -> {
+                    val tools = invocationContext()?.let { registry.get().getDeferredTools(it) }.orEmpty()
+                    if (operation == "tool.list") JsonArray(tools.map { describeTool(it) }).toString()
+                    else {
+                        val name = args.getValue("name").jsonPrimitive.content
+                        val tool = tools.firstOrNull { it.name == name }
+                            ?: error("Tool is not available to this invocation: $name")
+                        describeTool(tool).toString()
+                    }
+                }
                 "file.read" -> JsonPrimitive(resolve(args).readText(Charsets.UTF_8)).toString()
                 "file.write" -> {
                     val file = resolve(args)
@@ -76,6 +98,12 @@ class HostPluginBridge @Inject constructor(
                 else -> error("Unknown host operation: $operation")
             }
         }
+        private fun describeTool(tool: AgentTool): JsonObject = buildJsonObject {
+            put("name", tool.name)
+            put("description", tool.description)
+            put("parameters", Json.parseToJsonElement(gson.toJson(tool.toJsonSchema())))
+        }
+
         private fun resolve(args: JsonObject): File {
             val path = args.getValue("path").jsonPrimitive.content
             require(path.isNotBlank()) { "File path is empty" }

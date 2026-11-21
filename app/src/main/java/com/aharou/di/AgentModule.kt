@@ -1,6 +1,7 @@
 package com.aharou.di
 
 import android.content.Context
+import com.aharou.core.net.AppProxy
 import com.aharou.core.net.applyTcpKeepAlive
 import androidx.room.Room
 import androidx.room.migration.Migration
@@ -90,6 +91,7 @@ import dagger.hilt.components.SingletonComponent
 import okhttp3.Call
 import okhttp3.Connection
 import okhttp3.EventListener
+import com.aharou.feature.plugin.domain.npm.NpmRegistryRepository
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Request
@@ -321,6 +323,16 @@ object AgentModule {
                 chain.proceed(finalRequest)
             }
             .build()
+    }
+
+    @Provides
+    @Singleton
+    fun provideNpmRegistryRepository(client: OkHttpClient): NpmRegistryRepository {
+        val registryClient = client.newBuilder()
+            .proxySelector(AppProxy.selector)
+            .proxyAuthenticator(AppProxy.okHttpAuthenticator)
+            .build()
+        return NpmRegistryRepository(registryClient)
     }
 
     /**

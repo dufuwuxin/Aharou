@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.aharou.core.datastore.preferencesCorruptionHandler
 import com.aharou.feature.settings.domain.model.ModelRouteGroup
+import com.aharou.feature.settings.domain.model.resolveModelRoute
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -43,6 +44,9 @@ class DefaultModelSettingsRepository @Inject constructor(
 
     val routeGroupsFlow: Flow<List<ModelRouteGroup>> = routeGroupRepository.groups
 
+    /** 读取失败也必须使预览失效，不能让上一次有效组掩盖损坏配置。 */
+    val routeGroupInvalidations: Flow<Unit> = routeGroupRepository.readState.map { }
+
     suspend fun getRouteGroup(id: String): ModelRouteGroup? = routeGroupRepository.get(id)
 
     suspend fun isRouteSelection(session: com.aharou.feature.agent.data.local.entity.ChatSessionEntity?): Boolean =
@@ -61,10 +65,7 @@ class DefaultModelSettingsRepository @Inject constructor(
 
     suspend fun resolveRoute(selection: String, providers: com.aharou.feature.settings.domain.repository.AIProviderRepository): com.aharou.feature.settings.domain.model.AIProviderConfig {
         val id = requireNotNull(ModelRouteGroup.idFromSelection(selection))
-        val member = routeGroupRepository.get(id)?.models?.firstOrNull() ?: error("MODEL_ROUTE_GROUP_REMOVED")
-        val provider = providers.getProviderById(member.providerId) ?: error("MODEL_ROUTE_PROVIDER_REMOVED")
-        check(provider.isEnabled && provider.hasUsableApiKey && member.model in provider.models) { "MODEL_ROUTE_MODEL_UNAVAILABLE" }
-        return provider.copy(selectedModel = member.model)
+        return resolveModelRoute(getRouteGroup(id)) { providers.getProviderById(it) }
     }
 
     /** 写入新会话默认模型（设空字符串即等同 [clear]）。 */

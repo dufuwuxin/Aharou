@@ -58,6 +58,7 @@ class NextSettingsPagesTest {
         val selected = MutableStateFlow("")
         val model = mockk<ModelRouteGroupViewModel>()
         every { model.groups } returns groups
+        every { model.readError } returns MutableStateFlow(false)
         every { model.selectedGroupId } returns selected
         var saved = emptyList<ModelRouteMember>()
         coEvery { model.create(any(), any()) } coAnswers {
@@ -87,6 +88,7 @@ class NextSettingsPagesTest {
         val groups = MutableStateFlow(listOf(group))
         val model = mockk<ModelRouteGroupViewModel>()
         every { model.groups } returns groups
+        every { model.readError } returns MutableStateFlow(false)
         every { model.selectedGroupId } returns MutableStateFlow("")
         var saved = emptyList<ModelRouteMember>()
         coEvery { model.update("repeated", any(), any()) } coAnswers {

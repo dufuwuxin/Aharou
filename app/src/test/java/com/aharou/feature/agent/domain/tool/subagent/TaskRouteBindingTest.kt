@@ -4,6 +4,7 @@ import com.aharou.feature.agent.data.local.entity.ChatSessionEntity
 import com.aharou.feature.agent.domain.model.RouteGroupAllocation
 import com.aharou.feature.agent.domain.model.RouteModelBinding
 import com.aharou.feature.settings.data.repository.DefaultModelSettingsRepository
+import com.aharou.feature.settings.data.repository.ModelRouteGroupDataException
 import com.aharou.feature.settings.data.repository.ModelRouteGroupRepository
 import com.aharou.feature.settings.domain.model.AIProviderConfig
 import com.aharou.feature.settings.domain.model.ModelRouteGroup
@@ -11,6 +12,7 @@ import com.aharou.feature.settings.domain.model.ModelRouteMember
 import com.aharou.feature.settings.domain.model.ProviderType
 import com.aharou.feature.settings.domain.repository.AIProviderRepository
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.flow.flowOf
@@ -69,6 +71,16 @@ class TaskRouteBindingTest {
         val child = parent("new-child").copy(parentId = "main", providerId = selected.binding.providerId, model = selected.binding.model)
         assertTrue(runCatching { resolver.saveMember(child, selected) { error("injected DAO failure") } }.isFailure)
         assertEquals(listOf(true, false), marks)
+        assertEquals(RouteModelBinding("b", "B"), resolver.prepare(parent(), null, null).binding)
+    }
+
+    @Test fun corruptGroupStorageFailsWithoutFallbackOrSpendingAnOrderedSlot() = runTest {
+        prepare()
+        val failure = ModelRouteGroupDataException(IllegalArgumentException("invalid JSON"))
+        coEvery { groups.get("g") } throws failure
+        assertSame(failure, runCatching { resolver.prepare(parent(), null, null) }.exceptionOrNull())
+        coVerify(exactly = 0) { providers.getProviderById(any()) }
+        coEvery { groups.get("g") } returns group
         assertEquals(RouteModelBinding("b", "B"), resolver.prepare(parent(), null, null).binding)
     }
 

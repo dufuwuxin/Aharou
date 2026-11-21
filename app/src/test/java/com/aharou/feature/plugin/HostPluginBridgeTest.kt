@@ -2,6 +2,7 @@ package com.aharou.feature.plugin
 
 import android.content.Context
 import com.aharou.feature.plugin.runtime.HostPluginBridge
+import com.aharou.feature.plugin.runtime.HostPluginTool
 import com.aharou.feature.agent.domain.model.AgentContext
 import com.aharou.feature.agent.domain.tool.*
 import com.aharou.feature.agent.domain.permission.ToolPermissionPolicyEngine
@@ -59,6 +60,109 @@ class HostPluginBridgeTest {
         assertTrue(java.io.File(host.dataDirectory(), "hello.txt").isFile)
     }
 
+    @Test fun hostCapabilitiesReportsActualSdkAndSupportedOperations() {
+        val host = bridge.createHost(temp.root) { null }
+        val capabilities = Json.parseToJsonElement(host.call("host.capabilities", "{}")).jsonObject
+        assertEquals(host.apiVersion(), capabilities.getValue("apiVersion").jsonPrimitive.int)
+        val operations = capabilities.getValue("operations").jsonArray.map { it.jsonPrimitive.content }
+        assertEquals(setOf("host.capabilities", "file.read", "file.write", "log",
+            "tool.list", "tool.describe", "tool.invoke", "config.get", "config.set",
+            "reflect.context", "reflect.class", "reflect.new", "reflect.invoke",
+            "reflect.get", "reflect.set", "reflect.release"), operations.toSet())
+        assertEquals(operations.size, operations.toSet().size)
+    }
+
+    @Test fun missingContextDoesNotExposeRegisteredTools() {
+        val hidden = mockk<AgentTool>()
+        every { hidden.name } returns "restricted"
+        registry.register(hidden.name, hidden)
+        val host = bridge.createHost(temp.root) { null }
+        assertEquals(JsonArray(emptyList()), Json.parseToJsonElement(host.call("tool.list", "{}")))
+        val failure = runCatching { host.call("tool.describe", """{"name":"restricted"}""") }.exceptionOrNull()
+        assertNotNull(failure)
+        assertTrue(failure!!.message.orEmpty().contains("not available"))
+        verify(exactly = 0) { hidden.toJsonSchema() }
+        coVerify(exactly = 0) { hidden.executeWithContext(any(), any()) }
+        coVerify(exactly = 0) { policy.evaluate(any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test fun discoveryUsesOnlyTheCurrentInvocationSnapshot() {
+        val context = AgentContext(null, null, temp.root.path, null, sessionId = "discovery")
+        val otherContext = context.copy(inputMessageId = "other-turn")
+        val visible = mockk<AgentTool>()
+        every { visible.name } returns "visible"
+        every { visible.description } returns "Visible in this invocation"
+        every { visible.toJsonSchema() } returns mapOf("type" to "object", "properties" to emptyMap<String, Any>())
+        val hidden = mockk<AgentTool>()
+        every { hidden.name } returns "restricted"
+        registry.register(hidden.name, hidden)
+        registry.bindDiscoveryTools(listOf(hidden), otherContext)
+        registry.bindDiscoveryTools(listOf(visible), context)
+        var active: AgentContext? = context
+        val host = bridge.createHost(temp.root) { active }
+        val listed = Json.parseToJsonElement(host.call("tool.list", "{}")).jsonArray
+        assertEquals(listOf("visible"), listed.map { it.jsonObject.getValue("name").jsonPrimitive.content })
+        assertEquals(listed.single(), Json.parseToJsonElement(host.call("tool.describe", """{"name":"visible"}""")))
+        for (name in listOf("restricted", "missing")) {
+            val failure = runCatching { host.call("tool.describe", """{"name":"$name"}""") }.exceptionOrNull()
+            assertNotNull(failure)
+            assertTrue(failure!!.message.orEmpty().contains("not available"))
+        }
+        assertTrue(host.call("tool.invoke", """{"name":"restricted"}""").contains("TOOL_NOT_ALLOWED"))
+        for (unbound in listOf(context.copy(inputMessageId = "next-turn"),
+            context.copy(sessionId = "other-session"), context.copy(projectRoot = "${temp.root.path}/other"), null)) {
+            active = unbound
+            assertEquals(JsonArray(emptyList()), Json.parseToJsonElement(host.call("tool.list", "{}")))
+            assertTrue(runCatching { host.call("tool.describe", """{"name":"visible"}""") }.isFailure)
+        }
+        verify(exactly = 0) { hidden.toJsonSchema() }
+        coVerify(exactly = 0) { hidden.executeWithContext(any(), any()) }
+        coVerify(exactly = 0) { policy.evaluate(any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test fun discoveryPreservesTheRealToolSchemaIncludingNestedAndNullValues() {
+        val context = AgentContext(null, null, temp.root.path, null)
+        val metadata = Json.parseToJsonElement("""{
+            "description":"Nested schema fixture",
+            "inputSchema":{
+                "type":"object",
+                "properties":{
+                    "payload":{"type":"object","properties":{"mode":{"enum":["safe",null],"default":null}},"additionalProperties":false},
+                    "entries":{"type":"array","items":{"oneOf":[{"type":"string"},{"type":"integer","minimum":1}]}}
+                },
+                "required":["payload"],
+                "additionalProperties":false,
+                "x-fixture":{"nullable":null,"enabled":true,"limit":42}
+            }
+        }""").jsonObject
+        val executions = AtomicInteger()
+        val tool = HostPluginTool("schema_fixture", metadata) { _, _ ->
+            executions.incrementAndGet()
+            "null"
+        }
+        registry.bindDiscoveryTools(listOf(tool), context)
+        val host = bridge.createHost(temp.root) { context }
+        val described = Json.parseToJsonElement(host.call("tool.describe", """{"name":"schema_fixture"}""")).jsonObject
+        assertEquals("schema_fixture", described.getValue("name").jsonPrimitive.content)
+        assertEquals("Nested schema fixture", described.getValue("description").jsonPrimitive.content)
+        assertEquals(metadata.getValue("inputSchema"), described.getValue("parameters"))
+        assertEquals(JsonArray(listOf(described)), Json.parseToJsonElement(host.call("tool.list", "{}")))
+        assertEquals(0, executions.get())
+        assertFalse(registry.isActivated(tool.name, context))
+        coVerify(exactly = 0) { policy.evaluate(any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test fun closingHostRejectsCapabilitiesAndToolDiscovery() {
+        val host = bridge.createHost(temp.root) { null }
+        host.close()
+        for ((operation, arguments) in listOf("host.capabilities" to "{}", "tool.list" to "{}",
+            "tool.describe" to """{"name":"fixture"}""")) {
+            val failure = runCatching { host.call(operation, arguments) }.exceptionOrNull()
+            assertTrue(failure is IllegalStateException)
+            assertEquals("Plugin host was released", failure!!.message)
+        }
+    }
+
     @Test fun missingContextOrRoleSnapshotCannotInvokeGlobalTools() {
         val context = AgentContext(null, null, temp.root.path, null)
         val host = bridge.createHost(temp.root) { context }
@@ -73,16 +177,43 @@ class HostPluginBridgeTest {
         val context = AgentContext(null, null, temp.root.path, null)
         val tool = mockk<AgentTool>()
         every { tool.name } returns "fixture"
+        every { tool.description } returns "Permission-gated fixture"
+        every { tool.toJsonSchema() } returns mapOf("type" to "object")
         every { tool.effectivePermissionPolicy(any()) } returns ToolPermissionPolicy.AUTO_APPROVE
         coEvery { policy.evaluate(any(), any(), any(), any(), any(), any()) } returns
             ToolPermissionPolicyEngine.EvalResult(ToolPermissionPolicyEngine.Verdict.ALLOW, emptyList())
         coEvery { tool.executeWithContext(any(), context) } returns ToolResult.Success(JsonPrimitive("called"))
         registry.bindDiscoveryTools(listOf(tool), context)
         val host = bridge.createHost(temp.root) { context }
+        assertEquals("fixture", Json.parseToJsonElement(host.call("tool.list", "{}")).jsonArray.single()
+            .jsonObject.getValue("name").jsonPrimitive.content)
+        host.call("tool.describe", """{"name":"fixture"}""")
+        coVerify(exactly = 0) { policy.evaluate(any(), any(), any(), any(), any(), any()) }
+        coVerify(exactly = 0) { tool.executeWithContext(any(), context) }
         assertTrue(host.call("tool.invoke", "{\"name\":\"fixture\",\"arguments\":{}}").contains("called"))
         coVerify(exactly = 1) { tool.executeWithContext(any(), context) }
         coVerify(exactly = 1) { policy.evaluate(tool, "fixture", any(), context.mode, context.projectRoot, context.sessionId) }
     }
+    @Test fun discoveringAToolDoesNotBypassPermissionDenial() {
+        val context = AgentContext(null, null, temp.root.path, null)
+        val tool = mockk<AgentTool>()
+        every { tool.name } returns "denied_fixture"
+        every { tool.description } returns "Discoverable but denied"
+        every { tool.toJsonSchema() } returns mapOf("type" to "object")
+        coEvery { policy.evaluate(any(), any(), any(), any(), any(), any()) } returns
+            ToolPermissionPolicyEngine.EvalResult(ToolPermissionPolicyEngine.Verdict.DENY,
+                emptyList(), denyReason = "fixture permission denial")
+        registry.bindDiscoveryTools(listOf(tool), context)
+        val host = bridge.createHost(temp.root) { context }
+        assertEquals("denied_fixture", Json.parseToJsonElement(host.call("tool.list", "{}")).jsonArray.single()
+            .jsonObject.getValue("name").jsonPrimitive.content)
+        host.call("tool.describe", """{"name":"denied_fixture"}""")
+        val response = host.call("tool.invoke", """{"name":"denied_fixture","arguments":{}}""")
+        assertTrue(response.contains("fixture permission denial"))
+        coVerify(exactly = 1) { policy.evaluate(tool, "denied_fixture", any(), context.mode, context.projectRoot, context.sessionId) }
+        coVerify(exactly = 0) { tool.executeWithContext(any(), any()) }
+    }
+
     @Test fun selfConfigDisableReloadAndCompileRevokeWithoutWaitingForOwnCallback() = runBlocking {
         mockkObject(FileLogger)
         every { FileLogger.i(any(), any()) } just Runs

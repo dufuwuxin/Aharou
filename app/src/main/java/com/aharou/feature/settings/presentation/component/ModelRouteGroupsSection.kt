@@ -27,6 +27,7 @@ import kotlinx.serialization.json.Json
 internal fun ModelRouteGroupsSection(providers: List<AIProviderConfig>, onBack: () -> Unit,
     viewModel: ModelRouteGroupViewModel = hiltViewModel()) {
     val groups by viewModel.groups.collectAsStateWithLifecycle()
+    val readError by viewModel.readError.collectAsStateWithLifecycle()
     val selectedId by viewModel.selectedGroupId.collectAsStateWithLifecycle(initialValue = "")
     var editing by rememberSaveable { mutableStateOf(false) }
     var editingId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -53,7 +54,7 @@ internal fun ModelRouteGroupsSection(providers: List<AIProviderConfig>, onBack: 
         Text(stringResource(R.string.route_groups_title), style = MaterialTheme.typography.headlineSmall)
         Text(stringResource(R.string.route_groups_hint), style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = Spacing.sm))
-        if (error) Text(stringResource(R.string.route_group_failed), color = MaterialTheme.colorScheme.error)
+        if (error || readError) Text(stringResource(R.string.route_group_failed), color = MaterialTheme.colorScheme.error)
         LazyColumn(verticalArrangement = Arrangement.spacedBy(Spacing.md), contentPadding = PaddingValues(bottom = Spacing.xl)) {
             groups.forEach { group -> item(key = group.id) {
                 SettingsGroup {
@@ -71,7 +72,7 @@ internal fun ModelRouteGroupsSection(providers: List<AIProviderConfig>, onBack: 
                     }
                 }
             } }
-            if (groups.isEmpty()) item { Text(stringResource(R.string.route_groups_empty)) }
+            if (groups.isEmpty() && !readError) item { Text(stringResource(R.string.route_groups_empty)) }
         }
     }
     deletingId?.let { id -> AlertDialog(onDismissRequest = { deletingId = null }, title = { Text(stringResource(R.string.common_delete)) },

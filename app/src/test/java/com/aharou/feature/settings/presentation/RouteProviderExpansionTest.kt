@@ -58,6 +58,7 @@ class RouteProviderExpansionTest {
         val beta = alpha.copy(id = "q", name = "Beta", defaultModel = "third", models = listOf("third"))
         val viewModel = mockk<ModelRouteGroupViewModel>()
         every { viewModel.groups } returns MutableStateFlow(listOf(group))
+        every { viewModel.readError } returns MutableStateFlow(false)
         every { viewModel.selectedGroupId } returns MutableStateFlow("")
         var saved = emptyList<ModelRouteMember>()
         coEvery { viewModel.update(group.id, any(), any()) } coAnswers {

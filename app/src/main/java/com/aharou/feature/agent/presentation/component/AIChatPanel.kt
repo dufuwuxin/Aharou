@@ -111,6 +111,7 @@ import com.aharou.feature.settings.presentation.SettingsViewModel
 import com.aharou.feature.settings.domain.model.DashboardContext
 import com.aharou.feature.settings.domain.model.ProviderDashboardState
 import com.aharou.feature.settings.domain.model.modelMetadataKey
+import com.aharou.feature.settings.domain.model.resolveModelRoute
 import com.aharou.feature.workspace.domain.WorkspacePathMapper
 import com.aharou.feature.workspace.presentation.WorkspaceViewModel
 import java.io.File
@@ -232,9 +233,9 @@ fun AIChatPanel(
     val routeViewModel: com.aharou.feature.settings.presentation.ModelRouteGroupViewModel = androidx.hilt.navigation.compose.hiltViewModel()
     val routeGroups by routeViewModel.groups.collectAsStateWithLifecycle()
     fun resolveRoute(selection: String?): AIProviderConfig? = routeGroups.firstOrNull { it.selectionId == selection }?.let { group ->
-        val member = group.models.firstOrNull() ?: return@let null
-        providers.firstOrNull { it.id == member.providerId && it.hasUsableApiKey && member.model in it.models }
-            ?.copy(selectedModel = member.model)
+        runCatching {
+            resolveModelRoute(group) { providerId -> providers.firstOrNull { it.id == providerId } }
+        }.getOrNull()
     }
     val defaultFallbackProvider = resolveRoute(defaultProviderId) ?: providers
         .find { it.id == defaultProviderId }

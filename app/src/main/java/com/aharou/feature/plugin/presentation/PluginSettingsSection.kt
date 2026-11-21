@@ -17,7 +17,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Tab
-import androidx.compose.material3.PrimaryTabRow
+import androidx.compose.material3.PrimaryScrollableTabRow
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -52,12 +53,14 @@ import compose.icons.feathericons.Upload
  *
  * 旧容器包保留原操作，显式宿主包另外提供编译、持久启用与原生界面入口。
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun PluginSettingsSection(
     viewModel: PluginViewModel = hiltViewModel(),
     marketViewModel: ExtensionsViewModel = hiltViewModel(),
     operitViewModel: OperitMarketViewModel = hiltViewModel(),
     promptViewModel: PluginPromptViewModel = hiltViewModel(),
+    npmViewModel: NpmMarketViewModel = hiltViewModel(),
 ) {
     val promptDraft by promptViewModel.draft.collectAsStateWithLifecycle()
     promptDraft?.let { PluginPromptEditor(it, promptViewModel::close, promptViewModel::save) }
@@ -75,6 +78,7 @@ internal fun PluginSettingsSection(
     val operitState by operitViewModel.state.collectAsStateWithLifecycle()
     val dshViewModel: DshMarketViewModel = hiltViewModel()
     val dshState by dshViewModel.state.collectAsStateWithLifecycle()
+    val revericViewModel: RevericMarketViewModel = hiltViewModel()
     var selectedTab by rememberSaveable { mutableStateOf(0) }
     var choosingImport by rememberSaveable { mutableStateOf(false) }
     val legacyBusy = busyId != null || marketBusyId != null || choosingImport
@@ -103,13 +107,17 @@ internal fun PluginSettingsSection(
     LaunchedEffect(Unit) { viewModel.refresh() }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        PrimaryTabRow(selectedTabIndex = selectedTab) {
+        PrimaryScrollableTabRow(selectedTabIndex = selectedTab, edgePadding = 0.dp) {
             Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 },
                 text = { Text(stringResource(R.string.plugin_tab_installed)) })
             Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 },
                 text = { Text(stringResource(R.string.operit_tab)) })
             Tab(selected = selectedTab == 2, onClick = { selectedTab = 2 },
                 text = { Text(stringResource(R.string.dsh_market_tab)) })
+            Tab(selected = selectedTab == 3, onClick = { selectedTab = 3 },
+                text = { Text(stringResource(R.string.npm_market_tab)) })
+            Tab(selected = selectedTab == 4, onClick = { selectedTab = 4 },
+                text = { Text(stringResource(R.string.reveric_tab)) })
         }
         if (anyBusy) {
             Text(
@@ -132,6 +140,14 @@ internal fun PluginSettingsSection(
         } else if (selectedTab == 2) {
             marketState.SaveableStateProvider("dsh") {
                 DshMarketPanel(dshViewModel, legacyBusy || operitState.busy, Modifier.weight(1f))
+            }
+        } else if (selectedTab == 3) {
+            marketState.SaveableStateProvider("npm") {
+                NpmMarketPanel(npmViewModel, Modifier.weight(1f))
+            }
+        } else if (selectedTab == 4) {
+            marketState.SaveableStateProvider("reveric") {
+                RevericMarketPanel(revericViewModel, Modifier.weight(1f))
             }
         } else Column(
             modifier = Modifier
