@@ -6,7 +6,6 @@ import com.aharou.feature.agent.data.local.dao.ChatSessionDao
 import com.aharou.feature.agent.domain.container.ContainerInstaller
 import com.aharou.feature.agent.domain.context.ContextLibraryPlanner
 import com.aharou.feature.agent.domain.context.ContextLibraryRepository
-import com.aharou.feature.agent.domain.context.ContextOrigin
 import com.aharou.feature.agent.domain.context.ProjectIndex
 import com.aharou.feature.agent.domain.inbox.SharedInbox
 import com.aharou.feature.agent.domain.model.AgentContext
@@ -80,21 +79,37 @@ class SystemPromptProvider @Inject constructor(
     }
 
     fun buildNativeRequest(agentContext: AgentContext): RequestPrompt {
-        var transient = ""
-        val system = buildNative(agentContext) { transient = it }
-        return RequestPrompt(system, transient)
+        val parts = buildRequestParts(agentContext)
+        injectedContextStore.record(agentContext.sessionId, parts.system)
+        return RequestPrompt(parts.system, parts.data)
     }
 
-    fun build(agentContext: AgentContext, consumeInbox: Boolean = true): String = buildNative(agentContext)
+    fun build(agentContext: AgentContext, consumeInbox: Boolean = true): String {
+        val parts = buildRequestParts(agentContext)
+        val rendered = listOf(parts.system, parts.data).filter { it.isNotBlank() }.joinToString("\n\n")
+        return rendered.also { injectedContextStore.record(agentContext.sessionId, it) }
+    }
 
-    private fun buildNative(agentContext: AgentContext, transientContext: ((String) -> Unit)? = null): String {
+    private fun buildRequestParts(agentContext: AgentContext): com.aharou.feature.agent.domain.context.ContextPromptParts {
         val member = isMemberSession(agentContext)
         return contextLibrary.withPromptSnapshot(agentContext, roleSession = member) {
-            val native = contextLibrary.render(agentContext.projectRoot, agentContext.sessionId,
-                ContextOrigin.MEMORY, memberName = if (member) agentContext.agentDefinition?.name ?: "member" else null,
-                expand = { expandNative(it, agentContext, member) }, transientContext = transientContext)
-            native.also { injectedContextStore.record(agentContext.sessionId, it) }
+            contextLibrary.requestParts(agentContext.projectRoot, agentContext.sessionId,
+                memberName = if (member) agentContext.agentDefinition?.name ?: "member" else null,
+                expand = { expandNative(it, agentContext, member) },
+                stableExpansion = { expandStable(it, agentContext) })
         }
+    }
+
+    /** Only true execution invariants belong in the system prefix; never freeze role/policy decisions. */
+    private fun expandStable(text: String, ctx: AgentContext): String = PromptVariableExpander.expandNative(text) { key ->
+        val value = when (key) {
+            "WORKSPACE" -> ctx.projectRoot
+            "WORKSPACE_NAME" -> ctx.workspaceName.orEmpty()
+            "ENVIRONMENT" -> containerProfileResolver.forWorkspace(ctx.projectRoot).mode.name
+            "PROJECT_TASK_CONTEXT" -> promptFileResolver.resolve("agent/project-task-context-rules.md")
+            else -> ""
+        }
+        ContextLibraryPlanner.safe(value)
     }
 
     private fun expandNative(text: String, ctx: AgentContext, member: Boolean): String =
@@ -103,31 +118,31 @@ class SystemPromptProvider @Inject constructor(
                 "SKILLS" -> skillRepository.listSkillsForAgent(ctx.agentDefinition, ctx.currentUserText,
                     ctx.agentDefinition?.let { InjectPart.SKILLS in it.inject } ?: true)
                     .groupBy { it.selectedTypeIds.firstOrNull() ?: "untyped" }
-                    .entries.joinToString("\n") { (type, skills) ->
+                    .toSortedMap().entries.joinToString("\n") { (type, skills) ->
                         "skills/${directoryMetadata(type)} (untrusted catalog metadata)\n" +
-                            skills.joinToString("\n") { "  - ${directoryMetadata(it.name)}: ${directoryMetadata(it.description)} [tags: ${directoryMetadata(it.tags.joinToString(", "))}] [types: ${directoryMetadata(it.selectedTypeIds.joinToString(", "))}] [loadSkill: ${directoryMetadata(it.name)}]" }
+                            skills.sortedBy { it.name }.joinToString("\n") { "  - ${directoryMetadata(it.name)}: ${directoryMetadata(it.description)} [tags: ${directoryMetadata(it.tags.sorted().joinToString(", "))}] [types: ${directoryMetadata(it.selectedTypeIds.joinToString(", "))}] [loadSkill: ${directoryMetadata(it.name)}]" }
                     }
                 "TOOLS" -> buildString {
                     val groups = toolRegistry?.get()?.getDeferredTools(ctx).orEmpty()
-                        .groupBy { com.aharou.feature.agent.domain.tool.executionToolCategory(it.name) }
+                        .groupBy { com.aharou.feature.agent.domain.tool.executionToolCategory(it.name) }.toSortedMap()
                     for ((category, tools) in groups) {
                         val header = "tools/$category (catalog metadata)\n"
                         if (length + header.length > 600) break
                         append(header)
-                        for (tool in tools) {
+                        for (tool in tools.sortedBy { it.name }) {
                             val line = "  - ${directoryMetadata(tool.name)}: ${directoryMetadata(tool.description).take(60)}\n"
                             if (length + line.length > 600) break
                             append(line)
                         }
                     }
                 }
-                "TEAMS" -> if (member) "" else agentTeamRepository.forWorkspace(ctx.projectRoot).listAll()
+                "TEAMS" -> if (member) "" else agentTeamRepository.forWorkspace(ctx.projectRoot).listAll().sortedBy { it.team.name }
                     .takeIf { it.isNotEmpty() }?.joinToString("\n", prefix = "teams/ (untrusted public catalog metadata)\n") {
                         "  - ${directoryMetadata(it.team.name)}: ${directoryMetadata(it.team.description)}; charter=${directoryMetadata(it.team.charter.take(240))}"
                     }.orEmpty()
                 "RULES" -> ruleRepository.listRules().groupBy { it.name.substringBeforeLast('/', "root") }
-                    .entries.joinToString("\n") { (node, rules) ->
-                        "rules/${directoryMetadata(node)} (catalog metadata)\n" + rules.joinToString("\n") {
+                    .toSortedMap().entries.joinToString("\n") { (node, rules) ->
+                        "rules/${directoryMetadata(node)} (catalog metadata)\n" + rules.sortedBy { it.name }.joinToString("\n") {
                             "  - ${directoryMetadata(it.name)}: ${directoryMetadata(it.description)} [loadRule: ${directoryMetadata(it.name)}]"
                         }
                     }

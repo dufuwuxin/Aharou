@@ -151,7 +151,7 @@ def violations(root: Path) -> list[str]:
            r"\b(?:staticRuleSource|subAgentListSource|projectRuleSource)\s*\.\s*build\s*\(",
            "old prompt/role source remains executable")
     require(PROVIDER, masked(reachable(texts[PROVIDER], "build"), strings=True),
-            r"\bcontextLibrary\s*\.\s*render\s*\(", "build must reach native library render")
+            r"\bcontextLibrary\s*\.\s*(?:render|requestParts)\s*\(", "build must reach native library render")
     require(PROVIDER, masked(reachable(texts[PROVIDER], "resolvePrompt"), strings=True),
             r"\b(?:promptFileResolver|contextLibrary)\s*\.\s*(?:resolve|resolvePrompt)\s*\(",
             "resolvePrompt must delegate to native resolution")

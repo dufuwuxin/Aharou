@@ -58,9 +58,12 @@ internal fun TokenUsageOverview(state: TokenStatsUiState) {
         }
         SettingsGroup {
             SettingsRow(title = stringResource(R.string.settings_token_stats_cache_hit_rate), trailing = {
-                Text(if (summary != null && summary.inputTokens > 0) String.format(Locale.getDefault(), "%.1f%%",
-                    summary.cachedInputTokens.coerceIn(0, summary.inputTokens) * 100.0 / summary.inputTokens) else "—")
+                Text(if (summary != null && summary.cacheReportedInputTokens > 0) String.format(Locale.getDefault(), "%.1f%%",
+                    summary.cachedInputTokens.coerceIn(0, summary.cacheReportedInputTokens) * 100.0 / summary.cacheReportedInputTokens) else "—")
             })
+            if (summary != null && summary.cacheUnreportedCalls > 0) Text(
+                stringResource(R.string.token_cache_unreported, summary.cacheUnreportedCalls),
+                style = MaterialTheme.typography.bodySmall)
             SettingsDivider()
             SettingsRow(title = stringResource(R.string.token_usage_errors), trailing = {
                 Text(if (summary != null && summary.calls > 0) stringResource(R.string.token_usage_error_value, summary.errors,

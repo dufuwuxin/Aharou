@@ -28,7 +28,7 @@ class ContextLibraryRepository @Inject constructor(
     }
     private val snapshot = ThreadLocal<Snapshot?>()
 
-    fun withPromptSnapshot(ctx: AgentContext, roleSession: Boolean = ctx.agentDefinition != null, block: () -> String): String {
+    fun <T> withPromptSnapshot(ctx: AgentContext, roleSession: Boolean = ctx.agentDefinition != null, block: () -> T): T {
         val previous = snapshot.get()
         snapshot.set(Snapshot(ctx.projectRoot.takeIf { it.isNotBlank() }, ctx.sessionId,
             (ctx.agentDefinition?.let { InjectPart.MEMORY in it.inject } ?: true) && memoryStore?.isMemoryEnabled() != false,
@@ -173,6 +173,25 @@ class ContextLibraryRepository @Inject constructor(
         return ContextLibraryPlanner.plan(list(normalizedRoot), sessionId,
             injectionCategory = audience, memoryAllowed = memoryAllowed,
             userText = active?.userText ?: query, roleName = active?.roleName ?: memberName, roleTags = active?.roleTags.orEmpty()).also { active?.plans?.set(memoryAllowed, it) }
+    }
+
+    fun requestParts(projectRoot: String?, sessionId: String?, memberName: String? = null,
+                     expand: (String) -> String, stableExpansion: (String) -> String): ContextPromptParts {
+        val active = snapshot.get()
+        val audience = active?.injectionCategory ?: if (memberName == null) ContextCategory.MAIN_INJECTED else ContextCategory.ROLE_INJECTED
+        val originals = list(projectRoot)
+        val expanded = originals.mapNotNull { entry ->
+            if (entry.category.isInjection && entry.category != audience || !entry.enabled || entry.loading != ContextLoad.FULL) entry
+            else {
+                val content = expand(entry.content)
+                if (entry.content.contains("{{AICODE_") && content.isBlank()) null
+                else entry.copy(content = content, dynamic = entry.content.contains("{{AICODE_"))
+            }
+        }
+        val admitted = ContextLibraryPlanner.plan(expanded, sessionId, ContextOrigin.MEMORY, audience,
+            active?.memoryAllowed != false && memoryStore?.isMemoryEnabled() != false,
+            active?.userText.orEmpty(), active?.roleName ?: memberName, active?.roleTags.orEmpty())
+        return ContextPromptPartitioner.partition(admitted, originals.associateBy { it.id }, stableExpansion)
     }
 
     fun render(projectRoot: String?, sessionId: String?, origin: ContextOrigin, enabled: Boolean = true,

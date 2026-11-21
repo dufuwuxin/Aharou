@@ -2000,7 +2000,8 @@ class AIAgentViewModel @Inject constructor(
         /** /init 等场景：调用方已先落过命令文本，这轮不再落用户消息，避免落出两条。 */
         persistUserMessage: Boolean = true,
         executionTurnId: String = UUID.randomUUID().toString(),
-        continuationTargetMessageId: String? = null
+        continuationTargetMessageId: String? = null,
+        replayUserMessageId: String? = null
     ): Job = viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
         val sessionId = targetSessionId ?: ensureSession()
         if (sessionId.isBlank()) {
@@ -2081,7 +2082,8 @@ class AIAgentViewModel @Inject constructor(
                     inputAttachments = inputAttachments,
                     isAutoTrigger = isAutoTrigger,
                     skipTitleUpdate = skipTitleUpdate,
-                    persistUserMessage = persistUserMessage
+                    persistUserMessage = persistUserMessage,
+                    replayUserMessageId = replayUserMessageId
                 )
             ).collect { event ->
                 if (sessionJobs[sessionId] !== currentJob) return@collect
@@ -2982,9 +2984,9 @@ class AIAgentViewModel @Inject constructor(
     /**
      * 错误横幅的一键重试。失败那一轮已有进度（非空回答或工具结果）时接着进度续跑——
      * 删掉重跑会让模型把已完成的部分当新任务重做，反而覆盖磁盘上已经改对的代码。
-     * 只有在首个回答产出之前就失败、没有任何进度时，才删除这一轮重新跑。
+     * 首个回答产出之前就失败时原样回放已有输入，不删除用户消息、不创建新轮次。
      *
-     * 注意删除从用户消息自身开始：重跑时 runner 会重新落一条同样的用户消息，只删「其后」会多出气泡。
+     * 失败提示保留用于界面排查，但历史投影不把它们作为助手回答再次送入模型。
      */
     private fun continuationBusy(sessionId: String): Boolean = sessionJobs[sessionId]?.isActive == true ||
         sessionId in stoppingSessions || sessionId in _activeAgentSessions.value || sessionId in _runningCommandSessions.value ||
@@ -2999,37 +3001,31 @@ class AIAgentViewModel @Inject constructor(
         }
     }
 
-    fun retryLastFailedRequest() = viewModelScope.launch {
+    fun retryLastFailedRequest() = viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
         val sessionId = _currentSessionId.value ?: return@launch
         val userMessage = lastUserInputMessage(sessionId) ?: return@launch
-        cancelRunningTurn(sessionId)
-        setAgentState(sessionId, AgentUIState.Idle)
-        if (turnHasProgressAfter(sessionId, userMessage.timestamp)) {
-            executeAgentRequestStream(
-                request = "",
-                projectRoot = workspaceOf(sessionId),
-                targetSessionId = sessionId,
-                // 重试只重放已有进度，不追加续跑指令或新的用户轮次。
-                isAutoTrigger = true,
-                persistUserMessage = false,
-                skipTitleUpdate = true
-            )
-            return@launch
+        // Hold the same gate as Continue until the attempt finishes. Repeated taps cannot cancel
+        // the first request or race its history deletion/persistence.
+        continuationGate.run(sessionId, userMessage.id, { _currentSessionId.value },
+            { continuationBusy(sessionId) }, latest = { lastUserInputMessage(sessionId)?.id }) {
+            setAgentState(sessionId, AgentUIState.Idle)
+            if (turnHasProgressAfter(sessionId, userMessage.timestamp)) {
+                executeAgentRequestStream(request = "", projectRoot = workspaceOf(sessionId),
+                    targetSessionId = sessionId, isAutoTrigger = true, persistUserMessage = false,
+                    skipTitleUpdate = true).join()
+            } else {
+                executeAgentRequestStream(request = userMessage.content, projectRoot = workspaceOf(sessionId),
+                    inputAttachments = decodeAttachments(userMessage.attachmentsJson), targetSessionId = sessionId,
+                    isAutoTrigger = true, persistUserMessage = false, skipTitleUpdate = true,
+                    replayUserMessageId = userMessage.id).join()
+            }
         }
-        messagePersistenceUseCase.deleteMessagesFromTimestamp(sessionId, userMessage.timestamp)
-        agentMessageDao.repairSingletonVariantGroups(sessionId)
-        executeAgentRequestStream(
-            request = userMessage.content,
-            projectRoot = workspaceOf(sessionId),
-            inputAttachments = decodeAttachments(userMessage.attachmentsJson),
-            targetSessionId = sessionId
-        )
     }
 
     /** 该用户消息之后是否已有可续的进度：工具结果，或非空且非错误行的助手回答。 */
     private suspend fun turnHasProgressAfter(sessionId: String, timestamp: Long): Boolean =
         agentMessageDao.getMessagesBySessionOnce(sessionId).any {
-            it.timestamp > timestamp && !it.isError &&
+            it.timestamp > timestamp && !it.isError && !it.isContextExcluded &&
                 (it.role == MessageRole.TOOL.name ||
                     (it.role == MessageRole.ASSISTANT.name && it.content.isNotBlank()))
         }

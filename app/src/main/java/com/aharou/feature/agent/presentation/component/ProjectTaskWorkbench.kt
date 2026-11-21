@@ -357,5 +357,7 @@ internal fun projectTaskExecutionReasonLabel(reason: String): String = when (rea
     "FAILED", "TASK_EXECUTION_FAILED" -> stringResource(R.string.project_task_failed)
     "INTERRUPTED_PREVIOUS_PROCESS" -> stringResource(R.string.project_task_interrupted)
     "SUCCEEDED" -> stringResource(R.string.project_task_execution_finished)
-    else -> reason
+    "PROJECT_PLAN_STALE" -> stringResource(R.string.pmap_preview_stale)
+    else -> if (reason.startsWith("PROJECT_TEAM_BLOCKED:"))
+        stringResource(R.string.pmap_team_blocked, reason.substringAfter(':').trim()) else reason
 }

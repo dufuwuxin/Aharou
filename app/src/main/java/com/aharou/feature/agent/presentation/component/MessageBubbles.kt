@@ -175,7 +175,8 @@ internal fun computeTurnUsage(
     turn.endMessage.id to TurnUsage(
         inputTokens = turn.assistantMessages.sumOf { it.inputTokens },
         outputTokens = turn.assistantMessages.sumOf { it.outputTokens },
-        cachedInputTokens = turn.assistantMessages.sumOf { it.cachedInputTokens }
+        cachedInputTokens = if (turn.assistantMessages.any { it.inputTokens > 0 && it.cachedInputTokens < 0 }) -1
+            else turn.assistantMessages.sumOf { it.cachedInputTokens.coerceAtLeast(0) }
     )
 }
 
@@ -198,7 +199,7 @@ internal fun formatTaskDuration(millis: Long): String {
  * 无输入统计或本次未命中缓存时返回 null（不占位，避免把「渠道不报缓存数据」误示为 0% 命中）。
  */
 internal fun formatCacheHitRate(inputTokens: Int, cachedInputTokens: Int): String? {
-    if (inputTokens <= 0 || cachedInputTokens <= 0) return null
+    if (inputTokens <= 0 || cachedInputTokens < 0) return null
     val rate = (cachedInputTokens * 100.0 / inputTokens).coerceAtMost(100.0)
     return "${rate.roundToInt()}%"
 }

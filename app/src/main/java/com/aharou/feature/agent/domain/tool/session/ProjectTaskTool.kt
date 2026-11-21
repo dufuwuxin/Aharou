@@ -96,8 +96,9 @@ class ProjectTaskTool @Inject constructor(
                     val stopEpoch = flows.stopEpoch(root.id, root.workspace)
                     val planned = if (currentBranch == null) repository.appendRequirements(root.id, text("requirement"), root.workspace)
                         else repository.appendBranchRequirements(currentBranch.id, text("requirement"), root.workspace)
-                    if (context.mode != AgentMode.PLAN) flows.continueProject(root.id, root.workspace, stopEpoch)
+                    if (context.mode != AgentMode.PLAN && !planned.ruleFallback) flows.continueProject(root.id, root.workspace, stopEpoch)
                     ToolResult.Success(buildJsonObject {
+                        put("execution_requested", context.mode != AgentMode.PLAN && !planned.ruleFallback)
                         put("project_id", root.id); currentBranch?.let { put("requirement_branch_id", it.id) }
                         put("rule_fallback", planned.ruleFallback)
                         put("instruction", "New tasks saved to this project. Do not report execution or acceptance without evidence.")
@@ -108,8 +109,9 @@ class ProjectTaskTool @Inject constructor(
                     if (tasks.none { it.id == taskId }) return ToolResult.Error("task_id must belong to this project", "OUTSIDE_PROJECT")
                     val stopEpoch = flows.stopEpoch(root.id, root.workspace)
                     val fallback = repository.supplement(taskId, text("requirement"), root.workspace)
-                    if (context.mode != AgentMode.PLAN) flows.continueProject(root.id, root.workspace, stopEpoch)
-                    ToolResult.Success(buildJsonObject { put("task_id", taskId); put("rule_fallback", fallback) })
+                    if (context.mode != AgentMode.PLAN && !fallback) flows.continueProject(root.id, root.workspace, stopEpoch)
+                    ToolResult.Success(buildJsonObject { put("task_id", taskId); put("rule_fallback", fallback)
+                        put("execution_requested", context.mode != AgentMode.PLAN && !fallback) })
                 }
                 "outline" -> ToolResult.Success(buildJsonObject {
                     val query = text("query")

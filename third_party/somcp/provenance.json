@@ -1,0 +1,22 @@
+{
+  "repository": "https://github.com/bilieebiliee1-design/SOMCP",
+  "commit": "f01f059bf4c903255464f1a073431c41ebd74eb5",
+  "license": "AGPL-3.0-only",
+  "files": [
+    {
+      "upstream_path": "app/src/main/java/com/soreverse/mcp/engine/ElfModels.kt",
+      "destination": "core-agent/src/main/java/com/soreverse/mcp/engine/ElfModels.kt",
+      "upstream_sha256": "701aa1885a8bc3e7c0786f343c81968a1fc4665304cac4719b47a95963111f58",
+      "integrated_sha256": "c49a499e125b0b86276cfbcd53bcd469191db5eb03f989e32f1d97490d62e8f2"
+    },
+    {
+      "upstream_path": "app/src/main/java/com/soreverse/mcp/engine/ElfParser.kt",
+      "destination": "core-agent/src/main/java/com/soreverse/mcp/engine/ElfParser.kt",
+      "upstream_sha256": "189cc50987bb69635f198bb45a83a89da72437ee4aac674fdbed323a5b0ef6eb",
+      "integrated_sha256": "f7dffc2af13cb8d0bff380d11e95fc0a2872b16ea9365255286ceea7f8c4b1b4"
+    }
+  ],
+  "scope": "Local read-only ELF parsing. Rizin, LIEF, dynamic execution, patching and MCP server are not imported.",
+  "native_tool": "elf_analyze",
+  "runtime": "In-process JVM/Kotlin parser; no MCP transport, server, port or external application."
+}

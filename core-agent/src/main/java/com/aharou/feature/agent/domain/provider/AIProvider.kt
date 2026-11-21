@@ -41,8 +41,8 @@ data class AIResponse(
     val inputTokens: Int = 0,
     /** 本轮输出 token 数（来自 API 返回的 usage）。取不到时为 0。 */
     val outputTokens: Int = 0,
-    /** 本轮输入中命中服务端缓存的部分（OpenAI cached_tokens / Anthropic cache_read_input_tokens / Gemini cachedContentTokenCount）。取不到时为 0。 */
-    val cachedInputTokens: Int = 0,
+    /** Cached input tokens reported by the provider. -1 means not reported; 0 is a reported miss. */
+    val cachedInputTokens: Int = -1,
     /** 本轮写入服务端缓存的 token 数（Anthropic cache_creation_input_tokens）。按高于普通输入的单价计费，取不到时为 0。 */
     val cacheCreationTokens: Int = 0,
     /**

@@ -124,7 +124,7 @@ class MessagePersistenceUseCase @Inject constructor(
         attachments: List<AgentAttachment> = emptyList(),
         inputTokens: Int = 0,
         outputTokens: Int = 0,
-        cachedInputTokens: Int = 0,
+        cachedInputTokens: Int = -1,
         isCompacted: Boolean = false,
         isContextExcluded: Boolean = false
     ) {
@@ -405,7 +405,8 @@ class MessagePersistenceUseCase @Inject constructor(
     private suspend fun buildHistoryUncached(sessionId: String, pendingToolMarker: String): List<AgentMessage> {
         val stored = agentMessageDao.getHistoryRowsBySessionOnce(sessionId)
             .map { it.toEntity() }
-            .filter { !it.isCompacted && !it.isContextExcluded }
+            .filter { !it.isCompacted && !it.isContextExcluded &&
+                !(it.isError && it.role == MessageRole.ASSISTANT.name) }
         // 回放只要「解析得动、拼得进上下文」的量：超长字段有界读回（带截断标记），
         // 否则几千条消息的会话会在每轮 LLM 调用前把档案里所有大字段同时拉上堆。
         // 第一遍：求 assistant 声明的 toolCallId 与 tool 结果 toolCallId 的交集。
@@ -519,6 +520,8 @@ class MessagePersistenceUseCase @Inject constructor(
                             toolName = e.toolName ?: "unknown",
                             result = e.content
                         )
+                        // Keep source history independent of request retention settings. The per-execution
+                        // request history projector freezes a send view without rewriting these rows.
                         result.add(message)
                     }
                 }

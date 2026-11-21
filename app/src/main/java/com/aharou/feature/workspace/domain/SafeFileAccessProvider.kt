@@ -52,6 +52,7 @@ class SafeFileAccessProvider(
         guard("listFilesRecursive", emptyList()) { delegate.listFilesRecursive(path, maxDepth) }
 
     override fun readBytes(path: String): ByteArray = guard("readBytes", ByteArray(0)) { delegate.readBytes(path) }
+    override fun readBytesBounded(path: String, maxBytes: Int): ByteArray = delegate.checked().readBytesBounded(path, maxBytes)
 
     override fun writeBytes(path: String, bytes: ByteArray, overwrite: Boolean) {
         guard("writeBytes", Unit) { delegate.writeBytes(path, bytes, overwrite) }

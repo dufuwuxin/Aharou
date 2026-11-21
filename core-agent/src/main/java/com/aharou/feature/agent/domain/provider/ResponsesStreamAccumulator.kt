@@ -23,7 +23,7 @@ internal data class ResponsesOutput(
 internal data class ResponsesUsage(
     val inputTokens: Int = 0,
     val outputTokens: Int = 0,
-    val cachedInputTokens: Int = 0,
+    val cachedInputTokens: Int = -1,
     val cacheCreationTokens: Int = 0
 )
 
@@ -114,7 +114,7 @@ internal fun parseResponsesUsage(usage: JsonObject?): ResponsesUsage {
     return ResponsesUsage(
         inputTokens = usage.int("input_tokens"),
         outputTokens = usage.int("output_tokens"),
-        cachedInputTokens = usage.obj("input_tokens_details")?.int("cached_tokens") ?: 0,
+        cachedInputTokens = usage.obj("input_tokens_details")?.get("cached_tokens")?.takeIf { !it.isJsonNull }?.asInt ?: -1,
         cacheCreationTokens = usage.obj("input_tokens_details")?.int("cache_write_tokens") ?: 0
     )
 }

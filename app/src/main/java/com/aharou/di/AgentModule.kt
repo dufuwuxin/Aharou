@@ -33,6 +33,8 @@ import com.aharou.feature.agent.domain.container.SshHostKeyStore
 import com.aharou.feature.agent.domain.container.SshLoginKeyStore
 import com.aharou.feature.settings.data.repository.ExecutionModeHolder
 import com.aharou.feature.agent.domain.tool.file.ReadFileTool
+import com.aharou.feature.agent.domain.tool.file.ElfAnalysisTool
+import com.aharou.feature.agent.domain.tool.file.FileAnalysisTool
 import com.aharou.feature.agent.domain.tool.pet.PetAvatarTool
 import com.aharou.feature.agent.domain.tool.file.SendFileTool
 import com.aharou.feature.agent.domain.tool.file.GenerateImageTool
@@ -447,6 +449,8 @@ object AgentModule {
     @Singleton
     fun provideToolRegistry(
         readFileTool: ReadFileTool,
+        elfAnalysisTool: ElfAnalysisTool,
+        fileAnalysisTool: FileAnalysisTool,
         sendFileTool: SendFileTool,
         viewImageTool: ViewImageTool,
         writeFileTool: WriteFileTool,
@@ -494,6 +498,8 @@ object AgentModule {
     ): ToolRegistry {
         return ToolRegistry(guard, customToolSource).apply {
             register("readFile", readFileTool)
+            register("elf_analyze", elfAnalysisTool)
+            register("file_analyze", fileAnalysisTool)
             register("sendFile", sendFileTool)
             register("viewImage", viewImageTool)
             register("writeFile", writeFileTool)

@@ -35,6 +35,7 @@ object ContextLibraryPlanner {
         for (entry in entries.distinctBy { it.id }.sortedWith(
             compareBy<ContextEntry> { isTransient(it) }
                 .thenByDescending { it.worldbook.priority }
+                .thenBy { it.id }
         )) {
             // Filter before charging budgets: another audience must not crowd out this one.
             if (entry.category.isInjection && entry.category != injectionCategory) {

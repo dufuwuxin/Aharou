@@ -3,6 +3,8 @@ package com.aharou.feature.agent.presentation
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.aharou.feature.agent.data.task.ProjectTaskRepository
+import com.aharou.feature.agent.data.local.dao.ToolCallReceiptDao
+import com.aharou.feature.agent.data.local.entity.ToolCallReceiptEntity
 import com.aharou.feature.agent.domain.task.ProjectTask
 import com.aharou.feature.agent.domain.task.ProjectFlowController
 import com.aharou.feature.agent.domain.task.ProjectPlan
@@ -17,6 +19,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -33,6 +38,7 @@ data class ProjectTaskUiState(
     val indexedSessionWorkspaces: Set<String> = emptySet(),
     val failedSessionWorkspaces: Set<String> = emptySet(),
     val appendSucceededRequest: String? = null,
+    val requirementPreview: com.aharou.feature.agent.data.task.ProjectRequirementPreview? = null,
     val activeTaskIds: Set<String> = emptySet(),
     val activeProjectIds: Set<String> = emptySet(),
     val availableMembers: List<String> = emptyList(),
@@ -50,10 +56,26 @@ class ProjectTaskViewModel @Inject constructor(
     private val runner: AgentTurnRunner,
     private val projectWorkflow: com.aharou.feature.agent.domain.task.ProjectWorkflowRunner,
     private val flows: ProjectFlowController,
-    private val workspaces: javax.inject.Provider<com.aharou.feature.workspace.data.repository.WorkspaceRepository>
+    private val workspaces: javax.inject.Provider<com.aharou.feature.workspace.data.repository.WorkspaceRepository>,
+    private val toolCallReceiptDao: ToolCallReceiptDao? = null
 ) : ViewModel() {
     private val mutable = MutableStateFlow(ProjectTaskUiState())
     val state = mutable.asStateFlow()
+
+    /** Read-only project activity: only sessions explicitly linked to this project's tasks are admitted. */
+    fun projectReceipts(workspace: String, sessionIds: List<String>, limit: Int = 300): Flow<List<ToolCallReceiptEntity>> {
+        val ids = sessionIds.filter { it.isNotBlank() }.distinct()
+        val dao = toolCallReceiptDao ?: return flowOf(emptyList())
+        if (workspace.isBlank() || ids.isEmpty()) return flowOf(emptyList())
+        val bound = limit.coerceIn(1, 500)
+        // Historical projects can exceed SQLite's 999 bind variables; merge bounded chunks deterministically.
+        val streams = ids.chunked(800).map { dao.observeProject(workspace, it, bound) }
+        return if (streams.size == 1) streams.single() else combine(streams) { batches ->
+            batches.flatMap { it }.distinctBy { it.id }
+                .sortedWith(compareByDescending<ToolCallReceiptEntity> { it.createdAt }.thenByDescending { it.id }).take(bound)
+        }
+    }
+
     private val sessionMutex = kotlinx.coroutines.sync.Mutex()
     // Retrying a failed link reuses the already persisted root session.
     private val pendingProjectSessions = mutableMapOf<Pair<String, String>, String>()
@@ -359,6 +381,41 @@ class ProjectTaskViewModel @Inject constructor(
         }
     }
 
+    fun previewRequirements(projectId: String, text: String) = operation { workspace ->
+        val epoch = selectionEpoch
+        mutable.update { it.copy(requirementPreview = null, planningProjectIds = it.planningProjectIds + projectId) }
+        try {
+            val preview = repository.previewRequirements(projectId, text, workspace)
+            if (selectionEpoch == epoch && mutable.value.workspace == workspace)
+                mutable.update { it.copy(requirementPreview = preview) }
+        } finally { mutable.update { it.copy(planningProjectIds = it.planningProjectIds - projectId) } }
+    }
+
+    fun dismissRequirementPreview() { if (!mutable.value.busy) mutable.update { it.copy(requirementPreview = null) } }
+
+    fun editPreviewTask(taskId: String, title: String, requirement: String, acceptance: String) {
+        if (mutable.value.busy) return
+        mutable.update { state -> state.copy(requirementPreview = state.requirementPreview?.let { preview ->
+            preview.copy(tasks = preview.tasks.map { if (it.id == taskId)
+                it.copy(title = title, requirement = requirement, acceptance = acceptance) else it })
+        }) }
+    }
+
+    fun confirmRequirementPreview(requestId: String, startExecution: Boolean) {
+        val preview = mutable.value.requirementPreview ?: return
+        if (preview.project.id in mutable.value.activeProjectIds) return
+        val epoch = flows.stopEpoch(preview.project.id, preview.project.workspace)
+        operation(onSuccess = { workspace ->
+            if (startExecution && !preview.ruleFallback) flows.continueProject(preview.project.id, workspace, epoch)
+        }) { workspace ->
+            check(preview.project.workspace == workspace) { "CROSS_WORKSPACE" }
+            repository.applyRequirementsPreview(preview)
+            if (mutable.value.workspace == workspace) mutable.update { it.copy(requirementPreview = null,
+                appendSucceededRequest = requestId, ruleFallbackProjectIds = if (preview.ruleFallback)
+                    it.ruleFallbackProjectIds + preview.project.id else it.ruleFallbackProjectIds - preview.project.id) }
+        }
+    }
+
     fun appendRequirements(projectId: String, text: String, requestId: String) = planning(projectId) { workspace ->
         val outcome = repository.appendRequirements(projectId, text, workspace)
         if (mutable.value.workspace == workspace) mutable.update { it.copy(appendSucceededRequest = requestId) }
@@ -366,9 +423,9 @@ class ProjectTaskViewModel @Inject constructor(
     }
 
     /** Keeps the user's wording on the task, lets the planner choose what to redo, then continues the flow. */
-    fun supplement(task: ProjectTask, text: String) {
+    fun supplement(task: ProjectTask, text: String, onSaved: (() -> Unit)? = null) {
         val projectId = task.projectId ?: return
-        planning(projectId) { workspace -> repository.supplement(task.id, text, workspace) }
+        planning(projectId, onSaved) { workspace -> repository.supplement(task.id, text, workspace) }
     }
 
     /** The planner decides parent (or keeps [parentId] when given), dependencies and members for one description. */
@@ -377,13 +434,18 @@ class ProjectTaskViewModel @Inject constructor(
     }
 
     /** [block] returns whether rules replaced the model. On success the flow starts once the setup lock is released. */
-    private fun planning(projectId: String, block: suspend (String) -> Boolean) {
+    private fun planning(projectId: String, onPlanned: (() -> Unit)? = null, block: suspend (String) -> Boolean) {
         val stopEpoch = flows.stopEpoch(projectId, mutable.value.workspace)
-        operation(onSuccess = { workspace -> flows.continueProject(projectId, workspace, stopEpoch) }) { workspace ->
+        var canContinue = false
+        operation(onSuccess = { workspace ->
+            onPlanned?.invoke()
+            if (canContinue) flows.continueProject(projectId, workspace, stopEpoch)
+        }) { workspace ->
             mutable.update { it.copy(planningProjectIds = it.planningProjectIds + projectId) }
             val fallback = try { block(workspace) } finally {
                 mutable.update { it.copy(planningProjectIds = it.planningProjectIds - projectId) }
             }
+            canContinue = !fallback
             mutable.update { it.copy(ruleFallbackProjectIds = if (fallback) it.ruleFallbackProjectIds + projectId else it.ruleFallbackProjectIds - projectId) }
         }
     }
@@ -414,7 +476,8 @@ class ProjectTaskViewModel @Inject constructor(
         if (mutable.value.workspace == saved.workspace) mutable.update { it.copy(selectedId = saved.id) }
     }
 
-    fun saveProjectGoal(project: ProjectPlan, horizon: String, goal: String, acceptance: String, executionTeam: String? = project.executionTeam) = operation { workspace ->
+    fun saveProjectGoal(project: ProjectPlan, horizon: String, goal: String, acceptance: String,
+        executionTeam: String? = project.executionTeam, onSaved: (() -> Unit)? = null) = operation(onSuccess = { onSaved?.invoke() }) { workspace ->
         check(project.workspace == workspace) { "CROSS_WORKSPACE" }
         // Close races with a queued run as well as a currently visible active run.
         flows.withProjectStopped(project.id, workspace) {

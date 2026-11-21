@@ -101,10 +101,5 @@ fun ProjectChatScreen(projectId: String, agentViewModel: AIAgentViewModel, proje
     onBack: () -> Unit, onToolDetail: (AgentUIMessage) -> Unit,
     onNavigateToTerminal: () -> Unit, onNavigateToGit: () -> Unit, onNavigateToBrowser: () -> Unit,
     onNavigateToSandbox: () -> Unit, onNavigateToShared: () -> Unit, onNavigateToObserve: () -> Unit) {
-    val binding = rememberProjectChatBinding(agentViewModel, projectViewModel, onBack, onToolDetail, projectId)!!
-    AIChatPanel(viewModel = agentViewModel, settingsViewModel = settingsViewModel, workspaceViewModel = workspaceViewModel,
-        bodyOverride = binding.body, floatingComposer = true, composerSessionId = binding.sessionId, projectConversation = binding.rootConversation,
-        onBackToSessions = onBack,
-        onNavigateToTerminal = onNavigateToTerminal, onNavigateToGit = onNavigateToGit, onNavigateToBrowser = onNavigateToBrowser,
-        onNavigateToSandbox = onNavigateToSandbox, onNavigateToShared = onNavigateToShared, onNavigateToObserve = onNavigateToObserve)
+    ProjectMindMapScreen(projectId = projectId, viewModel = projectViewModel, onBack = onBack)
 }

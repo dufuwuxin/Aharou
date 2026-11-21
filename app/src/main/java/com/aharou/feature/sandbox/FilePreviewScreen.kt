@@ -54,6 +54,7 @@ import androidx.compose.material.icons.filled.Android
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Print
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -102,6 +103,7 @@ fun FilePreviewScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val elf by rememberElfFile(item)
 
     // T-android-preview-title-toggle-path: tap the title to swap between
     // file name and absolute path. Mirrors the iOS preview's tap-to-toggle
@@ -111,11 +113,7 @@ fun FilePreviewScreen(
     var showFullPath by remember(item.file) { mutableStateOf(false) }
 
     // T144: SAF Save-As for non-image files (image keeps T142 MediaStore).
-    val mimeType = remember(item.file) {
-        MimeTypeMap.getSingleton().getMimeTypeFromExtension(
-            item.file.extension.lowercase(),
-        ) ?: "application/octet-stream"
-    }
+    val mimeType = rememberFilePreviewMimeType(item)
     val saveAsLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument(mimeType),
     ) { uri: Uri? ->
@@ -231,6 +229,8 @@ fun FilePreviewScreen(
             // Order matters: markdown / html before generic text — both are
             // technically text but warrant richer renderers.
             when {
+                elf == null -> CircularProgressIndicator(Modifier.align(Alignment.Center))
+                elf == true -> SomcpFilePreview(item)
                 item.isMarkdownFile -> MarkdownPreview(item)
                 item.isHtmlFile -> HtmlPreview(item)
                 item.isImageFile -> ImagePreview(item)

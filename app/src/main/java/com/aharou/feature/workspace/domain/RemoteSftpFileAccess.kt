@@ -282,6 +282,16 @@ class RemoteSftpFileAccess @Inject constructor(
 
     override fun readBytes(path: String): ByteArray = readAll(toRemotePath(path))
 
+    override fun readBytesBounded(path: String, maxBytes: Int): ByteArray = withSftp { sftp ->
+        require(maxBytes in 1..com.aharou.feature.agent.domain.binary.SomcpAnalyzer.MAX_BYTES) { "ELF_SIZE_LIMIT" }
+        val remote = toRemotePath(path)
+        val attrs = sftp.statExistence(remote) ?: throw NoSuchFileException(File(remote))
+        require(attrs.size <= maxBytes) { "ELF_SIZE_LIMIT" }
+        RemoteFileInputStream(sftp.open(remote)).use {
+            com.aharou.feature.agent.domain.binary.BoundedBinaryReader.read(it, maxBytes)
+        }
+    }
+
     override fun writeBytes(path: String, bytes: ByteArray, overwrite: Boolean) {
         val remote = toRemotePath(path)
         // 与 writeStream 同构：先写 .aicode-part 再改名，避免原地 TRUNC 让并发读者看到半截内容，

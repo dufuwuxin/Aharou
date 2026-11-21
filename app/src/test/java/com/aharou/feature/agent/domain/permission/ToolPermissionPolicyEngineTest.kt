@@ -120,6 +120,19 @@ class ToolPermissionPolicyEngineTest {
         } finally { TaintTracker.clear(sessionId) }
     }
 
+    @Test
+    fun nativeElfAnalysisHasTheSamePrivateFileTaintBoundaryAsReadFile() = runTest {
+        val policy = engine()
+        val reader = tool(ToolCapability.READ_WORKSPACE)
+        for ((index, path) in listOf("/etc/private.so", "~/workspace/lib.so", "~/workspace/../secret.so").withIndex()) {
+            val session = "elf-file-$index"
+            try {
+                policy.evaluate(reader, "elf_analyze", mapOf("path" to JsonPrimitive(path)), AgentMode.BUILD, TEST_WORKSPACE, session)
+                assertEquals(path, index != 1, TaintTracker.isTainted(session))
+            } finally { TaintTracker.clear(session) }
+        }
+    }
+
     private fun bash(command: String) = mapOf("command" to JsonPrimitive(command))
 
     private fun terminal(action: String) = mapOf("action" to JsonPrimitive(action))

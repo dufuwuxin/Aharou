@@ -20,6 +20,7 @@ import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.*
@@ -138,6 +139,7 @@ class ProjectWorkflowRunner @Inject constructor(
                             teamEvidence = evidence
                             outputs += output
                         } finally {
+                            val cancelled = !currentCoroutineContext().isActive
                             withContext(NonCancellable) {
                                 repository.transact(workspace) { store ->
                                     val latest = store.tasks.firstOrNull { it.id == next.id } ?: return@transact emptyList()
@@ -149,7 +151,9 @@ class ProjectWorkflowRunner @Inject constructor(
                                         val outcome = when {
                                             superseded -> "SUPERSEDED"
                                             terminal?.type == SubAgentEventType.COMPLETED && terminal.accepted == true -> "SUCCEEDED"
-                                            terminal == null || terminal.type == SubAgentEventType.STOPPED -> "STOPPED"
+                                            terminal == null && cancelled -> "STOPPED"
+                                            terminal == null -> "UNKNOWN"
+                                            terminal.type == SubAgentEventType.STOPPED -> "STOPPED"
                                             else -> "FAILED"
                                         }
                                         records[id] = record.copy(outcome = outcome, reason = if (superseded) "UPSTREAM_CHANGED" else terminal?.detail.orEmpty())

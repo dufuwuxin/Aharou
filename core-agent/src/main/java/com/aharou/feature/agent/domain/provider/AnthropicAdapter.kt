@@ -139,7 +139,7 @@ class AnthropicAdapter @Inject constructor(
             }
         }
 
-        return sanitizeTruncatedToolCalls(AIResponse(content = contentText, toolCalls = toolCalls, stopReason = response.stop_reason, stopDetail = response.stop_details?.explanation, reasoning = thinkingText.ifEmpty { null }, signature = signature, thinkingBlocksJson = encodeThinkingBlocks(thinkingBlocks), inputTokens = totalInputTokens(response.usage.input_tokens, response.usage.cache_read_input_tokens, response.usage.cache_creation_input_tokens), outputTokens = response.usage.output_tokens, cachedInputTokens = response.usage.cache_read_input_tokens ?: 0, cacheCreationTokens = response.usage.cache_creation_input_tokens ?: 0))
+        return sanitizeTruncatedToolCalls(AIResponse(content = contentText, toolCalls = toolCalls, stopReason = response.stop_reason, stopDetail = response.stop_details?.explanation, reasoning = thinkingText.ifEmpty { null }, signature = signature, thinkingBlocksJson = encodeThinkingBlocks(thinkingBlocks), inputTokens = totalInputTokens(response.usage.input_tokens, response.usage.cache_read_input_tokens, response.usage.cache_creation_input_tokens), outputTokens = response.usage.output_tokens, cachedInputTokens = response.usage.cache_read_input_tokens ?: -1, cacheCreationTokens = response.usage.cache_creation_input_tokens ?: 0))
     }
 
     override fun completeStream(
@@ -200,7 +200,7 @@ class AnthropicAdapter @Inject constructor(
             var stopDetail: String? = null
             var streamInputTokens = 0
             var streamOutputTokens = 0
-            var streamCachedInputTokens = 0
+            var streamCachedInputTokens = -1
             var streamCacheCreationTokens = 0
             // thinking block 的加密签名（signature_delta 事件携带），随 Final 上抛供工具循环回传。
             var signature: String? = null
@@ -247,7 +247,7 @@ class AnthropicAdapter @Inject constructor(
                                         ?.get("usage")?.takeIf { it.isJsonObject }?.asJsonObject
                                     streamInputTokens = usage?.get("input_tokens")?.takeIf { !it.isJsonNull }?.asInt ?: 0
                                     // 缓存命中/写入数在 message_start 的 usage 里返回；部分上游会在 message_delta 补全，见该分支的覆盖逻辑。
-                                    streamCachedInputTokens = usage?.get("cache_read_input_tokens")?.takeIf { !it.isJsonNull }?.asInt ?: 0
+                                    streamCachedInputTokens = usage?.get("cache_read_input_tokens")?.takeIf { !it.isJsonNull }?.asInt ?: -1
                                     streamCacheCreationTokens = usage?.get("cache_creation_input_tokens")?.takeIf { !it.isJsonNull }?.asInt ?: 0
                                 }
                                 "content_block_start" -> {
@@ -666,7 +666,7 @@ class AnthropicAdapter @Inject constructor(
          * 上下文占用、压缩触发、费用与缓存命中率都按总输入算。
          */
         fun totalInputTokens(input: Int, cacheRead: Int?, cacheCreation: Int?): Int =
-            input + (cacheRead ?: 0) + (cacheCreation ?: 0)
+            input + (cacheRead ?: 0).coerceAtLeast(0) + (cacheCreation ?: 0).coerceAtLeast(0)
 
         /** 模型元数据缺输出上限时的兜底最大输出 token。 */
         const val DEFAULT_MAX_TOKENS = 16384

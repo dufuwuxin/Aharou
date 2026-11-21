@@ -361,9 +361,10 @@ class ContextCompactor @Inject constructor(
                 val targetTokens = (squeezableBudget * COMPACTION_TARGET_PERCENT / 100.0).toInt()
                 val softThreshold = limits.warnTokens
                 val reachedHard = currentTokens >= threshold || currentTokens >= inputBudget
-                // 分级裁剪先试一遍：按成本从低到高逐级裁（清 reasoning → 落盘换引用 → 骨架化），够用就直接返回，
-                // 既不调模型、也不改写历史正文——旧消息的字节与上一轮一致，供应商的前缀缓存仍能命中。
-                if (!force && squeezableBudget > 0 && (reachedHard || currentTokens >= softThreshold)) {
+                // A soft watermark is advisory: rewriting old request messages here destroys their cached prefix.
+                // Perform a deliberate budget checkpoint only at the hard watermark (or explicit force).
+                if (!force && !reachedHard) return@withTimeoutOrNull unchanged
+                if (!force && squeezableBudget > 0 && reachedHard) {
                     val ladderTarget = if (reachedHard) targetTokens else softThreshold
                     val ladder = withContext(trimDispatcher) {
                         trimPlanner.planTrim(messages, ladderTarget, sendsImages, systemPrompt, tools, ContextTrimPlanner.TRIM_KEEP_RECENT_ITERATIONS)
@@ -374,17 +375,6 @@ class ContextCompactor @Inject constructor(
                     }
                     FileLogger.i(TAG, "分级裁剪收益不足：${ladder.before} → ${ladder.after} tokens（目标 $ladderTarget，${ladder.steps.joinToString(" ")}），继续摘要压缩")
                 }
-                if (!force && !reachedHard && currentTokens >= softThreshold) {
-                    val trimmed = withContext(trimDispatcher) {
-                        softTrimToolOutputs(messages, trimPlanner::storeOriginalToolOutput)
-                    }
-                    if (trimmed !== messages) {
-                        FileLogger.i(TAG, "上下文约 $currentTokens tokens 达软阈值 $softThreshold，已精简历史工具输出（未调用摘要模型）")
-                        return@withTimeoutOrNull CompactionResult(trimmed, compacted = true)
-                    }
-                    return@withTimeoutOrNull unchanged
-                }
-                if (!force && !reachedHard) return@withTimeoutOrNull unchanged
                 yield()
                 // 固定开销把可压缩空间吃干净了就没什么可压的：直接给可操作原因，
                 // 不调摘要模型，也不把这份历史记进失败名单（关掉工具后还能重试）。

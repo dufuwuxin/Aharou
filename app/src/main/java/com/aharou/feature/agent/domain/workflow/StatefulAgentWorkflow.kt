@@ -147,6 +147,7 @@ class StatefulAgentWorkflow @Inject constructor(
     private val memoryCompactor: Lazy<MemoryCompactor>, private val toolInjectionGate: ToolInjectionGate, // Lazy breaks compactor cycle
     private val languageRoutingFactory: com.aharou.core.translation.LanguageRoutingProvider.Factory? = null
 ) : AgentWorkflow {
+    private val requestPrefixTracker = RequestPrefixTracker()
     /** 卡死提示文案：从 prompts 文件读一次并缓存，用户可编辑该文件定制。 */
     private val stuckNudgeText: String get() = promptProvider.resolvePrompt(STUCK_NUDGE_FILE)
     internal companion object {
@@ -558,7 +559,7 @@ class StatefulAgentWorkflow @Inject constructor(
     /** 会话是否收到了「用户打断」：peek 到就打勾并 ack 掉（一次性消费），主循环与收流两处共用。 */
     /** 随请求发送的工具（延迟加载的 MCP 工具要 tool_search 展开过）；压缩与预算估算共用此口径。 */
     private fun requestTools(tools: List<AgentTool>, context: AgentContext) =
-        toolRegistry.requestTools(tools, context)
+        toolRegistry.requestTools(tools, context).sortedBy { it.name }
 
     private fun consumeUserInterrupt(sessionId: String?): Boolean {
         if (sessionId == null) return false
@@ -712,6 +713,14 @@ class StatefulAgentWorkflow @Inject constructor(
             outboundMasker = outboundMaskerOrNull(generalSettingsRepository.privacyMaskingEnabled())
             val outbound = maskedOutboundRequest(requestSystemPrompt, sendProjection, outboundMasker)
             val messagesToSend = outbound.messages
+            currentContext.sessionId?.let { session ->
+                requestPrefixTracker.record("$session:${providerInUse.providerId}:${providerInUse.model}",
+                    outbound.systemPrompt, messagesToSend, promptTools)?.let { change ->
+                    FileLogger.i(TAG, "request.prefix systemChanged=${change.systemChanged} toolsChanged=${change.toolsChanged} " +
+                        "unchangedMessages=${change.unchangedMessages} previousMessages=${change.previousMessages} currentMessages=${change.currentMessages} " +
+                        "estimatedReusableTokens=${change.estimatedReusableTokens} tokenMethod=local_estimate_not_provider_billing")
+                }
+            }
             injectedContexts.recordRequest(currentContext.sessionId, RequestContextComposition.capture(requestVersion, outbound.systemPrompt, messagesToSend, promptTools))
             // 采样循环检测：命中后 takeWhile 会取消上游流，模型不再继续把重复内容刷下去。
             var samplingLoopCut = false
@@ -896,7 +905,7 @@ class StatefulAgentWorkflow @Inject constructor(
                                 kind = callKind,
                                 inputTokens = usage?.inputTokens ?: 0,
                                 outputTokens = usage?.outputTokens ?: 0,
-                                cachedInputTokens = usage?.cachedInputTokens ?: 0,
+                                cachedInputTokens = usage?.cachedInputTokens ?: -1,
                                 cacheCreationTokens = usage?.cacheCreationTokens ?: 0,
                                 ttfbMillis = ttfbElapsed?.toInt(),
                                 durationMillis = durationMillis,
@@ -1309,7 +1318,7 @@ class StatefulAgentWorkflow @Inject constructor(
                         kind = "title",
                         inputTokens = usage?.inputTokens ?: 0,
                         outputTokens = usage?.outputTokens ?: 0,
-                        cachedInputTokens = usage?.cachedInputTokens ?: 0,
+                        cachedInputTokens = usage?.cachedInputTokens ?: -1,
                         cacheCreationTokens = usage?.cacheCreationTokens ?: 0,
                         ttfbMillis = null,
                         durationMillis = durationMillis,

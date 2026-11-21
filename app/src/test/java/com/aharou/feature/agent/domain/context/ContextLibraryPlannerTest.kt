@@ -7,6 +7,22 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 
 class ContextLibraryPlannerTest {
+    @Test fun equalPriorityEntriesRenderIdenticallyRegardlessOfInputOrder() {
+        val entries = listOf("z", "a", "m").map { entry(it, ContextLoad.FULL) }
+        val forward = ContextLibraryPlanner.plan(entries)
+        val reverse = ContextLibraryPlanner.plan(entries.reversed())
+        assertEquals(forward.rendered, reverse.rendered)
+        assertEquals(listOf("a", "m", "z"), forward.full.map { it.id })
+    }
+
+    @Test fun dynamicMetadataFollowsStableEntriesEvenWithHigherPriority() {
+        val stable = entry("stable", ContextLoad.FULL)
+        val dynamic = entry("dynamic", ContextLoad.FULL).copy(dynamic = true,
+            worldbook = WorldbookRules(priority = 100))
+        assertEquals(listOf("stable", "dynamic"),
+            ContextLibraryPlanner.plan(listOf(dynamic, stable)).full.map { it.id })
+    }
+
     @Test fun indexSkipsUnusedBodySanitizationWithoutChangingRequestText() {
         val body = "x".repeat(1_000_000)
         val indexed = entry("index-only", ContextLoad.INDEX).copy(content = body, description = "summary")
@@ -191,7 +207,7 @@ class ContextLibraryPlannerTest {
         val plan = ContextLibraryPlanner.plan(wrong + hidden + listOf(pending, large, role),
             injectionCategory = ContextCategory.ROLE_INJECTED, memoryAllowed = false)
         assertEquals(listOf(role), plan.full)
-        assertEquals(listOf(pending, large), plan.indexed)
+        assertEquals(listOf(large, pending), plan.indexed)
         assertFalse(plan.rendered.contains("pending-private-body"))
         assertFalse(plan.rendered.contains("z".repeat(900)))
         assertTrue(hidden.all { h -> plan.omitted.any { it.first.id == h.id } })
