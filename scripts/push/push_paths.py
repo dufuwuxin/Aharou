@@ -19,11 +19,11 @@ def parse_args():
     p = argparse.ArgumentParser(
         description="经 GitHub API 只把指定文件推到远端分支，不碰 tag。",
         epilog="示例：python3 scripts/push/push_paths.py rules.d/40-git-release.md docs/agent-user-parity.md\n"
-               "      python3 scripts/push/push_paths.py app/x.kt --branch master -m 'fix(core): ...' --dry-run",
+               "      python3 scripts/push/push_paths.py app/x.kt --branch main -m 'fix(core): ...' --dry-run",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p.add_argument("paths", nargs="+", help="要推的文件（相对仓库根或当前目录；工作区里已删除的视为删除）")
-    p.add_argument("--branch", default="master", help="远端分支（默认 master）")
+    p.add_argument("--branch", default="main", help="远端分支（默认 main）")
     p.add_argument("-m", "--message", help="commit message（默认取本地 HEAD 的 message）")
     p.add_argument("--repo-dir", default=".", help="本地仓库目录（默认当前目录）")
     p.add_argument("--repo", help="GitHub 仓库 owner/name（默认从 origin 解析）")

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """经 GitHub API 建或移动 lightweight tag（refs/tags/<tag>）。
 
-默认指向远端分支（--branch，默认 master）的最新 sha，不用本地 HEAD：
+默认指向远端分支（--branch，默认 main）的最新 sha，不用本地 HEAD：
 gh_api_push.py 推出去的 commit 与本地 sha 不同，本地 sha 在远端不存在。
 tag 已存在则 PATCH 强制移动；推 v* tag 会触发发版 CI。
 """
@@ -27,7 +27,7 @@ def parse_args():
     )
     p.add_argument("tag", help="tag 名，如 v2.45.0")
     p.add_argument("commit", nargs="?", help="要指向的完整 40 位 commit sha（默认远端 --branch 最新提交）")
-    p.add_argument("--branch", default="master", help="未给 commit 时取哪个远端分支的最新 sha（默认 master）")
+    p.add_argument("--branch", default="main", help="未给 commit 时取哪个远端分支的最新 sha（默认 main）")
     p.add_argument("--repo-dir", default=".", help="本地仓库目录，用于解析 origin 与取 token（默认当前目录）")
     p.add_argument("--repo", help="GitHub 仓库 owner/name（默认从 origin 解析）")
     p.add_argument("--dry-run", action="store_true", help="只发 GET，打印将要发的写请求")

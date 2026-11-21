@@ -6,7 +6,7 @@ name: CI
 on:
   workflow_dispatch:
   push:
-    branches: [ master, main, feat/operit2-major-upgrade ]
+    branches: [ main ]
     # 纯文档/资源改动不影响构建产物，跳过 CI 省时间（public 仓库虽不扣额度，但省 11 分钟等待）。
     # 注意：只要本次 push 含任一非忽略路径的改动，CI 仍会触发。
     paths-ignore:
@@ -17,7 +17,7 @@ on:
       - 'LICENSE'
       - '.gitignore'
   pull_request:
-    branches: [ master, main ]
+    branches: [ main ]
     paths-ignore:
       - '**.md'
       - 'docs/**'
@@ -301,7 +301,7 @@ jobs:
       - name: Reconcile complete app regression
         run: python3 scripts/ci_test_groups.py --verify-all
       # 迁移版本号对账：编号连续、SCHEMA_VERSION 一致、已发布迁移未被篡改/复用
-      # （hotfix 合流后 master 未把未发布迁移后移会在这里被拦）。
+      # （hotfix 合流后 main 未把未发布迁移后移会在这里被拦）。
       - name: Check migration versions
         run: |
           python3 scripts/check_migrations.py

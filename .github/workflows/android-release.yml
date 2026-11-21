@@ -31,21 +31,21 @@ jobs:
           # 浅克隆（默认 depth=1）会得到 1，必须拉完整历史，否则 Release APK 版本号错乱。
           fetch-depth: 0
 
-      # 发布包必须来自 master：tag 打在 feat/* 上同样会触发本 workflow，而 versionCode 校验
-      # （commit count 在功能分支上只更大）拦不住这种情况。手动触发只允许 master。
-      - name: Verify release is from master
+      # 发布包必须来自 main：tag 打在 feat/* 上同样会触发本 workflow，而 versionCode 校验
+      # （commit count 在功能分支上只更大）拦不住这种情况。手动触发只允许 main。
+      - name: Verify release is from main
         run: |
           set -e
-          git fetch --no-tags origin +refs/heads/master:refs/remotes/origin/master
-          if [[ "$GITHUB_REF" == refs/heads/* && "$GITHUB_REF" != refs/heads/master ]]; then
-            echo "::error::手动触发只允许 master 分支（当前 $GITHUB_REF）"
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          if [[ "$GITHUB_REF" == refs/heads/* && "$GITHUB_REF" != refs/heads/main ]]; then
+            echo "::error::手动触发只允许 main 分支（当前 $GITHUB_REF）"
             exit 1
           fi
-          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/master; then
-            echo "::error::提交 $GITHUB_SHA（$GITHUB_REF）不在 master 上：tag 必须先合入 master 再打"
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::提交 $GITHUB_SHA（$GITHUB_REF）不在 main 上：tag 必须先合入 main 再打"
             exit 1
           fi
-          echo "✓ $GITHUB_REF 位于 master 历史中"
+          echo "✓ $GITHUB_REF 位于 main 历史中"
 
       - name: Set up JDK 21
         uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6
@@ -57,7 +57,7 @@ jobs:
         uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5
         with:
           # 复用 Gradle 构建缓存，加速后续构建。
-          cache-read-only: ${{ github.ref != 'refs/heads/master' }}
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
 
       # Robolectric 的 android-all-instrumented 运行时（约 190MB）由它自己的 Maven 拉取器下载到
       # ~/.m2/repository，不在 setup-gradle 的缓存范围内。发版包必须过单测，不缓存则每次发版
@@ -278,7 +278,7 @@ jobs:
           fi
 
       # GitHub 的 generate_release_notes 只列 merged PR，直接 push 的 commit 不会出现。
-      # 本仓库在 master 上直接 commit，不走 PR 流程，所以手动用 git log 生成 changelog。
+      # 本仓库在 main 上直接 commit，不走 PR 流程，所以手动用 git log 生成 changelog。
       - name: Generate changelog from git log
         id: changelog
         if: startsWith(github.ref, 'refs/tags/v')
