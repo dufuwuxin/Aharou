@@ -16,7 +16,23 @@ import androidx.compose.ui.res.stringResource
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aharou.R
+import com.aharou.feature.settings.domain.model.AIProviderConfig
+import com.aharou.feature.settings.domain.model.ModelRouteGroup
+import com.aharou.feature.settings.domain.model.resolveModelRoute
 import com.aharou.feature.settings.presentation.ModelRouteGroupViewModel
+
+internal fun resolveChatRoutePreview(
+    selection: String?,
+    routeGroups: List<ModelRouteGroup>,
+    providers: List<AIProviderConfig>,
+    readError: Boolean,
+): AIProviderConfig? {
+    if (readError) return null
+    val group = routeGroups.firstOrNull { it.selectionId == selection } ?: return null
+    return runCatching {
+        resolveModelRoute(group) { providerId -> providers.firstOrNull { it.id == providerId } }
+    }.getOrNull()
+}
 
 @Composable
 internal fun ChatRouteGroupChoices(onSelect: (String, String) -> Unit, onDismiss: () -> Unit, enabled: Boolean = true,

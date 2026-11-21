@@ -109,10 +109,8 @@ import com.aharou.feature.onboarding.domain.OnboardingStep
 import com.aharou.feature.onboarding.presentation.onboardingTarget
 import com.aharou.feature.settings.presentation.SettingsViewModel
 import com.aharou.feature.settings.domain.model.DashboardContext
-import com.aharou.feature.settings.domain.model.ModelRouteGroup
 import com.aharou.feature.settings.domain.model.ProviderDashboardState
 import com.aharou.feature.settings.domain.model.modelMetadataKey
-import com.aharou.feature.settings.domain.model.resolveModelRoute
 import com.aharou.feature.workspace.domain.WorkspacePathMapper
 import com.aharou.feature.workspace.presentation.WorkspaceViewModel
 import java.io.File
@@ -124,19 +122,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-internal fun resolveChatRoutePreview(
-    selection: String?,
-    routeGroups: List<ModelRouteGroup>,
-    providers: List<AIProviderConfig>,
-    readError: Boolean,
-): AIProviderConfig? {
-    if (readError) return null
-    val group = routeGroups.firstOrNull { it.selectionId == selection } ?: return null
-    return runCatching {
-        resolveModelRoute(group) { providerId -> providers.firstOrNull { it.id == providerId } }
-    }.getOrNull()
-}
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AIChatPanel(
