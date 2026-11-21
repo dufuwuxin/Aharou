@@ -11,7 +11,9 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextContains
@@ -19,8 +21,12 @@ import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTextReplacement
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
@@ -34,11 +40,16 @@ import com.aharou.AppLaunchPolicy
 import com.aharou.R
 import com.aharou.core.ui.pageEnter
 import com.aharou.core.ui.pageExit
+import com.aharou.feature.agent.domain.model.ChatSession
 import com.aharou.feature.agent.domain.task.ProjectPlan
 import com.aharou.feature.agent.presentation.component.ProjectListScreen
+import com.aharou.feature.agent.presentation.component.WorkspaceSessionBrowser
+import com.aharou.feature.workspace.domain.model.Workspace
+import com.aharou.feature.workspace.presentation.WorkspaceViewModel
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.Assert.assertEquals
 import org.junit.Before
@@ -171,6 +182,90 @@ class ProjectListScreenTest {
             assertEquals("projects/{id}", nav.currentDestination?.route)
         }
         verify(exactly = 1) { viewModel.createProject(project.title, project.purpose) }
+    }
+
+    private fun mountWorkspaceHome(agent: AIAgentViewModel, onOpenChat: () -> Unit = {}) {
+        val workspace = Workspace("Home", "/ordinary")
+        val workspaces = mockk<WorkspaceViewModel>()
+        every { workspaces.current } returns MutableStateFlow<Workspace?>(workspace)
+        every { workspaces.workspaces } returns MutableStateFlow(listOf(workspace))
+        every { agent.sessionsByWorkspace } returns MutableStateFlow(mapOf(workspace.path to listOf(
+            ChatSession("regular", "Ordinary chat", 1, 1, workspacePath = workspace.path),
+            ChatSession("project-main", "Project private chat", 1, 1, workspacePath = workspace.path),
+        )))
+        every { agent.currentSessionId } returns MutableStateFlow<String?>(null)
+        every { agent.agentStates } returns MutableStateFlow(emptyMap())
+        every { agent.activeAgentSessions } returns MutableStateFlow(emptySet())
+        every { agent.awaitingPermissionSessionIds } returns MutableStateFlow(emptySet())
+        state.value = state.value.copy(workspace = workspace.path, loading = false, projects = listOf(project),
+            indexedSessionWorkspaces = setOf(workspace.path), projectSessionIds = setOf("project-main"))
+        compose.setContent {
+            MaterialTheme {
+                WorkspaceSessionBrowser(agent, viewModel, workspaces, false, {},
+                    onOpenProject = { opened += it }, onOpenTask = {}, onOpenChat = onOpenChat)
+            }
+        }
+    }
+
+    @Test fun homeShowsProjectsAndOrdinaryChatsTogetherAndKeepsBothOpenActions() {
+        val agent = mockk<AIAgentViewModel>()
+        every { agent.selectSession("regular") } returns Unit
+        var openedChats = 0
+        mountWorkspaceHome(agent) { openedChats++ }
+
+        compose.onNodeWithTag("project_home_pager").assertDoesNotExist()
+        compose.onNodeWithTag("project_${project.id}").assertIsDisplayed().performClick()
+        compose.onNodeWithText("Ordinary chat").assertIsDisplayed().performClick()
+        compose.onNodeWithText("Project private chat").assertDoesNotExist()
+        compose.runOnIdle {
+            assertEquals(listOf(project.id), opened)
+            assertEquals(1, openedChats)
+        }
+        verify(exactly = 1) { agent.selectSession("regular") }
+    }
+
+    @Test fun projectSearchIsOptionalAndClearingRestoresTheHomeLayout() {
+        val agent = mockk<AIAgentViewModel>()
+        mountWorkspaceHome(agent)
+        val other = project.copy(id = "other", title = "Other project", workspace = "/owned/other", purpose = "Polish UI")
+        publish(state.value.copy(projects = listOf(project, other)))
+
+        compose.onNodeWithTag("project_search").assertDoesNotExist()
+        compose.onNodeWithTag("project_search_open").assertIsDisplayed().performClick()
+        compose.onNodeWithTag("project_search").performTextInput("  USEFUL  ")
+        compose.onNodeWithTag("project_${project.id}").assertIsDisplayed()
+        compose.onNodeWithTag("project_${other.id}").assertDoesNotExist()
+        compose.onNodeWithText("Ordinary chat").assertIsDisplayed()
+        compose.onNodeWithTag("project_search").performTextReplacement("absent")
+        compose.onNodeWithTag("project_search_empty").assertIsDisplayed()
+        compose.onNodeWithTag("project_search_clear").performClick()
+        compose.onNodeWithTag("project_search").assertDoesNotExist()
+        compose.onNodeWithTag("project_search_empty").assertDoesNotExist()
+        compose.onNodeWithTag("project_${project.id}").assertIsDisplayed()
+        compose.onNodeWithTag("project_home_list").performScrollToNode(hasTestTag("project_${other.id}"))
+        compose.onNodeWithTag("project_${other.id}").assertIsDisplayed()
+        compose.onNodeWithText("Ordinary chat").assertIsDisplayed()
+        compose.runOnIdle { assertEquals(emptyList<String>(), opened) }
+    }
+
+    @Test fun projectAndOrdinaryChatDeleteKeepTheirOwnConfirmationsAndTargets() {
+        val agent = mockk<AIAgentViewModel>()
+        every { agent.deleteSession("regular") } returns Job().apply { complete() }
+        every { viewModel.canDeleteProject(project) } returns true
+        every { viewModel.deleteProject(project.id) } returns Unit
+        mountWorkspaceHome(agent)
+
+        compose.onNodeWithTag("project_${project.id}").performSemanticsAction(SemanticsActions.OnLongClick) { it() }
+        compose.onNodeWithTag("delete_project_${project.id}").performClick()
+        verify(exactly = 0) { viewModel.deleteProject(any()) }
+        compose.onNodeWithTag("confirm_delete_project").performClick()
+        verify(exactly = 1) { viewModel.deleteProject(project.id) }
+        verify(exactly = 0) { agent.deleteSession(any()) }
+
+        compose.onNodeWithText("Ordinary chat").performSemanticsAction(SemanticsActions.OnLongClick) { it() }
+        compose.onNodeWithText(compose.activity.getString(R.string.common_delete)).performClick()
+        verify(exactly = 1) { agent.deleteSession("regular") }
+        verify(exactly = 1) { viewModel.deleteProject(any()) }
     }
 
     @Test fun emptyHomeProvidesAnActionableCreateWithoutStartingTheModel() {

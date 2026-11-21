@@ -99,7 +99,7 @@ import compose.icons.feathericons.Trash2
 import com.aharou.feature.onboarding.domain.OnboardingStep
 import com.aharou.feature.onboarding.presentation.onboardingTarget
 import com.aharou.feature.settings.data.local.ProviderPreset
-import com.aharou.feature.terminal.presentation.component.TerminalSettingsSheet
+import com.aharou.feature.terminal.presentation.component.TerminalSettingsContent
 
 /** 使用手册在线文档站地址。 */
 
@@ -126,6 +126,7 @@ enum class SettingsSection(@param:StringRes val titleRes: Int) {
     Memory(R.string.memory_settings_title),
     General(R.string.settings_general),
     Theme(R.string.settings_theme_title),
+    Terminal(R.string.terminal_settings_title),
     Providers(R.string.settings_providers),
     ProviderEditor(R.string.settings_provider_editor),
     DefaultModels(R.string.settings_default_models),
@@ -256,7 +257,6 @@ fun SettingsScreen(
     val terminalSettings by viewModel.terminalSettings.collectAsStateWithLifecycle()
     val proxyConfig by viewModel.proxyConfig.collectAsStateWithLifecycle()
     val proxyTestState by viewModel.proxyTestState.collectAsStateWithLifecycle()
-    var showTerminalSettingsSheet by remember { mutableStateOf(false) }
 
     val context = LocalContext.current
     val backDispatcher = androidx.activity.compose.LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
@@ -281,7 +281,6 @@ fun SettingsScreen(
     var logReturnSection by remember { mutableStateOf(SettingsSection.Menu) }
     var connectorsReturnSection by remember { mutableStateOf(SettingsSection.AiGroup) }
     var editingProvider by remember { mutableStateOf<AIProviderConfig?>(null) }
-    var showAddProviderSheet by remember { mutableStateOf(false) }
     var providerPresetPrefill by remember { mutableStateOf<ProviderPreset?>(null) }
     var mcpDialogRequest by remember { mutableStateOf<McpDialogRequest?>(null) }
     var createToolRequested by remember { mutableStateOf(false) }
@@ -387,7 +386,7 @@ fun SettingsScreen(
         SettingsSection.Providers, SettingsSection.DefaultModels -> (configHome ?: SettingsSection.Menu)
         SettingsSection.Connectors -> connectorsReturnSection
         SettingsSection.Skills, SettingsSection.Plugins -> (configHome ?: SettingsSection.Menu)
-        SettingsSection.General, SettingsSection.Theme -> (configHome ?: SettingsSection.Menu)
+        SettingsSection.General, SettingsSection.Theme, SettingsSection.Terminal -> (configHome ?: SettingsSection.Menu)
         SettingsSection.AppPermissions,
         SettingsSection.Accessibility,
         SettingsSection.BackgroundRun -> (configHome ?: SettingsSection.Menu)
@@ -512,7 +511,7 @@ fun SettingsScreen(
             onOpen = openSection,
             themeMode = themeMode,
             terminalSettings = terminalSettings,
-            onOpenTerminalSettingsSheet = { showTerminalSettingsSheet = true }
+            onOpenTerminalSettings = { openSection(SettingsSection.Terminal) }
         )
     }
 
@@ -656,15 +655,6 @@ fun SettingsScreen(
                 },
                 actions = {
                     when (current) {
-                        SettingsSection.Providers -> IconButton(
-                            onClick = {
-                                providerPresetPrefill = null
-                                showAddProviderSheet = true
-                            },
-                            modifier = Modifier.onboardingTarget(OnboardingStep.PROVIDER_ADD)
-                        ) {
-                            Icon(FeatherIcons.Plus, contentDescription = stringResource(R.string.settings_add_provider))
-                        }
                         SettingsSection.Container -> {
                             IconButton(onClick = { showContainerAnnouncement = true }) {
                                 Icon(
@@ -835,6 +825,13 @@ fun SettingsScreen(
                     onPickBackgroundImage = { viewModel.setBackgroundImage(it) },
                     onBackgroundAlphaChange = { viewModel.setBackgroundAlpha(it) },
                     onRemoveBackgroundImage = { viewModel.clearBackgroundImage() }
+                )
+                SettingsSection.Terminal -> TerminalSettingsContent(
+                    settings = terminalSettings,
+                    onSelectTheme = { viewModel.setTerminalTheme(it) },
+                    onChangeFontSize = { viewModel.setTerminalFontSize(it) },
+                    onChangeCursorStyle = { viewModel.setTerminalCursorStyle(it) },
+                    onChangeFontPath = { viewModel.setTerminalFontPath(it) }
                 )
                 SettingsSection.General -> GeneralSettingsSection(
                     autoRemoveStaleModels = autoRemoveStaleModels,
@@ -1175,24 +1172,6 @@ fun SettingsScreen(
         McpJsonExportSheet(onDismiss = { showMcpExportSheet = false })
     }
 
-    if (showAddProviderSheet) {
-        ProviderPresetSheet(
-            onDismiss = { showAddProviderSheet = false },
-            onSelectCustom = {
-                showAddProviderSheet = false
-                editingProvider = null
-                providerPresetPrefill = null
-                section = SettingsSection.ProviderEditor
-            },
-            onSelectOfficial = { preset ->
-                showAddProviderSheet = false
-                editingProvider = null
-                providerPresetPrefill = preset
-                section = SettingsSection.ProviderEditor
-            }
-        )
-    }
-
     if (showSkillAddSheet) {
         SkillAddSheet(
             scope = skillImportScope,
@@ -1221,16 +1200,6 @@ fun SettingsScreen(
         )
     }
 
-    if (showTerminalSettingsSheet) {
-        TerminalSettingsSheet(
-            settings = terminalSettings,
-            onDismiss = { showTerminalSettingsSheet = false },
-            onSelectTheme = { viewModel.setTerminalTheme(it) },
-            onChangeFontSize = { viewModel.setTerminalFontSize(it) },
-            onChangeCursorStyle = { viewModel.setTerminalCursorStyle(it) },
-            onChangeFontPath = { viewModel.setTerminalFontPath(it) }
-        )
-    }
 
 
     if (showImageSourceSheet) {
@@ -1416,7 +1385,7 @@ internal fun SettingsMenu(
     onOpen: (SettingsSection) -> Unit,
     themeMode: com.aharou.feature.settings.data.repository.AppThemeMode,
     terminalSettings: com.aharou.feature.terminal.data.repository.TerminalSettings,
-    onOpenTerminalSettingsSheet: () -> Unit
+    onOpenTerminalSettings: () -> Unit
 ) {
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(scrollState)
@@ -1424,7 +1393,7 @@ internal fun SettingsMenu(
         verticalArrangement = Arrangement.spacedBy(Spacing.sm)
     ) {
         SettingsAharouRows(onOpen)
-        SettingsGeneralRows(themeMode, terminalSettings, { onOpen(SettingsSection.Theme) }, onOpenTerminalSettingsSheet, onOpen)
+        SettingsGeneralRows(themeMode, terminalSettings, { onOpen(SettingsSection.Theme) }, onOpenTerminalSettings, onOpen)
         SettingsPermissionsRows(onOpen)
         SettingsMoreRows(onOpen)
     }

@@ -1,6 +1,9 @@
 package com.aharou.feature.settings.presentation.component
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
@@ -15,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -43,25 +47,18 @@ internal fun ContextManagementContent(
     onKeepTools: (Int) -> Unit,
 ) {
     var expanded by rememberSaveable { mutableStateOf(false) }
+    var choosingPreset by rememberSaveable { mutableStateOf(false) }
     var editing by rememberSaveable { mutableStateOf<String?>(null) }
     SettingsGroupHeader(stringResource(R.string.settings_context_management))
     SettingsGroup {
         SettingsRow(title = stringResource(R.string.settings_context_preset),
-            subtitle = stringResource(R.string.settings_context_layers_desc),
+            subtitle = stringResource(R.string.settings_context_request_scope),
+            modifier = Modifier.testTag("context_preset_picker").heightIn(min = 48.dp),
+            onClick = { choosingPreset = true },
             trailing = { Text(stringResource(preferences.preset.labelRes())) })
-        ContextPreset.entries.filter { it != ContextPreset.CUSTOM }.forEach { preset ->
-            SettingsDivider()
-            SettingsRow(title = stringResource(preset.labelRes()),
-                subtitle = stringResource(preset.descriptionRes()),
-                modifier = Modifier.testTag("context_preset_${preset.id}"),
-                onClick = { onPreset(preset) })
-        }
         SettingsDivider()
-        SettingsRow(title = stringResource(R.string.settings_context_custom),
-            modifier = Modifier.testTag("context_custom"), onClick = { expanded = true })
-        SettingsDivider()
-        SettingsRow(title = stringResource(R.string.settings_context_advanced),
-            modifier = Modifier.testTag("context_advanced"), onClick = { expanded = !expanded })
+        CollapsibleGroupHeader(text = stringResource(R.string.settings_context_edit_custom), expanded = expanded,
+            onToggle = { expanded = !expanded }, modifier = Modifier.testTag("context_custom").heightIn(min = 48.dp))
         if (expanded) {
             ContextNumberRow("rounds", R.string.settings_context_trim_title, preferences.rounds) { editing = "rounds" }
             ContextNumberRow("soft", R.string.settings_soft_compaction_threshold, preferences.soft) { editing = "soft" }
@@ -73,6 +70,25 @@ internal fun ContextManagementContent(
             ContextNumberRow("tools", R.string.settings_context_keep_tools, preferences.keepTools) { editing = "tools" }
         }
     }
+    if (choosingPreset) AlertDialog(
+        onDismissRequest = { choosingPreset = false },
+        title = { Text(stringResource(R.string.settings_context_choose_preset)) },
+        text = {
+            SettingsGroup(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                ContextPreset.entries.filter { it != ContextPreset.CUSTOM }.forEachIndexed { index, preset ->
+                    if (index > 0) SettingsDivider()
+                    SettingsRow(title = stringResource(preset.labelRes()),
+                        subtitle = stringResource(preset.descriptionRes()),
+                        modifier = Modifier.testTag("context_preset_${preset.id}"),
+                        onClick = { onPreset(preset); choosingPreset = false; expanded = false })
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = { choosingPreset = false }) { Text(stringResource(R.string.common_cancel)) }
+        },
+    )
     editing?.let { field ->
         val initial = when (field) {
             "rounds" -> preferences.rounds

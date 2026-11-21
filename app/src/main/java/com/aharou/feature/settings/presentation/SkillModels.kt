@@ -116,9 +116,22 @@ internal fun toggleSkillType(ids: List<String>, id: String): List<String> =
 
 internal fun skillSelectionId(entry: SkillUiEntry): String = "${entry.scope.name}:${entry.name}"
 
-internal data class SkillTagGroup(val label: String?, val entries: List<SkillUiEntry>)
+internal data class SkillTagGroup(val label: String?, val entries: List<SkillUiEntry>) {
+    val filterId: String get() = label?.let { "tag:$it" } ?: "untagged"
+}
 
-/** Multi-tag rows share a selection identity while lazy-list rows remain group-specific. */
+/** Selected tags form a union; scope and search narrow it without repeating multi-tag skills. */
+internal fun filterSkillLibrary(
+    entries: List<SkillUiEntry>,
+    scope: SkillScope?,
+    selectedTagIds: List<String>
+): List<SkillUiEntry> = groupSkillsByTag(entries)
+    .filter { selectedTagIds.isEmpty() || it.filterId in selectedTagIds }
+    .flatMap { it.entries }
+    .distinctBy(::skillSelectionId)
+    .filter { scope == null || it.scope == scope }
+
+/** The label catalog keeps alphabetical tags/types first and unclassified skills last. */
 internal fun groupSkillsByTag(entries: List<SkillUiEntry>): List<SkillTagGroup> {
     val groups = linkedMapOf<String?, MutableList<SkillUiEntry>>()
     entries.distinctBy(::skillSelectionId).forEach { entry ->

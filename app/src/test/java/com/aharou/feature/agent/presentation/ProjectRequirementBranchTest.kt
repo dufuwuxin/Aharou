@@ -11,8 +11,6 @@ import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
 import com.aharou.feature.agent.domain.prompt.InjectedContextStore
 import com.aharou.feature.agent.domain.steward.StewardController
 import com.aharou.feature.agent.domain.steward.StewardSettingsStore
-import com.aharou.feature.settings.data.repository.DefaultModelSettingsRepository
-import com.aharou.feature.settings.data.repository.ModelRouteGroupRepository
 import com.aharou.feature.settings.presentation.ModelRouteGroupViewModel
 import com.aharou.feature.settings.presentation.ScheduledTasksViewModel
 import androidx.compose.ui.Modifier
@@ -328,12 +326,10 @@ class ProjectRequirementBranchTest {
                         every { scheduled.tasks } returns MutableStateFlow(emptyList())
                         every { scheduled.sessions } returns MutableStateFlow(emptyList())
                     })
-                val routeGroups = mockk<ModelRouteGroupRepository>()
-                every { routeGroups.groups } returns MutableStateFlow(emptyList())
-                val defaultModel = mockk<DefaultModelSettingsRepository>()
-                every { defaultModel.providerIdFlow } returns MutableStateFlow("")
                 put("androidx.lifecycle.ViewModelProvider.DefaultKey:${ModelRouteGroupViewModel::class.java.canonicalName}",
-                    ModelRouteGroupViewModel(routeGroups, defaultModel))
+                    mockk<ModelRouteGroupViewModel>().also { routes ->
+                        every { routes.groups } returns MutableStateFlow(emptyList())
+                    })
                 put("androidx.lifecycle.ViewModelProvider.DefaultKey:${StewardPanelViewModel::class.java.canonicalName}",
                     StewardPanelViewModel(StewardController(StewardSettingsStore.Noop, mockk()),
                         StewardSettingsStore.Noop, mockk()))

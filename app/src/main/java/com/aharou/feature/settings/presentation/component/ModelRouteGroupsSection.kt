@@ -90,6 +90,7 @@ private fun ModelRouteEditor(initial: ModelRouteGroup?, providers: List<AIProvid
     fun memberKey(provider: String, model: String) = Json.encodeToString(listOf(provider, model))
     var name by rememberSaveable { mutableStateOf(initial?.name.orEmpty()) }
     var selected by rememberSaveable { mutableStateOf(initial?.models.orEmpty().map { memberKey(it.providerId, it.model) }) }
+    var expandedProviderIds by remember { mutableStateOf(emptySet<String>()) }
     var saving by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -122,13 +123,20 @@ private fun ModelRouteEditor(initial: ModelRouteGroup?, providers: List<AIProvid
                 }
             } }
             providers.filter { it.isEnabled }.forEach { provider ->
-                item(key = "provider:${provider.id}") { SettingsGroupHeader(text = provider.name) }
-                provider.models.forEach { model -> item(key = "model:${memberKey(provider.id, model)}") {
-                    val encoded = memberKey(provider.id, model)
-                    FilterChip(selected = encoded in selected, enabled = !saving, onClick = {
-                        selected = if (encoded in selected) selected - encoded else selected + encoded
-                    }, label = { Text(model) }, modifier = Modifier.testTag("route_model_${provider.id}_$model"))
-                } }
+                val expanded = provider.id in expandedProviderIds
+                item(key = "provider:${provider.id}") {
+                    SettingsGroupHeader(text = provider.name, expanded = expanded, onToggle = {
+                        expandedProviderIds = if (expanded) expandedProviderIds - provider.id else expandedProviderIds + provider.id
+                    })
+                }
+                if (expanded) {
+                    provider.models.forEach { model -> item(key = "model:${memberKey(provider.id, model)}") {
+                        val encoded = memberKey(provider.id, model)
+                        FilterChip(selected = encoded in selected, enabled = !saving, onClick = {
+                            selected = if (encoded in selected) selected - encoded else selected + encoded
+                        }, label = { Text(model) }, modifier = Modifier.testTag("route_model_${provider.id}_$model"))
+                    } }
+                }
             }
         }
     }

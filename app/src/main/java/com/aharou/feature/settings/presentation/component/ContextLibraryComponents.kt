@@ -3,7 +3,6 @@ package com.aharou.feature.settings.presentation.component
 import androidx.annotation.StringRes
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -21,7 +20,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.aharou.R
@@ -80,41 +78,6 @@ internal fun ContextCategory.explanation(): Int = when (this) {
 internal fun MemoryScope.label(): Int = when (this) {
     MemoryScope.GLOBAL -> R.string.context_scope_global
     MemoryScope.PROJECT -> R.string.context_scope_project
-}
-
-@Composable
-internal fun ContextOverview(entries: List<ContextEntry>) {
-    Column(verticalArrangement = Arrangement.spacedBy(Spacing.lg)) {
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Column(verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
-                Text(stringResource(R.string.context_workspace_heading), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
-                Text(stringResource(R.string.context_workspace_description), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            Surface(shape = RoundedCornerShape(Radius.mdLarge), color = MaterialTheme.colorScheme.primaryContainer) {
-                Text(entries.size.toString(), modifier = Modifier.padding(Spacing.lg), style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.onPrimaryContainer)
-            }
-        }
-        BoxWithConstraints {
-            val columns = if (maxWidth >= 600.dp) 4 else 2
-            val modes = ContextCategory.entries
-            Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-                modes.chunked(columns).forEach { row ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-                        row.forEach { mode ->
-                            Surface(modifier = Modifier.weight(1f), shape = RoundedCornerShape(Radius.mdLarge), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)) {
-                                Column(modifier = Modifier.padding(Spacing.md), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
-                                    Text(entries.count { it.category == mode }.toString(), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                                    Text(stringResource(mode.label()), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        val pending = entries.count { it.pending }
-        if (pending > 0) ContextNotice(stringResource(R.string.context_pending_count, pending))
-    }
 }
 
 @Composable

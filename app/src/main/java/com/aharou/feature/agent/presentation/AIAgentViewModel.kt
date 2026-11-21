@@ -868,7 +868,7 @@ class AIAgentViewModel @Inject constructor(
     suspend fun bindSessionWorkspace(sessionId: String, path: String) {
         check(workspaceRepository.workspaces.value.any { it.path == path && it.available }) { "WORKSPACE_UNAVAILABLE" }
         sessionUseCase.bindWorkspace(sessionId, path) {
-            _currentSessionId.value == sessionId && sessionJobs[sessionId]?.isActive != true &&
+            sessionJobs[sessionId]?.isActive != true &&
                 sessionId !in _runningCommandSessions.value && sessionId !in _activeAgentSessions.value
         }
         fileMentionController.dismiss()

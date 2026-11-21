@@ -5,12 +5,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.unit.Dp
+import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -44,11 +46,9 @@ fun PrimaryPagesPager(
     val routeIndex = primaryRoutes.indexOf(route)
     val visible = routeIndex >= 0
     val pager = rememberPagerState(initialPage = routeIndex.coerceAtLeast(0)) { 3 }
-    var configRoot by rememberSaveable { mutableStateOf(true) }
-    var settingsRoot by rememberSaveable { mutableStateOf(true) }
     var bottomDragging by remember { mutableStateOf(false) }
+    var multiTouch by remember { mutableStateOf(false) }
     val navigate by rememberUpdatedState(onRouteChange)
-    val root = when (pager.currentPage) { 1 -> configRoot; 2 -> settingsRoot; else -> true }
     // Wait for both gestures to finish: scrollToPage used by the bar is instantaneous.
     LaunchedEffect(route) {
         if (!visible) return@LaunchedEffect
@@ -60,20 +60,32 @@ fun PrimaryPagesPager(
         }
     }
     // Keep composition/saveable state when a secondary NavHost destination covers the roots.
-    Box(if (visible) modifier.fillMaxSize() else Modifier.size(0.dp)) {
+    Box(
+        (if (visible) modifier.fillMaxSize() else Modifier.size(0.dp)).pointerInput(visible) {
+            if (!visible) return@pointerInput
+            awaitEachGesture {
+                var pressed: Boolean
+                do {
+                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                    multiTouch = event.changes.count { it.pressed } > 1
+                    pressed = event.changes.any { it.pressed }
+                } while (pressed)
+                multiTouch = false
+            }
+        }
+    ) {
         HorizontalPager(
             state = pager,
             beyondViewportPageCount = 2,
             key = { primaryRoutes[it] },
-            userScrollEnabled = visible && root,
+            userScrollEnabled = visible && !multiTouch,
             modifier = Modifier.fillMaxSize().padding(bottom = bottomContentPadding).testTag("primary_pages_pager"),
         ) { page ->
             val active = visible && pager.currentPage == page
             PrimaryPageLifecycle(active) {
                 if (page == 0) projects()
-                else settings(page == 1, active) { isRoot ->
-                    if (page == 1) configRoot = isRoot else settingsRoot = isRoot
-                }
+                // Section history stays local to the retained settings page.
+                else settings(page == 1, active) {}
             }
         }
         if (visible) FloatingTabBar(
@@ -84,7 +96,7 @@ fun PrimaryPagesPager(
                 FloatingTabItem(FeatherIcons.Settings, stringResource(R.string.bottom_tab_settings)),
             ),
             maskColor = settingsPageBackground(),
-            gesturesEnabled = root,
+            gesturesEnabled = !multiTouch,
             onDragStateChange = { bottomDragging = it },
             modifier = bottomBarModifier.align(Alignment.BottomCenter).testTag("primary_pages_tabs"),
         )

@@ -159,7 +159,7 @@ internal fun SettingsGeneralRows(
     themeMode: AppThemeMode,
     terminalSettings: TerminalSettings,
     onOpenTheme: () -> Unit,
-    onOpenTerminalSettingsSheet: () -> Unit,
+    onOpenTerminalSettings: () -> Unit,
     onOpen: (SettingsSection) -> Unit,
     cleanupViewModel: TerminalCleanupSettingsViewModel = hiltViewModel()
 ) {
@@ -193,7 +193,7 @@ internal fun SettingsGeneralRows(
             SettingsRow(
                 icon = FeatherIcons.Terminal,
                 title = stringResource(R.string.terminal_settings_title),
-                onClick = onOpenTerminalSettingsSheet,
+                onClick = onOpenTerminalSettings,
                 trailing = {
                     Text(
                         text = stringResource(terminalSettings.theme.nameRes),

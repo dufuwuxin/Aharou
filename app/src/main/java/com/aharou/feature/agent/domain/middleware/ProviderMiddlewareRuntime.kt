@@ -1,27 +1,15 @@
 package com.aharou.feature.agent.domain.middleware
 
+import com.aharou.core.privacy.SystemPromptSanitizer
 import com.aharou.core.util.FileLogger
+import com.aharou.feature.agent.domain.model.AgentMessage
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 
-/**
- * 声明式中间件在「不碰请求体」这一层能落地的两部分：模型映射。
- *
- * 参数覆盖（[MiddlewareConfig.paramOverrides]）作用在请求 JSON 上，需要按三种协议各自的组装点
- * 插入，暂不在这一层处理——配置里有它也不会被静默忽略：调用方可以拿 [MiddlewareConfig.paramOverrides]
- * 自行判断是否要提示用户。
- */
-data class MiddlewareApplication(
-    /** 真正发给服务端的模型名（未配置映射时与请求名相同）。 */
-    val actualModel: String,
-    /** 原生记忆库生成的系统提示，不从中间件追加正文。 */
-    val systemPrompt: String,
-)
+data class MiddlewareApplication(val actualModel: String, val systemPrompt: String)
 
-/**
- * 计算一次请求的中间件效果。
- *
- * @param rawConfig 供应商上的 JSON 配置原文；空/非法 JSON 按「未配置」处理，不抛异常。
- * @param requestedModel 用户在 UI 上选的模型名，用于查找 [MiddlewareConfig.modelMap]。
- */
 fun applyProviderMiddleware(
     rawConfig: String?,
     providerId: String,
@@ -31,10 +19,63 @@ fun applyProviderMiddleware(
 ): MiddlewareApplication {
     val parsed = RequestMiddleware.parseConfig(rawConfig)
     if (parsed == null && !rawConfig.isNullOrBlank()) {
-        FileLogger.w("ProviderMiddleware", "中间件配置解析失败（已忽略）：${rawConfig.take(120)}")
+        FileLogger.w("ProviderMiddleware", "中间件配置解析失败（已忽略）")
     }
     val config = parsed?.takeIf { it.enabled } ?: return MiddlewareApplication(requestedModel, systemPrompt)
-
     val mapped = config.modelMap[requestedModel]?.takeIf { it.isNotBlank() } ?: requestedModel
-    return MiddlewareApplication(mapped, systemPrompt)
+    return MiddlewareApplication(mapped, projectMiddlewareSystemPrompt(config, systemPrompt))
 }
+
+fun projectMiddlewareSystemPrompt(config: MiddlewareConfig?, systemPrompt: String): String =
+    if (config?.enabled == true && config.sanitizeSystemPrompt) SystemPromptSanitizer.sanitize(systemPrompt) else systemPrompt
+
+/** Only projects assistant body text. User/tool objects and native signed reasoning remain intact. */
+fun projectMiddlewareHistory(config: MiddlewareConfig?, messages: List<AgentMessage>): List<AgentMessage> {
+    if (config?.enabled != true || !config.stripAssistantThink) return messages
+    return messages.map { message ->
+        if (message is AgentMessage.AssistantMessage) {
+            val content = SystemPromptSanitizer.stripAssistantThink(message.content)
+            if (content == message.content) message else message.copy(content = content)
+        } else message
+    }
+}
+
+internal fun transformMiddlewareText(config: MiddlewareConfig, body: JsonObject): JsonObject {
+    if (!config.sanitizeSystemPrompt && !config.stripAssistantThink) return body
+    fun JsonObject.field(key: String, value: JsonElement) = JsonObject(toMutableMap().apply { put(key, value) })
+    fun text(value: JsonElement, transform: (String) -> String): JsonElement = when (value) {
+        is JsonPrimitive -> if (value.isString) JsonPrimitive(transform(value.content)) else value
+        is JsonArray -> JsonArray(value.map { block ->
+            if (block is JsonObject && (block["type"] as? JsonPrimitive)?.content in setOf("text", "input_text", "output_text")) {
+                val original = block["text"] as? JsonPrimitive
+                if (original?.isString == true) block.field("text", JsonPrimitive(transform(original.content))) else block
+            } else block
+        })
+        else -> value
+    }
+    var result = body
+    if (config.sanitizeSystemPrompt) {
+        for (key in listOf("system", "instructions")) {
+            result[key]?.let { result = result.field(key, text(it, SystemPromptSanitizer::sanitize)) }
+        }
+    }
+    for (key in listOf("messages", "input")) {
+        val messages = result[key] as? JsonArray ?: continue
+        result = result.field(key, JsonArray(messages.map { item ->
+            val message = item as? JsonObject ?: return@map item
+            val role = (message["role"] as? JsonPrimitive)?.content
+            val transform: ((String) -> String)? = when {
+                config.sanitizeSystemPrompt && role in setOf("system", "developer") -> SystemPromptSanitizer::sanitize
+                config.stripAssistantThink && role == "assistant" -> SystemPromptSanitizer::stripAssistantThink
+                else -> null
+            }
+            val content = message["content"]
+            if (transform == null || content == null) message else message.field("content", text(content, transform))
+        }))
+    }
+    return result
+}
+
+/** Unknown/missing usage is deliberately not represented as a measured zero-percent hit rate. */
+fun measuredCacheHitRatio(inputTokens: Int, cachedInputTokens: Int): Double? =
+    if (inputTokens > 0 && cachedInputTokens in 1..inputTokens) cachedInputTokens.toDouble() / inputTokens else null

@@ -6,6 +6,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import com.aharou.feature.agent.domain.model.ChatSession
+import com.aharou.feature.workspace.domain.model.Workspace
 import com.aharou.feature.agent.presentation.component.SessionListScreen
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -25,6 +26,31 @@ import org.robolectric.annotation.SQLiteMode
 @ConscryptMode(ConscryptMode.Mode.OFF)
 class SessionListRunningStateTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
+
+    @Test fun groupedSessionsShowWorkspaceHeadersAndMoveAction() {
+        val alpha = ChatSession("alpha", "Alpha session", 1, 1, workspacePath = "/projects/alpha")
+        val beta = ChatSession("beta", "Beta session", 2, 2, workspacePath = "/projects/beta")
+        val movedTo = mutableStateOf("")
+        compose.setContent {
+            MaterialTheme {
+                SessionListScreen(
+                    sessions = emptyList(), currentSessionId = null, agentStates = emptyMap(),
+                    awaitingPermissionSessionIds = emptySet(), workspaceName = "",
+                    onSelect = {}, onDelete = {}, onNewSession = {}, showNewSession = false,
+                    sessionGroups = mapOf("/projects/alpha" to listOf(alpha), "/projects/beta" to listOf(beta)),
+                    availableWorkspaces = listOf(Workspace("beta", "/projects/beta")),
+                    onMove = { _, path -> movedTo.value = path }
+                )
+            }
+        }
+        compose.onNodeWithText("/projects/alpha").assertExists()
+        compose.onNodeWithText("/projects/beta").assertExists()
+        compose.onNodeWithText(alpha.title).assertExists()
+        compose.onAllNodesWithContentDescription(compose.activity.getString(com.aharou.R.string.session_workspace_move)).onFirst().performClick()
+        compose.onNodeWithText(compose.activity.getString(com.aharou.R.string.session_workspace_move_title)).assertExists()
+        compose.onAllNodesWithText("beta").onLast().performClick()
+        compose.runOnIdle { assertEquals("/projects/beta", movedTo.value) }
+    }
 
     @Test fun staleStreamingDoesNotShowARunningDotAndJobCompletionRemovesIt() {
         val active = mutableStateOf(emptySet<String>())

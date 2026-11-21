@@ -69,7 +69,10 @@ import com.aharou.feature.agent.domain.provider.GeminiAdapter
 import com.aharou.feature.agent.domain.provider.AllKeysFailedException
 import com.aharou.feature.agent.domain.provider.enrichWithHttpErrorBody
 import com.aharou.feature.agent.domain.provider.KeySwitchOutcome
+import com.aharou.feature.agent.domain.middleware.RequestMiddleware
 import com.aharou.feature.agent.domain.middleware.applyProviderMiddleware
+import com.aharou.feature.agent.domain.middleware.projectMiddlewareHistory
+import com.aharou.feature.agent.domain.middleware.projectMiddlewareSystemPrompt
 import com.aharou.feature.agent.domain.middleware.applyProviderParamOverrides
 import com.aharou.feature.agent.domain.provider.isKeySwitchFailure
 import com.aharou.feature.agent.domain.provider.isQuotaExhausted
@@ -320,8 +323,8 @@ class StatefulAgentWorkflow @Inject constructor(
         toolRegistry.bindDiscoveryTools(tools, context)
         val compactionProvider = resolveCompactionFallbackProvider(sessionId) ?: provider
         val reuseMainPrefix = compactionProvider.providerId == provider.providerId && compactionProvider.model == provider.model  // 前缀缓存只同 provider 同 model 内生效，配了独立压缩模型就不复用主前缀
-        return contextCompactor.compactIfNeeded(history, compactionProvider, sessionId, force = true, windowProvider = provider,
-            systemPrompt = if (reuseMainPrefix) appendMiddlewarePrompt(provider.providerId, withContext(Dispatchers.IO) { promptProvider.build(context, consumeInbox = false) }) else "", tools = if (reuseMainPrefix) requestTools(tools, context) else emptyList(), onEvent = onEvent).compacted
+        return contextCompactor.compactIfNeeded(history, compactionTransport(compactionProvider), sessionId, force = true, windowProvider = provider,
+            systemPrompt = if (reuseMainPrefix) projectSystemPrompt(provider.providerId, withContext(Dispatchers.IO) { promptProvider.build(context, consumeInbox = false) }) else "", tools = if (reuseMainPrefix) requestTools(tools, context) else emptyList(), onEvent = onEvent).compacted
     }
 
     /**
@@ -390,12 +393,20 @@ class StatefulAgentWorkflow @Inject constructor(
         return failoverCoordinator.bindOrigin(languageRoutingFactory?.wrap(transport) ?: transport, config)
     }
 
-    /** 中间件注入的系统提示：按供应商配置追加，取不到配置就原样返回。 */
-    private suspend fun appendMiddlewarePrompt(providerId: String, systemPrompt: String): String {
-        val config = aiProviderRepository.getProviderById(providerId) ?: return systemPrompt
-        return applyProviderMiddleware(
-            config.requestMiddleware, config.id, config.type.name, config.effectiveModel, systemPrompt
-        ).systemPrompt
+    private suspend fun middlewareConfig(providerId: String) =
+        RequestMiddleware.parseConfig(aiProviderRepository.getProviderById(providerId)?.requestMiddleware)
+
+    private suspend fun projectSystemPrompt(providerId: String, systemPrompt: String): String =
+        projectMiddlewareSystemPrompt(middlewareConfig(providerId), systemPrompt)
+
+    // Keep the original provider identity for model metadata and failover; only compaction's send is decorated.
+    private suspend fun compactionTransport(provider: AIProvider): AIProvider {
+        val config = middlewareConfig(provider.providerId)
+        if (config?.enabled != true || (!config.sanitizeSystemPrompt && !config.stripAssistantThink)) return provider
+        return object : AIProvider by provider {
+            override suspend fun complete(systemPrompt: String, messages: List<AgentMessage>, tools: List<AgentTool>, reasoningEffort: String?) =
+                provider.complete(projectMiddlewareSystemPrompt(config, systemPrompt), projectMiddlewareHistory(config, messages), tools, reasoningEffort)
+        }
     }
 
     override fun executeEvents(userRequest: String, context: AgentContext, tools: List<AgentTool>): Flow<AgentEvent> =
@@ -457,7 +468,7 @@ class StatefulAgentWorkflow @Inject constructor(
         // 预算基线与两个「本轮只试一次」的开关都只在 LLM 调用分支用到，收成一个可变对象，
         // 让该分支抽成独立函数后不必在主循环里再留 4 个跨挂起点局部变量。
         val llmBudget = LlmCallBudgetState(providerKey = "${aiProvider.providerId.length}:${aiProvider.providerId}:${aiProvider.model}",
-            baselineEstimate = withContext(Dispatchers.Default) { ContextTokenEstimator.estimate(appendMiddlewarePrompt(aiProvider.providerId, listOf(systemPrompt.system, systemPrompt.transientContext).filter { it.isNotBlank() }.joinToString("\n\n")),
+            baselineEstimate = withContext(Dispatchers.Default) { ContextTokenEstimator.estimate(projectSystemPrompt(aiProvider.providerId, listOf(systemPrompt.system, systemPrompt.transientContext).filter { it.isNotBlank() }.joinToString("\n\n")),
                 currentContext.history.take(lastAssistantIndex.coerceAtLeast(0)), requestTools(currentTools, currentContext)) },
             baselineUsage = if (currentContext.lastInputTokens > 0 && lastAssistantIndex >= 0) {
                 (currentContext.history[lastAssistantIndex] as AgentMessage.AssistantMessage).inputTokens
@@ -593,14 +604,15 @@ class StatefulAgentWorkflow @Inject constructor(
         val requestVersion = injectedContexts.beginRequest(currentContext.sessionId)
         val native = withContext(Dispatchers.IO) { promptProvider.buildNativeRequest(currentContext.copy(history = state.messages)) }
         val requestPrompt = promptProvider.buildRequest(currentContext.copy(history = state.messages), native.system, native.transientContext)
-        val requestSystemPrompt = appendMiddlewarePrompt(providerInUse.providerId, requestPrompt.system)
+        val requestMiddleware = middlewareConfig(providerInUse.providerId)
+        val requestSystemPrompt = projectMiddlewareSystemPrompt(requestMiddleware, requestPrompt.system)
         val promptTools = requestTools(currentTools, currentContext)
         val compactionProvider = resolveCompactionFallbackProvider(currentContext.sessionId) ?: providerInUse
         val reuseMainPrefix = compactionProvider.providerId == providerInUse.providerId && compactionProvider.model == providerInUse.model  // 前缀缓存只同 provider 同 model 内生效，配了独立压缩模型就不复用主前缀
         var compactedMessages = state.messages
         // 送模型前的图片投影只算这一次：压缩触发估算、超预算判定与实际发送共用同一份结果。
         val supportsVision = callMetadata.supportsVision
-        val normalizedMessages = sanitizeImagesForModel(state.messages, supportsVision)
+        val normalizedMessages = sanitizeImagesForModel(projectMiddlewareHistory(requestMiddleware, state.messages), supportsVision)
         val rawProjection = budget.historyProjector.project(normalizedMessages, supportsVision, contextPreferences, false, requestPrompt.transientContext)
         val rawEstimate = withContext(Dispatchers.Default) { ContextTokenEstimator.estimate(requestSystemPrompt, rawProjection, promptTools) }
         val compactReceipts = contextPreferences.keepTools == 0 || ContextTokenEstimator.calibrated(rawEstimate,
@@ -610,7 +622,7 @@ class StatefulAgentWorkflow @Inject constructor(
             telemetry.compactionStart()
             val estimate = withContext(Dispatchers.Default) { ContextTokenEstimator.estimate(requestSystemPrompt, sendProjection, promptTools) }
             val predictedInput = ContextTokenEstimator.calibrated(estimate, budget.baselineEstimate, budget.baselineUsage)
-            val compaction = contextCompactor.compactIfNeeded(state.messages, compactionProvider, currentContext.sessionId,
+            val compaction = contextCompactor.compactIfNeeded(state.messages, compactionTransport(compactionProvider), currentContext.sessionId,
                 windowProvider = providerInUse, systemPrompt = if (reuseMainPrefix) requestSystemPrompt else "", tools = if (reuseMainPrefix) promptTools else emptyList(),
                 currentInputTokens = ContextTokenEstimator.forCompactionTrigger(estimate, budget.baselineEstimate, budget.baselineUsage), settingsSnapshot = contextPreferences) { event ->
                 if (event is AgentEvent.CompactionFailed) budget.compactionAttemptFailed = true
@@ -626,7 +638,7 @@ class StatefulAgentWorkflow @Inject constructor(
         }
         // 压缩真的改写过消息时内容变了，投影得按新的那份重算；源没变就沿用上面那份（同一个对象）。
         if (compactedMessages !== initialState.messages) {
-            sendProjection = budget.historyProjector.project(sanitizeImagesForModel(compactedMessages, supportsVision), supportsVision, contextPreferences, compactReceipts, requestPrompt.transientContext)
+            sendProjection = budget.historyProjector.project(sanitizeImagesForModel(projectMiddlewareHistory(requestMiddleware, compactedMessages), supportsVision), supportsVision, contextPreferences, compactReceipts, requestPrompt.transientContext)
         }
         val requestEstimate = withContext(Dispatchers.Default) { ContextTokenEstimator.estimate(requestSystemPrompt, sendProjection, promptTools) }
         val predictedInput = ContextTokenEstimator.calibrated(requestEstimate, budget.baselineEstimate, budget.baselineUsage)
@@ -1273,7 +1285,7 @@ class StatefulAgentWorkflow @Inject constructor(
         val response = try {
             val masker = outboundMaskerOrNull(generalSettingsRepository.privacyMaskingEnabled())
             val resp = provider.complete(
-                systemPrompt = prompt,
+                systemPrompt = projectSystemPrompt(provider.providerId, prompt),
                 messages = listOf(AgentMessage.UserMessage(content = request.maskIfNeeded(masker))),
                 tools = emptyList()
             ).let { if (masker == null) it else it.restoredFromOutbound(masker) }
@@ -1326,7 +1338,7 @@ class StatefulAgentWorkflow @Inject constructor(
         val provider = getEffectiveProvider(sessionId)
         val masker = outboundMaskerOrNull(generalSettingsRepository.privacyMaskingEnabled())
         provider.complete(
-            systemPrompt = systemPrompt.maskIfNeeded(masker),
+            systemPrompt = projectSystemPrompt(provider.providerId, systemPrompt).maskIfNeeded(masker),
             messages = listOf(AgentMessage.UserMessage(content = userText.maskIfNeeded(masker))),
             tools = emptyList()
         ).content.restoreIfNeeded(masker).trim().ifBlank { null }
@@ -1343,7 +1355,7 @@ class StatefulAgentWorkflow @Inject constructor(
         val truncatedDiff = diff.take(12000)
         val masker = outboundMaskerOrNull(generalSettingsRepository.privacyMaskingEnabled())
         val resp = provider.complete(
-            systemPrompt = prompt,
+            systemPrompt = projectSystemPrompt(provider.providerId, prompt),
             messages = listOf(AgentMessage.UserMessage(content = "git diff:\n```diff\n${truncatedDiff.maskIfNeeded(masker)}\n```")),
             tools = emptyList()
         )

@@ -19,7 +19,10 @@ data class MiddlewareConfig(
      * 为空 = 对所有请求生效。
      */
     val systemPromptTargets: List<String> = emptyList(),
-    val enabled: Boolean = true
+    val enabled: Boolean = true,
+    val version: Int = 1,
+    val sanitizeSystemPrompt: Boolean = false,
+    val stripAssistantThink: Boolean = false
 )
 
 @Serializable

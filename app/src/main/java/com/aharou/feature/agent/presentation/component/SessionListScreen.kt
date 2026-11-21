@@ -29,10 +29,13 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -42,6 +45,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.res.stringResource
@@ -53,7 +57,9 @@ import com.aharou.core.theme.Spacing
 import com.aharou.core.theme.semanticColors
 import com.aharou.feature.agent.presentation.AgentUIState
 import com.aharou.feature.agent.domain.model.ChatSession
+import com.aharou.feature.workspace.domain.model.Workspace
 import compose.icons.FeatherIcons
+import compose.icons.feathericons.Folder
 import compose.icons.feathericons.MessageSquare
 import compose.icons.feathericons.Plus
 import java.util.Locale
@@ -79,9 +85,13 @@ fun SessionListScreen(
     onNewSession: () -> Unit,
     showNewSession: Boolean = true,
     activeSessionIds: Set<String> = emptySet(),
+    sessionGroups: Map<String, List<ChatSession>> = emptyMap(),
+    workspaceStatuses: Map<String, String> = emptyMap(),
+    availableWorkspaces: List<Workspace> = emptyList(),
+    onMove: (ChatSession, String) -> Unit = { _, _ -> },
 ) {
-    // 长按触发删除二次确认。
     var pendingDelete by remember { mutableStateOf<ChatSession?>(null) }
+    var pendingMove by remember { mutableStateOf<ChatSession?>(null) }
 
     // 根用 Box：内层 Column 铺满（标题 + 会话列表），右下角叠加一个棕黄色悬浮「新建会话」按钮。
     // 之前它顶在右上角、蓝色，不符合 Material「悬浮按钮在右下角」的惯例，也容易被当成操作菜单。
@@ -115,49 +125,50 @@ fun SessionListScreen(
                 }
             }
 
+            val groups = sessionGroups.filterValues { it.isNotEmpty() }
+            val workspacePaths = (groups.keys + workspaceStatuses.keys).sorted()
+            val grouped = workspacePaths.isNotEmpty()
             LazyColumn(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(1f),
+                    .weight(1f)
+                    .testTag("session_list"),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(
                     top = Spacing.sm, bottom = 80.dp
                 ),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-            if (sessions.isEmpty()) {
-                item {
-                    EmptyStateRow()
+                if (!grouped && sessions.isEmpty()) {
+                    item { EmptyStateRow() }
                 }
-            }
-            items(sessions, key = { it.id }) { session ->
-                // 圆角卡片容器：整 item 最小 56dp（icon+标题+padding），卡片间距 8.dp
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.semanticColors.cardSurface,
-                    tonalElevation = 1.dp,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 56.dp)
-                ) {
-                    // 垂直居中：让 icon+标题+padding 在 56dp 卡片里均匀分布
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        ChatSessionRow(
-                            session = session,
-                            selected = session.id == currentSessionId,
-                            isExecuting = session.id in activeSessionIds,
-                            awaitingPermission = session.id in awaitingPermissionSessionIds,
-                            pinned = session.isPinned,
-                            onClick = { onSelect(session) },
-                            onLongClick = { pendingDelete = session },
-                            trailing = null
-                        )
+                if (grouped) {
+                    workspacePaths.forEach { group ->
+                        item(key = "workspace:$group") {
+                            Text(
+                                text = group.ifBlank { stringResource(R.string.common_workspace) },
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.semanticColors.subtleText,
+                                modifier = Modifier.padding(top = Spacing.sm, bottom = Spacing.xs)
+                            )
+                        }
+                        workspaceStatuses[group]?.let { status ->
+                            item(key = "workspace-status:$group") {
+                                Text(status, style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.semanticColors.subtleText)
+                            }
+                        }
+                        items(groups[group].orEmpty(), key = { "session:${it.id}" }) { session ->
+                            SessionCard(session, currentSessionId, activeSessionIds, awaitingPermissionSessionIds,
+                                onSelect, { pendingDelete = session }, { pendingMove = session })
+                        }
+                    }
+                } else {
+                    items(sessions, key = { it.id }) { session ->
+                        SessionCard(session, currentSessionId, activeSessionIds, awaitingPermissionSessionIds,
+                            onSelect, { pendingDelete = session }, { pendingMove = session })
                     }
                 }
             }
-        }  // LazyColumn 闭合
     }  // Column 闭合；FAB 独立放在 Box 底右，不能用 align(BottomEnd) 放 Column 里（类型不匹配）
     if (showNewSession) androidx.compose.material3.FloatingActionButton(
             onClick = onNewSession,
@@ -174,6 +185,26 @@ fun SessionListScreen(
                 modifier = Modifier.size(24.dp),
             )
         }
+    }
+
+    pendingMove?.let { pending ->
+        AlertDialog(
+            onDismissRequest = { pendingMove = null },
+            title = { Text(stringResource(R.string.session_workspace_move_title)) },
+            text = {
+                Column {
+                    availableWorkspaces.filter { it.available && it.path != pending.workspacePath }.forEach { workspace ->
+                        TextButton(onClick = {
+                            onMove(pending, workspace.path)
+                            pendingMove = null
+                        }) { Text(workspace.name) }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { pendingMove = null }) { Text(stringResource(R.string.common_cancel)) }
+            }
+        )
     }
 
     // 删除确认弹窗。
@@ -204,6 +235,42 @@ fun SessionListScreen(
                 }
             }
         )
+    }
+}
+
+@Composable
+private fun SessionCard(
+    session: ChatSession,
+    currentSessionId: String?,
+    activeSessionIds: Set<String>,
+    awaitingPermissionSessionIds: Set<String>,
+    onSelect: (ChatSession) -> Unit,
+    onDelete: () -> Unit,
+    onMove: () -> Unit,
+) {
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.semanticColors.cardSurface,
+        tonalElevation = 1.dp,
+        modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)
+    ) {
+        Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+            ChatSessionRow(
+                session = session,
+                selected = session.id == currentSessionId,
+                isExecuting = session.id in activeSessionIds,
+                awaitingPermission = session.id in awaitingPermissionSessionIds,
+                pinned = session.isPinned,
+                onClick = { onSelect(session) },
+                onLongClick = onDelete,
+                trailing = {
+                    IconButton(onClick = onMove, enabled = session.id !in activeSessionIds &&
+                        session.id !in awaitingPermissionSessionIds) {
+                        Icon(FeatherIcons.Folder, contentDescription = stringResource(R.string.session_workspace_move))
+                    }
+                }
+            )
+        }
     }
 }
 

@@ -66,13 +66,17 @@ class ContextManagementSectionTest {
             }
         }
         compose.onNodeWithTag("context_rounds").assertDoesNotExist()
+        compose.onNodeWithTag("context_advanced").assertDoesNotExist()
+        compose.onNodeWithTag("context_preset_balanced").assertDoesNotExist()
         compose.onNodeWithTag("context_custom").performClick()
         compose.onNodeWithTag("context_rounds").assertExists()
         compose.runOnIdle { assertEquals(19, state.value.rounds); assertEquals(emptyList<ContextPreset>(), selected) }
         for (preset in listOf(ContextPreset.ECONOMY, ContextPreset.DETAILED, ContextPreset.BALANCED)) {
-            compose.onNodeWithTag("context_preset_${preset.id}").performScrollTo().performClick()
+            compose.onNodeWithTag("context_preset_picker").performScrollTo().performClick()
+            compose.onNodeWithTag("context_preset_${preset.id}").performClick()
             compose.runOnIdle { assertEquals(preset.preferences, state.value); assertEquals(preset, selected.last()) }
         }
+        compose.onNodeWithTag("context_rounds").assertDoesNotExist()
     }
 
     @Test fun advancedInputRejectsNonNumericAndOutOfRangeThenSavesValidValue() {
@@ -82,7 +86,7 @@ class ContextManagementSectionTest {
                 ContextManagementContent(ContextPreferences(), {}, { saved += it }, {}, {}, {}, {})
             }
         } }
-        compose.onNodeWithTag("context_advanced").performClick()
+        compose.onNodeWithTag("context_custom").performClick()
         compose.onNodeWithTag("context_rounds").performScrollTo().performClick()
         for (invalid in listOf("abc", "101", "-1", "")) {
             compose.onNodeWithTag("context_number_input").performTextReplacement(invalid)

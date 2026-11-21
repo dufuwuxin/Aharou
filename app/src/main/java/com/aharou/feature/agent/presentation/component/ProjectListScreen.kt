@@ -1,28 +1,27 @@
 package com.aharou.feature.agent.presentation.component
 
-import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.foundation.lazy.rememberLazyListState
-import kotlinx.coroutines.launch
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aharou.R
@@ -31,6 +30,8 @@ import com.aharou.core.ui.AdaptiveModalBottomSheet
 import com.aharou.core.ui.AppTextField
 import com.aharou.feature.agent.domain.task.*
 import com.aharou.feature.agent.presentation.ProjectTaskViewModel
+import compose.icons.FeatherIcons
+import compose.icons.feathericons.Search
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -41,10 +42,10 @@ fun ProjectListScreen(viewModel: ProjectTaskViewModel, createRequested: Boolean,
     var deletingProject by remember { mutableStateOf<com.aharou.feature.agent.domain.task.ProjectPlan?>(null) }
     var menuProject by remember { mutableStateOf<ProjectPlan?>(null) }
     var creating by rememberSaveable { mutableStateOf(false) }
-    val pager = rememberPagerState { 2 }
-    val scope = rememberCoroutineScope()
     val projectListState = rememberLazyListState()
+    val focusManager = LocalFocusManager.current
     var createMenu by remember { mutableStateOf(false) }
+    var projectSearchOpen by rememberSaveable { mutableStateOf(false) }
     var projectQuery by rememberSaveable { mutableStateOf("") }
     val visibleProjects = remember(state.projects, projectQuery) {
         val query = projectQuery.trim()
@@ -59,7 +60,12 @@ fun ProjectListScreen(viewModel: ProjectTaskViewModel, createRequested: Boolean,
     var previousProject by rememberSaveable { mutableStateOf<String?>(null) }
     var continuationId by rememberSaveable { mutableStateOf<String?>(null) }
     var unassigned by rememberSaveable { mutableStateOf(false) }
-    LaunchedEffect(createRequested) { if (createRequested) { creating = true; pager.scrollToPage(0); onCreateConsumed() } }
+    LaunchedEffect(createRequested) {
+        if (createRequested) {
+            creating = true
+            onCreateConsumed()
+        }
+    }
     LaunchedEffect(submitted, state.busy, state.creating, state.createdProjectId, state.selectedProjectId, state.error) {
         if (submitted && !state.creating && !state.busy) {
             if (state.createdProjectId != null && state.createdProjectId != previousProject) {
@@ -70,124 +76,142 @@ fun ProjectListScreen(viewModel: ProjectTaskViewModel, createRequested: Boolean,
         }
     }
     Box(Modifier.fillMaxSize()) {
-    Column(Modifier.fillMaxSize()
-        .padding(Spacing.lg), verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
-        Column(verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+        Column(Modifier.fillMaxSize().padding(horizontal = Spacing.lg).padding(top = Spacing.lg)) {
             Text(stringResource(R.string.project_home_heading), style = MaterialTheme.typography.headlineSmall,
-                modifier = Modifier.testTag("project_home_heading"))
-            Text(stringResource(R.string.project_home_description), style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-            FilterChip(selected = pager.currentPage == 0, onClick = { scope.launch { pager.animateScrollToPage(0) } },
-                modifier = Modifier.heightIn(min = 48.dp), label = { Text(stringResource(R.string.project_home)) })
-            FilterChip(selected = pager.currentPage == 1, onClick = { scope.launch { pager.animateScrollToPage(1) } },
-                modifier = Modifier.heightIn(min = 48.dp), label = { Text(stringResource(R.string.project_sessions)) })
-        }
-        HorizontalPager(state = pager, beyondViewportPageCount = 1, key = { it },
-            modifier = Modifier.weight(1f).testTag("project_home_pager")) { page ->
-        if (page == 1) Box(Modifier.fillMaxSize()) { sessionsContent() }
-        else Column(Modifier.fillMaxSize()) {
-        state.error?.let { Text(stringResource(R.string.project_task_error, projectTaskExecutionReasonLabel(it)), color = MaterialTheme.colorScheme.error) }
-        AppTextField(projectQuery, { projectQuery = it },
-            label = stringResource(R.string.project_search_label),
-            modifier = Modifier.fillMaxWidth().testTag("project_search"))
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(R.string.project_search_count, visibleProjects.size, state.projects.size),
-                style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.weight(1f))
-            if (projectQuery.isNotEmpty()) TextButton(onClick = { projectQuery = "" }) {
-                Text(stringResource(R.string.common_clear))
-            }
-        }
-        LazyColumn(Modifier.weight(1f), state = projectListState, contentPadding = PaddingValues(bottom = 80.dp), verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
-            if (state.loading) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
-            if (!state.loading && state.projects.isNotEmpty() && visibleProjects.isEmpty()) item {
-                Text(stringResource(R.string.project_search_empty),
-                    style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag("project_search_empty"))
-            }
-            if (state.projects.isEmpty() && !state.loading) item {
-                Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surface,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                    modifier = Modifier.fillMaxWidth().testTag("project_empty_state")) {
-                    Column(Modifier.padding(Spacing.xl), verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
-                        Text(stringResource(R.string.project_empty_title), style = MaterialTheme.typography.titleLarge)
-                        Text(stringResource(R.string.project_empty_description), style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Button(onClick = { creating = true; scope.launch { pager.animateScrollToPage(0) } },
-                            enabled = !state.busy && state.workspace.isNotBlank(),
-                            modifier = Modifier.heightIn(min = 48.dp).testTag("project_empty_create")) {
-                            Text(stringResource(R.string.project_create))
-                        }
+                modifier = Modifier.semantics { heading() }.testTag("project_home_heading"))
+            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(stringResource(R.string.project_list_section), style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.semantics { heading() })
+                if (!projectSearchOpen) {
+                    IconButton(onClick = { projectSearchOpen = true },
+                        modifier = Modifier.size(48.dp).testTag("project_search_open")) {
+                        Icon(FeatherIcons.Search, contentDescription = stringResource(R.string.project_search_label))
                     }
                 }
             }
-            items(visibleProjects, key = { it.id }) { project ->
-                Box {
-                Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surface,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                    modifier = Modifier.fillMaxWidth().testTag("project_${project.id}").combinedClickable(
-                        onClick = { onOpenProject(project.id) },
-                        onLongClickLabel = stringResource(R.string.project_delete),
-                        onLongClick = { menuProject = project }
-                    )) {
-                    Column(Modifier.padding(Spacing.lg), verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-                        Text(project.title, style = MaterialTheme.typography.titleLarge,
-                            maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        Text(stringResource(if (project.workspaceOwnership == "owned") R.string.project_workspace_owned else R.string.project_workspace_legacy, project.workspace),
-                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        project.continuationSourceProjectId?.let { Text(stringResource(R.string.project_workspace_continuation_source, it)) }
-                        if (project.workspaceOwnership == "legacy_shared") TextButton(
-                            onClick = { continuationId = project.id },
-                            enabled = viewModel.canContinueInOwnedWorkspace(project),
-                            modifier = Modifier.testTag("project_continue_owned_${project.id}")) {
-                            Text(stringResource(R.string.project_workspace_continue))
-                        }
-                        if (project.purpose.isNotBlank()) {
-                            Text(stringResource(R.string.project_purpose), style = MaterialTheme.typography.labelMedium)
-                            Text(project.purpose, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                                style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        if (project.requirements.isNotBlank()) Text(project.requirements, maxLines = 2, style = MaterialTheme.typography.bodySmall)
-                        Text(stringResource(R.string.project_task_count, state.projectTaskCounts[project.id] ?: 0))
+            if (projectSearchOpen) {
+                Row(Modifier.fillMaxWidth().padding(bottom = Spacing.sm),
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.sm), verticalAlignment = Alignment.CenterVertically) {
+                    AppTextField(projectQuery, {
+                        projectQuery = it
+                        projectListState.requestScrollToItem(0)
+                    }, label = stringResource(R.string.project_search_label), singleLine = true,
+                        modifier = Modifier.weight(1f).testTag("project_search"))
+                    TextButton(onClick = {
+                        focusManager.clearFocus()
+                        projectQuery = ""
+                        projectSearchOpen = false
+                        projectListState.requestScrollToItem(0)
+                    }, modifier = Modifier.heightIn(min = 48.dp).testTag("project_search_clear")) {
+                        Text(stringResource(R.string.common_clear))
                     }
                 }
-                DropdownMenu(expanded = menuProject?.id == project.id, onDismissRequest = { menuProject = null }) {
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.project_delete), color = MaterialTheme.colorScheme.error) },
-                        enabled = viewModel.canDeleteProject(project),
-                        modifier = Modifier.testTag("delete_project_${project.id}"),
-                        onClick = { menuProject = null; deletingProject = project }
-                    )
+            }
+            LazyColumn(Modifier.fillMaxWidth().weight(1f).testTag("project_home_list"), state = projectListState,
+                verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
+                state.error?.let { error -> item {
+                    Text(stringResource(R.string.project_task_error, projectTaskExecutionReasonLabel(error)),
+                        color = MaterialTheme.colorScheme.error)
+                } }
+                if (projectSearchOpen) item {
+                    Text(stringResource(R.string.project_search_count, visibleProjects.size, state.projects.size),
+                        style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
+                if (state.loading) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
+                if (!state.loading && state.projects.isNotEmpty() && visibleProjects.isEmpty()) item {
+                    Text(stringResource(R.string.project_search_empty),
+                        style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag("project_search_empty"))
+                }
+                if (state.projects.isEmpty() && !state.loading) item {
+                    Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surface,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        modifier = Modifier.fillMaxWidth().testTag("project_empty_state")) {
+                        Column(Modifier.padding(Spacing.xl), verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
+                            Text(stringResource(R.string.project_empty_title), style = MaterialTheme.typography.titleLarge)
+                            Text(stringResource(R.string.project_empty_description), style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Button(onClick = { creating = true },
+                                enabled = !state.busy && state.workspace.isNotBlank(),
+                                modifier = Modifier.heightIn(min = 48.dp).testTag("project_empty_create")) {
+                                Text(stringResource(R.string.project_create))
+                            }
+                        }
+                    }
+                }
+                items(visibleProjects, key = { it.id }) { project ->
+                    Box {
+                        Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surface,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                            modifier = Modifier.fillMaxWidth().testTag("project_${project.id}").combinedClickable(
+                                onClick = { onOpenProject(project.id) },
+                                onLongClickLabel = stringResource(R.string.project_delete),
+                                onLongClick = { menuProject = project }
+                            )) {
+                            Column(Modifier.padding(Spacing.lg), verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                                Text(project.title, style = MaterialTheme.typography.titleLarge,
+                                    maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                Text(stringResource(if (project.workspaceOwnership == "owned") R.string.project_workspace_owned else R.string.project_workspace_legacy, project.workspace),
+                                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                project.continuationSourceProjectId?.let { Text(stringResource(R.string.project_workspace_continuation_source, it)) }
+                                if (project.workspaceOwnership == "legacy_shared") TextButton(
+                                    onClick = { continuationId = project.id },
+                                    enabled = viewModel.canContinueInOwnedWorkspace(project),
+                                    modifier = Modifier.testTag("project_continue_owned_${project.id}")) {
+                                    Text(stringResource(R.string.project_workspace_continue))
+                                }
+                                if (project.purpose.isNotBlank()) {
+                                    Text(stringResource(R.string.project_purpose), style = MaterialTheme.typography.labelMedium)
+                                    Text(project.purpose, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                                        style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                if (project.requirements.isNotBlank()) Text(project.requirements, maxLines = 2, style = MaterialTheme.typography.bodySmall)
+                                Text(stringResource(R.string.project_task_count, state.projectTaskCounts[project.id] ?: 0))
+                            }
+                        }
+                        DropdownMenu(expanded = menuProject?.id == project.id, onDismissRequest = { menuProject = null }) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.project_delete), color = MaterialTheme.colorScheme.error) },
+                                enabled = viewModel.canDeleteProject(project),
+                                modifier = Modifier.testTag("delete_project_${project.id}"),
+                                onClick = { menuProject = null; deletingProject = project }
+                            )
+                        }
+                    }
+                }
+                if (state.tasks.any { it.projectId == null }) {
+                    item {
+                        TextButton(onClick = { unassigned = !unassigned }, modifier = Modifier.heightIn(min = 48.dp)) {
+                            Text(stringResource(R.string.project_unassigned))
+                        }
+                    }
+                    if (unassigned) items(state.tasks.filter { it.projectId == null }, key = { it.id }) { task ->
+                        TextButton(onClick = { onOpenTask(task.id) }, modifier = Modifier.heightIn(min = 48.dp)) { Text(task.title) }
+                    }
                 }
             }
-            if (state.tasks.any { it.projectId == null }) {
-                item { TextButton(onClick = { unassigned = !unassigned }, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.project_unassigned)) } }
-                if (unassigned) items(state.tasks.filter { it.projectId == null }, key = { it.id }) { task ->
-                    TextButton(onClick = { onOpenTask(task.id) }, modifier = Modifier.heightIn(min = 48.dp)) { Text(task.title) }
-                }
+            HorizontalDivider(Modifier.padding(vertical = Spacing.sm))
+            Text(stringResource(R.string.project_sessions), style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.semantics { heading() })
+            // The existing session browser owns its scrolling list and needs a bounded viewport.
+            Box(Modifier.fillMaxWidth().weight(1f)) { sessionsContent() }
+        }
+        val createLabel = stringResource(R.string.project_create_menu)
+        Box(Modifier.align(Alignment.BottomEnd).padding(Spacing.lg)) {
+            FloatingActionButton(onClick = { createMenu = true }, shape = CircleShape,
+                modifier = Modifier.width(80.dp).height(52.dp).semantics { contentDescription = createLabel }.testTag("create_project_or_session")) {
+                Text(stringResource(R.string.project_add_content), style = MaterialTheme.typography.labelLarge)
+            }
+            DropdownMenu(expanded = createMenu, onDismissRequest = { createMenu = false }) {
+                DropdownMenuItem(text = { Text(stringResource(R.string.chat_new_session)) },
+                    enabled = state.workspace.isNotBlank(), onClick = { createMenu = false; onNewSession() })
+                DropdownMenuItem(text = { Text(stringResource(R.string.project_create)) },
+                    enabled = !state.loading && !state.busy && state.workspace.isNotBlank(),
+                    modifier = Modifier.testTag("create_project"),
+                    onClick = { createMenu = false; creating = true })
             }
         }
-        }
-    }
-    }
-    val createLabel = stringResource(R.string.project_create_menu)
-    Box(Modifier.align(Alignment.BottomEnd).padding(Spacing.lg)) {
-        FloatingActionButton(onClick = { createMenu = true }, shape = CircleShape,
-            modifier = Modifier.width(80.dp).height(52.dp).semantics { contentDescription = createLabel }.testTag("create_project_or_session")) {
-            Text(stringResource(R.string.project_add_content), style = MaterialTheme.typography.labelLarge)
-        }
-        DropdownMenu(expanded = createMenu, onDismissRequest = { createMenu = false }) {
-            DropdownMenuItem(text = { Text(stringResource(R.string.chat_new_session)) },
-                enabled = state.workspace.isNotBlank(), onClick = { createMenu = false; onNewSession() })
-            DropdownMenuItem(text = { Text(stringResource(R.string.project_create)) },
-                enabled = !state.loading && !state.busy && state.workspace.isNotBlank(),
-                modifier = Modifier.testTag("create_project"),
-                onClick = { createMenu = false; creating = true; scope.launch { pager.animateScrollToPage(0) } })
-        }
-    }
     }
     deletingProject?.let { project ->
         AlertDialog(onDismissRequest = { deletingProject = null },

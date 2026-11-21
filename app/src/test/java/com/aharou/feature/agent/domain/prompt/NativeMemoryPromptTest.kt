@@ -70,6 +70,26 @@ class NativeMemoryPromptTest {
         assertEquals("live-two", second.transientContext)
     }
 
+    @Test fun pluginContextPreservesSystemRoleForAppendAndReplacement() = kotlinx.coroutines.test.runTest {
+        val plugins = mockk<com.aharou.feature.plugin.runtime.HostPluginRuntime>()
+        val hookedProvider = SystemPromptProvider(mockk(), skills, PromptFileResolver(mockk(), mockk(), library),
+            mockk(), mockk(), teams, rules, dao, mockk(), mockk(), mockk(), projectTaskContext,
+            InjectedContextStore(), library, dagger.Lazy { registry }, hostPlugins = dagger.Lazy { plugins })
+        val combined = "native\n\nlive"
+        coEvery { plugins.onContext(any(), combined) } returns "$combined\n\nplugin contract"
+        val appended = hookedProvider.buildRequest(context, "native", "live")
+        assertEquals("$combined\n\nplugin contract", appended.system)
+        assertEquals("", appended.transientContext)
+        coEvery { plugins.onContext(any(), combined) } returns "replacement contract"
+        val replaced = hookedProvider.buildRequest(context, "native", "live")
+        assertEquals("replacement contract", replaced.system)
+        assertEquals("", replaced.transientContext)
+        coEvery { plugins.onContext(any(), combined) } returns combined
+        val unchanged = hookedProvider.buildRequest(context, "native", "live")
+        assertEquals("native", unchanged.system)
+        assertEquals("live", unchanged.transientContext)
+    }
+
     @Test fun nativeDynamicContextDoesNotRewriteTheRequestSystemPrefix() = kotlinx.coroutines.test.runTest {
         add("stable", "stable contract", ContextCategory.MAIN_INJECTED)
         add("dynamic", "{{AICODE_SKILLS}}", ContextCategory.MAIN_INJECTED)

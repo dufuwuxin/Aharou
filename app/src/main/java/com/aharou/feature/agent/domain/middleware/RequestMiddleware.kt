@@ -26,20 +26,35 @@ object RequestMiddleware {
         isLenient = true
     }
 
+    private val configCache = LinkedHashMap<String, MiddlewareConfig>()
+
+    @Synchronized
+    fun reload() = configCache.clear()
+
     /**
      * null、空白或非法 JSON 一律返回 null：配置坏了只应让中间件整体失效，不该让请求发不出去。
      *
      * 额外容忍「双重编码」：有些写入路径（配置通道的字符串字段）会把整段 JSON 当成字符串再编码一次，
      * 落盘形如 "{\"modelMap\":{...}}" 。先按对象解析，失败就当成字符串解一层再试。
      */
+    @Synchronized
     fun parseConfig(rawJson: String?): MiddlewareConfig? {
-        var raw = rawJson?.trim().orEmpty()
+        val key = rawJson?.takeIf { it.isNotBlank() } ?: return null
+        configCache[key]?.let { return it }
+        val parsed = decodeConfig(key) ?: return null
+        if (configCache.size >= 32) configCache.remove(configCache.keys.first())
+        configCache[key] = parsed
+        return parsed
+    }
+
+    private fun decodeConfig(rawJson: String): MiddlewareConfig? {
+        var raw = rawJson.trim()
         if (raw.isEmpty()) return null
         // 配置通道的字符串字段可能把 JSON 再包一层甚至两层（落盘成 "\"{...}\"" 这种），
         // 逐层剥到能按对象解析为止；剥不开就当没配，不让坏配置拦住请求。
         repeat(3) {
             runCatching { json.decodeFromString(MiddlewareConfig.serializer(), raw) }.getOrNull()
-                ?.let { return it }
+                ?.let { return it.takeIf { config -> config.version == 1 } }
             raw = runCatching { json.decodeFromString(String.serializer(), raw) }.getOrNull()?.trim()
                 ?: return null
             if (raw.isEmpty()) return null
@@ -68,7 +83,7 @@ object RequestMiddleware {
         if (!config.enabled) return MiddlewareResult(body)
 
         val actualModel = config.modelMap[ctx.requestedModel]?.takeIf { it.isNotBlank() } ?: ctx.actualModel
-        var out = withModel(body, actualModel)
+        var out = transformMiddlewareText(config, withModel(body, actualModel))
 
         // 规则按配置顺序逐条叠加，后写覆盖先写：同一条路径上后面的 SET/REMOVE 直接作用于
         // 前一条的结果，所以「先设默认值、后面按条件收紧」这类写法成立的顺序就是声明顺序。

@@ -413,7 +413,7 @@ fun AppNavigation(
     val navController = rememberNavController()
     val scope = rememberCoroutineScope()
     var taskCreateRequested by remember { mutableStateOf(false) }
-    var sessionBrowserWorkspace by rememberSaveable { mutableStateOf<String?>(null) }
+    var newSessionRequested by remember { mutableStateOf(false) }
 
     val currentBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = currentBackStackEntry?.destination?.route
@@ -503,7 +503,7 @@ fun AppNavigation(
                 }
 
                 ACTION_NEW_CHAT -> {
-                    taskCreateRequested = true
+                    newSessionRequested = true
                     navController.navigate("projects") { launchSingleTop = true }
                 }
 
@@ -927,11 +927,13 @@ fun AppNavigation(
             .onSizeChanged { bottomBarHeightPx = it.height }.padding(bottom = 8.dp),
         projects = {
             com.aharou.feature.agent.presentation.component.WorkspaceSessionBrowser(
-                agentViewModel, projectTaskViewModel, workspaceViewModel, sessionBrowserWorkspace,
-                { sessionBrowserWorkspace = it }, taskCreateRequested, { taskCreateRequested = false },
+                agentViewModel, projectTaskViewModel, workspaceViewModel,
+                taskCreateRequested, { taskCreateRequested = false },
                 onOpenProject = { id -> projectTaskViewModel.openProject(id) { navController.navigate("projects/$id") } },
                 onOpenTask = { id -> projectTaskViewModel.select(id); navController.navigate("tasks/$id") },
-                onOpenChat = { navController.navigate("chat") { launchSingleTop = true } })
+                onOpenChat = { navController.navigate("chat") { launchSingleTop = true } },
+                newSessionRequested = newSessionRequested,
+                onNewSessionConsumed = { newSessionRequested = false })
         },
         settings = { config, active, onRootChange ->
             SettingsScreen(viewModel = settingsViewModel,

@@ -39,6 +39,7 @@ import com.aharou.feature.agent.domain.context.ContextCategory
 import com.aharou.feature.agent.domain.context.ContextEntry
 import com.aharou.feature.agent.domain.context.ContextKind
 import com.aharou.feature.agent.domain.context.ContextLoad
+import com.aharou.feature.agent.domain.context.ContextLibraryPlanner
 import com.aharou.feature.agent.domain.context.WorldbookRules
 import com.aharou.feature.agent.domain.memory.MemoryScope
 import com.aharou.feature.settings.presentation.ContextEditorDraft
@@ -65,6 +66,7 @@ internal fun ContextLibraryEditor(
         ContextEditorDraft.from(entry, initialCategory, initialFolder, state.hasWorkspace)
     }
     var draft by rememberSaveable(editorKey, stateSaver = ContextEditorDraftSaver) { mutableStateOf(original) }
+    var showConditions by rememberSaveable(editorKey) { mutableStateOf(false) }
     var showAdvanced by rememberSaveable(editorKey) { mutableStateOf(false) }
     var showPlacement by rememberSaveable(editorKey) { mutableStateOf(false) }
     var confirmDelete by rememberSaveable(editorKey) { mutableStateOf(false) }
@@ -102,6 +104,13 @@ internal fun ContextLibraryEditor(
             ContextChoiceRow(ContextLoad.entries.map { stringResource(it.label()) }, draft.loading.ordinal,
                 { draft = draft.copy(loading = ContextLoad.entries[it]) }, !state.writing)
             Text(stringResource(draft.loading.explanation()), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (draft.loading == ContextLoad.FULL || draft.loading == ContextLoad.INDEX) {
+                worldbook?.takeIf { it.enabled && entry?.enabled != false }?.let { rules ->
+                    val transient = ContextLibraryPlanner.isTransient(draft.category, draft.content, rules)
+                    Text(stringResource(if (transient) R.string.context_injection_transient else R.string.context_injection_stable),
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
         }
         key("name") {
             AppTextField(value = draft.name, onValueChange = { draft = draft.copy(name = it) },
@@ -116,13 +125,22 @@ internal fun ContextLibraryEditor(
                 singleLine = false, minLines = 5, enabled = !state.writing)
         }
         com.aharou.core.translation.TranslationPreview(draft.content)
-        key(editorKey) {
-            MemoryEntryFields(draft.worldbookJson, !state.writing) { draft = draft.copy(worldbookJson = it) }
+        SettingsGroup {
+            CollapsibleGroupHeader(stringResource(R.string.context_injection_conditions), showConditions,
+                onToggle = { showConditions = !showConditions })
+            if (showConditions) Column(Modifier.padding(Spacing.md), verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                Text(stringResource(R.string.context_injection_budget, ContextLibraryPlanner.FULL_ENTRY_CHARS,
+                    ContextLibraryPlanner.FULL_TOTAL_CHARS, ContextLibraryPlanner.INDEX_TOTAL_CHARS),
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                key(editorKey) {
+                    MemoryEntryFields(draft.worldbookJson, !state.writing) { draft = draft.copy(worldbookJson = it) }
+                }
+                TextButton(enabled = !state.writing, onClick = { showAdvanced = !showAdvanced }) {
+                    Text(stringResource(if (showAdvanced) R.string.context_worldbook_hide_json else R.string.context_worldbook_show_json))
+                }
+            }
         }
-        TextButton(enabled = !state.writing, onClick = { showAdvanced = !showAdvanced }) {
-            Text(stringResource(if (showAdvanced) R.string.context_worldbook_hide_json else R.string.context_worldbook_show_json))
-        }
-        if (showAdvanced || worldbook == null) {
+        if ((showConditions && showAdvanced) || worldbook == null) {
             if (worldbook == null) ContextNotice(stringResource(R.string.context_worldbook_recover), error = true)
             AppTextField(value = draft.worldbookJson, onValueChange = { draft = draft.copy(worldbookJson = it) },
                 label = stringResource(R.string.context_worldbook_field), singleLine = false, minLines = 4, enabled = !state.writing)

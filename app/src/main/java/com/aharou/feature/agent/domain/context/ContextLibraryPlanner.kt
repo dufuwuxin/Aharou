@@ -13,8 +13,12 @@ object ContextLibraryPlanner {
     internal fun metadata(text: String): String = kotlinx.serialization.json.JsonPrimitive(safe(text)).toString()
         .replace("<", "\\u003c").replace(">", "\\u003e")
 
-    internal fun isTransient(entry: ContextEntry): Boolean = entry.dynamic || entry.content.contains("{{AICODE_") ||
-        entry.category == ContextCategory.TEMPORARY || entry.worldbook.triggers.isNotEmpty() || entry.worldbook.excludes.isNotEmpty()
+    internal fun isTransient(entry: ContextEntry): Boolean =
+        entry.dynamic || isTransient(entry.category, entry.content, entry.worldbook)
+
+    internal fun isTransient(category: ContextCategory, content: String, rules: WorldbookRules): Boolean =
+        category == ContextCategory.TEMPORARY || content.contains("{{AICODE_") ||
+            rules.triggers.isNotEmpty() || rules.excludes.isNotEmpty()
 
     fun plan(entries: List<ContextEntry>, sessionId: String? = null, onlyOrigin: ContextOrigin? = null,
              injectionCategory: ContextCategory = ContextCategory.MAIN_INJECTED,

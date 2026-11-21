@@ -11,9 +11,15 @@ object ProviderLibraryPreferences {
 
     @Synchronized
     fun initialize(context: Context) {
-        if (preferences != null) return
         preferences = context.applicationContext.getSharedPreferences("provider_library", Context.MODE_PRIVATE)
         state.value = preferences?.getStringSet("hidden_types", emptySet()).orEmpty().toSet()
+    }
+
+    @Synchronized
+    internal fun setBrandHidden(brand: String, hidden: Boolean) {
+        val current = state.value
+        val updated = if (hidden) current + brand else current - brand
+        if (updated != current) setHidden(updated)
     }
 
     @Synchronized

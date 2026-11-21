@@ -53,6 +53,34 @@ class ContextLibraryPlannerTest {
         id, id, "summary", "body", scope, ContextKind.REFERENCE, load, ContextOrigin.MEMORY, id
     )
 
+    @Test fun stablePrefixSurvivesChangingDynamicInputsAndBudgetPressure() {
+        val stable = (1..4).map { entry("stable$it", ContextLoad.FULL).copy(
+            content = "stable-$it".repeat(90), worldbook = WorldbookRules(priority = 5 - it)) }
+        val dynamic = entry("dynamic", ContextLoad.FULL).copy(dynamic = true,
+            worldbook = WorldbookRules(priority = 99))
+        val conditional = entry("conditional", ContextLoad.FULL).copy(
+            worldbook = WorldbookRules(triggers = listOf("match-me"), priority = 100))
+        val temporary = entry("temporary", ContextLoad.FULL).copy(category = ContextCategory.TEMPORARY, sessionId = "s1")
+        val search = entry("retrieval", ContextLoad.SEARCH)
+        val firstEntries = listOf(temporary, dynamic.copy(content = "value one"), search, conditional) + stable.reversed()
+        val first = ContextLibraryPlanner.plan(firstEntries, "s1", userText = "match-me")
+        assertEquals(first, ContextLibraryPlanner.plan(firstEntries, "s1", userText = "match-me"))
+        val next = ContextLibraryPlanner.plan(listOf(dynamic.copy(content = "value two"), temporary, conditional, search) + stable,
+            "s2", userText = "different query")
+        val expectedPrefix = stable.map { first.renderedEntries.getValue(it.id) }.joinToString("\n\n")
+        assertTrue(first.rendered.startsWith(expectedPrefix))
+        assertTrue(next.rendered.startsWith(expectedPrefix))
+        assertEquals(stable.take(3).map { it.id }, first.full.take(3).map { it.id })
+        assertEquals(stable.last().id, first.indexed.first().id)
+        assertTrue(first.rendered.contains("value one"))
+        assertTrue(next.rendered.contains("value two"))
+        assertTrue(first.renderedEntries.containsKey(conditional.id))
+        assertFalse(next.renderedEntries.containsKey(conditional.id))
+        assertTrue(first.renderedEntries.containsKey(temporary.id))
+        assertFalse(next.renderedEntries.containsKey(temporary.id))
+        assertFalse(first.renderedEntries.containsKey(search.id))
+    }
+
     @Test fun temporaryEntriesRequireTheirActualSession() {
         val temporary = entry("temp", ContextLoad.FULL).copy(category = ContextCategory.TEMPORARY, sessionId = "s1", folder = "work")
         assertTrue(ContextLibraryPlanner.plan(listOf(temporary)).full.isEmpty())

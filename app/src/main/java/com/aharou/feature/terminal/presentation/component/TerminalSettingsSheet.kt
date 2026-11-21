@@ -78,24 +78,37 @@ fun TerminalSettingsSheet(
     onChangeFontPath: (String) -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    AdaptiveModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = MaterialTheme.colorScheme.surface
+    ) {
+        TerminalSettingsContent(settings, onSelectTheme, onChangeFontSize, onChangeCursorStyle, onChangeFontPath)
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun TerminalSettingsContent(
+    settings: TerminalSettings,
+    onSelectTheme: (String) -> Unit,
+    onChangeFontSize: (Int) -> Unit,
+    onChangeCursorStyle: (Int) -> Unit,
+    onChangeFontPath: (String) -> Unit
+) {
 
     // 滑块用本地值实时预览，松手（onValueChangeFinished）才落盘并触发一次 PTY resize：
     // 若每格都调 onChangeFontSize，会连续写 DataStore 并给 shell 连发 SIGWINCH。
     var sliderFontSize by remember { mutableFloatStateOf(settings.fontSizeSp.toFloat()) }
     LaunchedEffect(settings.fontSizeSp) { sliderFontSize = settings.fontSizeSp.toFloat() }
 
-    AdaptiveModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        containerColor = MaterialTheme.colorScheme.surface
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = Spacing.lg)
+            .padding(bottom = Spacing.xl)
+            .verticalScroll(rememberScrollState())
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = Spacing.lg)
-                .padding(bottom = Spacing.xl)
-                .verticalScroll(rememberScrollState())
-        ) {
             Text(
                 text = stringResource(R.string.terminal_settings_title),
                 style = MaterialTheme.typography.titleLarge,
@@ -205,7 +218,6 @@ fun TerminalSettingsSheet(
                 }
             }
         }
-    }
 }
 
 /** 自定义字体选择区：系统等宽 + 已导入字体，支持导入与删除。 */

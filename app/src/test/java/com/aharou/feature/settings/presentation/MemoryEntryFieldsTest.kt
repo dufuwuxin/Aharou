@@ -38,7 +38,7 @@ class MemoryEntryFieldsTest {
         worldbook = WorldbookRules(keywordWeight = 2.0, tagWeight = 3.0,
             relations = listOf(WorldbookRelation("target")), tags = listOf(id)))
 
-    private fun open(restoration: StateRestorationTester? = null) {
+    private fun open(restoration: StateRestorationTester? = null, expandConditions: Boolean = true) {
         val content: @androidx.compose.runtime.Composable () -> Unit = {
             MaterialTheme {
                 ContextLibraryEditor(selected.value, ContextCategory.LONG_TERM, "", ContextLibraryState(),
@@ -47,12 +47,21 @@ class MemoryEntryFieldsTest {
             }
         }
         if (restoration == null) compose.setContent(content) else restoration.setContent(content)
+        if (expandConditions) text(R.string.context_injection_conditions).performScrollTo().performClick()
     }
 
     private fun field(label: Int) = compose.onNode(hasSetTextAction() and hasText(compose.activity.getString(label)))
     private fun text(label: Int) = compose.onNodeWithText(compose.activity.getString(label))
     private fun replace(label: Int, value: String) { field(label).performScrollTo().performTextReplacement(value) }
     private fun save() { text(R.string.common_save).performScrollTo().assertIsEnabled().performClick() }
+
+    @Test fun conditionsStartCollapsedAndFieldsAppearAfterExpanding() {
+        open(expandConditions = false)
+        val triggers = field(R.string.context_worldbook_triggers)
+        triggers.assertDoesNotExist()
+        text(R.string.context_injection_conditions).performScrollTo().performClick()
+        field(R.string.context_worldbook_triggers).assertExists()
+    }
 
     @Test fun inlineEditsCommitTogetherOnceAndPreserveAdvancedMetadata() {
         open()
@@ -116,6 +125,7 @@ class MemoryEntryFieldsTest {
         replace(R.string.context_worldbook_triggers, "first draft")
         replace(R.string.context_worldbook_confidence, "bad")
         compose.runOnIdle { selected.value = entry("second").copy(worldbook = WorldbookRules(triggers = listOf("second"))) }
+        text(R.string.context_injection_conditions).performScrollTo().performClick()
         field(R.string.context_worldbook_triggers).performScrollTo().assertTextContains("second")
         save()
         assertEquals(listOf("second"), saves.single().triggers)

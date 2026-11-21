@@ -359,7 +359,7 @@ class SettingsViewModel @Inject constructor(
     /** 为不支持图片输入的模型自动做本机 OCR 的开关。 */
     val ocrForTextOnlyModels: StateFlow<Boolean> = _ocrForTextOnlyModels.asStateFlow()
 
-    /** OCR 语言包的当前状态（打开设置页时构造 VM 即算好）。 */
+    /** OCR 语言包的磁盘快照，进入默认模型页或下载结束时刷新。 */
     private val _tessdataStatus = MutableStateFlow(tessdataManager.status())
     val tessdataStatus: StateFlow<TessdataStatus> = _tessdataStatus.asStateFlow()
 
@@ -371,18 +371,25 @@ class SettingsViewModel @Inject constructor(
         _tessdataStatus.value = tessdataManager.status()
     }
 
-    /** 下载（已下载则重新下载）OCR 语言包；进度与结果都走 [tessdataState]。 */
+    /** 下载缺失或不完整的 OCR 语言包；进度与结果都走 [tessdataState]。 */
     fun downloadTessdata() {
         if (_tessdataState.value is TessdataState.Downloading) return
         viewModelScope.launch {
             _tessdataState.value = TessdataState.Downloading(0f)
-            runCatching { tessdataManager.redownload { _tessdataState.value = it } }
-                .onFailure { e ->
-                    if (e !is CancellationException) {
-                        _tessdataState.value = TessdataState.Failed(e.message ?: "")
-                    }
+            val result = try {
+                tessdataManager.ensureReady { state ->
+                    if (state is TessdataState.Downloading) _tessdataState.value = state
                 }
+                TessdataState.Ready
+            } catch (e: CancellationException) {
+                _tessdataState.value = TessdataState.Idle
+                throw e
+            } catch (e: Exception) {
+                TessdataState.Failed(e.message.orEmpty())
+            }
+            // 保持下载门禁直到磁盘快照更新，避免用旧文件状态重新开放入口。
             refreshTessdataStatus()
+            _tessdataState.value = if (_tessdataStatus.value.ready) TessdataState.Ready else result
         }
     }
     private val _logLevel = MutableStateFlow(LogLevel.VERBOSE)
@@ -1622,6 +1629,8 @@ class SettingsViewModel @Inject constructor(
      * - 全部解析完一次性 update，避免多次 emit 导致设置页反复重组。
      */
     fun loadAllModelMetadata() {
+        // 默认模型页复用上一层的 VM，聊天 OCR 可能已在后台补齐语言包。
+        refreshTessdataStatus()
         val enabled = _providers.value.filter { it.isEnabled }
         if (enabled.isEmpty()) return
         viewModelScope.launch {

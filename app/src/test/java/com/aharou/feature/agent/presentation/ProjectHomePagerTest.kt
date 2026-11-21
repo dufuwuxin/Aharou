@@ -2,16 +2,17 @@ package com.aharou.feature.agent.presentation
 
 import android.app.Application
 import androidx.activity.ComponentActivity
+import androidx.compose.foundation.clickable
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.foundation.clickable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import com.aharou.R
+import com.aharou.feature.agent.domain.task.ProjectPlan
 import com.aharou.feature.agent.presentation.component.ProjectListScreen
 import io.mockk.every
 import io.mockk.mockk
@@ -30,48 +31,61 @@ import org.robolectric.annotation.*
 class ProjectHomePagerTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
 
-    @Test fun swipeAndChipsSharePageAndKeepSessionState() {
+    @Test fun browsingProjectsKeepsTheVisibleSessionSectionState() {
         val vm = mockk<ProjectTaskViewModel>()
-        every { vm.state } returns MutableStateFlow(ProjectTaskUiState(workspace = "/A", loading = false))
+        val projects = List(8) { index ->
+            ProjectPlan(id = "p$index", workspace = "/projects/p$index", title = "Project $index", workspaceOwnership = "owned")
+        }
+        every { vm.state } returns MutableStateFlow(ProjectTaskUiState(workspace = "/A", loading = false, projects = projects))
         compose.setContent { MaterialTheme {
             ProjectListScreen(vm, false, {}, {}, {}, {}, {
                 var count by rememberSaveable { mutableIntStateOf(0) }
                 Text("count=$count", Modifier.testTag("session_counter").clickable { count++ })
             })
         } }
-        compose.onNodeWithText(compose.activity.getString(R.string.project_sessions)).performClick()
-        compose.onNodeWithTag("session_counter").performClick().assertTextEquals("count=1")
-        compose.onNodeWithTag("project_home_pager").performTouchInput { swipeRight() }
-        compose.onNodeWithText(compose.activity.getString(R.string.project_home)).assertIsSelected()
-        compose.onNodeWithTag("project_home_pager").performTouchInput { swipeLeft() }
-        compose.onNodeWithText(compose.activity.getString(R.string.project_sessions)).assertIsSelected()
-        compose.onNodeWithTag("session_counter").assertTextEquals("count=1")
+        val sessions = compose.onNodeWithTag("session_counter")
+        sessions.assertIsDisplayed().performClick().assertTextEquals("count=1")
+        val projectList = compose.onNodeWithTag("project_home_list")
+        projectList.performScrollToNode(hasTestTag("project_p7"))
+        compose.onNodeWithTag("project_p7").assertIsDisplayed()
+        sessions.assertIsDisplayed().assertTextEquals("count=1")
+        projectList.performScrollToNode(hasTestTag("project_p0"))
+        compose.onNodeWithTag("project_p0").assertIsDisplayed()
+        sessions.performClick().assertTextEquals("count=2")
     }
-    @Test fun searchFiltersProjectsAndSurvivesSessionNavigationWithoutOpeningAnything() {
+
+    @Test fun searchFiltersProjectsAndSurvivesSessionInteractionWithoutOpeningAProject() {
         val vm = mockk<ProjectTaskViewModel>()
-        val first = com.aharou.feature.agent.domain.task.ProjectPlan(
-            id = "alpha", workspace = "/projects/alpha", title = "Alpha", purpose = "API migration")
+        val first = ProjectPlan(id = "alpha", workspace = "/projects/alpha", title = "Alpha",
+            purpose = "API migration", workspaceOwnership = "owned")
         val second = first.copy(id = "beta", title = "Beta", workspace = "/projects/beta", purpose = "UI cleanup")
         val state = MutableStateFlow(ProjectTaskUiState(workspace = "/A", loading = false, projects = listOf(first, second)))
         every { vm.state } returns state
-        every { vm.canContinueInOwnedWorkspace(any()) } returns false
         var opened = 0
+        var sessionActions = 0
         compose.setContent { MaterialTheme {
-            ProjectListScreen(vm, false, {}, { opened++ }, {}, {}, { Text("Sessions") })
+            ProjectListScreen(vm, false, {}, { opened++ }, {}, {}, {
+                Text("Existing session action", Modifier.clickable { sessionActions++ })
+            })
         } }
+        compose.onNodeWithTag("project_search").assertDoesNotExist()
+        compose.onNodeWithTag("project_search_open").performClick()
         compose.onNodeWithTag("project_search").performTextInput("migration")
         compose.onNodeWithTag("project_alpha").assertExists()
         compose.onNodeWithTag("project_beta").assertDoesNotExist()
-        compose.onNodeWithText(compose.activity.getString(R.string.project_sessions)).performClick()
-        compose.onNodeWithText("Sessions").assertIsDisplayed()
-        compose.onNodeWithText(compose.activity.getString(R.string.project_home)).performClick()
+        compose.onNodeWithText("Existing session action").assertIsDisplayed().performClick()
         compose.onNodeWithTag("project_search").assertTextContains("migration")
         compose.onNodeWithTag("project_search").performTextReplacement("absent")
         compose.onNodeWithTag("project_search_empty").assertExists()
         compose.onNodeWithText(compose.activity.getString(R.string.common_clear)).performClick()
+        compose.onNodeWithTag("project_search").assertDoesNotExist()
         compose.onNodeWithTag("project_alpha").assertExists()
-        compose.onNodeWithTag("project_beta").assertExists()
-        org.junit.Assert.assertEquals(0, opened)
+        compose.onNodeWithTag("project_home_list").performScrollToNode(hasTestTag("project_beta"))
+        compose.onNodeWithTag("project_beta").assertIsDisplayed()
+        compose.runOnIdle {
+            org.junit.Assert.assertEquals(0, opened)
+            org.junit.Assert.assertEquals(1, sessionActions)
+        }
     }
 
     @Test fun projectMenuFloatsWithoutHeaderBackAndRetainsInjectedActions() {

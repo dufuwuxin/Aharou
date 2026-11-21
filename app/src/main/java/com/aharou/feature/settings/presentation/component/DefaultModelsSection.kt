@@ -282,41 +282,7 @@ internal fun DefaultModelsSection(
                 }
             )
             SettingsDivider()
-            val tessdataDownloading = tessdataState as? TessdataState.Downloading
-            val tessdataProblem = when {
-                tessdataStatus.ready -> null
-                // 从未下载过（而不是下载残了）：用不上 OCR 的人本来就不该有这份包
-                tessdataStatus.neverDownloaded -> stringResource(R.string.settings_ocr_pack_not_downloaded)
-                else -> {
-                    val missing = stringResource(R.string.settings_ocr_pack_missing)
-                    val mismatch = stringResource(R.string.settings_ocr_pack_size_mismatch)
-                    tessdataStatus.files.filter { !it.ok }
-                        .joinToString("、") { f -> "${f.name}：" + if (f.actual == null) missing else mismatch }
-                }
-            }
-            SettingsRow(
-                icon = FeatherIcons.Download,
-                title = stringResource(R.string.settings_ocr_pack_title),
-                subtitle = when {
-                    tessdataDownloading != null -> stringResource(
-                        R.string.settings_ocr_pack_downloading,
-                        (tessdataDownloading.progress * 100).toInt()
-                    )
-                    tessdataState is TessdataState.Failed -> stringResource(R.string.settings_ocr_pack_failed)
-                    tessdataProblem != null -> tessdataProblem
-                    else -> stringResource(R.string.settings_ocr_pack_ready)
-                },
-                onClick = onDownloadTessdata,
-                trailing = {
-                    Text(
-                        text = if (tessdataDownloading != null) stringResource(R.string.settings_ocr_pack_downloading_short)
-                        else stringResource(R.string.settings_ocr_pack_download),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.primary,
-                        maxLines = 1
-                    )
-                }
-            )
+            OcrLanguagePackRow(tessdataStatus, tessdataState, onDownloadTessdata)
         }
         LocalModelSection()
     }
@@ -421,6 +387,47 @@ internal fun DefaultModelsSection(
         )
     }
 
+}
+
+@Composable
+internal fun OcrLanguagePackRow(
+    status: TessdataStatus,
+    downloadState: TessdataState,
+    onDownload: () -> Unit,
+) {
+    val downloading = downloadState as? TessdataState.Downloading
+    val canDownload = !status.ready && downloading == null
+    SettingsRow(
+        icon = FeatherIcons.Download,
+        title = stringResource(R.string.settings_ocr_pack_title),
+        subtitle = when {
+            downloading != null -> stringResource(
+                R.string.settings_ocr_pack_downloading,
+                (downloading.progress * 100).toInt()
+            )
+            status.ready -> stringResource(R.string.settings_ocr_pack_ready)
+            downloadState is TessdataState.Failed -> stringResource(R.string.settings_ocr_pack_failed)
+            // 从未下载过（而不是下载残了）：用不上 OCR 的人本来就不该有这份包
+            status.neverDownloaded -> stringResource(R.string.settings_ocr_pack_not_downloaded)
+            else -> {
+                val missing = stringResource(R.string.settings_ocr_pack_missing)
+                val mismatch = stringResource(R.string.settings_ocr_pack_size_mismatch)
+                status.files.filter { !it.ok }
+                    .joinToString("、") { f -> "${f.name}：" + if (f.actual == null) missing else mismatch }
+            }
+        },
+        onClick = onDownload.takeIf { canDownload },
+        trailing = if (canDownload) {
+            {
+                Text(
+                    text = stringResource(R.string.settings_ocr_pack_download),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = 1
+                )
+            }
+        } else null,
+    )
 }
 
 /**

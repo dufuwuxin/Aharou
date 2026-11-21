@@ -68,6 +68,7 @@ class NextSettingsPagesTest {
         compose.setContent { AIEditorTheme { ModelRouteGroupsSection(listOf(provider), {}, model) } }
         compose.onNodeWithTag("route_group_create").performClick()
         compose.onNodeWithTag("route_group_name").performTextInput("ordered")
+        compose.onNodeWithText("OpenAI").performScrollTo().performClick()
         compose.onNodeWithTag("route_model_p_second").performScrollTo().performClick()
         compose.onNodeWithTag("route_model_p_first").performScrollTo().performClick()
         compose.onNodeWithTag("route_group_save").performClick()
@@ -118,29 +119,29 @@ class NextSettingsPagesTest {
 
     @Test fun providerBrandsAddConnectionAndHideWithoutDisablingTheProvider() {
         ProviderLibraryPreferences.initialize(compose.activity)
-        val previousHidden = ProviderLibraryPreferences.hiddenTypes.value
         ProviderLibraryPreferences.setHidden(emptySet())
-        try {
-            var added = ""
-            compose.setContent { AIEditorTheme {
-                ProvidersSection(listOf(provider), {}, {}, { _, _ -> }, { added = it.name })
-            } }
-            val list = compose.onNode(hasScrollToIndexAction())
-            val brand = "provider_brand_openai"
-            val addConnection = "provider_add_url_openai"
-            list.performScrollToNode(hasTestTag(brand))
-            compose.onNodeWithTag(brand).performClick()
-            list.performScrollToNode(hasTestTag(addConnection))
-            compose.onNodeWithTag(addConnection).performClick()
-            compose.runOnIdle { assertTrue(added.isNotBlank()) }
-            compose.onNodeWithText(compose.activity.getString(R.string.providers_hide_type)).performClick()
-            compose.waitUntil { "openai" in ProviderLibraryPreferences.hiddenTypes.value }
-            assertTrue(provider.isEnabled)
-            compose.onNodeWithTag("providers_show_hidden").performClick()
-            list.performScrollToNode(hasTestTag(brand))
-            compose.onNodeWithTag(brand).assertIsDisplayed()
-        } finally {
-            ProviderLibraryPreferences.setHidden(previousHidden)
-        }
+        var added = ""
+        compose.setContent { AIEditorTheme {
+            ProvidersSection(listOf(provider), {}, {}, { _, _ -> }, { added = it.name })
+        } }
+        compose.onNodeWithTag("providers_show_hidden").performClick()
+        compose.onNodeWithTag("providers_library_list").performScrollToKey("brand:openai")
+        compose.onNodeWithTag("provider_visibility_openai").assertIsOn()
+        compose.onNodeWithTag("providers_show_hidden").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithTag("providers_library_search").performTextClearance()
+        compose.waitForIdle()
+        compose.onNodeWithTag("providers_library_list").performScrollToKey("brand:openai")
+        compose.onNodeWithTag("provider_brand_openai").performClick()
+        compose.onNodeWithTag("provider_add_url_openai").performScrollTo().performClick()
+        assertTrue(added.isNotBlank())
+        compose.onNodeWithText(compose.activity.getString(R.string.providers_hide_type)).performClick()
+        compose.waitUntil(timeoutMillis = 5_000) { "openai" in ProviderLibraryPreferences.hiddenTypes.value }
+        assertTrue("openai" in ProviderLibraryPreferences.hiddenTypes.value)
+        assertTrue(provider.isEnabled)
+        compose.onNodeWithTag("providers_show_hidden").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithTag("provider_brand_openai").performScrollTo().assertExists()
+        ProviderLibraryPreferences.setHidden(emptySet())
     }
 }

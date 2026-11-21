@@ -110,18 +110,15 @@ class SettingsNavigationTest(unittest.TestCase):
         sessions = source(SRC / "feature/agent/presentation/component/SessionListScreen.kt")
         projects = source(SRC / "feature/agent/presentation/component/ProjectListScreen.kt")
         self.assertNotIn("R.string.session_list_title", sessions)
-        self.assertIn("val pager = rememberPagerState { 2 }", projects)
-        for page in (0, 1):
-            self.assertIn(
-                f"FilterChip(selected = pager.currentPage == {page}, "
-                f"onClick = {{ scope.launch {{ pager.animateScrollToPage({page}) }} }}",
-                projects,
-            )
-        self.assertIn("HorizontalPager(state = pager", projects)
-        self.assertIn("if (page == 1) Box(Modifier.fillMaxSize()) { sessionsContent() }", projects)
-        self.assertNotRegex(projects, r"Text\(stringResource\(R\.string\.project_home\),\s*style\s*=")
-        self.assertIn("onNewSession", sessions)
+        self.assertIn('testTag("project_home_list")', projects)
+        self.assertIn('testTag("project_search_open")', projects)
         self.assertIn('testTag("create_project")', projects)
+        self.assertIn("sessionsContent()", projects)
+        self.assertIn("R.string.project_sessions", projects)
+        self.assertNotIn("HorizontalPager", projects)
+        self.assertNotIn("FilterChip", projects)
+        self.assertNotIn("rememberPagerState", projects)
+        self.assertIn("onNewSession", projects)
 
     def test_native_editor_has_editable_fields_and_persistent_category_draft(self):
         editor = source(SETTINGS / "ContextLibraryEditor.kt")

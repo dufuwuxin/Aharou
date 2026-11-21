@@ -3,6 +3,8 @@ package com.aharou.feature.settings.presentation.component
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -28,6 +30,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -55,6 +58,7 @@ internal fun ContextLibrarySection(viewModel: ContextLibraryViewModel = hiltView
     var folder by rememberSaveable { mutableStateOf<String?>(null) }
     var scope by rememberSaveable { mutableStateOf<MemoryScope?>(null) }
     var loading by rememberSaveable { mutableStateOf<ContextLoad?>(null) }
+    var filtersExpanded by rememberSaveable { mutableStateOf(false) }
     var query by rememberSaveable { mutableStateOf("") }
     var editor by rememberSaveable(stateSaver = ContextEntryStateSaver) { mutableStateOf<ContextEntry?>(null) }
     var editorRoot by rememberSaveable { mutableStateOf<String?>(null) }
@@ -76,7 +80,13 @@ internal fun ContextLibrarySection(viewModel: ContextLibraryViewModel = hiltView
             initialFolder = folder ?: if (category.isInjection) stringResource(category.label()) else "", state = state,
             onBack = { creating = false; editor = null },
             onSave = { name, description, content, entryScope, kind, entryLoad, entryCategory, entryFolder, sessionId, worldbook ->
-                val done = { creating = false; editor = null; category = entryCategory; folder = entryFolder }
+                val done = {
+                    creating = false
+                    editor = null
+                    category = entryCategory
+                    folder = entryFolder.takeIf(String::isNotEmpty)
+                    query = ""
+                }
                 if (target == null) viewModel.create(name, description, content, entryScope, kind, entryLoad,
                     entryCategory, entryFolder, sessionId, editorRoot, done, worldbook = worldbook)
                 else viewModel.save(target.copy(title = name, description = description, content = content, kind = kind, loading = entryLoad,
@@ -88,12 +98,10 @@ internal fun ContextLibrarySection(viewModel: ContextLibraryViewModel = hiltView
     }
     val up = {
         if (tab != 0) tab = 0
-        else {
-            folder = folder?.takeIf { it.contains('/') }?.let { contextParentFolder(it) }
-            query = ""
-        }
+        else if (query.isNotBlank()) query = ""
+        else folder = folder?.let(::contextParentFolder)?.takeIf(String::isNotEmpty)
     }
-    BackHandler(enabled = tab != 0 || folder != null) { up() }
+    BackHandler(enabled = tab != 0 || !folder.isNullOrEmpty() || query.isNotBlank()) { up() }
     if (creatingFolder) AlertDialog(
         onDismissRequest = { if (!state.writing) creatingFolder = false },
         title = { Text(stringResource(R.string.context_new_folder)) },
@@ -135,7 +143,7 @@ internal fun ContextLibrarySection(viewModel: ContextLibraryViewModel = hiltView
             }) { Text(stringResource(R.string.common_cancel)) } },
         )
     }
-    val currentFolder = folder
+    val currentFolder = folder.orEmpty()
     val searchRequest = remember(state.entries, query, scope, loading, category, currentFolder) { Any() }
     val searchResult by produceState<Pair<Any, List<ContextEntry>>?>(initialValue = null, searchRequest) {
         val entries = withContext(Dispatchers.Default) {
@@ -146,7 +154,7 @@ internal fun ContextLibrarySection(viewModel: ContextLibraryViewModel = hiltView
     val visible = searchResult?.takeIf { it.first === searchRequest }?.second.orEmpty()
     val folders = remember(state.folders, state.entries, category, currentFolder, query) {
         val paths = state.folders[category].orEmpty() + state.entries.filter { it.category == category }.map { it.folder }
-        if (query.isNotBlank()) emptyList() else contextChildFolders(paths, currentFolder.orEmpty())
+        if (query.isNotBlank()) emptyList() else contextChildFolders(paths, currentFolder)
     }
     Column(Modifier.fillMaxSize()) {
         Column(Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.sm),
@@ -155,64 +163,92 @@ internal fun ContextLibrarySection(viewModel: ContextLibraryViewModel = hiltView
             SegmentedTabs(tab, listOf(stringResource(R.string.context_tab_library), stringResource(R.string.context_tab_preview),
                 stringResource(R.string.context_graph_title), stringResource(R.string.context_resource_tree)), { tab = it })
         }
-    LazyColumn(modifier = Modifier.weight(1f).fillMaxWidth().testTag("context_library_content"),
-        verticalArrangement = Arrangement.spacedBy(Spacing.md),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(Spacing.lg)) {
-        if (state.error) item { ContextNotice(stringResource(R.string.context_operation_error), error = true) }
-        if (tab == 1) item { ContextLibraryPreview(state, viewModel::preview, viewModel::clearPreview) }
-        else if (tab == 3) item {
-            ContextResourceTree(state.entries) { editorRoot = state.workspaceRoot; editor = it }
-        }
-        else if (tab == 2) item {
-            ContextMemoryGraph(state.entries,
-                onSelect = { editorRoot = state.workspaceRoot; editor = it },
-                onEditRules = { tab = 0; folder = ""; query = "" },
-            )
-        }
-        else {
-            item { AppTextField(query, { query = it }, label = stringResource(R.string.context_search_placeholder),
-                modifier = Modifier.fillMaxWidth().testTag("context_library_search")) }
-            item { ContextOverview(state.entries) }
-            item { ContextChoiceRow(ContextCategory.entries.map { stringResource(it.label()) }, category.ordinal,
-                { category = ContextCategory.entries[it]; folder = null; query = "" }) }
-            item { Text(stringResource(category.explanation()), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-            if (currentFolder != null) item {
-                TextButton(onClick = up) { Text(stringResource(R.string.context_folder_up)) }
-                Text(stringResource(R.string.context_folder_path, currentFolder.ifEmpty { stringResource(R.string.context_folder_root_title) }),
-                    style = MaterialTheme.typography.titleMedium)
-                if (viewModel.canDeleteFolder(category, currentFolder)) {
-                    TextButton(enabled = !state.loading && !state.writing, onClick = {
-                        deleteSnapshot = state
-                        deleteCategory = category
-                        deleteScope = scope ?: if (state.hasWorkspace) MemoryScope.PROJECT else MemoryScope.GLOBAL
-                        deletingFolder = currentFolder
-                    }) { Text(stringResource(R.string.context_delete_folder)) }
+        LazyColumn(modifier = Modifier.weight(1f).fillMaxWidth().testTag("context_library_content"),
+            verticalArrangement = Arrangement.spacedBy(Spacing.md), contentPadding = PaddingValues(Spacing.lg)) {
+            if (state.error) item { ContextNotice(stringResource(R.string.context_operation_error), error = true) }
+            when (tab) {
+                1 -> item { ContextLibraryPreview(state, viewModel::preview, viewModel::clearPreview) }
+                2 -> item {
+                    ContextMemoryGraph(state.entries,
+                        onSelect = { editorRoot = state.workspaceRoot; editor = it },
+                        onEditRules = {
+                            tab = 0
+                            category = ContextCategory.RULE
+                            folder = null
+                            query = ""
+                            scope = null
+                            loading = null
+                        },
+                    )
+                }
+                3 -> item { ContextResourceTree(state.entries) { editorRoot = state.workspaceRoot; editor = it } }
+                else -> {
+                    item {
+                        AppTextField(query, { query = it }, label = stringResource(R.string.context_search_placeholder),
+                            modifier = Modifier.fillMaxWidth().testTag("context_library_search"))
+                    }
+                    if (query.isBlank()) item {
+                        ContextChoiceRow(ContextCategory.entries.map { stringResource(it.label()) }, category.ordinal,
+                            { category = ContextCategory.entries[it]; folder = null })
+                    }
+                    item {
+                        val filterLabel = if (scope == null && loading == null) stringResource(R.string.context_library_filters)
+                        else listOfNotNull(scope?.let { stringResource(it.label()) }, loading?.let { stringResource(it.label()) })
+                            .joinToString(" · ")
+                        SettingsGroup {
+                            CollapsibleGroupHeader(filterLabel, filtersExpanded, { filtersExpanded = !filtersExpanded },
+                                Modifier.heightIn(min = 48.dp))
+                            if (filtersExpanded) Column(Modifier.padding(horizontal = Spacing.md, vertical = Spacing.sm)) {
+                                ContextChoiceRow(listOf(stringResource(R.string.context_scope_all)) + MemoryScope.entries.map { stringResource(it.label()) },
+                                    (scope?.ordinal ?: -1) + 1, { scope = MemoryScope.entries.getOrNull(it - 1) })
+                                ContextChoiceRow(listOf(stringResource(R.string.context_load_all)) + ContextLoad.entries.map { stringResource(it.label()) },
+                                    (loading?.ordinal ?: -1) + 1, { loading = ContextLoad.entries.getOrNull(it - 1) })
+                            }
+                        }
+                    }
+                    if (currentFolder.isNotEmpty() && query.isBlank()) item {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            TextButton(onClick = up) { Text(stringResource(R.string.context_folder_up)) }
+                            if (viewModel.canDeleteFolder(category, currentFolder)) {
+                                TextButton(enabled = !state.loading && !state.writing, onClick = {
+                                    deleteSnapshot = state
+                                    deleteCategory = category
+                                    deleteScope = scope ?: if (state.hasWorkspace) MemoryScope.PROJECT else MemoryScope.GLOBAL
+                                    deletingFolder = currentFolder
+                                }) { Text(stringResource(R.string.context_delete_folder)) }
+                            }
+                        }
+                        Text(stringResource(R.string.context_folder_path, currentFolder), style = MaterialTheme.typography.titleMedium)
+                    }
+                    item {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                            Button(onClick = { editorRoot = state.workspaceRoot; creating = true }, modifier = Modifier.weight(1f)) {
+                                Text(stringResource(R.string.context_add_entry))
+                            }
+                            OutlinedButton(onClick = { creatingFolder = true }, modifier = Modifier.weight(1f)) {
+                                Text(stringResource(R.string.context_new_folder))
+                            }
+                        }
+                    }
+                    if (state.loading) item { CircularProgressIndicator() }
+                    if (query.isNotBlank()) item {
+                        Text(stringResource(R.string.context_result_count, visible.size), style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    val pending = state.entries.count { it.pending }
+                    if (pending > 0 && query.isBlank()) item { ContextNotice(stringResource(R.string.context_pending_count, pending)) }
+                    items(folders, key = { "folder:$it" }) { path ->
+                        ContextFolderRow(path.substringAfterLast('/')) { folder = path }
+                    }
+                    if (!state.loading && searchResult?.first === searchRequest && visible.isEmpty() && folders.isEmpty()) {
+                        item { ContextNotice(stringResource(R.string.context_folder_empty)) }
+                    }
+                    items(visible, key = { it.id }) { entry ->
+                        ContextEntryCard(entry, query) { editorRoot = state.workspaceRoot; editor = entry }
+                    }
                 }
             }
-            item { ContextChoiceRow(listOf(stringResource(R.string.context_scope_all)) + MemoryScope.entries.map { stringResource(it.label()) },
-                    (scope?.ordinal ?: -1) + 1, { scope = MemoryScope.entries.getOrNull(it - 1) }) }
-                item { ContextChoiceRow(listOf(stringResource(R.string.context_load_all)) + ContextLoad.entries.map { stringResource(it.label()) },
-                    (loading?.ordinal ?: -1) + 1, { loading = ContextLoad.entries.getOrNull(it - 1) }) }
-            item {
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-                    Button(onClick = { editorRoot = state.workspaceRoot; creating = true }, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.context_add_entry)) }
-                    OutlinedButton(onClick = { creatingFolder = true }, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.context_new_folder)) }
-                }
-            }
-            if (state.loading) item { CircularProgressIndicator() }
-            if (currentFolder == null && query.isBlank()) item {
-                ContextFolderRow(stringResource(R.string.context_folder_root_title)) { folder = ""; query = "" }
-            }
-            items(folders, key = { "folder:$it" }) { path ->
-                ContextFolderRow(path.substringAfterLast('/')) { folder = path; query = "" }
-            }
-            if (currentFolder != null || query.isNotBlank()) {
-                item { Text(stringResource(R.string.context_result_count, visible.size), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                if (!state.loading && visible.isEmpty() && folders.isEmpty()) item { ContextNotice(stringResource(R.string.context_folder_empty)) }
-                items(visible, key = { it.id }) { entry -> ContextEntryCard(entry, query) { editorRoot = state.workspaceRoot; editor = entry } }
-            }
         }
-    }
     }
 }
 
