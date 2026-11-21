@@ -10,6 +10,7 @@ import kotlinx.coroutines.runBlocking
 import okhttp3.Authenticator
 import okhttp3.Call
 import okhttp3.Callback
+import okhttp3.ConnectionSpec
 import okhttp3.Cookie
 import okhttp3.CookieJar
 import okhttp3.HttpUrl
@@ -21,6 +22,7 @@ import okhttp3.ResponseBody
 import okhttp3.ResponseBody.Companion.toResponseBody
 import okio.Buffer
 import okio.BufferedSource
+import okio.Timeout
 import okio.buffer
 import org.junit.Assert.*
 import org.junit.Test
@@ -33,17 +35,31 @@ class NpmRegistryRepositoryTest {
     private var response: (Request) -> Response = { response(it, "{}") }
     private val repository = NpmRegistryRepository(Call.Factory { request ->
         requests += request
-        val delegate = OkHttpClient().newCall(request)
-        object : Call by delegate {
-            override fun enqueue(callback: Callback) {
-                lastCall = this
-                if (!respond) return
-                val error = failure
-                if (error != null) callback.onFailure(this, error)
-                else callback.onResponse(this, response(request))
-            }
-        }
+        FakeCall(request)
     })
+
+    private inner class FakeCall(private val request: Request) : Call {
+        private var executed = false
+        private var canceled = false
+
+        override fun request(): Request = request
+        override fun execute(): Response = error("Expected enqueue()")
+        override fun enqueue(callback: Callback) {
+            check(!executed) { "Already Executed" }
+            executed = true
+            lastCall = this
+            if (!respond) return
+            val error = failure
+            if (error != null) callback.onFailure(this, error)
+            else callback.onResponse(this, response(request))
+        }
+
+        override fun cancel() { canceled = true }
+        override fun isExecuted(): Boolean = executed
+        override fun isCanceled(): Boolean = canceled
+        override fun timeout(): Timeout = Timeout.NONE
+        override fun clone(): Call = FakeCall(request)
+    }
 
     @Test fun searchProjectsOnlyAllowedMetadataAndPreservesText() = runBlocking {
         response = { response(it, """{"objects":[{"package":{"name":"@s/pkg","version":"1.2.3",
@@ -207,7 +223,9 @@ class NpmRegistryRepositoryTest {
     }
 
     @Test fun productionClientDropsOriginCredentialPathsAndEnforcesTimeouts() {
-        val original = OkHttpClient.Builder().addInterceptor { error("Must not execute") }
+        // This test inspects client settings without making requests or initializing a trust manager.
+        val original = OkHttpClient.Builder().connectionSpecs(listOf(ConnectionSpec.CLEARTEXT))
+            .addInterceptor { error("Must not execute") }
             .addNetworkInterceptor { error("Must not execute") }
             .authenticator { _, _ -> error("Must not authenticate") }
             .cookieJar(object : CookieJar {
