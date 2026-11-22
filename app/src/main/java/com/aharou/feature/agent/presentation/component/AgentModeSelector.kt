@@ -1,6 +1,8 @@
 package com.aharou.feature.agent.presentation.component
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.DropdownMenu
@@ -48,8 +50,13 @@ internal fun AgentModeSelector(mode: AgentMode, onSelect: (AgentMode) -> Unit) {
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             listOf(AgentMode.AUTO, AgentMode.ALLOW, AgentMode.PLAN, AgentMode.BUILD).forEach { option ->
                 DropdownMenuItem(
-                    text = { Text(option.name, fontWeight = if (option == mode) FontWeight.Bold else FontWeight.Normal) },
-                    supportingText = { Text(stringResource(modeDescription(option))) },
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(option.name, fontWeight = if (option == mode) FontWeight.Bold else FontWeight.Normal)
+                            Text(stringResource(modeDescription(option)), style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    },
                     onClick = { expanded = false; onSelect(option) },
                 )
             }

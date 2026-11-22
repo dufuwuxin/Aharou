@@ -13,7 +13,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.res.stringResource
 import com.aharou.R
 import com.aharou.feature.agent.domain.provider.OpenAIServiceTier
-import com.aharou.feature.agent.presentation.SettingsViewModel
+import com.aharou.feature.settings.presentation.SettingsViewModel
 import com.aharou.feature.settings.domain.model.AIProviderConfig
 import com.aharou.feature.settings.domain.model.ProviderType
 
