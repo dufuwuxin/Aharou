@@ -100,6 +100,7 @@ class RemoteBootstrapSyncTest {
 
     @Test fun alreadyConnectedCommandEntryRetriesFailedStageAndPullsOnlyOncePerCommand() = runTest {
         val cfg = RemoteConnectionConfig("example.invalid", username = "test", auth = RemoteAuth.Password("test"), remoteWorkspacePath = "/home/test/work")
+        current = RemoteSshConnection.BootstrapTarget(current.client, current.home, cfg)
         every { connection.isConnected() } returns true
         every { connection.config } returns cfg
         coEvery { connection.connectTarget(cfg) } answers { current }
