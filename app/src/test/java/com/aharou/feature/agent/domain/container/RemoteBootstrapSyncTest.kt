@@ -115,7 +115,7 @@ class RemoteBootstrapSyncTest {
         every { command.inputStream } answers { byteArrayOf().inputStream() }
         every { command.errorStream } answers { byteArrayOf().inputStream() }
         every { command.exitStatus } returns 0
-        every { connection.startExecSession(any()) } returns command
+        every { connection.startExecSession(any(), any()) } returns command
         val engine = RemoteSshEngine(connection, resolver, configs, sync, mockk(relaxed = true), settings)
         var fail = true
         coEvery { connection.uploadDocs(any(), any()) } coAnswers { if (fail) throw IllegalStateException("retry needed") }

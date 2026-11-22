@@ -8,8 +8,10 @@ import com.aharou.feature.agent.domain.session.SessionUseCase
 import com.aharou.feature.agent.domain.task.ProjectFlowController
 import com.aharou.feature.agent.domain.task.ProjectWorkflowRunner
 import com.aharou.feature.workspace.data.repository.WorkspaceRepository
+import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
@@ -19,14 +21,18 @@ import org.junit.Test
 import java.util.concurrent.atomic.AtomicReference
 
 class ProjectReceiptQueryTest {
-    private fun viewModel(dao: ToolCallReceiptDao) = ProjectTaskViewModel(
-        mockk<ProjectTaskRepository>(relaxed = true),
-        mockk<SessionUseCase>(relaxed = true),
-        mockk<AgentTurnRunner>(relaxed = true),
-        mockk<ProjectWorkflowRunner>(relaxed = true),
-        mockk<ProjectFlowController>(relaxed = true),
-        javax.inject.Provider { mockk<WorkspaceRepository>(relaxed = true) }, dao
-    )
+    private fun viewModel(dao: ToolCallReceiptDao): ProjectTaskViewModel {
+        val repository = mockk<ProjectTaskRepository>(relaxed = true)
+        every { repository.snapshots } returns MutableStateFlow(emptyMap())
+        val workflow = mockk<ProjectWorkflowRunner>(relaxed = true)
+        coEvery { workflow.members() } returns emptyList()
+        val flows = mockk<ProjectFlowController>(relaxed = true)
+        every { flows.state } returns MutableStateFlow(com.aharou.feature.agent.domain.task.ProjectFlowState())
+        val workspaces = mockk<WorkspaceRepository>(relaxed = true)
+        every { workspaces.workspaces } returns MutableStateFlow(emptyList())
+        return ProjectTaskViewModel(repository, mockk<SessionUseCase>(relaxed = true), mockk<AgentTurnRunner>(relaxed = true),
+            workflow, flows, javax.inject.Provider { workspaces }, dao)
+    }
 
     private fun receipt(id: Long) = ToolCallReceiptEntity(
         id = id, sessionId = "session-$id", toolName = "readFile", status = "SUCCESS", createdAt = id
