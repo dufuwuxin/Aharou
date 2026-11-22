@@ -46,7 +46,7 @@ class ProjectCompactLayoutContract(unittest.TestCase):
         self.assertIn("sessionMenu { menuOpen = false }", menu)
         self.assertIn('onClick = { expandedId = null; viewMode = if (viewMode == "map") "tree" else "map"; menuOpen = false }', menu)
         self.assertIn("header = header, process = process)", workbench)
-        self.assertIn("else Column(Modifier.fillMaxSize()) {\n                header {}", workbench)
+        self.assertIn("} else {\n                header {}\n                LazyColumn(", workbench)
 
     def assert_stop(self, workbench):
         menu = region(region(workbench, "val header:"), "onDismissRequest = { menuOpen = false })")
