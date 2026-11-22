@@ -54,6 +54,16 @@ class ProjectChatComposerContract(unittest.TestCase):
         self.assertIn("if (bodyOverride == null) ChatHeader(", source("AIChatPanel.kt"))
         self.assertIn("header = header, process = process)", source("ProjectTaskWorkbench.kt"))
 
+    def test_project_card_route_mounts_the_workbench_and_its_bound_composer(self):
+        main = (JAVA / "MainActivity.kt").read_text()
+        route = main.split('composable("projects/{projectId}")', 1)[1].split('composable("tasks/{taskId}")', 1)[0]
+        self.assertIn("ProjectChatScreen(", route)
+        screen = source("ProjectChatScreen.kt").split("fun ProjectChatScreen(", 1)[1]
+        self.assertNotIn("ProjectMindMapScreen(", screen)
+        for contract in ("rememberProjectChatBinding(", "AIChatPanel(", "bodyOverride = binding.body",
+                         "floatingComposer = true", "composerSessionId = binding.sessionId"):
+            self.assertIn(contract, screen)
+
     def test_status_questions_do_not_force_requirement_writes(self):
         screen = source("ProjectChatScreen.kt")
         entries = json.loads((ROOT / "app/src/main/assets/context-library/builtin.json").read_text())["entries"]

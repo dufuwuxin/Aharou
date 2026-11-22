@@ -2,6 +2,11 @@ package com.aharou.feature.agent.presentation.component
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -10,6 +15,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aharou.R
 import com.aharou.feature.agent.presentation.AIAgentViewModel
@@ -17,6 +26,8 @@ import com.aharou.feature.agent.presentation.AgentUIMessage
 import com.aharou.feature.agent.presentation.ProjectTaskViewModel
 import com.aharou.feature.settings.presentation.SettingsViewModel
 import com.aharou.feature.workspace.presentation.WorkspaceViewModel
+import compose.icons.FeatherIcons
+import compose.icons.feathericons.ChevronLeft
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ensureActive
 
@@ -101,5 +112,65 @@ fun ProjectChatScreen(projectId: String, agentViewModel: AIAgentViewModel, proje
     onBack: () -> Unit, onToolDetail: (AgentUIMessage) -> Unit,
     onNavigateToTerminal: () -> Unit, onNavigateToGit: () -> Unit, onNavigateToBrowser: () -> Unit,
     onNavigateToSandbox: () -> Unit, onNavigateToShared: () -> Unit, onNavigateToObserve: () -> Unit) {
-    ProjectMindMapScreen(projectId = projectId, viewModel = projectViewModel, onBack = onBack)
+    val state by projectViewModel.state.collectAsStateWithLifecycle()
+    val project = state.projects.singleOrNull { it.id == projectId }
+    LaunchedEffect(projectId, project?.workspace) {
+        if (project != null && state.workspace != project.workspace) projectViewModel.openProject(projectId) {}
+    }
+    val ready = project != null && state.workspace == project.workspace && !state.loading
+    var adding by rememberSaveable(projectId, project?.workspace) { mutableStateOf(false) }
+    var requirement by rememberSaveable(projectId, project?.workspace) { mutableStateOf("") }
+    var submitted by rememberSaveable(projectId, project?.workspace) { mutableStateOf<String?>(null) }
+    LaunchedEffect(state.appendSucceededRequest) {
+        if (submitted != null && submitted == state.appendSucceededRequest) {
+            adding = false
+            requirement = ""
+            submitted = null
+        }
+    }
+    Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack, modifier = Modifier.size(48.dp).testTag("project_route_back")) {
+                Icon(FeatherIcons.ChevronLeft, stringResource(R.string.project_back))
+            }
+            Text(project?.title ?: stringResource(R.string.pmap_title), modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (ready) TextButton(enabled = !state.busy && projectId !in state.activeProjectIds && projectId !in state.planningProjectIds,
+                modifier = Modifier.testTag("project_route_add_requirement"), onClick = { adding = true }) {
+                Text(stringResource(R.string.pmap_add_requirements))
+            }
+        }
+        if (project == null || !ready) {
+            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    when {
+                        state.error != null -> {
+                            Text(stringResource(R.string.pmap_project_error, state.error.orEmpty()))
+                            if (project != null) OutlinedButton(onClick = { projectViewModel.openProject(projectId) {} }) {
+                                Text(stringResource(R.string.pmap_reload))
+                            }
+                        }
+                        state.loading || project != null -> CircularProgressIndicator()
+                        else -> Text(stringResource(R.string.pmap_unavailable))
+                    }
+                }
+            }
+        } else key(project.workspace, projectId) {
+            val binding = checkNotNull(rememberProjectChatBinding(agentViewModel, projectViewModel, onBack, onToolDetail, projectId))
+            AIChatPanel(viewModel = agentViewModel, settingsViewModel = settingsViewModel, workspaceViewModel = workspaceViewModel,
+                bodyOverride = binding.body, floatingComposer = true, composerSessionId = binding.sessionId,
+                projectConversation = binding.rootConversation, onNavigateToTerminal = onNavigateToTerminal,
+                onNavigateToGit = onNavigateToGit, onNavigateToBrowser = onNavigateToBrowser,
+                onNavigateToSandbox = onNavigateToSandbox, onNavigateToShared = onNavigateToShared,
+                onNavigateToObserve = onNavigateToObserve, modifier = Modifier.weight(1f))
+            if (adding) Dialog(onDismissRequest = {}, properties = DialogProperties(usePlatformDefaultWidth = false,
+                dismissOnBackPress = false, dismissOnClickOutside = false)) {
+                Surface(Modifier.fillMaxSize()) {
+                    ProjectRequirementEditor(projectId, state, projectViewModel, requirement,
+                        onText = { requirement = it }, onSubmit = { submitted = it },
+                        onDismiss = { projectViewModel.dismissRequirementPreview(); adding = false })
+                }
+            }
+        }
+    }
 }
