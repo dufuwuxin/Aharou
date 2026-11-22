@@ -8,6 +8,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import com.aharou.feature.agent.domain.model.ReasoningEffort
+import com.aharou.feature.agent.domain.provider.OpenAIServiceTier
 import com.aharou.feature.settings.domain.model.AIProviderConfig
 import com.aharou.feature.settings.domain.model.ProviderType
 import org.junit.Assert.assertEquals
@@ -30,7 +31,8 @@ class ChatControlPanelTest {
 
     @Test fun effortPanelUsesDiscreteSliderAndEmbedsOpenAiServiceTier() {
         val provider = AIProviderConfig(id = "openai", name = "OpenAI", type = ProviderType.OPENAI,
-            apiKey = "", baseUrl = "https://api.openai.com", defaultModel = "gpt-6.1")
+            apiKey = "", baseUrl = "https://api.openai.com", defaultModel = "gpt-6.1",
+            customHeaders = mapOf(OpenAIServiceTier.HEADER to "fast"))
         var selectedEffort = ReasoningEffort.DEFAULT
         var selectedTier: String? = "fast"
         compose.setContent {
