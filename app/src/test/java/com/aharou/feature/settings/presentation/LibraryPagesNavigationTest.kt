@@ -118,6 +118,7 @@ class LibraryPagesNavigationTest {
         compose.setContent { MaterialTheme { ContextLibrarySection(vm) } }
         compose.onNodeWithTag("context_library_search").performTextInput("Target memory")
         val memoryCard = hasText("Target memory") and hasClickAction() and !hasSetTextAction()
+        compose.waitUntil(5_000) { compose.onAllNodes(memoryCard).fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithTag("context_library_content").performScrollToNode(memoryCard)
         compose.onNode(memoryCard).performClick()
         compose.onNodeWithText(compose.activity.getString(R.string.context_back_library)).performClick()
