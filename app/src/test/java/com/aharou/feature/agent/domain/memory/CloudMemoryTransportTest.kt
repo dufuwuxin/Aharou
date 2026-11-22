@@ -25,7 +25,8 @@ import org.junit.Test
 class CloudMemoryTransportTest {
     @Before fun installConscryptProvider() {
         if (java.security.Security.getProvider("Conscrypt") == null) {
-            java.security.Security.insertProviderAt(org.conscrypt.Conscrypt.newProvider(), 1)
+            val provider = Class.forName("org.conscrypt.Conscrypt").getMethod("newProvider").invoke(null) as java.security.Provider
+            java.security.Security.insertProviderAt(provider, 1)
         }
     }
 
