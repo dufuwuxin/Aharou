@@ -108,7 +108,8 @@ class ProjectWorkflowRunner @Inject constructor(
                     val latest = store.tasks.first { it.id == next.id }
                     if (latest.requirementsVersion != next.requirementsVersion || ProjectWorkflowPlan.participants(latest) != ProjectWorkflowPlan.participants(next)) emptyList()
                     else listOf(ProjectTaskChange(latest.copy(status = ProjectTaskStatus.RUNNING, executionReason = "",
-                        processRequirementsVersion = null, processParticipants = participants)))
+                        processRequirementsVersion = null, processParticipants = participants,
+                        runStartedAtEpochMs = System.currentTimeMillis())))
                 }.singleOrNull() ?: continue
                 val outputs = mutableListOf<String>()
                 var teamEvidence: String? = null
@@ -232,7 +233,9 @@ class ProjectWorkflowRunner @Inject constructor(
                     listOf(ProjectTaskChange(if (superseded) latest.copy(status = ProjectTaskStatus.READY, processRequirementsVersion = null,
                         executionReason = "UPSTREAM_CHANGED") else latest.copy(status = ProjectTaskStatus.REVIEW,
                         processRequirementsVersion = next.requirementsVersion, brief = outputs.joinToString("\n\n"),
-                        evidenceRefs = latest.evidenceRefs + listOfNotNull(teamEvidence), executionReason = "SUCCEEDED")))
+                        evidenceRefs = latest.evidenceRefs + listOfNotNull(teamEvidence), executionReason = "SUCCEEDED",
+                        lastRunDurationMs = latest.runStartedAtEpochMs?.let { (System.currentTimeMillis() - it).coerceAtLeast(0) },
+                        runStartedAtEpochMs = null)))
                 }
                 active = null
                 if (superseded) continue
@@ -264,7 +267,9 @@ class ProjectWorkflowRunner @Inject constructor(
                         val records = latest.processMembers.toMutableMap()
                         child?.let { id -> records[id]?.let { records[id] = it.copy(outcome = reason, reason = failure.message.orEmpty()) } }
                         listOf(ProjectTaskChange(latest.copy(status = if (reason == "UPSTREAM_CHANGED") ProjectTaskStatus.READY else ProjectTaskStatus.BLOCKED,
-                            processRequirementsVersion = null, processMembers = records, executionReason = reason)))
+                            processRequirementsVersion = null, processMembers = records, executionReason = reason,
+                            lastRunDurationMs = latest.runStartedAtEpochMs?.let { (System.currentTimeMillis() - it).coerceAtLeast(0) },
+                            runStartedAtEpochMs = null)))
                     }
                 }
             }

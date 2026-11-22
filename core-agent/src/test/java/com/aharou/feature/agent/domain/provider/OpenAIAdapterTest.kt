@@ -267,10 +267,37 @@ class OpenAIAdapterTest {
         assertEquals("session-42", reqSlot.captured.prompt_cache_key)
 
         adapter(api).apply {
+            baseUrl = "https://gateway.example/v1"
             chatCacheKeyEnabled = false
             logSessionId = "session-42"
         }.complete("", emptyList())
         assertNull(reqSlot.captured.prompt_cache_key)
+    }
+
+    @Test
+    fun officialChatEndpointUsesStableSessionCacheKeyByDefault() = runTest {
+        val api = api()
+        val reqSlot = slot<ChatCompletionRequest>()
+        coEvery { api.createChatCompletion(any(), any(), any(), capture(reqSlot)) } returns response()
+
+        adapter(api).apply { logSessionId = "session-42" }.complete("", emptyList())
+        assertEquals("session-42", reqSlot.captured.prompt_cache_key)
+
+        for (url in listOf("https://gateway.example/v1", "https://api.openai.com.attacker.example/v1",
+                "http://api.openai.com/v1")) {
+            adapter(api).apply {
+                baseUrl = url
+                chatCacheKeyEnabled = false
+                logSessionId = "session-42"
+            }.complete("", emptyList())
+            assertNull("custom endpoint must retain explicit opt-in: $url", reqSlot.captured.prompt_cache_key)
+        }
+        adapter(api).apply {
+            baseUrl = "https://gateway.example/v1"
+            chatCacheKeyEnabled = true
+            logSessionId = "session-42"
+        }.complete("", emptyList())
+        assertEquals("session-42", reqSlot.captured.prompt_cache_key)
     }
 
     @Test

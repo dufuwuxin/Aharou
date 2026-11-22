@@ -49,6 +49,10 @@ data class ProjectTask(
     val supplements: List<String> = emptyList(),
     /** Member session that added this task through project_tasks; null for user or planner tasks. */
     val createdBySessionId: String? = null,
+    /** Wall-clock start of the latest task attempt; null when no attempt is active. */
+    val runStartedAtEpochMs: Long? = null,
+    /** Elapsed time of the latest completed or failed task attempt. */
+    val lastRunDurationMs: Long? = null,
     /** Conversation/context container, never an executable task. Legacy records remain tasks. */
     val isRequirementBranch: Boolean = false
 )

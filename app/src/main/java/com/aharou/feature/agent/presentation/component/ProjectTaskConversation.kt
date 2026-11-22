@@ -54,7 +54,12 @@ fun ProjectTaskConversation(sessionId: String, agentViewModel: AIAgentViewModel,
                 TextButton(onClick = { summaryExpanded = !summaryExpanded }) { Text(stringResource(R.string.project_process_summary)) }
                 if (summaryExpanded) {
                     if (finalReply == null) Text(stringResource(R.string.project_process_no_summary))
-                    else AgentMessageItem(finalReply, markdownCache = cache, reasoningVisible = false)
+                    else {
+                        AgentMessageItem(finalReply, markdownCache = cache, reasoningVisible = false)
+                        if (!live) TextButton(onClick = { agentViewModel.regenerateMessage(finalReply.id, sessionId) }) {
+                            Text(stringResource(R.string.chat_action_regenerate))
+                        }
+                    }
                 }
             }
             if (state.loading) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }

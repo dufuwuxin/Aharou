@@ -14,8 +14,9 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import com.aharou.core.ui.AdaptiveModalBottomSheet
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
+import com.aharou.core.ui.AdaptiveModalBottomSheet
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -25,6 +26,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -44,7 +46,6 @@ import com.aharou.feature.settings.domain.model.modelMetadataKey
 import com.aharou.feature.settings.presentation.component.ModelLogoIcon
 import com.aharou.feature.settings.presentation.component.ModelSelectionSheet
 import compose.icons.FeatherIcons
-import compose.icons.feathericons.Check
 import compose.icons.feathericons.Zap
 
 /**
@@ -106,19 +107,20 @@ internal fun ModelIconButton(
 }
 
 /**
- * 思考强度选择器：独立图标按钮，点击弹出底部档位选择。
- * [availableEfforts] 由调用方按当前模型元数据生成，元数据未命中时给出全部档位。
+ * 思考强度选择器：独立图标按钮，点击弹出离散滑块与供应商服务档位。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun ReasoningEffortSelector(
     effort: ReasoningEffort,
-    availableEfforts: List<ReasoningEffort>,
     onChange: (ReasoningEffort) -> Unit,
     enabled: Boolean,
-    modelMetadata: ModelMetadata? = null
+    modelMetadata: ModelMetadata? = null,
+    serviceTierSummary: String? = null,
+    serviceTierSelector: @Composable () -> Unit = {},
 ) {
     var showSheet by remember { mutableStateOf(false) }
+    var selectedEffort by remember(effort) { mutableStateOf(effort) }
     Box {
         // 图标旁直接带档位文字：档位不同耗时与花费差得多，只给图标看不出当前选了哪档。
         Row(
@@ -137,7 +139,9 @@ internal fun ReasoningEffortSelector(
             )
             Spacer(Modifier.width(Spacing.xs))
             Text(
-                text = reasoningEffortLabel(effort),
+                text = serviceTierSummary?.let {
+                    stringResource(R.string.chat_effort_with_service_tier, reasoningEffortLabel(effort), it)
+                } ?: reasoningEffortLabel(effort),
                 style = MaterialTheme.typography.labelMedium,
                 color = tint,
                 maxLines = 1
@@ -183,10 +187,10 @@ internal fun ReasoningEffortSelector(
                 // UI 再算一遍必然与实现漂移。DEFAULT 是不指定档位，服务端默认总是成立，不提醒；
                 // 元数据没命中（INFERRED 兜底）时对模型一无所知，也不吓人。
                 // 纯开关型模型选「不思考」正是它声明的关态，不算未声明档位。
-                val toggleExpressesNone = modelMetadata?.reasoningSupportsToggle == true && effort == ReasoningEffort.NONE
+                val toggleExpressesNone = modelMetadata?.reasoningSupportsToggle == true && selectedEffort == ReasoningEffort.NONE
                 val reasoningCapable = modelMetadata?.supportsReasoning == true || !declaredEfforts.isNullOrEmpty()
                 // apiValue 是 String?（DEFAULT 为 null），先取局部变量再比对，否则 contains 的类型对不上。
-                val effortValue = effort.apiValue
+                val effortValue = selectedEffort.apiValue
                 if (reasoningCapable && effortValue != null && !toggleExpressesNone &&
                     declaredEfforts?.contains(effortValue) != true
                 ) {
@@ -195,44 +199,38 @@ internal fun ReasoningEffortSelector(
                         MaterialTheme.colorScheme.tertiary
                     )
                 }
-                availableEfforts.forEach { e ->
-                    val selected = e == effort
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(Radius.sm))
-                            .clickable {
-                                showSheet = false
-                                onChange(e)
-                            }
-                            .padding(horizontal = Spacing.md, vertical = Spacing.md),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            FeatherIcons.Zap,
-                            contentDescription = null,
-                            tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(Modifier.width(Spacing.md))
+                val orderedEfforts = ReasoningEffort.entries
+                val selectedIndex = orderedEfforts.indexOf(selectedEffort).coerceAtLeast(0)
+                Text(reasoningEffortLabel(selectedEffort), style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary)
+                Slider(
+                    value = selectedIndex.toFloat(),
+                    onValueChange = { position ->
+                        selectedEffort = orderedEfforts[position.toInt().coerceIn(0, orderedEfforts.lastIndex)]
+                    },
+                    onValueChangeFinished = { onChange(selectedEffort) },
+                    valueRange = 0f..orderedEfforts.lastIndex.toFloat(),
+                    steps = (orderedEfforts.size - 2).coerceAtLeast(0),
+                    enabled = enabled,
+                    modifier = Modifier.fillMaxWidth().testTag("reasoning_effort_slider"),
+                )
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    orderedEfforts.forEachIndexed { index, option ->
                         Text(
-                            text = reasoningEffortLabel(e),
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.weight(1f),
+                            text = stringResource(option.labelRes()),
+                            modifier = Modifier.weight(1f).clickable(enabled = enabled) {
+                                selectedEffort = option
+                                onChange(option)
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (index == selectedIndex) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                            overflow = TextOverflow.Clip,
                         )
-                        if (selected) {
-                            Icon(
-                                FeatherIcons.Check,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
                     }
                 }
+                serviceTierSelector()
             }
         }
     }

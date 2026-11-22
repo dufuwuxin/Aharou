@@ -77,6 +77,17 @@ data class CallSummary(
     val cacheUnreportedCalls: Int = 0
 )
 
+data class ProjectCallUsage(
+    val calls: Long = 0,
+    val cacheReportedCalls: Long = 0,
+    val inputTokens: Long = 0,
+    val outputTokens: Long = 0,
+    val cacheReportedInputTokens: Long = 0,
+    val cachedTokens: Long = 0,
+    val durationCalls: Long = 0,
+    val durationMillis: Long = 0,
+)
+
 /** 调用明细分页记录：单次调用 + 渠道名（LEFT JOIN ai_providers 取，渠道被删除后仍显示）。 */
 data class RecentCallRecord(
     @Embedded val record: LlmCallRecordEntity,
@@ -91,6 +102,23 @@ interface LlmCallRecordDao {
 
     @Query("DELETE FROM llm_call_records")
     suspend fun deleteAll()
+
+    /** Exact project totals; unknown cache/token-duration fields are excluded from their own denominator. */
+    @Query("""
+        SELECT COUNT(*) AS calls,
+               COALESCE(SUM(CASE WHEN cachedInputTokens >= 0 THEN 1 ELSE 0 END), 0) AS cacheReportedCalls,
+               COALESCE(SUM(inputTokens), 0) AS inputTokens,
+               COALESCE(SUM(outputTokens), 0) AS outputTokens,
+               COALESCE(SUM(CASE WHEN cachedInputTokens >= 0 THEN inputTokens ELSE 0 END), 0) AS cacheReportedInputTokens,
+               COALESCE(SUM(CASE WHEN cachedInputTokens >= 0 THEN cachedInputTokens ELSE 0 END), 0) AS cachedTokens,
+               COALESCE(SUM(CASE WHEN durationMillis IS NOT NULL THEN 1 ELSE 0 END), 0) AS durationCalls,
+               COALESCE(SUM(COALESCE(durationMillis, 0)), 0) AS durationMillis
+        FROM llm_call_records r
+        INNER JOIN chat_sessions s ON s.id = r.sessionId
+        WHERE s.workspacePath = :workspace AND r.sessionId IN (:sessionIds)
+        """)
+    fun observeProjectUsage(workspace: String, sessionIds: List<String>): Flow<ProjectCallUsage>
+
 
     /**
      * 按天聚合（本地时区：把 createdAt 平移 [tzOffsetMillis] 后再按 86400000 取整切天）。

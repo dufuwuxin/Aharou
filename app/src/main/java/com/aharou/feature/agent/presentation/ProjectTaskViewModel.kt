@@ -4,6 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.aharou.feature.agent.data.task.ProjectTaskRepository
 import com.aharou.feature.agent.data.local.dao.ToolCallReceiptDao
+import com.aharou.feature.agent.data.local.dao.LlmCallRecordDao
+import com.aharou.feature.agent.data.local.dao.ProjectCallUsage
 import com.aharou.feature.agent.data.local.entity.ToolCallReceiptEntity
 import com.aharou.feature.agent.domain.task.ProjectTask
 import com.aharou.feature.agent.domain.task.ProjectFlowController
@@ -57,12 +59,32 @@ class ProjectTaskViewModel @Inject constructor(
     private val projectWorkflow: com.aharou.feature.agent.domain.task.ProjectWorkflowRunner,
     private val flows: ProjectFlowController,
     private val workspaces: javax.inject.Provider<com.aharou.feature.workspace.data.repository.WorkspaceRepository>,
-    private val toolCallReceiptDao: ToolCallReceiptDao? = null
+    private val toolCallReceiptDao: ToolCallReceiptDao? = null,
+    private val llmCallRecordDao: LlmCallRecordDao? = null
 ) : ViewModel() {
     private val mutable = MutableStateFlow(ProjectTaskUiState())
     val state = mutable.asStateFlow()
 
     /** Read-only project activity: only sessions explicitly linked to this project's tasks are admitted. */
+    fun projectCallUsage(workspace: String, sessionIds: List<String>): Flow<ProjectCallUsage> {
+        val ids = sessionIds.filter { it.isNotBlank() }.distinct()
+        val dao = llmCallRecordDao ?: return flowOf(ProjectCallUsage())
+        if (workspace.isBlank() || ids.isEmpty()) return flowOf(ProjectCallUsage())
+        val streams = ids.chunked(800).map { dao.observeProjectUsage(workspace, it) }
+        return if (streams.size == 1) streams.single() else combine(streams) { batches ->
+            ProjectCallUsage(
+                calls = batches.sumOf { it.calls },
+                cacheReportedCalls = batches.sumOf { it.cacheReportedCalls },
+                inputTokens = batches.sumOf { it.inputTokens },
+                outputTokens = batches.sumOf { it.outputTokens },
+                cacheReportedInputTokens = batches.sumOf { it.cacheReportedInputTokens },
+                cachedTokens = batches.sumOf { it.cachedTokens },
+                durationCalls = batches.sumOf { it.durationCalls },
+                durationMillis = batches.sumOf { it.durationMillis },
+            )
+        }
+    }
+
     fun projectReceipts(workspace: String, sessionIds: List<String>, limit: Int = 300): Flow<List<ToolCallReceiptEntity>> {
         val ids = sessionIds.filter { it.isNotBlank() }.distinct()
         val dao = toolCallReceiptDao ?: return flowOf(emptyList())

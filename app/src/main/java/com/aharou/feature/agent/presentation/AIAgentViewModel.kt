@@ -3034,10 +3034,10 @@ class AIAgentViewModel @Inject constructor(
      * 「重新生成」：旧回答不删，而是连同本轮的工具过程一起标记为变体组的一版（退出上下文回放），
      * 删掉本轮的用户消息后原样重跑，把新产出标成下一版；气泡下方据此左右切换。
      */
-    fun regenerateMessage(messageId: String) = viewModelScope.launch {
-        val sessionId = _currentSessionId.value ?: return@launch
+    fun regenerateMessage(messageId: String, targetSessionId: String? = null) = viewModelScope.launch {
+        val sessionId = targetSessionId ?: _currentSessionId.value ?: return@launch
         val target = agentMessageDao.getMessageById(messageId) ?: return@launch
-        if (target.role != MessageRole.ASSISTANT.name) return@launch
+        if (target.sessionId != sessionId || target.role != MessageRole.ASSISTANT.name) return@launch
         val all = agentMessageDao.getMessagesBySessionOnce(sessionId)
         val userMessage = all.lastOrNull {
             it.role == MessageRole.USER.name && !it.isCompactionMarker && !it.isContextSummary &&

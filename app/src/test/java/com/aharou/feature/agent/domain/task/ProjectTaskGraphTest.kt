@@ -16,6 +16,8 @@ class ProjectTaskGraphTest {
         val legacy = kotlinx.serialization.json.Json.decodeFromString(ProjectTask.serializer(),
             """{"id":"old","workspace":"w","title":"old","requirement":"unchanged"}""")
         assertNull(legacy.projectId)
+        assertNull(legacy.runStartedAtEpochMs)
+        assertNull(legacy.lastRunDurationMs)
     }
     @Test fun missingParentCrossWorkspaceAndCyclesAreRejected() {
         assertNotNull(ProjectTaskGraph.validate(listOf(task("a", "missing"))))
@@ -33,6 +35,17 @@ class ProjectTaskGraphTest {
         assertEquals(ProjectTaskStatus.READY, changed.status)
         assertNotNull(ProjectTaskGraph.validate(listOf(changed.copy(status = ProjectTaskStatus.DONE))))
     }
+    @Test fun requirementChangesStopActiveTimerAndStoreElapsedDuration() {
+        val running = task("timed-edit").copy(status = ProjectTaskStatus.RUNNING,
+            runStartedAtEpochMs = System.currentTimeMillis() - 1_000)
+
+        val revised = ProjectTaskGraph.revise(running, running.copy(requirement = "new requirement"), 2)
+
+        assertEquals(ProjectTaskStatus.READY, revised.status)
+        assertNull(revised.runStartedAtEpochMs)
+        assertTrue(requireNotNull(revised.lastRunDurationMs) >= 1_000)
+    }
+
     @Test fun participantChangesRevokeAcceptanceAndInvalidateDependentDeliveries() {
         for (state in listOf(ProjectTaskStatus.REVIEW, ProjectTaskStatus.DONE)) {
             val old = task("a").copy(owner = "builder", status = state, acceptance = "checked",
@@ -65,7 +78,8 @@ class ProjectTaskGraphTest {
     }
     @Test fun jsonRoundtripPreservesTaskSessionAndAcceptanceVersions() {
         val original = task("a").copy(sessionIds = listOf("s1", "s2"), evidenceRefs = listOf("src/file:8"),
-            acceptance = "tested", acceptedRequirementsVersion = 1, status = ProjectTaskStatus.DONE, version = 7)
+            acceptance = "tested", acceptedRequirementsVersion = 1, status = ProjectTaskStatus.DONE, version = 7,
+            lastRunDurationMs = 1_234L)
         val repositoryJson = kotlinx.serialization.json.Json { encodeDefaults = true }
         val encoded = repositoryJson.encodeToString(ProjectTask.serializer(), original)
         assertTrue(encoded.contains("\"order\":${original.order}"))
@@ -88,6 +102,16 @@ class ProjectTaskGraphTest {
             assertEquals(recovered, ProjectTaskGraph.recoverInterrupted(recovered))
         }
     }
+    @Test fun repeatedInterruptedRecoveryPreservesPreviouslyMeasuredDuration() {
+        val stopped = task("timed-recovery").copy(status = ProjectTaskStatus.BLOCKED,
+            executionReason = "INTERRUPTED_PREVIOUS_PROCESS", lastRunDurationMs = 3_200L)
+
+        val recoveredAgain = ProjectTaskGraph.recoverInterrupted(stopped)
+
+        assertEquals(3_200L, recoveredAgain.lastRunDurationMs)
+        assertEquals(stopped, recoveredAgain)
+    }
+
     @Test fun coldRecoveryInterruptsOnlyPersistedRunningAndPreservesHistory() {
         val running = task("a").copy(status = ProjectTaskStatus.RUNNING, sessionIds = listOf("old-session"))
         val recovered = ProjectTaskGraph.recoverInterrupted(running)
@@ -97,6 +121,17 @@ class ProjectTaskGraphTest {
         assertEquals(recovered, ProjectTaskGraph.recoverInterrupted(recovered))
         assertEquals(task("b"), ProjectTaskGraph.recoverInterrupted(task("b")))
     }
+    @Test fun interruptedAttemptRecordsElapsedTimeAndClearsActiveStart() {
+        val running = task("timed").copy(status = ProjectTaskStatus.RUNNING,
+            runStartedAtEpochMs = System.currentTimeMillis() - 1_000)
+
+        val recovered = ProjectTaskGraph.recoverInterrupted(running)
+
+        assertEquals(ProjectTaskStatus.BLOCKED, recovered.status)
+        assertNull(recovered.runStartedAtEpochMs)
+        assertTrue(requireNotNull(recovered.lastRunDurationMs) >= 1_000)
+    }
+
     @Test fun optionalContextReadErrorReportsUnavailableAndMissingSessionNeverReadsTaskStore() {
         var reads = 0
         val unavailable = ProjectTaskGraph.currentContextTask("s", "w") { reads++; error("corrupt") }

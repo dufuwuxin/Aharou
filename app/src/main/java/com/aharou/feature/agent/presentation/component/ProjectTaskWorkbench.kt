@@ -59,6 +59,7 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
     var deletingBranchId by rememberSaveable(projectId) { mutableStateOf<String?>(null) }
     val rootId = ProjectTaskMapLayout.rootId(projectId)
     var viewMode by rememberSaveable(projectId) { mutableStateOf("tree") }
+    var workbenchTab by rememberSaveable(projectId) { mutableStateOf("tasks") }
     var menuOpen by rememberSaveable(projectId) { mutableStateOf(false) }
     var expandedId by rememberSaveable(projectId) { mutableStateOf<String?>(null) }
     var collapsed by remember(projectId) { mutableStateOf(emptySet<String>()) }
@@ -177,12 +178,37 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
             }
         }
         approvals()
+        if (viewMode == "tree") Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+            TextButton(enabled = !state.busy && !planning, onClick = { addingParentId = null; adding = true },
+                modifier = Modifier.testTag("project_new_requirement_branch")) {
+                Text(stringResource(R.string.project_workbench_new_branch))
+            }
+        }
         }
     }
+    val sessionIds = remember(project?.flowSessionIds, tasks) {
+        (project?.flowSessionIds.orEmpty() + tasks.flatMap { it.sessionIds + it.processSessionIds }).distinct()
+    }
+    val projectWorkspace = project?.workspace.orEmpty()
+    val receiptsFlow = remember(viewModel, projectWorkspace, sessionIds) {
+        viewModel.projectReceipts(projectWorkspace, sessionIds)
+    }
+    val callUsageFlow = remember(viewModel, projectWorkspace, sessionIds) {
+        viewModel.projectCallUsage(projectWorkspace, sessionIds)
+    }
+    val receipts by receiptsFlow.collectAsStateWithLifecycle(initialValue = emptyList())
+    val callUsage by callUsageFlow.collectAsStateWithLifecycle(
+        initialValue = com.aharou.feature.agent.data.local.dao.ProjectCallUsage())
     val dragConnection = rememberContentDragConnection(onContentDrag)
     BoxWithConstraints(Modifier.fillMaxSize().statusBarsPadding().nestedScroll(dragConnection).padding(horizontal = Spacing.sm)) {
             val processHeight = (maxHeight * 0.9f).coerceIn(240.dp, 640.dp)
-            if (viewMode == "map") Column(Modifier.fillMaxSize()) {
+            Column(Modifier.fillMaxSize()) {
+                ProjectWorkbenchNavigation(selected = workbenchTab, onSelect = { workbenchTab = it })
+                if (workbenchTab != "tasks") {
+                    ProjectWorkbenchPanel(tab = workbenchTab, tasks = executableTasks,
+                        receipts = receipts, callUsage = callUsage,
+                        onOpenTask = { task -> workbenchTab = "tasks"; toggle(task.id) })
+                } else if (viewMode == "map") Column(Modifier.fillMaxSize()) {
                 Box(Modifier.weight(1f).fillMaxWidth()) {
                 ProjectTaskMap(projectId, stringResource(R.string.project_main_conversation), tasks, processId = expandedId,
                 onOpenProcess = { id -> expandedId = id; viewModel.select(id)
@@ -206,7 +232,7 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
                         }
                     }
                 }
-            } else Column(Modifier.fillMaxSize()) {
+            } else {
                 header {}
                 LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("project_tree_body"), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
                 item(key = "project-root") {
@@ -263,6 +289,7 @@ fun ProjectTaskWorkbench(projectId: String, viewModel: ProjectTaskViewModel, onB
                         }
                     }
                 }
+            }
             }
         }
     }

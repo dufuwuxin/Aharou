@@ -45,6 +45,9 @@ object ProjectTaskGraph {
         if (task.status != ProjectTaskStatus.RUNNING &&
             !(task.status == ProjectTaskStatus.BLOCKED && task.executionReason == "INTERRUPTED_PREVIOUS_PROCESS")) return task
         return task.copy(status = ProjectTaskStatus.BLOCKED, executionReason = "INTERRUPTED_PREVIOUS_PROCESS",
+            lastRunDurationMs = task.runStartedAtEpochMs?.let { (System.currentTimeMillis() - it).coerceAtLeast(0) }
+                ?: task.lastRunDurationMs,
+            runStartedAtEpochMs = null,
             processMembers = task.processMembers.mapValues { (_, member) ->
                 if (member.outcome == "RUNNING") member.copy(outcome = "STOPPED", reason = "INTERRUPTED_PREVIOUS_PROCESS") else member
             })
@@ -155,6 +158,9 @@ object ProjectTaskGraph {
             requirementsVersion = (old?.requirementsVersion ?: 1) + if (changed) 1 else 0,
             acceptedRequirementsVersion = if (changed) null else proposed.acceptedRequirementsVersion,
             executionReason = if (changed) "REQUIREMENTS_CHANGED" else proposed.executionReason,
+            runStartedAtEpochMs = if (changed) null else proposed.runStartedAtEpochMs,
+            lastRunDurationMs = if (changed && proposed.runStartedAtEpochMs != null)
+                (System.currentTimeMillis() - proposed.runStartedAtEpochMs).coerceAtLeast(0) else proposed.lastRunDurationMs,
             status = if (changed && proposed.status in setOf(ProjectTaskStatus.DONE, ProjectTaskStatus.REVIEW, ProjectTaskStatus.RUNNING)) ProjectTaskStatus.READY else proposed.status)
     }
 

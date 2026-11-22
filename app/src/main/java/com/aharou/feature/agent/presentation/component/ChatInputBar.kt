@@ -178,6 +178,7 @@ internal fun ChatInputBar(
     onToggleMode: (AgentMode) -> Unit,
     reasoningEffort: ReasoningEffort,
     onReasoningEffortChange: (ReasoningEffort) -> Unit,
+    onSelectServiceTier: (String?) -> Unit = {},
     pendingAttachments: List<PendingUploadAttachment>,
     onRemoveAttachment: (Int) -> Unit,
     onReadAttachment: suspend (String) -> String?,
@@ -543,47 +544,7 @@ internal fun ChatInputBar(
                         modifier = Modifier.weight(1f).horizontalScroll(rememberScrollState()),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        val modeColor = when (currentMode) {
-                            AgentMode.PLAN -> MaterialTheme.colorScheme.primaryContainer
-                            AgentMode.AUTO -> MaterialTheme.semanticColors.warningContainer
-                            AgentMode.ALLOW -> MaterialTheme.colorScheme.error
-                            AgentMode.BUILD -> MaterialTheme.semanticColors.success
-                        }
-                        val modeTextColor = when (currentMode) {
-                            AgentMode.PLAN -> MaterialTheme.colorScheme.onPrimaryContainer
-                            AgentMode.AUTO -> MaterialTheme.semanticColors.onWarningContainer
-                            AgentMode.ALLOW -> MaterialTheme.colorScheme.onError
-                            AgentMode.BUILD -> MaterialTheme.semanticColors.onSuccess
-                        }
-                        Surface(
-                            shape = RoundedCornerShape(16.dp),
-                            color = modeColor,
-                            modifier = Modifier
-                                .clickable {
-                                    val nextMode = when (currentMode) {
-                                        AgentMode.BUILD -> AgentMode.PLAN
-                                        AgentMode.PLAN -> AgentMode.AUTO
-                                        AgentMode.AUTO -> AgentMode.ALLOW
-                                        AgentMode.ALLOW -> AgentMode.BUILD
-                                    }
-                                    onToggleMode(nextMode)
-                                }
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .widthIn(min = 46.dp)
-                                    .padding(horizontal = 8.dp, vertical = 4.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = currentMode.name,
-                                    style = MaterialTheme.typography.labelSmall.copy(
-                                        fontWeight = FontWeight.Bold,
-                                        color = modeTextColor
-                                    )
-                                )
-                            }
-                        }
+                        AgentModeSelector(currentMode, onToggleMode)
                         Spacer(Modifier.width(Spacing.xs))
 
                         ModelIconButton(
@@ -610,10 +571,13 @@ internal fun ChatInputBar(
                         // 按声明过滤会让用户选不到「中」这类档位；声明只用来在弹层里提示「未必支持」。
                         ReasoningEffortSelector(
                             effort = reasoningEffort,
-                            availableEfforts = ReasoningEffort.entries,
                             onChange = onReasoningEffortChange,
                             enabled = !isBusy,
-                            modelMetadata = activeProvider?.let { modelMetadata[modelMetadataKey(it.id, it.effectiveModel)] }
+                            modelMetadata = activeProvider?.let { modelMetadata[modelMetadataKey(it.id, it.effectiveModel)] },
+                            serviceTierSummary = openAIServiceTierSummary(activeProvider),
+                            serviceTierSelector = {
+                                OpenAIServiceTierSelector(activeProvider, !isBusy, onSelectServiceTier)
+                            }
                         )
                     }
                     UploadIconButton(

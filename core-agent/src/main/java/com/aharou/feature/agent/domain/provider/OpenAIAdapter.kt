@@ -5,6 +5,7 @@ import com.aharou.feature.agent.data.remote.openai.OpenAIApi
 import com.aharou.feature.settings.domain.model.ProviderType
 import com.aharou.feature.settings.domain.model.defaultProviderApiPath
 import java.io.IOException
+import java.net.URI
 import com.aharou.feature.agent.data.remote.openai.ChatCompletionRequest
 import com.aharou.feature.agent.data.remote.openai.ThinkingConfig
 import com.aharou.feature.agent.data.remote.openai.OpenAIChatMessage
@@ -78,6 +79,15 @@ class OpenAIAdapter @Inject constructor(
 
     private val serviceTier: String?
         get() = OpenAIServiceTier.value(resolveCustomHeaders(customHeaders, logSessionId, apiKey))
+
+    private fun promptCacheKey(): String? =
+        logSessionId?.takeIf { chatCacheKeyEnabled || isOfficialOpenAiEndpoint() }
+
+    private fun isOfficialOpenAiEndpoint(): Boolean = runCatching {
+        URI(baseUrl.trim()).let { uri ->
+            uri.scheme.equals("https", ignoreCase = true) && uri.host.equals("api.openai.com", ignoreCase = true)
+        }
+    }.getOrDefault(false)
     private val effectiveResponses: Boolean
         get() = useResponseApi || serviceTier == "ultrafast"
 
@@ -142,7 +152,7 @@ class OpenAIAdapter @Inject constructor(
             tools = toolDefs,
             tool_choice = if (toolDefs != null) "auto" else null,
             stream = false,
-            prompt_cache_key = if (chatCacheKeyEnabled) logSessionId else null
+            prompt_cache_key = promptCacheKey()
         ).withThinkingDisabled(reasoningEffort)
         val seq = AILogger.logRequest(logSessionId, "OpenAI", model, "POST", url, request)
 
@@ -434,7 +444,7 @@ class OpenAIAdapter @Inject constructor(
             tool_choice = if (toolDefs != null) "auto" else null,
             stream = true,
             stream_options = StreamOptions(include_usage = true),
-            prompt_cache_key = if (chatCacheKeyEnabled) logSessionId else null
+            prompt_cache_key = promptCacheKey()
         ).withThinkingDisabled(reasoningEffort)
         val seq = AILogger.logRequest(logSessionId, "OpenAI", model, "POST", url, request)
         // 原始 SSE 分批落盘（见 AILogger.beginRawSse），本轮结束在 finally 收尾。

@@ -1470,7 +1470,7 @@ fun AIChatPanel(
                 inputs = dashboardInputs,
                 onInputChange = { id, text -> dashboardInputs = dashboardInputs + (id to text) }
             ) {
-                FloatingProjectComposer(composer, inputText) { inputFocus ->
+                FloatingProjectComposer(composer) { inputFocus ->
                 ChatInputBar(
                     focusRequester = inputFocus,
                     value = inputText,
@@ -1499,6 +1499,7 @@ fun AIChatPanel(
                     onToggleMode = { viewModel.setSessionMode(it) },
                     reasoningEffort = reasoningEffort,
                     onReasoningEffortChange = { viewModel.setSessionReasoningEffort(it) },
+                    onSelectServiceTier = { saveOpenAIServiceTier(activeProvider, it, settingsViewModel) },
                     pendingAttachments = pendingAttachments,
                     onRemoveAttachment = ::removePendingAttachment,
                     onReadAttachment = { path -> viewModel.readAttachmentText(path) },

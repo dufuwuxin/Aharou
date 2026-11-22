@@ -363,6 +363,10 @@ class ProjectRequirementBranchTest {
         compose.onNodeWithTag("diagnostics_close").performClick()
         compose.waitForIdle()
         fun send(text: String) {
+            if (compose.onAllNodesWithTag("project_composer_capsule").fetchSemanticsNodes().isNotEmpty()) {
+                compose.onNodeWithContentDescription(compose.activity.getString(R.string.project_expand_input)).assertExists()
+                compose.onNodeWithText(compose.activity.getString(R.string.project_chat_input_hint)).assertDoesNotExist()
+            }
             if (compose.onAllNodesWithTag("project_composer_capsule").fetchSemanticsNodes().isNotEmpty())
                 compose.onNodeWithTag("project_composer_capsule").performClick()
             compose.onNode(hasSetTextAction()).performTextInput(text)
