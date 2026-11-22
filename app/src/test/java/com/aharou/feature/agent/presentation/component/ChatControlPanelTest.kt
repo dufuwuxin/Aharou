@@ -56,7 +56,7 @@ class ChatControlPanelTest {
         compose.onNodeWithText("速度档位: Fast（快速）").performClick()
         compose.onNodeWithText("默认（不指定档位）").performClick()
         compose.runOnIdle {
-            assertEquals(ReasoningEffort.DEFAULT, selectedEffort)
+            assertEquals(ReasoningEffort.NONE, selectedEffort)
             assertEquals(null, selectedTier)
         }
     }
