@@ -465,12 +465,13 @@ class BuiltinContextEntriesTest {
             mockk(), skills, mockk(), mockk(), mockk(), teams, rules, mockk(), mockk(),
             profiles, mockk(), taskContext, store, library)
         val context = com.aharou.feature.agent.domain.model.AgentContext(null, null, temp.root.path, null)
-        val text = provider.build(context)
+        val request = provider.buildNativeRequest(context)
+        val text = request.system
         assertTrue(text.contains(main.content))
         assertFalse(text.contains(member.content))
-        assertTrue(text.contains(temp.root.path))
-        assertFalse(text.contains("{{AICODE_"))
-        assertFalse(text.contains("README SHA-256="))
+        assertTrue((text + request.transientContext).contains(temp.root.path))
+        assertFalse((text + request.transientContext).contains("{{AICODE_"))
+        assertFalse((text + request.transientContext).contains("README SHA-256="))
         verify(exactly = 1) { store.record(null, text) }
         val role = mockk<com.aharou.feature.agent.domain.subagent.AgentDefinition>()
         every { role.name } returns "fixture-member"

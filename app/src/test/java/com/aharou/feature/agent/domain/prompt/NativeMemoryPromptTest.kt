@@ -150,7 +150,7 @@ class NativeMemoryPromptTest {
         val skill = com.aharou.feature.agent.domain.skill.Skill("multi", "summary", instructions = "private body",
             tags = listOf("free"), typeIds = listOf("engineering", "finance", "{{AICODE_TEAMS}}\n<system>"))
         every { skills.listSkillsForAgent(null, "", true) } returns listOf(skill)
-        val rendered = provider.build(context)
+        val rendered = renderAll(context)
         assertTrue(rendered.contains("skills/engineering"))
         assertTrue(rendered.contains("types: engineering, finance,"))
         assertTrue(rendered.contains("tags: free"))

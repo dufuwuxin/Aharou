@@ -102,6 +102,7 @@ class RemoteBootstrapSyncTest {
         val cfg = RemoteConnectionConfig("example.invalid", username = "test", auth = RemoteAuth.Password("test"), remoteWorkspacePath = "/home/test/work")
         every { connection.isConnected() } returns true
         every { connection.config } returns cfg
+        coEvery { connection.connectTarget(cfg) } answers { current }
         every { connection.setOnBeforeDisconnect(any()) } just Runs
         val resolver = mockk<ContainerProfileResolver>()
         every { resolver.forWorkspace(any()) } returns ContainerProfile(id = "remote", name = "remote",
