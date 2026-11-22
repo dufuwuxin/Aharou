@@ -30,10 +30,39 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import java.io.IOException
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Named
 import javax.inject.Singleton
 import kotlin.coroutines.resumeWithException
+
+internal fun isSecureOAuthEndpoint(endpoint: String): Boolean {
+    val url = endpoint.toHttpUrlOrNull() ?: return false
+    if (url.username.isNotEmpty() || url.password.isNotEmpty() || url.fragment != null) return false
+    val loopbackV4 = Regex("127\\.(?:[0-9]{1,3}\\.){2}[0-9]{1,3}").matches(url.host) &&
+        url.host.split('.').all { octet -> octet.toIntOrNull()?.let { it in 0..255 } == true }
+    return url.isHttps || url.host == "localhost" || loopbackV4 || url.host == "::1"
+}
+
+internal fun singleOAuthQueryParameter(uri: Uri, name: String): String? =
+    uri.getQueryParameters(name).singleOrNull()
+
+internal fun matchesOAuthState(expected: String, actual: String?): Boolean =
+    expected.isNotBlank() && !actual.isNullOrBlank() && actual == expected
+
+internal fun matchesOAuthRedirect(expected: String, actual: String): Boolean {
+    val expectedUri = Uri.parse(expected)
+    val actualUri = Uri.parse(actual)
+    return expectedUri.scheme.equals(actualUri.scheme, ignoreCase = true) &&
+        expectedUri.host.equals(actualUri.host, ignoreCase = true) &&
+        expectedUri.port == actualUri.port &&
+        expectedUri.encodedPath == actualUri.encodedPath &&
+        expectedUri.userInfo == null && actualUri.userInfo == null &&
+        expectedUri.fragment == null && actualUri.fragment == null &&
+        expectedUri.queryParameterNames.all { name ->
+            actualUri.getQueryParameters(name) == expectedUri.getQueryParameters(name)
+        }
+}
 
 /**
  * MCP OAuth 2.1 客户端（MCP 授权规范：RFC 9728 + RFC 8414 + RFC 7591 + RFC 7636）。
@@ -93,7 +122,7 @@ class McpOAuthClient @Inject constructor(
     )
 
     // 同一时刻只会有一次交互式授权（UI 单飞），用 Map 兜住多 server 的并发场景。
-    private val pending = HashMap<String, PendingAuth>()
+    private val pending = ConcurrentHashMap<String, PendingAuth>()
 
     // ───────────────────────── 发现 ─────────────────────────
 
@@ -114,6 +143,7 @@ class McpOAuthClient @Inject constructor(
             val authEp = jsonStr(meta, "authorization_endpoint")
             val tokenEp = jsonStr(meta, "token_endpoint")
             if (authEp.isNullOrBlank() || tokenEp.isNullOrBlank()) continue
+            if (!isSecureOAuthEndpoint(authEp) || !isSecureOAuthEndpoint(tokenEp)) continue
             return@withContext Discovery(
                 authorizationServer = authServer,
                 authorizationEndpoint = authEp,
@@ -152,6 +182,9 @@ class McpOAuthClient @Inject constructor(
         redirectUri: String
     ): BeginResult = withContext(Dispatchers.IO) {
         val discovery = discover(serverUrl)
+        if (!isSecureOAuthEndpoint(discovery.authorizationEndpoint)) {
+            throw McpOAuthFlowException(McpOAuthErrorKind.DISCOVERY_FAILED, "授权端点必须使用 HTTPS 或本机回环地址")
+        }
         var cid = clientId.trim()
         var secret = clientSecret.trim()
         if (cid.isEmpty()) {
@@ -204,6 +237,7 @@ class McpOAuthClient @Inject constructor(
         redirectUri: String,
         scopes: List<String>
     ): Pair<String, String> {
+        requireSecureOAuthEndpoint(registrationEndpoint)
         val body = buildJsonObject {
             put("client_name", "Aharou")
             put("application_type", "native")
@@ -218,7 +252,7 @@ class McpOAuthClient @Inject constructor(
             .header("Accept", "application/json")
             .post(JSON.encodeToString(JsonObject.serializer(), body).toRequestBody(JSON_MEDIA))
             .build()
-        val resp = send(req)
+        val resp = send(req, followRedirects = false)
         val obj = parseObject(resp.body)
         if (!resp.ok) {
             throw McpOAuthFlowException(McpOAuthErrorKind.DCR_FAILED, errorDetail(obj) ?: "HTTP ${resp.code}")
@@ -234,23 +268,39 @@ class McpOAuthClient @Inject constructor(
      * 授权第二步：用回调 URL 里的 code 换 token，成功后落盘并返回最新配置。
      * 回调 URL 由 WebView 在拦截到 [McpOAuthConfig.redirectUri] 时传入。
      */
+    fun isPendingAuthorizationCallback(serverName: String, redirectUrl: String): Boolean =
+        pending[serverName]?.let { callbackParametersMatch(it, redirectUrl) } == true
+
+    private fun callbackParametersMatch(p: PendingAuth, redirectUrl: String): Boolean {
+        if (!matchesOAuthRedirect(p.base.redirectUri, redirectUrl)) return false
+        val uri = Uri.parse(redirectUrl)
+        if (!matchesOAuthState(p.state, singleOAuthQueryParameter(uri, "state"))) return false
+        val codes = uri.getQueryParameters("code")
+        val errors = uri.getQueryParameters("error")
+        val descriptions = uri.getQueryParameters("error_description")
+        return codes.size + errors.size == 1 && descriptions.size <= 1 &&
+            (codes.singleOrNull()?.isNotBlank() == true || errors.singleOrNull()?.isNotBlank() == true)
+    }
+
     suspend fun completeAuthorization(serverName: String, redirectUrl: String): McpOAuthConfig =
         withContext(Dispatchers.IO) {
-            val p = pending.remove(serverName)
+            val p = pending[serverName]
                 ?: throw McpOAuthFlowException(McpOAuthErrorKind.INVALID_RESPONSE, "授权会话已失效，请重新发起")
-            val uri = Uri.parse(redirectUrl)
-            uri.getQueryParameter("error")?.let { err ->
-                throw McpOAuthFlowException(
-                    McpOAuthErrorKind.AUTH_DENIED,
-                    uri.getQueryParameter("error_description") ?: err
-                )
+            if (!callbackParametersMatch(p, redirectUrl)) {
+                throw McpOAuthFlowException(McpOAuthErrorKind.INVALID_RESPONSE, "授权回调校验失败")
             }
-            val code = uri.getQueryParameter("code")
-                ?: throw McpOAuthFlowException(McpOAuthErrorKind.INVALID_RESPONSE, "回调缺少 code")
-            uri.getQueryParameter("state")?.let { st ->
-                if (p.state.isNotBlank() && st != p.state) {
-                    throw McpOAuthFlowException(McpOAuthErrorKind.INVALID_RESPONSE, "state 校验失败")
+            val uri = Uri.parse(redirectUrl)
+            val error = singleOAuthQueryParameter(uri, "error")
+            if (error != null) {
+                if (!pending.remove(serverName, p)) {
+                    throw McpOAuthFlowException(McpOAuthErrorKind.INVALID_RESPONSE, "授权会话已被处理，请重新发起")
                 }
+                val description = singleOAuthQueryParameter(uri, "error_description")
+                throw McpOAuthFlowException(McpOAuthErrorKind.AUTH_DENIED, description ?: error)
+            }
+            val code = requireNotNull(singleOAuthQueryParameter(uri, "code"))
+            if (!pending.remove(serverName, p)) {
+                throw McpOAuthFlowException(McpOAuthErrorKind.INVALID_RESPONSE, "授权会话已被处理，请重新发起")
             }
             val form = FormBody.Builder()
                 .add("grant_type", "authorization_code")
@@ -283,12 +333,13 @@ class McpOAuthClient @Inject constructor(
     }
 
     private suspend fun postToken(tokenEndpoint: String, form: FormBody): TokenResponse {
+        requireSecureOAuthEndpoint(tokenEndpoint)
         val req = Request.Builder()
             .url(tokenEndpoint)
             .header("Accept", "application/json")
             .post(form)
             .build()
-        val resp = send(req)
+        val resp = send(req, followRedirects = false)
         val obj = parseObject(resp.body)
         if (!resp.ok) {
             throw McpOAuthFlowException(
@@ -376,14 +427,19 @@ class McpOAuthClient @Inject constructor(
     }
 
     private suspend fun getJson(url: String): JsonObject? = withContext(Dispatchers.IO) {
+        requireSecureOAuthEndpoint(url)
         val req = Request.Builder().url(url).header("Accept", "application/json").get().build()
-        val resp = send(req)
+        val resp = send(req, followRedirects = false)
         if (!resp.ok) return@withContext null
         parseObject(resp.body)
     }
 
-    private suspend fun send(req: Request): HttpResult = withContext(Dispatchers.IO) {
-        awaitCall(client.newCall(req)).use { resp ->
+    private suspend fun send(req: Request, followRedirects: Boolean = true): HttpResult = withContext(Dispatchers.IO) {
+        val requestClient = if (followRedirects) client else client.newBuilder()
+            .followRedirects(false)
+            .followSslRedirects(false)
+            .build()
+        awaitCall(requestClient.newCall(req)).use { resp ->
             val body = resp.body?.string().orEmpty()
             if (!resp.isSuccessful) FileLogger.w(TAG, "${req.url.encodedPath} → HTTP ${resp.code}")
             HttpResult(resp.code, body)
@@ -421,6 +477,15 @@ class McpOAuthClient @Inject constructor(
 
     private fun errorDetail(obj: JsonObject?): String? =
         jsonStr(obj, "error_description") ?: jsonStr(obj, "error") ?: jsonStr(obj, "message")
+
+    private fun requireSecureOAuthEndpoint(endpoint: String) {
+        if (!isSecureOAuthEndpoint(endpoint)) {
+            throw McpOAuthFlowException(
+                McpOAuthErrorKind.DISCOVERY_FAILED,
+                "OAuth 端点必须使用 HTTPS 或本机回环地址"
+            )
+        }
+    }
 
     private fun originOf(url: String): String? {
         val parsed = url.toHttpUrlOrNull() ?: return null

@@ -119,13 +119,20 @@ class AIEditorApp : Application(), Configuration.Provider {
                 ?: context.packageName
         }
 
+        private fun isContentProcessName(name: String): Boolean =
+            name.endsWith(":content_parser") || name.endsWith(":content_zygote")
+
+        internal fun isContentProcess(context: android.content.Context): Boolean =
+            (Build.VERSION.SDK_INT >= 28 && android.os.Process.isIsolated()) ||
+                isContentProcessName(getProcessNameCompat(context))
+
         /** 判断当前进程是否为专门渲染崩溃错误页的子进程。 */
         fun isCrashProcess(context: android.content.Context): Boolean =
             getProcessNameCompat(context).endsWith(":crash")
     }
 
     override fun attachBaseContext(base: android.content.Context) {
-        if (getProcessNameCompat(base).endsWith(":account_login")) {
+        if (isContentProcess(base) || getProcessNameCompat(base).endsWith(":account_login")) {
             super.attachBaseContext(base)
             return
         }
@@ -373,10 +380,11 @@ class AIEditorApp : Application(), Configuration.Provider {
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun onCreate() {
-        if (isCrashProcess(this) || getProcessNameCompat(this).endsWith(":account_login")) {
+        if (isContentProcess(this) || isCrashProcess(this) || getProcessNameCompat(this).endsWith(":account_login")) {
             // 轻量子进程不能触发 Hilt 业务注入、数据库或主进程常驻服务。
             return
         }
+        com.aharou.core.content.ContentProcessPolicy.capture(this)
         com.aharou.feature.agent.domain.container.BuiltinAssetUpgradeCoordinator.initialize(this)
         super.onCreate()
         logDeviceInfo()

@@ -20,6 +20,8 @@
 
 ## 本轮新增能力
 
+- 内容进程实验：设置页「隔离内容进程」与 `app.experiments.content.isolated_process` 同存储；「App Zygote 进程」与 `app.experiments.content.app_zygote` 同存储。均默认关闭、进程启动时冻结，修改后重启生效。Zygote 开启隐含隔离，API29以下降为普通隔离；真实消费者为 webfetch 的 HTML 解析与正文清洗，经 PFD 传输、有限并发并支持取消/失败回退，不迁移容器、数据库、联网或 WebView 渲染。设备启动与内存收益须实测，不由开关和 Manifest 声明推断。
+
 - 上下文分层管理：用户在偏好设置中选均衡/节省/更多细节，或展开高级参数；Agent 通过 config `app.context_trim_rounds`、`app.soft_compaction_threshold_percent`、`app.compaction_threshold_percent`、`app.context_preserve_summary`、`app.context_tool_result_keep_recent` 与 `app.context_preset` 读取/修改同一仓库。预设一次写入五项，名称从实际数值推导，自定义不自动覆盖。参数只改变真实发送投影，不删除聊天；成功压缩仍沿用 MemoryDigestWriter 的 DIGEST 留档、按需检索而不常驻，不将摘要或检索命中自动提升为长期偏好；WARN/MAX 关系沿用原口径。`app.context_preset` 接受预设名称，读取返回名称及五项完整参数快照；审计保留并可原样回写该快照，自定义参数也能在重建配置入口后恢复。
 - 压缩原文检索：`sessions action=search` 新增严格布尔可选参数 `include_compacted`（默认 false）；显式 true 才搜索当前工作区压缩归档原文，命中带 `messageId`。摘要、marker、被排除消息和外工作区不返回；`read` 仍可分页恢复原文，检索结果只作普通工具结果。原生工具目录动态提供参数，默认原生条目无需新增或覆盖用户正文。
 

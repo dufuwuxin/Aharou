@@ -1,6 +1,7 @@
 package com.aharou.feature.settings.domain
 
 import com.aharou.R
+import com.aharou.core.content.ContentProcessPolicy
 
 /**
  * 内置实验清单。每项对应一个配置字段 `app.experiments.<key>` 与设置页的一行，
@@ -21,6 +22,18 @@ object ExperimentCatalog {
             titleRes = R.string.experiment_quote_reply,
             descriptionRes = R.string.experiment_quote_reply_desc,
             defaultEnabled = true
+        ),
+        Experiment(
+            key = ContentProcessPolicy.ISOLATED_PROCESS,
+            titleRes = R.string.experiment_content_isolated,
+            descriptionRes = R.string.experiment_content_isolated_desc,
+            defaultEnabled = false
+        ),
+        Experiment(
+            key = ContentProcessPolicy.APP_ZYGOTE,
+            titleRes = R.string.experiment_content_zygote,
+            descriptionRes = R.string.experiment_content_zygote_desc,
+            defaultEnabled = false
         )
     )
 }

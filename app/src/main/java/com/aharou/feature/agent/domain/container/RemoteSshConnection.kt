@@ -367,7 +367,9 @@ class RemoteSshConnection internal constructor(
      * 本地工作区路径 → 服务器上的工作区目录（`<remoteWorkspacePath>/<目录名>`）。
      * 与 [RemoteSshEngine] 的命令 cd 目标同一口径，供 MCP stdio 远端起进程复用。
      */
-    fun remoteWorkspaceFor(projectPath: String): String? {
+    fun remoteWorkspaceFor(projectPath: String): String? = remoteWorkspaceFor(projectPath, config)
+
+    internal fun remoteWorkspaceFor(projectPath: String, config: RemoteConnectionConfig?): String? {
         val base = config?.remoteWorkspacePath?.trimEnd('/') ?: return null
         val name = projectPath.trimEnd('/').substringAfterLast('/')
         return if (name.isBlank()) base else "$base/$name"
@@ -597,11 +599,18 @@ class RemoteSshConnection internal constructor(
      * 链接建到该目录**内部**，形成自引用死循环，破坏整个工作区；跳过时命令链路会回退到真实路径。
      */
     suspend fun updateWorkspaceSymlink(workspacePath: String) {
-        val client = sshClient ?: return
+        val target = bootstrapTarget() ?: return
+        updateWorkspaceSymlink(workspacePath, target)
+    }
+
+    suspend fun updateWorkspaceSymlink(workspacePath: String, target: BootstrapTarget) {
+        if (!isCurrentBootstrap(target)) return
+        val client = target.client
         val ws = workspacePath.trimEnd('/')
         if (ws.isEmpty()) return
         withContext(Dispatchers.IO) {
             runCatching {
+                check(isCurrentBootstrap(target)) { "SSH_CONNECTION_CHANGED" }
                 val session = client.startSession()
                 val cmd = session.exec(
                     "if [ -d ~/workspace ] && [ ! -L ~/workspace ]; then echo skip; " +
@@ -772,24 +781,45 @@ class RemoteSshConnection internal constructor(
      * @param credentials 要注入的凭据列表（每 host 一条）。
      * @param workspaceRoot 远程工作区根路径（AI 的 ~/workspace 映射目录），限定注入范围。
      */
-    suspend fun uploadGitCredentialConfig(credentials: List<GitCredential>, workspaceRoot: String) {
-        val client = sshClient ?: return
-        val home = remoteHome ?: return
+    internal suspend fun updateGitCredentialPreference(
+        enabled: Boolean,
+        matchesServer: (BootstrapTarget) -> Boolean,
+        shouldRevoke: () -> Boolean,
+        onApplied: (cleanupPending: Boolean) -> Unit
+    ) = credentialSyncMutex.withLock {
+        val target = if (!enabled && shouldRevoke()) bootstrapTarget()?.takeIf(matchesServer) else null
+        if (target != null) revokeGitCredentials(target)
+        onApplied(!enabled && target == null && shouldRevoke())
+    }
+
+    suspend fun uploadGitCredentialConfig(
+        target: BootstrapTarget,
+        credentials: List<GitCredential>,
+        workspaceRoot: String,
+        stillAuthorized: suspend () -> Boolean = { true },
+        onSuccess: () -> Unit = {}
+    ): Boolean {
+        check(isCurrentBootstrap(target)) { "SSH_CONNECTION_CHANGED" }
+        val client = target.client
+        val home = target.home
         val aharouDir = home.trimEnd('/') + "/.aharou"
         // 注入范围用「远程工作区父目录」而不是单个工作区：includeIf 只认一个目录时，
         // 切到新工作区就不命中了，漏重新上传一次就 push 认证失败。父目录下都是用户自己的
         // 工作区仓库，放宽到这一层不会把凭据递给无关仓库。
-        val wsRoot = config?.remoteWorkspacePath?.trimEnd('/')
-            ?.takeIf { it.isNotBlank() }
-            ?: workspaceRoot.trimEnd('/').ifEmpty { return }
-        // 与 removeGitCredentialConfig 共用同一把锁：并发时一边写 includeIf 配置、一边删文件，
-        // 会留下半截配置。两个方法互不调用，锁内也不再取别的锁，不存在重入/交叉等待。
-        credentialSyncMutex.withLock {
+        val wsRoot = target.config.remoteWorkspacePath.trimEnd('/').ifEmpty {
+            workspaceRoot.trimEnd('/').takeIf { it.isNotBlank() }
+                ?: throw IllegalArgumentException("REMOTE_WORKSPACE_UNAVAILABLE")
+        }
+        require(wsRoot.isNotBlank() && wsRoot != "/") { "REMOTE_WORKSPACE_UNAVAILABLE" }
+        return credentialSyncMutex.withLock {
+            if (!stillAuthorized()) return@withLock false
+            check(isCurrentBootstrap(target)) { "SSH_CONNECTION_CHANGED" }
             withContext(Dispatchers.IO) {
-                runCatching {
-                    val mkdirSession = client.startSession()
-                    mkdirSession.exec("mkdir -p ${shellQuote(aharouDir)}").join()
-                    mkdirSession.close()
+                check(isCurrentBootstrap(target)) { "SSH_CONNECTION_CHANGED" }
+                execRemoteChecked(
+                    client,
+                    "${physicalDirectory(home)} && umask 077 && mkdir -p .aharou && ${physicalDirectory(aharouDir)} && chmod 700 . && ${remoteModeCheck(".", "700")}"
+                )
 
                     val creds = credentials.joinToString("\n") { c ->
                         "https://${enc(c.username)}:${enc(c.token)}@${c.host}"
@@ -800,10 +830,7 @@ class RemoteSshConnection internal constructor(
                     // 服务器上没有 App，用 AICODE_CRED_NO_PROMPT 让未命中时直接空退出而非等待弹窗。
                     containerInstaller.extractCredentialHelper()
                     val helperScript = java.io.File(containerInstaller.aharouDir, "git-credential-aicode").readText()
-                    writeRemoteFile(client, "$aharouDir/git-credential-aicode", helperScript)
-                    val chmodSession = client.startSession()
-                    chmodSession.exec("chmod +x ${shellQuote("$aharouDir/git-credential-aicode")}").join()
-                    chmodSession.close()
+                    writeRemoteFile(client, "$aharouDir/git-credential-aicode", helperScript, mode = "700")
 
                     val gitconfig = buildString {
                         append("[include]\n")
@@ -818,39 +845,45 @@ class RemoteSshConnection internal constructor(
                         // AICODE_DIR 必须显式给出：helper 默认读 $HOME/.aicode/git-credentials，
                         // 那是本地容器 /root/.aicode 与 /root/.aharou 同源绑定下的旧路径；
                         // 真机远程没有这层绑定，不指定就会去读一个不存在的文件，凭据永远取不到。
-                        append("    helper = !AICODE_CRED_NO_PROMPT=1 AICODE_DIR=$aharouDir $aharouDir/git-credential-aicode\n")
+                        val helper = "!AICODE_CRED_NO_PROMPT=1 AICODE_DIR=${shellQuote(aharouDir)} ${shellQuote("$aharouDir/git-credential-aicode")}"
+                        append("    helper = \"${gitConfigValue(helper)}\"\n")
                     }
                     writeRemoteFile(client, "$aharouDir/gitconfig.credential", credentialConfig)
-                    FileLogger.i(TAG, "已注入 git 凭据到远程 $aharouDir（限定 $wsRoot/）")
-                }.onFailure { FileLogger.w(TAG, "注入 git 凭据到远程失败", it) }
+                check(isCurrentBootstrap(target)) { "SSH_CONNECTION_CHANGED" }
+                if (!stillAuthorized()) {
+                    revokeGitCredentials(target)
+                    return@withContext false
+                }
+                onSuccess()
+                FileLogger.i(TAG, "已注入 git 凭据到远程 $aharouDir（限定 $wsRoot/）")
+                true
             }
         }
     }
 
-    /**
-     * 撤销远程注入：删除 App 管理的三个配置/凭据文件。
-     * `GIT_CONFIG_GLOBAL` 指向不存在的文件时 git 静默跳过，注入即失效，服务器用户配置不受影响。
-     */
-    suspend fun removeGitCredentialConfig() {
-        val client = sshClient ?: return
-        val home = remoteHome ?: return
-        val aharouDir = home.trimEnd('/') + "/.aharou"
-        credentialSyncMutex.withLock {
-            withContext(Dispatchers.IO) {
-                runCatching {
-                    val session = client.startSession()
-                    val managedFiles = listOf(
-                        "$aharouDir/gitconfig",
-                        "$aharouDir/gitconfig.credential",
-                        "$aharouDir/git-credentials",
-                        "$aharouDir/git-credential-aicode"
-                    )
-                    session.exec("rm -f ${managedFiles.joinToString(" ") { shellQuote(it) }} 2>/dev/null; echo done").join()
-                    session.close()
-                    FileLogger.i(TAG, "已撤销远程 git 凭据注入")
-                }.onFailure { FileLogger.w(TAG, "撤销远程 git 凭据注入失败", it) }
-            }
-        }
+    suspend fun removeGitCredentialConfig(
+        target: BootstrapTarget,
+        stillAuthorized: suspend () -> Boolean = { true },
+        onSuccess: () -> Unit = {}
+    ): Boolean = credentialSyncMutex.withLock {
+        if (!stillAuthorized()) return@withLock false
+        revokeGitCredentials(target)
+        onSuccess()
+        true
+    }
+
+    private suspend fun revokeGitCredentials(target: BootstrapTarget) = withContext(Dispatchers.IO) {
+        check(isCurrentBootstrap(target)) { "SSH_CONNECTION_CHANGED" }
+        val directory = target.home.trimEnd('/') + "/.aharou"
+        val managedFiles = listOf("gitconfig", "gitconfig.credential", "git-credentials", "git-credential-aicode")
+        val verifyRemoved = managedFiles.joinToString(" && ") { "test ! -e $it && test ! -L $it" }
+        execRemoteChecked(
+            target.client,
+            "${physicalDirectory(target.home)} && test ! -L .aharou && { test ! -e .aharou || " +
+                "{ ${physicalDirectory(directory)} && rm -f ${managedFiles.joinToString(" ")} && $verifyRemoved; }; }"
+        )
+        check(isCurrentBootstrap(target)) { "SSH_CONNECTION_CHANGED" }
+        FileLogger.i(TAG, "已撤销远程 git 凭据注入")
     }
 
     private suspend fun bootstrapExec(target: BootstrapTarget, command: String) = kotlinx.coroutines.runInterruptible(Dispatchers.IO) {
@@ -865,15 +898,37 @@ class RemoteSshConnection internal constructor(
     }
 
     /** exec + printf 写一个文本文件到远程，内容与路径都由 [shellQuote] 转义。 */
-    private suspend fun writeRemoteFile(client: SSHClient, dest: String, content: String) {
-        val session = client.startSession()
-        // 写临时文件再 mv 覆盖：直接 `>` 写会在中途断连时留下空或半截文件，凭据/ gitconfig
-        // 一次写坏后续 git 操作就报看不懂的错。mv 同分区是原子替换。
-        val tmp = "$dest.tmp"
-        session.exec(
-            "printf %s ${shellQuote(content)} > ${shellQuote(tmp)} && mv -f ${shellQuote(tmp)} ${shellQuote(dest)}"
-        ).join()
-        session.close()
+    private suspend fun execRemoteChecked(client: SSHClient, command: String) {
+        client.startSession().use { session ->
+            val result = session.exec(command)
+            result.join()
+            check(result.exitStatus == 0) { "REMOTE_COMMAND_FAILED" }
+        }
+    }
+
+    private suspend fun writeRemoteFile(client: SSHClient, dest: String, content: String, mode: String = "600") {
+        val rawName = dest.substringAfterLast('/')
+        val name = shellQuote(rawName)
+        execRemoteChecked(
+            client,
+            "${physicalDirectory(dest.substringBeforeLast('/'))} && ${remoteModeCheck(".", "700")} && " +
+                "test ! -L $name && { test ! -e $name || test -f $name; } && " +
+                "umask 077 && tmp=\$(mktemp ./.aharou-write.XXXXXX) && trap 'rm -f \"\$tmp\"' EXIT && " +
+                "printf %s ${shellQuote(content)} > \"\$tmp\" && chmod $mode \"\$tmp\" && mv -f \"\$tmp\" $name && " +
+                "test -f $name && test ! -L $name && ${remoteModeCheck(rawName, mode)}"
+        )
+    }
+
+    private fun physicalDirectory(path: String): String {
+        val normalized = path.trimEnd('/').ifEmpty { "/" }
+        require(normalized.startsWith('/')) { "REMOTE_HOME_UNAVAILABLE" }
+        val quoted = shellQuote(normalized)
+        return "cd -P $quoted && test \"\$(pwd -P)\" = $quoted"
+    }
+
+    private fun remoteModeCheck(path: String, expected: String): String {
+        val quoted = shellQuote(path)
+        return "mode=\$(stat -c '%a' $quoted 2>/dev/null || stat -f '%Lp' $quoted) && test \"\$mode\" = ${shellQuote(expected)}"
     }
 
     private fun enc(part: String): String = java.net.URLEncoder.encode(part, "UTF-8")

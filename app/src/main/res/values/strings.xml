@@ -1005,6 +1005,8 @@
     <!-- Credential Toast -->
     <string name="credential_toast_saved">凭据已保存</string>
     <string name="credential_toast_save_failed">保存失败：%1$s</string>
+    <string name="credential_toast_remote_injection_failed">远程凭据操作失败：%1$s</string>
+    <string name="credential_toast_remote_sync_failed">本地凭据已更新，但远程同步失败：%1$s</string>
     <string name="credential_toast_deleted">凭据已删除</string>
     <string name="credential_toast_identity_saved">署名与仓库地址已保存</string>
 
@@ -1581,6 +1583,10 @@
     <string name="subagent_comm_enabled">允许成员互相对话</string>
     <string name="subagent_comm_enabled_desc">同一批次运行中的成员可以互相查看队友、发消息（team / tell）；关闭后只能向主会话汇报，主会话与成员之间的收发不受影响。</string>
     <string name="settings_experiments">实验开关</string>
+    <string name="experiment_content_isolated">隔离内容进程</string>
+    <string name="experiment_content_isolated_desc">实验性：将网页抓取后的 HTML 解析与正文清洗移入独立隔离进程，并限制解析并发。联网仍由主进程完成。默认关闭，重启应用后生效；服务不可用时回退本地后台解析。</string>
+    <string name="experiment_content_zygote">App Zygote 进程</string>
+    <string name="experiment_content_zygote_desc">实验性：预加载 HTML 解析代码供隔离内容服务启动时复用，需要 Android 10 及以上并重启应用。开启会同时启用内容隔离；低版本使用普通隔离进程。可能增加内存占用，启动收益取决于设备和使用频率。</string>
     <string name="experiment_quote_reply">长按引用回复</string>
     <string name="experiment_quote_reply_desc">长按消息气泡弹出菜单，可复制或引用整条消息；引用会把该条摘要带进输入框</string>
     <string name="experiment_state_follow">跟随默认</string>

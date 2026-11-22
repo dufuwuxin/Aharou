@@ -9,6 +9,7 @@ import android.net.Uri
 import androidx.core.content.pm.ShortcutInfoCompat
 import androidx.core.content.pm.ShortcutManagerCompat
 import androidx.core.graphics.drawable.IconCompat
+import com.aharou.AIEditorApp
 import com.aharou.MainActivity
 import com.aharou.R
 
@@ -25,6 +26,7 @@ class LauncherShortcutOverrides : ContentProvider() {
 
     override fun onCreate(): Boolean {
         val ctx = context ?: return true
+        if (AIEditorApp.isContentProcess(ctx)) return true
         runCatching {
             ShortcutManagerCompat.removeDynamicShortcuts(ctx, listOf("start_voice"))
             ShortcutManagerCompat.disableShortcuts(ctx, listOf("start_voice"), null)

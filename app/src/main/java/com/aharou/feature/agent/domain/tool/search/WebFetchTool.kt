@@ -1,5 +1,7 @@
 package com.aharou.feature.agent.domain.tool.search
 
+import com.aharou.core.content.ContentParser
+import com.aharou.core.content.ContentProcessClient
 import com.aharou.core.net.UrlSafetyPolicy
 import com.aharou.core.util.FileLogger
 import com.aharou.feature.agent.domain.tool.AgentTool
@@ -7,26 +9,29 @@ import com.aharou.feature.agent.domain.tool.ParameterType
 import com.aharou.feature.agent.domain.tool.ToolParameter
 import com.aharou.feature.agent.domain.tool.ToolCapability
 import com.aharou.feature.agent.domain.tool.ToolResult
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import org.jsoup.Jsoup
-import org.jsoup.nodes.Document
 import java.net.URI
 import javax.inject.Inject
+import kotlin.coroutines.coroutineContext
 
-class WebFetchTool @Inject constructor() : AgentTool() {
+class WebFetchTool @Inject constructor(private val contentParser: ContentProcessClient) : AgentTool() {
 
     private companion object {
         const val TAG = "WebFetchTool"
         // 较新的桌面 Chrome 版本，搭配下方 sec-ch-ua / sec-fetch-* 请求头以贴近真实浏览器指纹
         const val USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36"
-        const val MAX_LENGTH = 100_000 // 限制最大提取字符数，防止撑爆上下文
 
         /** 手动跟随重定向的上限：每跳都要重做主机校验，防止用跳转绕过内网拦截。 */
         const val MAX_REDIRECTS = 5
+        // Match Jsoup 1.18's automatic parser selection from Response.parse().
+        val XML_CONTENT_TYPE = Regex("""\w+/\w*\+?xml.*""")
 
         /** [URI] 解析不出 host 时的兜底提取（含端口/方括号）。 */
         val HOST_FALLBACK = Regex("^https?://([^/?#]+)", RegexOption.IGNORE_CASE)
@@ -60,32 +65,26 @@ class WebFetchTool @Inject constructor() : AgentTool() {
             return ToolResult.Error("URL 必须以 http:// 或 https:// 开头")
         }
 
-        blockedReason(url)?.let { return ToolResult.Error(it) }
-
         return withContext(Dispatchers.IO) {
+            blockedReason(url)?.let { return@withContext ToolResult.Error(it) }
             try {
                 FileLogger.i(TAG, "正在抓取网页: $url, format=$format")
 
                 // 从顶层捕获非 HTTP 的连接异常（DNS、超时、SSL 等），直接把具体原因回传给 AI，不做兜底猜测
-                val doc = try {
-                    fetchDocument(url)
+                val response = try {
+                    fetchResponse(url)
                 } catch (e: FetchException) {
                     return@withContext ToolResult.Error(e.detailedMessage(url))
                 }
 
-                // 按要求提取
-                val resultText = when (format) {
-                    "html" -> doc.outerHtml()
-                    else -> extractCleanText(doc)
-                }
-                
-                val finalOutput = if (resultText.length > MAX_LENGTH) {
-                    resultText.take(MAX_LENGTH) + "\n\n[网页内容超长，已截断...]"
-                } else {
-                    resultText
-                }
+                coroutineContext.ensureActive()
+                val finalOutput = contentParser.parse(
+                    response.bytes, response.charset, response.baseUri, format == "html", response.xml
+                )
 
                 ToolResult.Success(kotlinx.serialization.json.JsonPrimitive(finalOutput))
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 FileLogger.e(TAG, "抓取网页时发生异常", e)
                 ToolResult.Error("抓取失败: ${e.message}")
@@ -111,10 +110,13 @@ class WebFetchTool @Inject constructor() : AgentTool() {
         }
     }
 
-    private fun fetchDocument(url: String): Document {
+    private data class FetchResponse(val bytes: ByteArray, val charset: String?, val baseUri: String, val xml: Boolean)
+
+    private suspend fun fetchResponse(url: String): FetchResponse {
         var current = url
         var redirects = 0
         while (true) {
+            coroutineContext.ensureActive()
             val response = try {
                 Jsoup.connect(current)
                     .userAgent(USER_AGENT)
@@ -133,7 +135,7 @@ class WebFetchTool @Inject constructor() : AgentTool() {
                     // 关掉自动跟随：跳转目标要在下一圈重新过主机校验，否则能被 302 到内网绕过拦截
                     .followRedirects(false)
                     .ignoreHttpErrors(true)
-                    .maxBodySize(5 * 1024 * 1024) // 5MB
+                    .maxBodySize(ContentParser.MAX_INPUT_BYTES)
                     .timeout(15000) // 15秒超时
                     .ignoreContentType(true)
                     .execute()
@@ -156,6 +158,7 @@ class WebFetchTool @Inject constructor() : AgentTool() {
 
             val status = response.statusCode()
             if (status in 300..399) {
+                response.bodyStream().close()
                 val location = response.header("Location")
                     ?: throw FetchException("HTTP $status 重定向缺少 Location 头")
                 if (++redirects > MAX_REDIRECTS) {
@@ -167,33 +170,18 @@ class WebFetchTool @Inject constructor() : AgentTool() {
                 continue
             }
             if (status >= 400) {
+                response.bodyStream().close()
                 FileLogger.e(TAG, "HTTP 状态码异常: $status - $current")
                 throw FetchException("HTTP $status: ${response.statusMessage().ifBlank { "无状态描述" }}")
             }
-            return response.parse()
+            val bytes = response.bodyAsBytes()
+            val xml = response.contentType()?.let(XML_CONTENT_TYPE::matches) == true
+            return FetchResponse(bytes, response.charset(), response.url().toExternalForm(), xml)
         }
     }
 
     /** 把抓取过程中的失败包装成携带具体信息的异常，以便回传给 AI 而非模糊提示。 */
     private class FetchException(val detail: String) : RuntimeException(detail) {
         fun detailedMessage(url: String): String = "抓取 $url 失败：$detail"
-    }
-
-    /**
-     * 提取干净正文，并在段落之间保留换行符。
-     */
-    private fun extractCleanText(doc: Document): String {
-        // 移除多余的不可见内容
-        doc.select("script, style, iframe, nav, footer, header, noscript, .ad, .advertisement").remove()
-        
-        // 为了避免 Jsoup 的 .text() 把所有行挤在一起，给块级元素加上换行符
-        doc.select("p, h1, h2, h3, h4, h5, h6, li, div, br").append("\\n")
-        
-        val rawText = doc.body().text()
-        
-        // 还原换行符，并清理多余的空行
-        return rawText.replace("\\n", "\n")
-            .replace(Regex("\\n{3,}"), "\n\n")
-            .trim()
     }
 }

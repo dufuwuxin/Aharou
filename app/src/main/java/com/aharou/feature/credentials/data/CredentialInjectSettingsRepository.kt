@@ -19,6 +19,8 @@ class CredentialInjectSettingsRepository @Inject constructor(
         const val PREFS = "credential_inject_prefs"
         const val KEY_AUTO_INJECT = "auto_inject_cred_"
         const val KEY_ASKED = "asked_auto_inject_"
+        const val KEY_REVISION = "auto_inject_revision_"
+        const val KEY_CLEANUP_PENDING = "auto_inject_cleanup_"
     }
 
     private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -30,17 +32,30 @@ class CredentialInjectSettingsRepository @Inject constructor(
         return java.math.BigInteger(1, digest).toString(16).padStart(32, '0').take(8)
     }
 
+    internal data class InjectionState(val enabled: Boolean, val revision: Long, val cleanupPending: Boolean)
+
     fun isAutoInjectEnabled(serverKey: String): Boolean =
         prefs.getBoolean(KEY_AUTO_INJECT + serverKey, false)
 
-    fun setAutoInject(serverKey: String, enabled: Boolean) {
-        prefs.edit().putBoolean(KEY_AUTO_INJECT + serverKey, enabled).apply()
+    @Synchronized
+    internal fun injectionState(serverKey: String): InjectionState = InjectionState(
+        isAutoInjectEnabled(serverKey),
+        prefs.getLong(KEY_REVISION + serverKey, 0),
+        prefs.getBoolean(KEY_CLEANUP_PENDING + serverKey, false)
+    )
+
+    @Synchronized
+    internal fun setAutoInject(serverKey: String, enabled: Boolean, markAsked: Boolean = false, cleanupPending: Boolean = false) {
+        val current = injectionState(serverKey)
+        val editor = prefs.edit()
+            .putBoolean(KEY_AUTO_INJECT + serverKey, enabled)
+            .putLong(KEY_REVISION + serverKey, if (current.enabled == enabled) current.revision else current.revision + 1)
+            .putBoolean(KEY_CLEANUP_PENDING + serverKey, cleanupPending)
+        if (markAsked) editor.putBoolean(KEY_ASKED + serverKey, true)
+        editor.apply()
     }
 
     fun hasAsked(serverKey: String): Boolean =
         prefs.getBoolean(KEY_ASKED + serverKey, false)
 
-    fun markAsked(serverKey: String) {
-        prefs.edit().putBoolean(KEY_ASKED + serverKey, true).apply()
-    }
 }

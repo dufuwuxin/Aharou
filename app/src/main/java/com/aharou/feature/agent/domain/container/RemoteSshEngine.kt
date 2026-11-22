@@ -75,12 +75,13 @@ class RemoteSshEngine @Inject constructor(
     override val initProgress: StateFlow<ContainerInitState> = _initProgress.asStateFlow()
 
     private val connectMutex = Mutex()
+    private val credentialSyncMutex = Mutex()
 
     /**
      * 上一次注入到远端的凭据指纹（主机 + 凭据 + 工作区）。切工作区容器不会断开 SSH，
      * 所以同步必须靠每次命令前的检查；又不能让每条命令都重写远端三个文件，故用指纹去重。
      */
-    private var lastInjectSignature: String? = null
+    @Volatile private var lastInjection: Triple<RemoteSshConnection.BootstrapTarget, Long, String>? = null
 
     /**
      * 按**本次执行所属工作区**解析容器与它的 SSH 连接，配置不一致就重连。
@@ -88,7 +89,7 @@ class RemoteSshEngine @Inject constructor(
      * 不能依赖全局 active_profile 那条：容器可以按工作区指定，全局仍是本地时那条收集器
      * 根本不建立连接，执行会报「SSH 连接失败: 未配置 SSH 连接」。
      */
-    private suspend fun ensureConnectedFor(projectPath: String?) {
+    private suspend fun ensureConnectedFor(projectPath: String?): RemoteSshConnection.BootstrapTarget {
         val profile = profileResolver.forWorkspace(projectPath)
         if (profile.mode != ExecutionMode.REMOTE_SSH) {
             // 这个工作区已改成非远程（或覆盖被取消）：若还挂着旧 SSH 连接就断开，
@@ -104,55 +105,66 @@ class RemoteSshEngine @Inject constructor(
         val cfg = connectionResolver.configForProfile(profile.id)
             ?: throw IllegalStateException("容器 ${profile.name} 未配置可用的 SSH 连接")
         if (connection.isConnected() && connection.config == cfg) {
+            val target = connection.connectTarget(cfg)
             if (!bootstrapSync.syncIfNeeded()) bootstrapSync.pullShared()
             // 凭据同步同理，而且更隐蔽：切工作区容器不会断开连接，只挂在建连分支上会让
             // 「自动注入」开关打开后远端一直停在旧配置（实测 debug 包重连两次都没有注入日志）。
-            syncGitCredentialsIfEnabled()
-            return
+            syncGitCredentialsIfEnabled(target)
+            return target
         }
-        connectMutex.withLock {
-            if (connection.isConnected() && connection.config == cfg) return@withLock
-            connection.connect(cfg)
-        }
+        val target = connectMutex.withLock { connection.connectTarget(cfg) }
         // 连上后把内置文档/子代理/团队铺到远端（同一目标只铺一次）：不铺的话远端 ~/.aharou 下
         // 只有 workspaces，AI 读不到文档、内置 Explore 子代理也不存在。
         if (!bootstrapSync.syncIfNeeded()) bootstrapSync.pullShared()
         // git 凭据：用户开了「自动注入」才铺，否则不动服务器上的任何 git 配置。
         // 之前这条只在凭据页手动切换开关时才触发，按工作区连上（全局仍是本地）时不会同步，
         // 远程里 `git push` 就会认证失败。
-        syncGitCredentialsIfEnabled()
+        syncGitCredentialsIfEnabled(target)
         // `~/workspace` 指向本工作区（远程路径与本地区别大，AI 习惯用这个别名）
         projectPath?.takeIf { it.isNotBlank() }
             ?.let { connection.remoteWorkspaceFor(it) }
-            ?.let { connection.updateWorkspaceSymlink(it) }
+            ?.let { connection.updateWorkspaceSymlink(it, target) }
+        return target
     }
 
-    /** 用户为该服务器开了「自动注入」时，把 App 的 git 凭据铺到远端；关闭时什么都不做。 */
-    private suspend fun syncGitCredentialsIfEnabled() {
+    /** 仅使用这个连接获准的凭据批次；离线关闭留下的文件在重连后清理。 */
+    private suspend fun syncGitCredentialsIfEnabled(target: RemoteSshConnection.BootstrapTarget) = credentialSyncMutex.withLock {
         runCatching {
-            val cfg = connection.config ?: return@runCatching
+            val cfg = target.config
             val host = cfg.host
             val port = cfg.port
             val key = injectSettings.serverKey(host, port)
-            if (!injectSettings.isAutoInjectEnabled(key)) {
-                // 关掉开关后凭据页会撤销远端文件，指纹必须一并作废，
-                // 否则重新打开时签名没变会跳过上传，远端就一直是空的。
-                lastInjectSignature = null
+            val expected = injectSettings.injectionState(key)
+            if (!expected.enabled) {
+                lastInjection = null
+                if (expected.cleanupPending) connection.removeGitCredentialConfig(
+                    target,
+                    stillAuthorized = { injectSettings.injectionState(key) == expected },
+                    onSuccess = { injectSettings.setAutoInject(key, false, cleanupPending = false) }
+                )
                 return@runCatching
             }
+            if (credentialRepository.storageReadOnly.value) return@runCatching
             val creds = credentialRepository.getAll().first()
             val workspaceRoot = cfg.remoteWorkspacePath.orEmpty()
-            if (workspaceRoot.isBlank() || creds.isEmpty()) return@runCatching
+            if (workspaceRoot.isBlank()) return@runCatching
             // 指纹去重：内容没变就不重写远端文件；开关关闭后重新打开（或凭据改了）指纹会变。
-            val signature = buildString {
-                append(key).append('|').append(workspaceRoot).append('|')
-                creds.sortedBy { it.host }.forEach { append(it.host).append(':').append(it.username).append(':').append(it.token.hashCode()).append(',') }
-            }
-            if (signature == lastInjectSignature) return@runCatching
-            connection.uploadGitCredentialConfig(creds, workspaceRoot)
-            lastInjectSignature = signature
-            FileLogger.i(TAG, "已向远程注入 ${creds.size} 条 git 凭据（$host:$port）")
-        }.onFailure { FileLogger.w(TAG, "远程 git 凭据注入失败", it) }
+            val signature = credentialSignature(key, workspaceRoot, creds)
+            val batch = Triple(target, expected.revision, signature)
+            if (batch == lastInjection) return@runCatching
+            lastInjection = null
+            connection.uploadGitCredentialConfig(
+                target, creds, workspaceRoot,
+                stillAuthorized = {
+                    injectSettings.injectionState(key) == expected && !credentialRepository.storageReadOnly.value &&
+                        credentialRepository.getAll().first() == creds
+                },
+                onSuccess = { lastInjection = batch }
+            )
+        }.onFailure {
+            if (it is CancellationException) throw it
+            FileLogger.w(TAG, "远程 git 凭据注入失败", it)
+        }
     }
 
     override fun runCommandStream(
@@ -160,18 +172,19 @@ class RemoteSshEngine @Inject constructor(
         projectPath: String?,
         timeoutMs: Long
     ): Flow<CommandEvent> = flow {
-        ensureConnectedFor(projectPath)
-        emitAll(streamExec(command, projectPath, timeoutMs))
+        val target = ensureConnectedFor(projectPath)
+        emitAll(streamExec(command, projectPath, timeoutMs, target))
     }.flowOn(Dispatchers.IO)
 
     private fun streamExec(
         command: String,
         projectPath: String?,
-        timeoutMs: Long
+        timeoutMs: Long,
+        target: RemoteSshConnection.BootstrapTarget
     ): Flow<CommandEvent> = channelFlow {
         val effectiveTimeout = timeoutMs.coerceIn(1L, CommandEngine.MAX_TIMEOUT_MS)
         FileLogger.d(TAG, "执行命令(远程流式) cwd=$projectPath timeout=${effectiveTimeout}ms: ${sanitizeCommandForLog(command)}")
-        val session = connection.startExecSession(buildCdCommand(command, projectPath))
+        val session = connection.startExecSession(buildCdCommand(command, projectPath, target), target)
         val timedOut = AtomicBoolean(false)
         val watchScope = CoroutineScope(Dispatchers.IO + Job())
         val watchdog = watchScope.launch {
@@ -239,8 +252,8 @@ class RemoteSshEngine @Inject constructor(
         projectPath: String?,
         timeoutMs: Long
     ): String = withContext(Dispatchers.IO) {
-        ensureConnectedFor(projectPath)
-        execCaptured(command, projectPath, timeoutMs).output
+        val target = ensureConnectedFor(projectPath)
+        execCaptured(command, projectPath, timeoutMs, target = target).output
     }
 
     override suspend fun runCommandSyncWithExit(
@@ -248,8 +261,8 @@ class RemoteSshEngine @Inject constructor(
         projectPath: String?,
         timeoutMs: Long
     ): CommandResult = withContext(Dispatchers.IO) {
-        ensureConnectedFor(projectPath)
-        execCaptured(command, projectPath, timeoutMs)
+        val target = ensureConnectedFor(projectPath)
+        execCaptured(command, projectPath, timeoutMs, target = target)
     }
 
     override suspend fun runCommandSyncIfReady(
@@ -257,8 +270,8 @@ class RemoteSshEngine @Inject constructor(
         projectPath: String?,
         timeoutMs: Long
     ): CommandResult? {
-        if (!isContainerInstalled()) return null
-        return runCatching { execCaptured(command, projectPath, timeoutMs) }
+        val target = connection.bootstrapTarget() ?: return null
+        return runCatching { execCaptured(command, projectPath, timeoutMs, target = target) }
             .getOrElse {
                 FileLogger.w(TAG, "远程命令执行失败(连接可能已断): ${sanitizeCommandForLog(command)}", it)
                 null
@@ -270,24 +283,25 @@ class RemoteSshEngine @Inject constructor(
         projectPath: String?,
         timeoutMs: Long
     ): CommandResult = withContext(Dispatchers.IO) {
-        ensureConnectedFor(projectPath)
-        execCaptured(command, projectPath, timeoutMs, unbounded = true)
+        val target = ensureConnectedFor(projectPath)
+        execCaptured(command, projectPath, timeoutMs, unbounded = true, target = target)
     }
 
     internal suspend fun runCommandOnTarget(target: RemoteSshConnection.BootstrapTarget, command: String, timeoutMs: Long): CommandResult =
-        execCaptured(command, null, timeoutMs, target = target)
+        execCaptured(command, null, timeoutMs, target = target, raw = true)
 
     private suspend fun execCaptured(
         command: String,
         projectPath: String?,
         timeoutMs: Long,
         unbounded: Boolean = false,
-        target: RemoteSshConnection.BootstrapTarget? = null
+        target: RemoteSshConnection.BootstrapTarget,
+        raw: Boolean = false
     ): CommandResult = withContext(Dispatchers.IO) {
         val effectiveTimeout = timeoutMs.coerceIn(1L, CommandEngine.MAX_TIMEOUT_MS)
         FileLogger.d(TAG, "执行命令(远程同步) cwd=$projectPath timeout=${effectiveTimeout}ms: ${sanitizeCommandForLog(command)}")
-        val session = if (target == null) connection.startExecSession(buildCdCommand(command, projectPath))
-            else connection.startExecSession(command, target)
+        val prepared = if (raw) command else buildCdCommand(command, projectPath, target)
+        val session = connection.startExecSession(prepared, target)
         val output = if (unbounded) BoundedOutput.hardCapped(MAX_UNBOUNDED_CHARS) else BoundedOutput()
         var exitCode: Int? = null
         try {
@@ -372,11 +386,25 @@ class RemoteSshEngine @Inject constructor(
      *  不能像从前那样先试 `cd ~/workspace`：服务器上那个路径本来就可能是用户自己的真实目录
      *  （建链时 updateWorkspaceSymlink 会跳过真实目录），此时第一条 cd 必然成功，而文件工具走的是
      *  base/<工作区名>——命令与读写作用在两个不同目录。
-     *  注入 GIT_CONFIG_GLOBAL 指向 App 管理的 ~/.aharou/gitconfig：
-     *  仅当用户开启「自动注入」时该文件存在（含 include 用户全局配置 + includeIf 限定工作区根），
-     *  文件不存在时 git 静默跳过——不影响用户在服务器上手动 git。 */
-    private fun buildCdCommand(command: String, projectPath: String?): String {
-        val prefix = "export GIT_CONFIG_GLOBAL=\"\$HOME/.aharou/gitconfig\"; "
+     *  关闭凭据注入后，即使远程清理尚未成功，也不覆盖 Git 的原生全局配置。 */
+    private suspend fun buildCdCommand(
+        command: String,
+        projectPath: String?,
+        target: RemoteSshConnection.BootstrapTarget
+    ): String {
+        val key = injectSettings.serverKey(target.config.host, target.config.port)
+        val managedConfig = shellQuote(target.home.trimEnd('/') + "/.aharou/gitconfig")
+        val state = injectSettings.injectionState(key)
+        val creds = if (state.enabled && !credentialRepository.storageReadOnly.value) {
+            credentialRepository.getAll().first()
+        } else emptyList()
+        val signature = credentialSignature(key, target.config.remoteWorkspacePath, creds)
+        val activeBatch = lastInjection
+        val prefix = if (state.enabled && !state.cleanupPending &&
+            activeBatch == Triple(target, state.revision, signature)
+        ) {
+            "if [ -f $managedConfig ] && [ ! -L $managedConfig ]; then export GIT_CONFIG_GLOBAL=$managedConfig; fi; "
+        } else ""
         if (projectPath == null) return prefix + command
         // cd 失败就不要往下跑了：路径写错时在 $HOME 里执行命令，比直接报错危险得多。
         // 路径用单引号包并转义内部单引号，避免路径含特殊字符时被 shell 拆成别的参数。
@@ -384,14 +412,22 @@ class RemoteSshEngine @Inject constructor(
         // 目标必须换算成**服务器上的路径**：projectPath 是本地工作区路径（/data/data/.../projects/x），
         // 服务器上没有那个目录，照搬会让每条命令都 exit 1。规则：remoteWorkspacePath/<工作区目录名>，
         // 不存在就建（首次连上去时远程还没这套目录）。
-        val target = connection.remoteWorkspaceFor(projectPath)
-        val mk = if (target != null) "mkdir -p ${shellQuote(target)} 2>/dev/null; " else ""
-        val cdTarget = shellQuote(target ?: projectPath)
+        val path = connection.remoteWorkspaceFor(projectPath, target.config)
+        val mk = if (path != null) "mkdir -p ${shellQuote(path)} 2>/dev/null; " else ""
+        val cdTarget = shellQuote(path ?: projectPath)
         return prefix + mk +
             "cd $cdTarget 2>/dev/null || exit 1; " +
             // 两者物理路径一致时再切到 ~/workspace，只为让 pwd 好看；不一致就留在真实路径。
             "if [ \"\$(cd ~/workspace 2>/dev/null && pwd -P)\" = \"\$(pwd -P)\" ]; then cd ~/workspace; fi; " +
             command
     }
+
+    private fun credentialSignature(key: String, workspaceRoot: String, creds: List<com.aharou.feature.credentials.domain.model.GitCredential>): String =
+        buildString {
+            append(key).append('|').append(workspaceRoot).append('|')
+            creds.sortedBy { it.host }.forEach {
+                append(it.host).append(':').append(it.username).append(':').append(it.token.hashCode()).append(',')
+            }
+        }
 
 }

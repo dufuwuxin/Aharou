@@ -13,7 +13,6 @@ import com.aharou.feature.credentials.data.repository.CredentialStorageReadOnlyE
 import com.aharou.feature.credentials.domain.model.GitCredential
 import com.aharou.feature.credentials.domain.repository.CredentialRepository
 import com.aharou.feature.git.domain.GitRepository
-import com.aharou.feature.workspace.data.repository.WorkspaceRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
@@ -28,6 +27,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
 
 /**
@@ -43,10 +44,11 @@ class CredentialViewModel @Inject constructor(
     private val gitRepository: GitRepository,
     private val injectSettings: CredentialInjectSettingsRepository,
     private val remoteSshConnection: RemoteSshConnection,
-    private val workspaceRepository: WorkspaceRepository,
     private val deviceFlowClient: GitHubDeviceFlowClient,
     @param:ApplicationContext private val context: Context
 ) : ViewModel() {
+
+    private val autoInjectMutex = Mutex()
 
     private companion object {
         const val TAG = "CredentialViewModel"
@@ -296,48 +298,82 @@ class CredentialViewModel @Inject constructor(
 
     /** 用户切换开关：持久化 + 立即注入/撤销。 */
     fun setAutoInject(enabled: Boolean) {
-        viewModelScope.launch {
-            val key = currentServerKey() ?: return@launch
-            injectSettings.setAutoInject(key, enabled)
-            applyInjection(key, enabled)
-            refreshAutoInjectState()
-        }
+        val target = remoteSshConnection.bootstrapTarget() ?: return
+        viewModelScope.launch { updateAutoInject(target, enabled, markAsked = false) }
     }
 
     /** 首次询问弹窗选择后调用：标记已询问 + 应用选择。 */
     fun dismissAutoInjectPrompt(enabled: Boolean) {
-        viewModelScope.launch {
-            val key = currentServerKey() ?: return@launch
-            injectSettings.markAsked(key)
-            injectSettings.setAutoInject(key, enabled)
-            applyInjection(key, enabled)
+        val target = remoteSshConnection.bootstrapTarget() ?: return
+        viewModelScope.launch { updateAutoInject(target, enabled, markAsked = true) }
+    }
+
+    private suspend fun updateAutoInject(
+        target: RemoteSshConnection.BootstrapTarget,
+        enabled: Boolean,
+        markAsked: Boolean
+    ) = autoInjectMutex.withLock {
+        val key = injectSettings.serverKey(target.config.host, target.config.port)
+        try {
+            check(remoteSshConnection.isCurrentBootstrap(target)) { "SSH_CONNECTION_CHANGED" }
+            if (enabled) {
+                val expected = injectSettings.injectionState(key)
+                if (!applyInjection(
+                        target,
+                        stillAuthorized = { injectSettings.injectionState(key) == expected },
+                        onSuccess = { injectSettings.setAutoInject(key, true, markAsked) }
+                    )) return@withLock
+            } else {
+                remoteSshConnection.updateGitCredentialPreference(
+                    enabled = false,
+                    matchesServer = { it === target },
+                    shouldRevoke = { injectSettings.injectionState(key).let { it.enabled || it.cleanupPending } },
+                    onApplied = { pending -> injectSettings.setAutoInject(key, false, markAsked, pending) }
+                )
+            }
             refreshAutoInjectState()
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            FileLogger.w(TAG, "更新远程凭据注入失败", e)
+            toast(context.getString(R.string.credential_toast_save_failed, e.message))
         }
     }
 
-    /** 开启时上传远程注入配置（凭据 + includeIf 限定的 gitconfig），关闭时撤销。 */
-    private suspend fun applyInjection(key: String, enabled: Boolean) {
-        if (!enabled) {
-            remoteSshConnection.removeGitCredentialConfig()
-            return
-        }
+    private suspend fun applyInjection(
+        target: RemoteSshConnection.BootstrapTarget,
+        stillAuthorized: suspend () -> Boolean,
+        onSuccess: () -> Unit
+    ): Boolean {
         // 凭据文件读不到时内存是空表：上传等于把远程服务器上的凭据一起抹掉。
         if (credentialRepository.storageReadOnly.value) {
             FileLogger.w(TAG, "跳过远程凭据注入：本地凭据读取失败（只读保护）")
             toast(context.getString(R.string.credential_toast_storage_read_only))
-            return
+            return false
         }
         val creds = credentialRepository.getAll().first()
-        val workspaceRoot = workspaceRepository.currentPath()
-            .takeIf { it.isNotBlank() && it != "/" }
-            ?: remoteSshConnection.config?.remoteWorkspacePath.orEmpty()
-        remoteSshConnection.uploadGitCredentialConfig(creds, workspaceRoot)
+        val workspaceRoot = target.config.remoteWorkspacePath
+        return remoteSshConnection.uploadGitCredentialConfig(target, creds, workspaceRoot, stillAuthorized, onSuccess)
     }
 
     /** 凭据增删后若当前服务器已开启注入，重新同步到远程。 */
     private suspend fun syncInjectionIfEnabled() {
-        val key = currentServerKey() ?: return
-        if (injectSettings.isAutoInjectEnabled(key)) applyInjection(key, true)
+        val target = remoteSshConnection.bootstrapTarget() ?: return
+        val key = injectSettings.serverKey(target.config.host, target.config.port)
+        val expected = injectSettings.injectionState(key)
+        if (!expected.enabled) return
+        try {
+            applyInjection(
+                target,
+                stillAuthorized = { injectSettings.injectionState(key) == expected },
+                onSuccess = {}
+            )
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            FileLogger.w(TAG, "本地凭据已更新，但远程同步失败", e)
+            toast(context.getString(R.string.credential_toast_remote_sync_failed, e.message))
+        }
     }
 
     override fun onCleared() {

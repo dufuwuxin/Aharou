@@ -60,6 +60,8 @@ import com.aharou.feature.agent.domain.mcp.MCP_OAUTH_CUSTOM_SCHEME_REDIRECT
 import com.aharou.feature.agent.domain.mcp.MCP_OAUTH_LOOPBACK_REDIRECT
 import com.aharou.feature.agent.domain.mcp.McpManager
 import com.aharou.feature.agent.domain.mcp.McpOAuthClient
+import com.aharou.feature.agent.domain.mcp.isSecureOAuthEndpoint
+import com.aharou.feature.agent.domain.mcp.matchesOAuthRedirect
 import com.aharou.feature.agent.domain.mcp.McpOAuthErrorKind
 import com.aharou.feature.agent.domain.mcp.McpOAuthFlowException
 import com.aharou.feature.agent.domain.mcp.McpOAuthStatus
@@ -194,18 +196,21 @@ class McpOAuthController @Inject constructor(
     /** WebView 拦截到回调地址：用 code 换令牌并落盘，随后重连该 server。 */
     fun onRedirect(url: String) {
         val flow = _state.value ?: return
+        if (flow.phase != McpOAuthPhase.AUTHORIZING) return
         val entry = flow.entry
+        if (!oauthClient.isPendingAuthorizationCallback(entry.server.name, url)) return
+        val working = flow.copy(phase = McpOAuthPhase.WORKING, authUrl = null, error = null, errorDetail = null)
+        _state.value = working
         job?.cancel()
         job = scope.launch {
-            _state.value = flow.copy(phase = McpOAuthPhase.WORKING, authUrl = null, error = null, errorDetail = null)
             try {
                 oauthClient.completeAuthorization(entry.server.name, url)
                 mcpManager.reloadServer(entry.server.name)
                 _state.value = _state.value?.copy(phase = McpOAuthPhase.DONE)
             } catch (e: McpOAuthFlowException) {
-                fail(_state.value ?: flow, e)
+                fail(_state.value ?: working, e)
             } catch (e: Exception) {
-                fail(_state.value ?: flow, McpOAuthFlowException(McpOAuthErrorKind.UNKNOWN, e.message, e))
+                fail(_state.value ?: working, McpOAuthFlowException(McpOAuthErrorKind.UNKNOWN, e.message, e))
             }
         }
     }
@@ -526,13 +531,11 @@ private fun McpOAuthWebView(
             webViewClient = object : WebViewClient() {
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                     val target = request.url?.toString().orEmpty()
-                    if (target.startsWith(redirectUri)) {
-                        onRedirect(target)
+                    if (matchesOAuthRedirect(redirectUri, target)) {
+                        if (request.isForMainFrame) onRedirect(target)
                         return true
                     }
-                    val scheme = request.url?.scheme?.lowercase()
-                    // 只允许 http(s) 在页面内继续导航；file/content/自定义 scheme 一律拦下，不交给系统。
-                    return scheme != "http" && scheme != "https"
+                    return !isSecureOAuthEndpoint(target)
                 }
 
                 override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {

@@ -9,6 +9,7 @@ import com.aharou.core.config.ConfigRisk
 import com.aharou.core.config.ConfigSchema
 import com.aharou.core.config.ConfigValue
 import com.aharou.core.config.fields.ClosureField
+import com.aharou.feature.agent.domain.container.RemoteSshConnection
 import com.aharou.feature.agent.domain.container.SshLoginKey
 import com.aharou.feature.agent.domain.container.SshLoginKeyStore
 import com.aharou.feature.credentials.data.CredentialInjectSettingsRepository
@@ -39,6 +40,7 @@ import javax.inject.Singleton
 class ConfigCredentialFields @Inject constructor(
     private val githubTokens: GitHubTokenStore,
     private val injectSettings: CredentialInjectSettingsRepository,
+    private val remoteSshConnection: RemoteSshConnection,
     private val loginKeyStore: SshLoginKeyStore,
     private val remote: com.aharou.feature.workspace.data.local.dao.RemoteConnectionDao,
     private val vault: VaultRepository,
@@ -288,7 +290,14 @@ class ConfigCredentialFields @Inject constructor(
                     writer = { v ->
                         val b = (v as? ConfigValue.Bool)?.value
                             ?: throw ConfigError.TypeMismatch("boolean")
-                        injectSettings.setAutoInject(forId, b)
+                        runBlocking {
+                            remoteSshConnection.updateGitCredentialPreference(
+                                enabled = b,
+                                matchesServer = { injectSettings.serverKey(it.config.host, it.config.port) == forId },
+                                shouldRevoke = { injectSettings.injectionState(forId).let { it.enabled || it.cleanupPending } },
+                                onApplied = { pending -> injectSettings.setAutoInject(forId, b, cleanupPending = pending) }
+                            )
+                        }
                     },
                 ),
                 ClosureField(

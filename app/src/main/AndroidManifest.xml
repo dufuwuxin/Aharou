@@ -65,6 +65,7 @@
 
     <application
         android:name=".AIEditorApp"
+        android:zygotePreloadName="com.aharou.core.content.ContentZygotePreload"
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:icon="@mipmap/ic_launcher"
@@ -195,6 +196,18 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+
+        <service
+            android:name=".core.content.ContentParseService"
+            android:exported="false"
+            android:isolatedProcess="true"
+            android:process=":content_parser" />
+        <service
+            android:name=".core.content.ZygoteContentParseService"
+            android:exported="false"
+            android:isolatedProcess="true"
+            android:useAppZygote="true"
+            android:process=":content_zygote" />
 
         <!-- 终端保活：常驻前台通知，让后台会话不被系统回收。
              用 specialUse 而不是 dataSync：Android 15(35) 起 dataSync 前台服务在 24 小时内累计只能跑 6 小时，
