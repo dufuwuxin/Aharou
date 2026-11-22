@@ -86,9 +86,10 @@ class SystemPromptProvider @Inject constructor(
 
     fun build(agentContext: AgentContext, consumeInbox: Boolean = true): String {
         val parts = buildRequestParts(agentContext)
-        val rendered = listOf(parts.system, parts.data).filter { it.isNotBlank() }.joinToString("\n\n")
-        return rendered.also { injectedContextStore.record(agentContext.sessionId, it) }
+        return parts.system.also { injectedContextStore.record(agentContext.sessionId, it) }
     }
+
+    fun buildContextData(agentContext: AgentContext): String = buildRequestParts(agentContext).data
 
     private fun buildRequestParts(agentContext: AgentContext): com.aharou.feature.agent.domain.context.ContextPromptParts {
         val member = isMemberSession(agentContext)

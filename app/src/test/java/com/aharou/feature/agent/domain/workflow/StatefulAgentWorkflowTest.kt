@@ -389,7 +389,7 @@ class StatefulAgentWorkflowTest {
     @Test
     fun liveContextPreparationReachesTheActualProviderWithCurrentRequestContext() = runTest {
         prepare(flow { emit(AIStreamChunk.Final(AIResponse("done"))) })
-        coEvery { prompts.buildLiveContext(any()) } answers { "live-" + firstArg<AgentContext>().currentUserText }
+        coEvery { prompts.buildRequest(any(), any(), any()) } answers { com.aharou.feature.agent.domain.prompt.RequestPrompt(secondArg(), "live-" + firstArg<AgentContext>().currentUserText) }
         val sent = slot<String>()
         val history = slot<List<AgentMessage>>()
         every { provider.completeStream(capture(sent), capture(history), any(), any()) } returns flow { emit(AIStreamChunk.Final(AIResponse("done"))) }

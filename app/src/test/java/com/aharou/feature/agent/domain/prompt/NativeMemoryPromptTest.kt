@@ -128,7 +128,7 @@ class NativeMemoryPromptTest {
         assertEquals("", library.resolvePromptForContext("active.md", null, null, "Kotlin"))
     }
 
-    private fun renderAll(ctx: AgentContext): String = provider.build(ctx)
+    private fun renderAll(ctx: AgentContext): String = listOf(provider.build(ctx), provider.buildContextData(ctx)).filter { it.isNotBlank() }.joinToString("\n\n")
 
     @Test fun skillsAndRulesAreGroupedByTheirActualAdmittedIdentity() {
         add("catalogs", "{{AICODE_SKILLS}}\n{{AICODE_RULES}}", ContextCategory.MAIN_INJECTED)
