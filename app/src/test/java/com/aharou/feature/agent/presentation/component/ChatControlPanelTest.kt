@@ -48,6 +48,8 @@ class ChatControlPanelTest {
 
         compose.onNodeWithText("默认", substring = true).performClick()
         compose.onNodeWithTag("reasoning_effort_slider").assertExists()
+        compose.onNodeWithText("不思考").performClick()
+        compose.runOnIdle { assertEquals(ReasoningEffort.NONE, selectedEffort) }
         compose.onNodeWithText("速度档位: Fast（快速）").assertExists()
         compose.onNodeWithText("速度档位: Fast（快速）").performClick()
         compose.onNodeWithText("默认（不指定档位）").performClick()
