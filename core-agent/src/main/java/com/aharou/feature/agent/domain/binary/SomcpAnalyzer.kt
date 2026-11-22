@@ -77,11 +77,13 @@ class SomcpAnalyzer {
         val stringSize = elf.dynamicEntries.firstOrNull { it.tag == 10L }?.value
         val load = strtabVa?.let { va -> elf.programHeaders.firstOrNull {
             it.type == 1L && va >= it.vaddr && va - it.vaddr < it.filesz
-        } }
+        }?.let { it to va } }
         val section = elf.sections.firstOrNull { it.name == ".dynstr" && it.type == 3L }
-        val base = if (load != null && strtabVa != null) load.offset + (strtabVa - load.vaddr) else section?.offset
-        val length = if (load != null && strtabVa != null) minOf(stringSize ?: (load.filesz - (strtabVa - load.vaddr)),
-            load.filesz - (strtabVa - load.vaddr)) else section?.size
+        val base = load?.let { (header, va) -> header.offset + (va - header.vaddr) } ?: section?.offset
+        val length = load?.let { (header, va) ->
+            val remaining = header.filesz - (va - header.vaddr)
+            minOf(stringSize ?: remaining, remaining)
+        } ?: section?.size
         val neededEntries = elf.dynamicEntries.filter { it.tag == 1L }
         if (neededEntries.isEmpty()) return JsonArray(emptyList())
         require(base != null && length != null && base >= 0 && length > 0 && base <= elf.data.size && length <= elf.data.size - base) {
