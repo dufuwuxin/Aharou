@@ -42,14 +42,15 @@ class ProjectChatComposerContract(unittest.TestCase):
 
     def test_routes_reuse_header_and_root_binding(self):
         screen = source("ProjectChatScreen.kt")
-        for contract in ("AIChatPanel(", "ensureProjectSession(", "messages.loaded",
-                         "messages.sessionId == sessionId", "currentSession == sessionId",
-                         "ProjectTaskConversation(", "flowSessionIds", "task.sessionIds"):
+        for contract in ("ensureProjectSession(", "messages.loaded", "messages.sessionId == sessionId",
+                         "currentSession == sessionId", "ProjectTaskConversation(", "flowSessionIds", "task.sessionIds"):
             self.assertIn(contract, screen)
         main = (JAVA / "MainActivity.kt").read_text()
         self.assertIn("ProjectChatScreen(", main)
         self.assertIn("rememberProjectChatBinding(", main)
-        self.assertIn("bodyOverride = binding.body, floatingComposer = true, composerSessionId = binding.sessionId", screen)
+        self.assertIn("AIChatPanel(", main)
+        self.assertIn("bodyOverride = projectChat?.body, floatingComposer = projectChat != null, projectConversation = projectChat?.rootConversation,", main)
+        self.assertIn("if (bodyOverride == null) ChatHeader(", source("AIChatPanel.kt"))
         self.assertIn("if (bodyOverride == null) ChatHeader(", source("AIChatPanel.kt"))
         self.assertIn("header = header, process = process)", source("ProjectTaskWorkbench.kt"))
 
@@ -103,12 +104,12 @@ class ProjectChatComposerContract(unittest.TestCase):
         self.assertIn("readOnly = true", workbench)
         self.assertIn("if (!readOnly) TextButton(onClick = onEdit)", source("ProjectTaskProcess.kt"))
 
-    def assert_root_diagnostics_binding(self, screen, workbench):
+    def assert_root_diagnostics_binding(self, screen, workbench, main):
         for contract in ("rootConversation =", "ProjectRootConversation(records, agent, onToolDetail)",
                          "it.id in project?.flowSessionIds.orEmpty()", "it.parentId == null", "it.workspacePath == workspace",
-                         "ProjectChatBinding(sessionId.takeIf { ready }, rootConversation)",
-                         "projectConversation = binding.rootConversation"):
+                         "ProjectChatBinding(sessionId.takeIf { ready }, rootConversation)"):
             self.assertIn(contract, screen)
+        self.assertIn("projectConversation = projectChat?.rootConversation", main)
         for contract in ("if (id == rootId) onSelectRequirementBranch(null)", "rootConversation()",
                          'Modifier.testTag("project_session_diagnostics")', "enabled = diagnostics != null",
                          "onClick = { menuOpen = false; diagnostics?.invoke() }",
@@ -117,7 +118,8 @@ class ProjectChatComposerContract(unittest.TestCase):
             self.assertIn(contract, workbench)
 
     def test_root_node_opens_bound_conversation_with_live_streams(self):
-        self.assert_root_diagnostics_binding(source("ProjectChatScreen.kt"), source("ProjectTaskWorkbench.kt"))
+        self.assert_root_diagnostics_binding(source("ProjectChatScreen.kt"), source("ProjectTaskWorkbench.kt"),
+                                             (JAVA / "MainActivity.kt").read_text())
         self.assertIn("projectConversation = projectConversation", source("AIChatPanel.kt"))
         self.assertIn("SessionDiagnosticTab.PLANNING -> projectConversation?.invoke()", source("SessionDiagnosticsSheet.kt"))
         self.assertIn("rootStyle, onClick = onOpenRoot)", source("ProjectTaskMap.kt"))
@@ -131,14 +133,18 @@ class ProjectChatComposerContract(unittest.TestCase):
     def test_root_diagnostics_rejects_cross_scope_or_disconnected_records(self):
         screen = source("ProjectChatScreen.kt")
         workbench = source("ProjectTaskWorkbench.kt")
+        main = (JAVA / "MainActivity.kt").read_text()
         for old, new in (("it.id in project?.flowSessionIds.orEmpty()", "true"),
                          ("it.parentId == null", "true"),
-                         ("it.workspacePath == workspace", "true"),
-                         ("projectConversation = binding.rootConversation", "projectConversation = {}")):
+                         ("it.workspacePath == workspace", "true")):
             mutant = screen.replace(old, new)
             self.assertNotEqual(mutant, screen)
             with self.assertRaises(AssertionError):
-                self.assert_root_diagnostics_binding(mutant, workbench)
+                self.assert_root_diagnostics_binding(mutant, workbench, main)
+        mutant_main = main.replace("projectConversation = projectChat?.rootConversation", "projectConversation = {}")
+        self.assertNotEqual(mutant_main, main)
+        with self.assertRaises(AssertionError):
+            self.assert_root_diagnostics_binding(screen, workbench, mutant_main)
         for old, new in (("if (id == rootId) onSelectRequirementBranch(null)", "if (false) onSelectRequirementBranch(null)"),
                          ("onOpenRoot = { toggle(rootId) }", "onOpenRoot = {}"),
                          (".clickable { toggle(rootId) }", ".clickable {}"),
@@ -149,7 +155,7 @@ class ProjectChatComposerContract(unittest.TestCase):
             mutant = workbench.replace(old, new)
             self.assertNotEqual(mutant, workbench)
             with self.assertRaises(AssertionError):
-                self.assert_root_diagnostics_binding(screen, mutant)
+                self.assert_root_diagnostics_binding(screen, mutant, main)
 
     def test_read_only_records_retain_validated_acceptance(self):
         process = source("ProjectTaskProcess.kt")
