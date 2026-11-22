@@ -35,7 +35,7 @@ import java.util.concurrent.atomic.AtomicInteger
 @Config(application = Application::class, sdk = [35], qualifiers = "en-w411dp-h891dp")
 @GraphicsMode(GraphicsMode.Mode.LEGACY)
 @SQLiteMode(SQLiteMode.Mode.LEGACY)
-@ConscryptMode(ConscryptMode.Mode.OFF)
+@ConscryptMode(ConscryptMode.Mode.ON)
 class RevericMarketPanelTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
 

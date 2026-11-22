@@ -19,9 +19,16 @@ import okio.Buffer
 import okio.GzipSink
 import okio.buffer
 import org.junit.Assert.*
+import org.junit.Before
 import org.junit.Test
 
 class CloudMemoryTransportTest {
+    @Before fun installConscryptProvider() {
+        if (java.security.Security.getProvider("Conscrypt") == null) {
+            java.security.Security.insertProviderAt(org.conscrypt.Conscrypt.newProvider(), 1)
+        }
+    }
+
     private fun transport(timeoutMs: Long = 20000, block: suspend (MockWebServer, CloudMemorySearch) -> Unit) = runBlocking {
         val certificate = HeldCertificate.Builder().commonName("localhost")
             .addSubjectAlternativeName("localhost").addSubjectAlternativeName("127.0.0.1").build()
