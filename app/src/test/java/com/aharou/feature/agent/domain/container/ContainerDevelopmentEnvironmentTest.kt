@@ -52,7 +52,7 @@ class ContainerDevelopmentEnvironmentTest {
         while (!File(root, "app/src/main").isDirectory && root.parentFile != null) root = checkNotNull(root.parentFile)
         val container = File(root, "app/src/main/java/com/aharou/feature/agent/domain/container")
         val source = File(container, "LinuxContainerEngine.kt").readText()
-        assertTrue(source.contains("TawcrootRuntime.wrapCommand(argv, \"exec \\\"\$0\\\" \\\"\$@\\\"\", projectPath != null, overrides)"))
+        assertTrue(source.contains("TawcrootRuntime.wrapCommand(argv, \"exec \\\"\\\$0\\\" \\\"\\\$@\\\"\", projectPath != null, overrides)"))
         assertTrue(source.contains("TawcrootRuntime.wrapCommand(argv, command, projectPath != null, overrides)"))
         assertTrue(source.contains("envVarRepository.asMap() + profile.env + extraEnv"))
         val overrides = mapOf("JAVA_HOME" to "/user's jdk")
