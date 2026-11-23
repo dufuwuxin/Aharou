@@ -4,7 +4,6 @@ import com.aharou.core.util.LINE_TRUNCATED_NOTE
 import com.aharou.core.util.ProcessIdentity
 import com.aharou.R
 import com.aharou.feature.settings.data.repository.ExecutionMode
-import com.aharou.feature.settings.data.repository.ContainerSettingsRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -49,8 +48,7 @@ class LinuxContainerEngine @Inject constructor(
     private val profileResolver: ContainerProfileResolver,
     private val pathHomeResolver: com.aharou.feature.workspace.domain.PathHomeResolver,
     private val runtimeProcessStore: RuntimeProcessStore,
-    private val gradleHeapApplier: ContainerGradleHeapApplier,
-    private val runtimeSettings: ContainerSettingsRepository
+    private val gradleHeapApplier: ContainerGradleHeapApplier
 ) : CommandEngine {
     /** 容器初始化的实时进度，供所有入口（终端页/AI/后台终端/MCP）共享同一份状态。 */
     private val _initProgress = MutableStateFlow<ContainerInitState>(ContainerInitState.Idle)
@@ -215,10 +213,12 @@ class LinuxContainerEngine @Inject constructor(
         FileLogger.d(TAG, "执行命令(流式) cwd=$projectPath profile=${profile.id} timeout=${effectiveTimeout}ms: ${sanitizeCommandForLog(command)}")
         // 先记下当前已有的子进程，启动后取差集：这是不依赖 Process.pid() 的兜底定位手段
         val childrenBefore = ProcessIdentity.childPids()
-        val process = startContainerProcess(command, projectPath, profile)
+        val started = startContainerProcess(command, projectPath, profile)
+        val process = started.process
+        val injectedEnv = started.injectedEnv
         val identity = ProcessIdentity.capture(process)
             ?: ProcessIdentity.childPids().minus(childrenBefore).minOrNull()?.let { ProcessIdentity.Handle(it, null) }
-        identity?.let { runtimeProcessStore.record(it.pid, it.startTimeTicks, command) }
+        identity?.let { runtimeProcessStore.record(it.pid, it.startTimeTicks, sanitizeCommandForLog(command)) }
         val timedOut = AtomicBoolean(false)
         // 看门狗跑在独立 scope（独立 Job）上：若放进包裹 emit 的 coroutineScope 里，emit 的
         // Job 与 flow 收集者不一致会触发「Flow invariant is violated」。这里仅用它在超时时杀进程。
@@ -243,19 +243,19 @@ class LinuxContainerEngine @Inject constructor(
         try {
             while (true) {
                 val line = reader.readLine() ?: break
-                emit(CommandEvent.Line(if (line.truncated) "${line.text}\n$LINE_TRUNCATED_NOTE" else line.text))
+                emit(CommandEvent.Line(if (line.truncated) "${line.text}\n$LINE_TRUNCATED_NOTE" else line.text, injectedEnv))
             }
             val exitCode = awaitExit(process, timedOut)
             watchdog.cancel()
             processKiller.cancel()
             if (timedOut.get()) {
                 FileLogger.w(TAG, "命令超时(${effectiveTimeout}ms)，输出等待已中断: ${sanitizeCommandForLog(command)}")
-                emit(CommandEvent.Line(timeoutNotice(effectiveTimeout)))
-                emit(CommandEvent.Exit(null))
+                emit(CommandEvent.Line(timeoutNotice(effectiveTimeout), injectedEnv))
+                emit(CommandEvent.Exit(null, injectedEnv))
             } else {
                 if (exitCode != 0) FileLogger.w(TAG, "命令退出码=$exitCode: ${sanitizeCommandForLog(command)}")
                 else FileLogger.v(TAG, "命令完成(退出码 0): ${sanitizeCommandForLog(command)}")
-                emit(CommandEvent.Exit(exitCode))
+                emit(CommandEvent.Exit(exitCode, injectedEnv))
             }
         } catch (e: CancellationException) {
             throw e
@@ -268,12 +268,12 @@ class LinuxContainerEngine @Inject constructor(
             watchdog.cancel()
             if (timedOut.get()) {
                 FileLogger.w(TAG, "命令超时(${effectiveTimeout}ms)，输出等待已中断(readLine 异常): ${sanitizeCommandForLog(command)}", e)
-                emit(CommandEvent.Line(timeoutNotice(effectiveTimeout)))
-                emit(CommandEvent.Exit(null))
+                emit(CommandEvent.Line(timeoutNotice(effectiveTimeout), injectedEnv))
+                emit(CommandEvent.Exit(null, injectedEnv))
             } else {
                 FileLogger.e(TAG, "命令读输出异常(已保留此前输出): ${sanitizeCommandForLog(command)}", e)
-                emit(CommandEvent.Line("[命令执行异常：${e.message}]"))
-                emit(CommandEvent.Exit(null))
+                emit(CommandEvent.Line("[命令执行异常：${e.message}]", injectedEnv))
+                emit(CommandEvent.Exit(null, injectedEnv))
             }
         } finally {
             outputReaders.remove(process)?.close()
@@ -316,11 +316,18 @@ class LinuxContainerEngine @Inject constructor(
         // 未就绪时不自动初始化，直接返回引导文案，由用户去终端页完成初始化。
         notReadyHintFor(profile)?.let { return@withContext CommandResult(it, null) }
         val r = execCaptured(command, projectPath, timeoutMs, profile)
-        CommandResult(r.output, r.exitCode, r.truncated)
+        CommandResult(r.output, r.exitCode, r.truncated, r.injectedEnv)
     }
 
     /** 一次容器内执行的内部结果：限幅后的完整输出 + 退出码（超时/异常时为 null）。 */
-    private data class ExecResult(val output: String, val exitCode: Int?, val truncated: Boolean = false)
+    private data class StartedContainerProcess(val process: Process, val injectedEnv: Map<String, String>)
+
+    private data class ExecResult(
+        val output: String,
+        val exitCode: Int?,
+        val truncated: Boolean = false,
+        val injectedEnv: Map<String, String> = emptyMap()
+    )
 
     /**
      * 仅在容器已就绪（rootfs 已安装）时执行命令；不会触发 rootfs 解压。
@@ -339,7 +346,7 @@ class LinuxContainerEngine @Inject constructor(
     internal suspend fun runCommandOnProfile(profile: ContainerProfile, command: String, timeoutMs: Long, projectPath: String? = null): CommandResult? {
         if (!containerInstaller.isInstalledFor(profile)) return null
         val result = execCaptured(command, projectPath, timeoutMs, profile)
-        return CommandResult(result.output, result.exitCode, result.truncated)
+        return CommandResult(result.output, result.exitCode, result.truncated, result.injectedEnv)
     }
 
     override suspend fun runCommandSyncUnbounded(
@@ -350,7 +357,7 @@ class LinuxContainerEngine @Inject constructor(
         val profile = profileResolver.forWorkspace(projectPath)
         notReadyHintFor(profile)?.let { return@withContext CommandResult(it, null) }
         val r = execCaptured(command, projectPath, timeoutMs, profile, unbounded = true)
-        CommandResult(r.output, r.exitCode, r.truncated)
+        CommandResult(r.output, r.exitCode, r.truncated, r.injectedEnv)
     }
 
     /**
@@ -368,14 +375,17 @@ class LinuxContainerEngine @Inject constructor(
         profile: ContainerProfile,
         unbounded: Boolean = false
     ): ExecResult = withContext(Dispatchers.IO) {
+        var injectedEnv: Map<String, String> = emptyMap()
         try {
             val effectiveTimeout = timeoutMs.coerceIn(1L, MAX_TIMEOUT_MS)
             FileLogger.d(TAG, "执行命令(同步) cwd=$projectPath profile=${profile.id} timeout=${effectiveTimeout}ms: ${sanitizeCommandForLog(command)}")
             val childrenBefore = ProcessIdentity.childPids()
-            val process = startContainerProcess(command, projectPath, profile)
+            val started = startContainerProcess(command, projectPath, profile)
+            val process = started.process
+            injectedEnv = started.injectedEnv
             val identity = ProcessIdentity.capture(process)
                 ?: ProcessIdentity.childPids().minus(childrenBefore).minOrNull()?.let { ProcessIdentity.Handle(it, null) }
-            identity?.let { runtimeProcessStore.record(it.pid, it.startTimeTicks, command) }
+            identity?.let { runtimeProcessStore.record(it.pid, it.startTimeTicks, sanitizeCommandForLog(command)) }
             val timedOut = AtomicBoolean(false)
             val reader = ProcessLineReader(process.inputStream) { process.isAlive }
             outputReaders[process] = reader
@@ -429,16 +439,16 @@ class LinuxContainerEngine @Inject constructor(
                 FileLogger.w(TAG, "命令超时(${effectiveTimeout}ms)，输出等待已中断: ${sanitizeCommandForLog(command)}")
                 output.append(timeoutNotice(effectiveTimeout))
                 output.append("\n")
-                ExecResult(output.build(), null, output.truncated)
+                ExecResult(output.build(), null, output.truncated, injectedEnv)
             } else {
                 FileLogger.v(TAG, "命令完成(退出码 $exitCode，输出 ${output.totalChars} 字符): ${sanitizeCommandForLog(command)}")
-                ExecResult(output.build(), exitCode, output.truncated)
+                ExecResult(output.build(), exitCode, output.truncated, injectedEnv)
             }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             FileLogger.e(TAG, "执行命令异常: ${sanitizeCommandForLog(command)}", e)
-            ExecResult("Error: ${e.message}", null)
+            ExecResult("Error: ${e.message}", null, injectedEnv = injectedEnv)
         }
     }
 
@@ -507,21 +517,18 @@ class LinuxContainerEngine @Inject constructor(
      * 启动进程。rootfs/proot 安装就绪则用 PRoot 进入容器；
      * 否则回退到 Android 原生 shell（rootfs 缺失时的兜底）。
      */
-    private fun startContainerProcess(command: String, projectPath: String?, profile: ContainerProfile): Process {
+    private fun startContainerProcess(command: String, projectPath: String?, profile: ContainerProfile): StartedContainerProcess {
         ensureHostsForCommand(command, profile)
         val useProot = containerInstaller.isInstalledFor(profile)
-
-        val processBuilder = if (useProot) {
-            buildProcessBuilder(buildProotInvocation(command, projectPath, profile))
-        } else {
+        val invocation = if (useProot) buildProotInvocation(command, projectPath, profile) else null
+        val processBuilder = invocation?.let(::buildProcessBuilder) ?: run {
             FileLogger.w(TAG, "PRoot 未安装，回退到原生 shell")
             buildNativeProcess(command, projectPath)
         }
 
-        // Redirect stderr to stdout so we capture everything in one stream
         processBuilder.redirectErrorStream(true)
         processBuilder.redirectInput(STDIN_FROM_DEV_NULL)
-        return processBuilder.start()
+        return StartedContainerProcess(processBuilder.start(), invocation?.injectedEnv.orEmpty())
     }
 
     /** 容器是否已安装就绪（按全局默认 profile；带工作区的判断走 [ContainerProfileResolver.forWorkspace]）。 */
@@ -771,12 +778,13 @@ class LinuxContainerEngine @Inject constructor(
         val argv = buildBaseProotArgv(projectPath, profile)
         argv.add("/bin/sh")
         argv.add("-c")
-        val overrides = envVarRepository.asMap() + profile.env + extraEnv
+        val proxyEnv = com.aharou.core.net.AppProxy.proxyEnv(context)
+        val overrides = envVarRepository.asMap() + profile.env + proxyEnv + extraEnv
         argv.add(TawcrootRuntime.wrapCommand(argv, "exec \"\$0\" \"\$@\"", projectPath != null, overrides))
         argv.add(program)
         argv.addAll(programArgs)
         return ProotInvocation(
-            argv, TawcrootRuntime.resultEnvironment(argv, buildContainerEnv(profile, projectPath), overrides),
+            argv, TawcrootRuntime.resultEnvironment(argv, buildContainerEnv(profile, projectPath, proxyEnv), overrides),
             TawcrootRuntime.environmentIfEnabled(argv, overrides),
         )
     }
@@ -798,10 +806,11 @@ class LinuxContainerEngine @Inject constructor(
         NativeArm64Rootfs.requireSupported(containerInstaller.rootfsDirFor(profile), shell)
         argv.add(shell)
         argv.add("-c")
-        val overrides = envVarRepository.asMap() + profile.env
+        val proxyEnv = com.aharou.core.net.AppProxy.proxyEnv(context)
+        val overrides = envVarRepository.asMap() + profile.env + proxyEnv
         argv.add(TawcrootRuntime.wrapCommand(argv, command, projectPath != null, overrides))
         return ProotInvocation(
-            argv, TawcrootRuntime.resultEnvironment(argv, buildContainerEnv(profile, projectPath), overrides),
+            argv, TawcrootRuntime.resultEnvironment(argv, buildContainerEnv(profile, projectPath, proxyEnv), overrides),
             TawcrootRuntime.environmentIfEnabled(argv, overrides),
         )
     }
@@ -876,12 +885,17 @@ class LinuxContainerEngine @Inject constructor(
         }
         gradleHeapApplier.apply(profile)
         return TawcrootRuntime.prefixIfEnabled(
-            context, containerInstaller, profile, argv, TawcrootRuntime.enabled(runtimeSettings)
+            context, containerInstaller, profile, argv,
+            TawcrootRuntime.enabled(profile)
         )
     }
 
     /** 容器内进程的标准环境变量（proot loader / 动态库 / PATH / HOME 等）。 */
-    private fun buildContainerEnv(profile: ContainerProfile, projectPath: String?): Map<String, String> {
+    private fun buildContainerEnv(
+        profile: ContainerProfile,
+        projectPath: String?,
+        proxyEnv: Map<String, String>
+    ): Map<String, String> {
         // 每个容器用自己 rootfs 下的 /tmp：镜像自带该目录，但重置/删除别的容器不该影响本容器，
         // 且 proot 要求 PROOT_TMP_DIR 已存在，故启动前确保建好（同 -b 源路径的处理）。
         val tmpDir = containerInstaller.prootTmpDirFor(profile).apply { mkdirs() }
@@ -929,7 +943,7 @@ class LinuxContainerEngine @Inject constructor(
             "TZ" to containerTimeZone(profile)
             // 全局 HTTP 代理：开启时注入 HTTP_PROXY/HTTPS_PROXY/ALL_PROXY/NO_PROXY，
             // 容器内 curl/git/npm/pip 等一律走代理；关闭或配置不完整时为空 map 不影响直连。
-        ) + ContainerLogMount.environment(profile, projectPath) + com.aharou.core.net.AppProxy.proxyEnv(context)
+        ) + ContainerLogMount.environment(profile, projectPath) + proxyEnv
     }
     /**
      * 容器内时区（TZ 环境变量值），跟随手机当前系统时区。

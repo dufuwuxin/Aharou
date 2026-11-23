@@ -341,12 +341,12 @@ class TerminalSessionTool @Inject constructor(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            FileLogger.e(TAG, "启动后台命令失败: $command", e)
+            FileLogger.e(TAG, "启动后台命令失败", e)
             emit(ToolStreamEvent.Completed(ToolResult.Error("启动后台命令失败: ${e.message}")))
             return
         }
 
-        FileLogger.i(TAG, "后台命令已启动 tab=$tabId(流式捕获): $command")
+        FileLogger.i(TAG, "后台命令已启动 tab=$tabId(流式捕获)")
         val redaction = withContext(Dispatchers.Main) { CaptureRedaction(tabId, initialRedaction) }
         captureOutputFor(tabId, initialOutput = "", redaction = redaction)
         val result = withContext(Dispatchers.Main) { capturedResult(tabId, actionLabel = "start", redaction = redaction) }
@@ -382,7 +382,7 @@ class TerminalSessionTool @Inject constructor(
             emit(ToolStreamEvent.Completed(ToolResult.Error("未找到终端标签: $tabId")))
             return
         }
-        FileLogger.i(TAG, "向 $tabId 发送输入(流式捕获): $input")
+        FileLogger.i(TAG, "向 $tabId 发送输入(流式捕获，${input.length} 字符)")
 
         captureOutputFor(tabId, initialOutput = before, redaction = redaction)
         val result = withContext(Dispatchers.Main) { capturedResult(tabId, actionLabel = "send", redaction = redaction) }
@@ -443,7 +443,7 @@ class TerminalSessionTool @Inject constructor(
         try {
             // 新建标签绑定发起会话的工作区：proot 挂载写死在进程 argv 里，用全局工作区会在切工作区后落错仓库。
             val tabId = sessionManager.startBackgroundCommand(command, title, notify, context?.sessionId, context?.projectRoot)
-            FileLogger.i(TAG, "后台命令已启动 tab=$tabId: $command")
+            FileLogger.i(TAG, "后台命令已启动 tab=$tabId")
             val redaction = CaptureRedaction(tabId, initialRedaction)
 
             // 轮询捕获初始输出：命令退出则提前结束，否则最多等满 START_CAPTURE_MS。
@@ -469,7 +469,7 @@ class TerminalSessionTool @Inject constructor(
                 )
             )
         } catch (e: Exception) {
-            FileLogger.e(TAG, "启动后台命令失败: $command", e)
+            FileLogger.e(TAG, "启动后台命令失败", e)
             ToolResult.Error("启动后台命令失败: ${e.message}")
         }
     }
@@ -492,7 +492,7 @@ class TerminalSessionTool @Inject constructor(
         val redaction = CaptureRedaction(tabId)
         val ok = sessionManager.sendInput(tabId, input, appendNewline = submit)
         if (ok) {
-            FileLogger.i(TAG, "向 $tabId 发送输入: $input")
+            FileLogger.i(TAG, "向 $tabId 发送输入（${input.length} 字符）")
             var elapsed = 0L
             while (elapsed < START_CAPTURE_MS) {
                 delay(START_POLL_INTERVAL_MS)
@@ -585,7 +585,7 @@ class TerminalSessionTool @Inject constructor(
                 val state = if (it.running) "运行中" else "已结束"
                 val kind = if (it.isBackground) "后台" else "交互"
                 val mark = if (workspaceMismatch(it, context)) "  [绑定的是别的工作区：${it.workspacePath}]" else ""
-                "${it.id}  [$kind/$state]  ${it.title}" + (it.command?.let { c -> "  ($c)" } ?: "") + mark
+                "${it.id}  [$kind/$state]  ${it.title}" + (it.command?.let { c -> "  [命令 ${c.length} 字符]" } ?: "") + mark
             }
             return@withContext ToolResult.Success(JsonPrimitive(text))
         }
@@ -612,7 +612,7 @@ class TerminalSessionTool @Inject constructor(
             output
         } else {
             val matched = filterOutputLines(output, regex)
-            FileLogger.v(TAG, "读取 $tabId 输出 ${output.length} 字符，filter=$filter 命中 ${matched.size} 行")
+            FileLogger.v(TAG, "读取 $tabId 输出 ${output.length} 字符，使用过滤条件命中 ${matched.size} 行")
             if (matched.isEmpty()) {
                 "没有匹配 $filter 的行（原输出共 ${output.lineSequence().count()} 行）。"
             } else {
@@ -694,17 +694,15 @@ class TerminalSessionTool @Inject constructor(
     }
 
     private inner class CaptureRedaction(
-        tabId: String,
+        private val tabId: String,
         private val initial: ContainerSettingsRepository.RedactionState = containerSettings.redactEnvOutputState(),
     ) {
-        private val redact = sessionManager.tabOutputRedactor(tabId)
-
         fun observe(): Boolean {
             val current = containerSettings.redactEnvOutputState()
             return initial.enabled || current.enabled || current.enabledGeneration != initial.enabledGeneration
         }
 
-        fun apply(output: String): String = if (observe()) redact(output) else output
+        fun apply(output: String): String = sessionManager.redactTabOutput(tabId, output, observe())
     }
 
     private fun outputDelta(previous: String, current: String): String {

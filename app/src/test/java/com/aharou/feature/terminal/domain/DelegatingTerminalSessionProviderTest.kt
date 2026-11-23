@@ -50,17 +50,21 @@ class DelegatingTerminalSessionProviderTest {
     }
 
     @Test
-    fun default_mode_routes_reads_to_local() {
+    fun list_tabs_merges_local_and_remote_sessions() {
         val provider = newProvider()
         every { local.listTabs() } returns listOf(tabInfo("term-1"))
+        every { remote.listTabs() } returns listOf(tabInfo("ssh-term-1"))
 
-        assertEquals(listOf("term-1"), provider.listTabs().map { it.id })
-        verify(exactly = 0) { remote.listTabs() }
+        assertEquals(listOf("term-1", "ssh-term-1"), provider.listTabs().map { it.id })
+        verify(exactly = 1) { local.listTabs() }
+        verify(exactly = 1) { remote.listTabs() }
     }
 
     @Test
-    fun default_mode_routes_input_and_output_to_local() {
+    fun default_mode_routes_input_and_local_output_to_local() {
         val provider = newProvider()
+        every { local.listTabs() } returns listOf(tabInfo("term-1"))
+        every { remote.listTabs() } returns listOf(tabInfo("ssh-term-1"))
         every { local.sendInput(any(), any(), any()) } returns true
         every { local.getTabOutput("term-1") } returns "hello"
 
@@ -71,12 +75,13 @@ class DelegatingTerminalSessionProviderTest {
     }
 
     @Test
-    fun remote_ssh_mode_routes_to_remote() {
+    fun tab_output_routes_to_ssh_backend_by_its_unique_tab_id() {
         val provider = newProvider()
-        modeHolder.setMode(ExecutionMode.REMOTE_SSH)
-        every { remote.getTabOutput("term-9") } returns "remote-out"
+        every { local.listTabs() } returns listOf(tabInfo("term-1"))
+        every { remote.listTabs() } returns listOf(tabInfo("ssh-term-9"))
+        every { remote.getTabOutput("ssh-term-9") } returns "remote-out"
 
-        assertEquals("remote-out", provider.getTabOutput("term-9"))
+        assertEquals("remote-out", provider.getTabOutput("ssh-term-9"))
         verify(exactly = 0) { local.getTabOutput(any()) }
     }
 

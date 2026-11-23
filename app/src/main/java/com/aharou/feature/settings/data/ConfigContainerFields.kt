@@ -15,6 +15,8 @@ import com.aharou.core.config.fields.DataStoreIntField
 import com.aharou.core.config.fields.DataStoreStrField
 import com.aharou.core.config.fields.ReadOnlyField
 import com.aharou.feature.agent.domain.container.ContainerProfile
+import com.aharou.feature.agent.domain.container.ContainerRuntimeBackend
+import com.aharou.feature.agent.domain.container.TawcrootRuntime
 import com.aharou.feature.agent.domain.container.ContainerWorkspaceKeys
 import com.aharou.feature.agent.domain.container.RootfsSource
 import com.aharou.feature.settings.data.repository.ContainerSettingsRepository
@@ -23,6 +25,7 @@ import com.aharou.feature.settings.presentation.ContainerMirrorMode
 import com.aharou.feature.settings.presentation.ContainerSourcesRepository
 import com.aharou.feature.settings.data.repository.ExecutionMode
 import dagger.hilt.android.qualifiers.ApplicationContext
+import java.io.File
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -46,19 +49,13 @@ class ConfigContainerFields @Inject constructor(
     fun registerInto(registry: ConfigRegistry) {
         registry.registerSources()
         registry.register(DataStoreBoolField(
-            path = "container.use_tawcroot",
-            displayName = context.getString(com.aharou.R.string.tawcroot_title),
-            description = context.getString(com.aharou.R.string.tawcroot_description),
-            flow = containerSettings.useTawcrootFlow,
-            setter = { containerSettings.setUseTawcroot(it) }
-        ))
-        registry.register(DataStoreBoolField(
             path = "container.redact_env_output",
             displayName = context.getString(com.aharou.R.string.settings_container_env_redaction_title),
             description = context.getString(com.aharou.R.string.settings_container_env_redaction_desc),
             flow = containerSettings.redactEnvOutputFlow,
             setter = { containerSettings.setRedactEnvOutput(it) }
         ))
+
         registry.register(
             DataStoreStrField(
                 path = "container.active_profile",
@@ -128,7 +125,7 @@ class ConfigContainerFields @Inject constructor(
         override val basePath = "container.profiles"
         override val displayName = "容器 profile"
         override val description =
-            "自定义容器 / 远程 SSH 容器列表（含内置 Alpine）。子字段：name / mode / rootfs_kind / " +
+            "容器 profile 列表（含内置 Ubuntu）。子字段：name / mode / runtime_backend / rootfs_kind / " +
                 "rootfs_source / shell_path / extra_bindings / extra_args / env / is_builtin / created_at；" +
                 "add 建一个新 profile、remove 删掉列表中的一项（分别走 upsertCustomProfile / deleteCustomProfile）。"
 
@@ -157,6 +154,31 @@ class ConfigContainerFields @Inject constructor(
                     "local_proot=本地 PRoot 容器 / remote_ssh=远程 SSH；由 profile 创建时选定，与 rootfs 来源绑定，只读。",
                     ConfigSchema.StrEnum(listOf("local_proot", "remote_ssh")),
                 ) { ConfigValue.Str(p.mode.name.lowercase()) },
+
+                ClosureField(
+                    path = "$basePath.$forId.runtime_backend",
+                    displayName = "运行时（$forId）",
+                    description = "仅本地 profile 可选：proot（默认）或 tawcroot（实验性；受 Android/ABI/Ubuntu glibc 条件限制）。",
+                    valueSchema = ConfigSchema.StrEnum(listOf("proot", "tawcroot")),
+                    revertable = true,
+                    reader = { ConfigValue.Str((p.runtimeBackend ?: ContainerRuntimeBackend.PROOT).name.lowercase()) },
+                    writer = { v ->
+                        val backend = when (strOf(v)) {
+                            "proot" -> ContainerRuntimeBackend.PROOT
+                            "tawcroot" -> ContainerRuntimeBackend.TAWCROOT
+                            else -> throw ConfigError.InvalidValue("Unsupported container runtime backend")
+                        }
+                        if (backend == ContainerRuntimeBackend.TAWCROOT && p.mode != ExecutionMode.LOCAL_PROOT) {
+                            throw ConfigError.InvalidValue("TAwCroot is only supported for local container profiles")
+                        }
+                        val rootfs = if (p.isBuiltin) File(context.filesDir, "rootfs_ubuntu")
+                            else File(context.filesDir, "rootfs_${p.id}")
+                        if (backend == ContainerRuntimeBackend.TAWCROOT && !TawcrootRuntime.availableForProfile(context, p, rootfs)) {
+                            throw ConfigError.InvalidValue("TAwCroot is unavailable for this device, app package, or installed profile rootfs")
+                        }
+                        mutate(forId) { it.copy(runtimeBackend = backend) }
+                    },
+                ),
 
                 ReadOnlyField(
                     "$basePath.$forId.rootfs_kind", "镜像来源类型（$forId）",
@@ -246,7 +268,7 @@ class ConfigContainerFields @Inject constructor(
 
                 ReadOnlyField(
                     "$basePath.$forId.is_builtin", "是否内置（$forId）",
-                    "内置 Alpine 为 true，其余为 false；只读。",
+                    "内置 Ubuntu 为 true，其余为 false；只读。",
                     ConfigSchema.Bool,
                 ) { ConfigValue.Bool(p.isBuiltin) },
 
@@ -283,6 +305,17 @@ class ConfigContainerFields @Inject constructor(
             } else {
                 ExecutionMode.LOCAL_PROOT
             }
+            val runtimeBackend = when (val value = obj["runtime_backend"]) {
+                null -> ContainerRuntimeBackend.PROOT
+                is ConfigValue.Str -> when (value.value) {
+                    "proot" -> ContainerRuntimeBackend.PROOT
+                    "tawcroot" -> throw ConfigError.InvalidValue(
+                        "TAwCroot requires a verified installed Ubuntu rootfs; add the profile first, then set its runtime_backend"
+                    )
+                    else -> throw ConfigError.InvalidValue("Unsupported container runtime backend")
+                }
+                else -> throw ConfigError.TypeMismatch("string")
+            }
 
             val bindings = (obj["extra_bindings"] as? ConfigValue.Arr)?.value
                 ?.map { (it as? ConfigValue.Str)?.value ?: throw ConfigError.TypeMismatch("string") }
@@ -315,6 +348,7 @@ class ConfigContainerFields @Inject constructor(
                 env = env,
                 isBuiltin = false,
                 mode = mode,
+                runtimeBackend = runtimeBackend,
             )
             runBlocking { containerSettings.upsertCustomProfile(profile) }
             return profile.id

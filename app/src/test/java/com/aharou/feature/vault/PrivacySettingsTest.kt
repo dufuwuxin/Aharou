@@ -1,6 +1,10 @@
 package com.aharou.feature.vault
 
 import android.content.Context
+import androidx.datastore.preferences.preferencesDataStoreFile
+import com.aharou.feature.settings.data.repository.ContainerSettingsRepository
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -19,26 +23,39 @@ import org.robolectric.annotation.ConscryptMode
 @SQLiteMode(SQLiteMode.Mode.LEGACY)
 @ConscryptMode(ConscryptMode.Mode.OFF)
 class PrivacySettingsTest {
-    @Test fun settingsPersistAndActuallyChangeTheSharedRedactionConsumer() {
+    @Test fun settingsPersistAndActuallyChangeTheSharedRedactionConsumer() = runBlocking {
         val context = RuntimeEnvironment.getApplication()
-        context.getSharedPreferences("aharou_vault", Context.MODE_PRIVATE).edit().clear().commit()
+        val vaultPrefs = context.getSharedPreferences("aharou_vault", Context.MODE_PRIVATE)
+        val containerFile = context.preferencesDataStoreFile("container_prefs")
+        vaultPrefs.edit().clear().commit()
+        containerFile.delete()
+        vaultPrefs.edit().putBoolean("privacy_redaction", true).commit()
         val previous = VaultRedactor.delegate
+        val previousSnapshot = VaultRedactor.snapshotDelegate
         try {
-            val repository = VaultRepository(context)
+            val container = ContainerSettingsRepository(context)
+            container.migrateLegacyPrivacyRedaction()
+            val repository = VaultRepository(context, container)
             val sample = "test@example.org phone=13812345678"
-            assertFalse(repository.privacyRedaction.value)
-            assertEquals(sample, repository.redact(sample))
-            assertTrue(repository.setPrivacyRedaction(true))
-            assertFalse(VaultRedactor.redact(sample).contains("test@example.org"))
-            assertFalse(VaultRedactor.redact(sample).contains("13812345678"))
-            val reloaded = VaultRepository(context)
-            assertTrue(reloaded.privacyRedaction.value)
-            assertTrue(reloaded.setPrivacyRedaction(false))
+            container.setRedactEnvOutput(true)
+            assertTrue(repository.privacyRedaction.first())
+            assertFalse(repository.redact(sample).contains("test@example.org"))
+            assertFalse(repository.redact(sample).contains("13812345678"))
+            val reloaded = VaultRepository(context, container)
+            assertTrue(reloaded.privacyRedaction.first())
+            val capturedRedaction = container.redactEnvOutputEnabledSnapshot()
+            container.setRedactEnvOutput(false)
+            assertFalse(reloaded.privacyRedaction.first())
             assertEquals(sample, reloaded.redact(sample))
+            assertFalse(VaultRedactor.redact(sample, capturedRedaction).contains("test@example.org"))
+            assertFalse(VaultRedactor.redact(sample, capturedRedaction).contains("13812345678"))
             assertFalse(reloaded.previewRedaction(sample).contains("test@example.org"))
+            assertFalse(vaultPrefs.contains("privacy_redaction"))
         } finally {
             VaultRedactor.delegate = previous
-            context.getSharedPreferences("aharou_vault", Context.MODE_PRIVATE).edit().clear().commit()
+            VaultRedactor.snapshotDelegate = previousSnapshot
+            vaultPrefs.edit().clear().commit()
+            containerFile.delete()
         }
     }
 }

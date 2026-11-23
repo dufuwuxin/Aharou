@@ -146,7 +146,7 @@ class RemoteTerminalSessionManager @Inject constructor(
             workspacePath = workspacePath,
             createdByAgent = true
         )
-        FileLogger.i(TAG, "后台命令标签 $id: $command")
+        FileLogger.i(TAG, "后台命令标签 $id，命令 ${command.length} 字符")
         return id
     }
 
@@ -317,7 +317,7 @@ class RemoteTerminalSessionManager @Inject constructor(
         tab.session.write(arr, 0, arr.size)
     }
 
-    private fun nextId(): String = "term-${idCounter.incrementAndGet()}"
+    private fun nextId(): String = "ssh-term-${idCounter.incrementAndGet()}"
 
     private fun addTab(tab: TerminalTab) {
         _tabs.value = _tabs.value + tab

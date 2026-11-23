@@ -6,9 +6,9 @@ import kotlinx.coroutines.flow.StateFlow
 /** 流式执行命令时产生的事件，供终端逐行实时渲染。 */
 sealed interface CommandEvent {
     /** 一行标准输出/错误（stderr 已合并到 stdout）。 */
-    data class Line(val text: String) : CommandEvent
-    /** 命令结束，附退出码（兜底 shell 无法取到时为 null）。 */
-    data class Exit(val code: Int?) : CommandEvent
+    data class Line(val text: String, val injectedEnv: Map<String, String> = emptyMap()) : CommandEvent
+    /** 命令结束，附退出码（兜底 shell 无法取到时为 null）与启动时注入环境快照。 */
+    data class Exit(val code: Int?, val injectedEnv: Map<String, String> = emptyMap()) : CommandEvent
 }
 
 /**
@@ -16,7 +16,12 @@ sealed interface CommandEvent {
  * [outputTruncated] 为 true 表示输出超过了引擎上限被截断（不限幅通道见 [MAX_UNBOUNDED_CHARS]），
  * 调用方不应把这种输出当作完整结果解析。
  */
-data class CommandResult(val output: String, val exitCode: Int?, val outputTruncated: Boolean = false)
+data class CommandResult(
+    val output: String,
+    val exitCode: Int?,
+    val outputTruncated: Boolean = false,
+    val injectedEnv: Map<String, String> = emptyMap()
+)
 
 /**
  * 命令执行后端抽象：把"在哪执行命令"从硬编码的本地 PRoot 解耦。
@@ -129,24 +134,4 @@ interface CommandEngine {
     }
 }
 
-/**
- * 日志打印前对命令串脱敏：命令可能带 env 前缀（如面板脚本的 `AICODE_PROVIDER_API_KEY=...`）
- * 或内联凭据（`--header "Authorization: Bearer ..."`）。按敏感键名把值打码为 `***`。
- */
-private val SENSITIVE_COMMAND_VALUE_REGEX = Regex(
-    """(?i)(?<![A-Za-z0-9])(api[_-]?key|access[_-]?token|auth[_-]?token|token|password|passwd|secret|authorization|auth[_-]?cookie|cookie)\b\s*([=:])\s*(['"]?)(?:Bearer\s+|Basic\s+)?[^\s'"]+"""
-)
-
-/** 日志里命令串的长度上限。超长命令（如面板脚本注入的长 env 前缀）保留首尾，中段以省略号代替。 */
-private const val MAX_LOGGED_COMMAND_CHARS = 400
-
-fun sanitizeCommandForLog(command: String): String {
-    val sanitized = SENSITIVE_COMMAND_VALUE_REGEX.replace(command) { m ->
-        m.groupValues[1] + m.groupValues[2] + m.groupValues[3] + "***"
-    }
-    if (sanitized.length <= MAX_LOGGED_COMMAND_CHARS) return sanitized
-    val half = MAX_LOGGED_COMMAND_CHARS / 2
-    return sanitized.take(half) +
-        "…<省略 ${sanitized.length - 2 * half} 字符>…" +
-        sanitized.takeLast(half)
-}
+fun sanitizeCommandForLog(command: String): String = "[命令内容已省略，${command.length} 字符]"

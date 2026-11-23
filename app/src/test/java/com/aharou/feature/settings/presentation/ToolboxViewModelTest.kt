@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.lifecycle.viewModelScope
 import com.aharou.feature.agent.domain.container.CommandEngine
 import com.aharou.feature.agent.domain.container.CommandResult
+import com.aharou.feature.settings.data.repository.ContainerSettingsRepository
 import com.aharou.feature.agent.domain.permission.ToolPermissionPolicyEngine
 import com.aharou.feature.agent.domain.tool.ToolRegistry
 import com.aharou.feature.agent.domain.tool.custom.*
@@ -26,6 +27,7 @@ class ToolboxViewModelTest {
     private val workspace = mockk<WorkspaceRepository>()
     private val context = mockk<Context>(relaxed = true)
     private val policy = mockk<ToolPermissionPolicyEngine>()
+    private val containerSettings = mockk<ContainerSettingsRepository>(relaxed = true)
     private val viewModels = mutableListOf<ToolboxViewModel>()
 
     @Before fun setup() {
@@ -42,7 +44,9 @@ class ToolboxViewModelTest {
             }
         } finally { Dispatchers.resetMain() }
     }
-    private fun vm() = ToolboxViewModel(store, registry, engine, workspace, context, policy).also(viewModels::add)
+    private fun vm() = ToolboxViewModel(
+        store, registry, engine, workspace, context, policy, containerSettings
+    ).also(viewModels::add)
 
     @Test fun strictImportRejectsBadDefinitionsAndRoundTripsOriginalFormat() {
         val tool = CustomToolDefinition("example", command = "printf %s {{path}}", parameters = listOf(CustomToolParameter("path", required = true)))

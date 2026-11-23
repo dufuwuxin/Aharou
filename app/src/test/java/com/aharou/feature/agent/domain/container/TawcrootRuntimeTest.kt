@@ -1,11 +1,25 @@
 package com.aharou.feature.agent.domain.container
 
+import com.aharou.feature.settings.data.repository.ExecutionMode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class TawcrootRuntimeTest {
+    @Test fun backendSelectionBelongsToEachProfileAndRemoteNeverUsesTawcroot() {
+        val experimental = ContainerProfile.BUILTIN_UBUNTU.copy(runtimeBackend = ContainerRuntimeBackend.TAWCROOT)
+        val regular = ContainerProfile.BUILTIN_UBUNTU.copy(id = "custom-ubuntu", runtimeBackend = ContainerRuntimeBackend.PROOT)
+        val remote = ContainerProfile(
+            id = "remote", name = "remote", rootfsSource = RootfsSource.RemoteSsh("ssh", "/workspace"),
+            shellPath = null, isBuiltin = false, mode = ExecutionMode.REMOTE_SSH,
+            runtimeBackend = ContainerRuntimeBackend.TAWCROOT
+        )
+        assertTrue(TawcrootRuntime.enabled(experimental))
+        assertFalse(TawcrootRuntime.enabled(regular))
+        assertFalse(TawcrootRuntime.enabled(remote))
+    }
+
     @Test fun deviceGateRequiresAndroidTenAndArm64Process() {
         assertTrue(TawcrootRuntime.deviceSupported(29, true, listOf("arm64-v8a")))
         assertFalse(TawcrootRuntime.deviceSupported(28, true, listOf("arm64-v8a")))

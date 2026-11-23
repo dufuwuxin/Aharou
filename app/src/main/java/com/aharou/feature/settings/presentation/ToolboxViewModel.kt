@@ -97,6 +97,7 @@ class ToolboxViewModel @Inject constructor(
     private val workspace: WorkspaceRepository,
     @param:ApplicationContext private val context: Context,
     private val policy: ToolPermissionPolicyEngine,
+    private val containerSettings: com.aharou.feature.settings.data.repository.ContainerSettingsRepository,
 ) : ViewModel() {
     private val _state = MutableStateFlow(ToolboxUiState())
     val state = _state.asStateFlow()
@@ -182,7 +183,7 @@ class ToolboxViewModel @Inject constructor(
                         override suspend fun runCommandSyncWithExit(command: String, projectPath: String?, timeoutMs: Long): CommandResult =
                             engine.runCommandSyncWithExit(command, projectPath, timeoutMs).also { truncated = it.outputTruncated; exitCode = it.exitCode }
                     }
-                    val tool = CustomCommandTool(definition, capture, workspace, context)
+                    val tool = CustomCommandTool(definition, capture, workspace, context, containerSettings)
                     val verdict = policy.evaluate(tool, tool.name, args, AgentMode.BUILD, root, null)
                     val output = if (verdict.verdict == ToolPermissionPolicyEngine.Verdict.DENY) {
                         ToolResult.Error(verdict.denyReason.orEmpty(), "PERMISSION_DENIED")

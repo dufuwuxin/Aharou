@@ -42,6 +42,7 @@ import com.aharou.core.ui.AppTextField
 import com.aharou.core.ui.SwipeToDeleteRow
 import com.aharou.core.ui.dialogTextFieldColors
 import com.aharou.feature.settings.presentation.component.SettingsDivider
+import com.aharou.feature.settings.presentation.component.PrivacyRedactionSettingsRow
 import com.aharou.feature.settings.presentation.component.SettingsGroup
 import com.aharou.feature.settings.presentation.component.SettingsGroupHeader
 import com.aharou.feature.settings.presentation.component.SettingsRow
@@ -96,10 +97,9 @@ internal fun VaultSection(viewModel: VaultViewModel = hiltViewModel()) {
                 trailing = { AppSwitch(checked = outboundEnabled, onCheckedChange = { viewModel.setOutboundMasking(it) }) },
             )
             SettingsDivider()
-            SettingsRow(
-                title = stringResource(R.string.vault_privacy_enable),
-                subtitle = stringResource(R.string.vault_privacy_scope),
-                trailing = { AppSwitch(checked = privacyEnabled, onCheckedChange = { viewModel.setPrivacyRedaction(it) }) },
+            PrivacyRedactionSettingsRow(
+                checked = privacyEnabled,
+                onCheckedChange = viewModel::setPrivacyRedaction
             )
             if (privacyError || outboundError) {
                 Text(stringResource(R.string.vault_privacy_save_failed), color = MaterialTheme.colorScheme.error,

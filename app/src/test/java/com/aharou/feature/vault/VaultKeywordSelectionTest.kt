@@ -4,6 +4,7 @@ import android.app.Application
 import com.aharou.core.privacy.MaskingRules
 import com.aharou.core.privacy.OutboundMasker
 import com.aharou.core.security.KeystoreCipher
+import com.aharou.feature.settings.data.repository.ContainerSettingsRepository
 import io.mockk.every
 import io.mockk.mockkObject
 import io.mockk.unmockkObject
@@ -27,8 +28,13 @@ import org.robolectric.annotation.SQLiteMode
 @ConscryptMode(ConscryptMode.Mode.OFF)
 class VaultKeywordSelectionTest {
     private val context get() = RuntimeEnvironment.getApplication()
+    private var previousDelegate: ((String) -> String)? = null
+    private var previousSnapshotDelegate: ((String, Boolean) -> String)? = null
+    private fun repository() = VaultRepository(context, ContainerSettingsRepository(context))
 
     @Before fun setup() {
+        previousDelegate = VaultRedactor.delegate
+        previousSnapshotDelegate = VaultRedactor.snapshotDelegate
         context.getSharedPreferences("aharou_vault", 0).edit().clear().commit()
         mockkObject(KeystoreCipher)
         every { KeystoreCipher.encryptString(any()) } answers { firstArg() }
@@ -36,16 +42,18 @@ class VaultKeywordSelectionTest {
     }
 
     @After fun cleanup() {
+        VaultRedactor.delegate = previousDelegate
+        VaultRedactor.snapshotDelegate = previousSnapshotDelegate
         MaskingRules.literalValues = { emptyList() }
         unmockkObject(KeystoreCipher)
         context.getSharedPreferences("aharou_vault", 0).edit().clear().commit()
     }
 
     @Test fun selectionIsPersistentAndUsesTheActualOutboundFactory() {
-        val repository = VaultRepository(context)
+        val repository = repository()
         repository.set("project", "内部甲")
         assertTrue(repository.setKeywordNames(setOf("project")))
-        val reloaded = VaultRepository(context)
+        val reloaded = repository()
         assertEquals(setOf("project"), reloaded.keywordNames.value)
         val masker = OutboundMasker.create()
         val result = masker.mask("讨论内部甲")
@@ -56,7 +64,7 @@ class VaultKeywordSelectionTest {
     }
 
     @Test fun deletingAndResettingDoNotLeaveReplacementSelections() {
-        val repository = VaultRepository(context)
+        val repository = repository()
         repository.set("one", "内部甲")
         repository.set("two", "内部乙")
         assertTrue(repository.setKeywordNames(setOf("one", "two")))
@@ -64,7 +72,7 @@ class VaultKeywordSelectionTest {
         assertEquals(setOf("two"), repository.keywordNames.value)
         repository.reset()
         assertTrue(repository.keywordNames.value.isEmpty())
-        assertTrue(VaultRepository(context).keywordNames.value.isEmpty())
+        assertTrue(repository().keywordNames.value.isEmpty())
     }
 
     @Test fun failedKeywordCommitPreventsDeletionAndPreservesExistingSelection() {
@@ -85,7 +93,7 @@ class VaultKeywordSelectionTest {
         val application = object : android.content.ContextWrapper(context) {
             override fun getSharedPreferences(name: String?, mode: Int): android.content.SharedPreferences = preferences
         }
-        val repository = VaultRepository(application)
+        val repository = VaultRepository(application, ContainerSettingsRepository(application))
         repository.set("one", "内部甲")
         assertTrue(repository.setKeywordNames(setOf("one")))
         failCommits = true
@@ -95,10 +103,10 @@ class VaultKeywordSelectionTest {
     }
 
     @Test fun savingMultipleSeparatedRulesIsAtomicAndPreservesOtherCredentials() {
-        val repository = VaultRepository(context)
+        val repository = repository()
         repository.set("credential", "Abc123keepSecretValue")
         assertTrue(repository.saveKeywordEntries(listOf("first" to "一,二", "second" to "第三条\n整段")))
-        val reloaded = VaultRepository(context)
+        val reloaded = repository()
         assertEquals(mapOf("first" to "一,二", "second" to "第三条\n整段"), reloaded.keywordEntries().toMap())
         assertEquals("Abc123keepSecretValue", reloaded.get("credential"))
         val masker = OutboundMasker.create()
@@ -114,7 +122,7 @@ class VaultKeywordSelectionTest {
         val preferences = context.getSharedPreferences("aharou_vault", 0)
         preferences.edit().putString("blob", "unreadable-original-blob").commit()
         every { KeystoreCipher.decryptString("unreadable-original-blob") } throws IllegalStateException("fixture_decryption_failed")
-        val repository = VaultRepository(context)
+        val repository = repository()
         try {
             repository.saveKeywordEntries(listOf("new" to "new text"))
             fail("Unreadable vault must remain read-only")
@@ -124,7 +132,7 @@ class VaultKeywordSelectionTest {
     }
 
     @Test fun concurrentIndividualSelectionsDoNotLoseAnUpdate() = kotlinx.coroutines.runBlocking {
-        val repository = VaultRepository(context)
+        val repository = repository()
         repository.set("one", "原文一")
         repository.set("two", "原文二")
         kotlinx.coroutines.coroutineScope {
@@ -141,7 +149,7 @@ class VaultKeywordSelectionTest {
     }
 
     @Test fun missingNamesAreRejectedWithoutChangingSelection() {
-        val repository = VaultRepository(context)
+        val repository = repository()
         repository.set("one", "内部甲")
         assertTrue(repository.setKeywordNames(setOf("one")))
         try { repository.setKeywordNames(setOf("missing")); fail("Unknown name must not be saved") }

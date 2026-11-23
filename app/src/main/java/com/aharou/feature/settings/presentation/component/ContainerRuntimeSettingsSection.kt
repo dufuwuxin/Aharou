@@ -1,87 +1,81 @@
 package com.aharou.feature.settings.presentation.component
 
-import androidx.compose.foundation.layout.Column
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
+import android.content.Context
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import com.aharou.R
 import com.aharou.core.ui.AppSwitch
+import com.aharou.feature.agent.domain.container.ContainerProfile
+import com.aharou.feature.agent.domain.container.ContainerRuntimeBackend
 import com.aharou.feature.agent.domain.container.TawcrootRuntime
-import com.aharou.feature.settings.data.repository.ContainerSettingsRepository
-import dagger.hilt.EntryPoint
-import dagger.hilt.InstallIn
-import dagger.hilt.android.EntryPointAccessors
-import dagger.hilt.components.SingletonComponent
-import kotlinx.coroutines.CancellationException
+import com.aharou.feature.settings.data.repository.ExecutionMode
+import com.aharou.feature.workspace.domain.model.RemoteConnection
+import java.io.File
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-@EntryPoint
-@InstallIn(SingletonComponent::class)
-internal interface ContainerRuntimeSettingsEntryPoint {
-    fun containerSettingsRepository(): ContainerSettingsRepository
+@Composable
+internal fun ContainerRuntimeBackendRow(
+    profile: ContainerProfile?,
+    mode: ExecutionMode,
+    backend: ContainerRuntimeBackend,
+    onBackendChange: (ContainerRuntimeBackend) -> Unit
+) {
+    val context = LocalContext.current
+    var available by remember(profile?.id, profile?.rootfsSource, mode) { mutableStateOf(false) }
+    LaunchedEffect(context, profile?.id, profile?.rootfsSource, mode) {
+        available = withContext(Dispatchers.IO) {
+            profile != null && TawcrootRuntime.availableForProfile(
+                context,
+                profile.copy(mode = mode),
+                if (profile.isBuiltin) File(context.filesDir, "rootfs_ubuntu") else File(context.filesDir, "rootfs_${profile.id}")
+            )
+        }
+    }
+    SettingsRow(
+        title = stringResource(R.string.container_runtime_backend),
+        subtitle = stringResource(
+            if (available || backend == ContainerRuntimeBackend.TAWCROOT) {
+                R.string.container_runtime_backend_tawcroot_desc
+            } else R.string.container_runtime_backend_tawcroot_unavailable
+        ),
+        trailing = {
+            AppSwitch(
+                checked = backend == ContainerRuntimeBackend.TAWCROOT,
+                enabled = available || backend == ContainerRuntimeBackend.TAWCROOT,
+                onCheckedChange = { enabled ->
+                    onBackendChange(if (enabled) ContainerRuntimeBackend.TAWCROOT else ContainerRuntimeBackend.PROOT)
+                }
+            )
+        }
+    )
+}
+
+internal fun containerProfileSubtitle(context: Context, profile: ContainerProfile, connections: List<RemoteConnection>): String {
+    if (profile.mode == ExecutionMode.REMOTE_SSH) {
+        val ssh = profile.rootfsSource as? com.aharou.feature.agent.domain.container.RootfsSource.RemoteSsh
+        val connectionName = ssh?.connectionId?.let { id -> connections.firstOrNull { it.id == id }?.name }
+        return connectionName ?: context.getString(R.string.container_channel_deleted)
+    }
+    val shell = profile.shellPath?.ifBlank { null } ?: "/bin/sh"
+    val backend = context.getString(
+        if (TawcrootRuntime.enabled(profile)) R.string.container_runtime_backend_tawcroot
+        else R.string.container_runtime_backend_proot
+    )
+    return context.getString(R.string.container_profile_runtime_subtitle, backend, shell)
 }
 
 @Composable
-internal fun ContainerRuntimeSettingsSection() {
-    val context = LocalContext.current
-    val repository = remember(context) {
-        EntryPointAccessors.fromApplication(context.applicationContext, ContainerRuntimeSettingsEntryPoint::class.java)
-            .containerSettingsRepository()
-    }
-    val redact by repository.redactEnvOutputFlow.collectAsState(initial = true)
-    val tawcroot by repository.useTawcrootFlow.collectAsState(initial = false)
-    val scope = rememberCoroutineScope()
-    var available by remember { mutableStateOf(false) }
-    var failure by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(context) {
-        available = withContext(Dispatchers.IO) { TawcrootRuntime.available(context) }
-    }
-    Column {
-        SettingsGroup {
-            SettingsRow(
-                title = stringResource(R.string.settings_container_env_redaction_title),
-                subtitle = stringResource(R.string.settings_container_env_redaction_desc),
-                trailing = {
-                    AppSwitch(checked = redact, onCheckedChange = { enabled ->
-                        scope.launch { repository.setRedactEnvOutput(enabled) }
-                    })
-                }
-            )
-        }
-        SettingsGroup {
-            SettingsRow(
-                title = stringResource(R.string.tawcroot_title),
-                subtitle = stringResource(if (available || tawcroot) R.string.tawcroot_description else R.string.tawcroot_unavailable),
-                trailing = {
-                    AppSwitch(checked = tawcroot, enabled = available || tawcroot, onCheckedChange = { enabled ->
-                        scope.launch {
-                            failure = null
-                            try {
-                                withContext(Dispatchers.IO) {
-                                    if (enabled) TawcrootRuntime.requireAvailable(context)
-                                    repository.setUseTawcroot(enabled)
-                                }
-                            } catch (cancelled: CancellationException) {
-                                throw cancelled
-                            } catch (error: Exception) {
-                                failure = error.message.orEmpty()
-                            }
-                        }
-                    })
-                }
-            )
-        }
-        failure?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-    }
+internal fun PrivacyRedactionSettingsRow(checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    SettingsRow(
+        title = stringResource(R.string.settings_container_env_redaction_title),
+        subtitle = stringResource(R.string.settings_container_env_redaction_desc),
+        trailing = { AppSwitch(checked = checked, onCheckedChange = onCheckedChange) }
+    )
 }

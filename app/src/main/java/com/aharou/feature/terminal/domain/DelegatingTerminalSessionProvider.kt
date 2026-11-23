@@ -33,6 +33,12 @@ class DelegatingTerminalSessionProvider @Inject constructor(
     private fun delegate(): TerminalSessionProvider =
         if (modeHolder.currentMode() == ExecutionMode.REMOTE_SSH) remote else local
 
+    private fun delegateForTab(id: String): TerminalSessionProvider = when {
+        local.listTabs().any { it.id == id } -> local
+        remote.listTabs().any { it.id == id } -> remote
+        else -> delegate()
+    }
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     /**
@@ -74,15 +80,18 @@ class DelegatingTerminalSessionProvider @Inject constructor(
     override fun writeBytesToTab(id: String, vararg bytes: Int): Boolean =
         delegate().writeBytesToTab(id, *bytes)
 
-    override fun getTabOutput(id: String): String? = delegate().getTabOutput(id)
+    override fun getTabOutput(id: String): String? = delegateForTab(id).getTabOutput(id)
 
-    override fun redactTabOutput(id: String, output: String): String = delegate().redactTabOutput(id, output)
+    override fun redactTabOutput(id: String, output: String): String = delegateForTab(id).redactTabOutput(id, output)
 
-    override fun tabOutputRedactor(id: String): (String) -> String = delegate().tabOutputRedactor(id)
+    override fun redactTabOutput(id: String, output: String, redactEnvironment: Boolean): String =
+        delegateForTab(id).redactTabOutput(id, output, redactEnvironment)
 
-    override fun listTabs(): List<TabInfo> = delegate().listTabs()
+    override fun tabOutputRedactor(id: String): (String) -> String = delegateForTab(id).tabOutputRedactor(id)
 
-    override fun closeTab(id: String): Boolean = delegate().closeTab(id)
+    override fun listTabs(): List<TabInfo> = local.listTabs() + remote.listTabs()
 
-    override fun closeFinishedAgentTabs(): Int = delegate().closeFinishedAgentTabs()
+    override fun closeTab(id: String): Boolean = delegateForTab(id).closeTab(id)
+
+    override fun closeFinishedAgentTabs(): Int = local.closeFinishedAgentTabs() + remote.closeFinishedAgentTabs()
 }

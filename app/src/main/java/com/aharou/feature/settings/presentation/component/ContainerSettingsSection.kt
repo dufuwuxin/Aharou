@@ -74,6 +74,7 @@ import com.aharou.core.ui.SwipeToDeleteRow
 import com.aharou.core.theme.Spacing
 import com.aharou.core.theme.semanticColors
 import com.aharou.feature.agent.domain.container.ContainerProfile
+import com.aharou.feature.agent.domain.container.ContainerRuntimeBackend
 import com.aharou.feature.agent.domain.container.RootfsSource
 import com.aharou.feature.settings.data.repository.ExecutionMode
 import com.aharou.feature.settings.data.repository.DEFAULT_REMOTE_WORKSPACE_ROOT
@@ -93,13 +94,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/**
- * 容器镜像二级页：所有容器（含内置 Alpine）统一管理——列表单选切换、编辑、重置、左滑删除；
- * 删光后空态可一键恢复内置 Alpine。内置 Alpine 首次启动自动写入列表，不享受特殊待遇。
- *
- * 选中某个 profile 时按其 [ContainerProfile.mode] 同步切全局执行模式——本地镜像走 PRoot 容器，
- * 远程 SSH 镜像走 SSH exec/SFTP。
- */
+/** 容器镜像二级页：管理本地镜像与 SSH profile，并按 profile 切换对应执行模式。 */
 @Composable
 internal fun ContainerSection(
     profiles: List<ContainerProfile>,
@@ -172,7 +167,7 @@ internal fun ContainerSection(
                         active = profile.id == activeProfileId,
                         defaultContainerId = defaultContainerId,
                         osId = osMap[profile.id],
-                        subtitle = profileSubtitle(context, profile, remoteConnections),
+                        subtitle = containerProfileSubtitle(context, profile, remoteConnections),
                         onSelect = { if (profile.id != activeProfileId) pendingSwitch = profile },
                         onEdit = { editingProfile = profile },
                         onDelete = { deletingProfile = profile },
@@ -464,23 +459,7 @@ private fun SourceBadge(text: String, color: Color) {
     }
 }
 
-/** 镜像列表项副标题：本地镜像（内置/自定义）统一显示生效 shell，不区分来源；远程 SSH 显示通道名。 */
-private fun profileSubtitle(context: Context, profile: ContainerProfile, connections: List<RemoteConnection>): String {
-    if (profile.mode == ExecutionMode.REMOTE_SSH) {
-        val ssh = profile.rootfsSource as? RootfsSource.RemoteSsh
-        val connName = ssh?.connectionId?.let { cid -> connections.firstOrNull { it.id == cid }?.name }
-        return connName ?: context.getString(R.string.container_channel_deleted)
-    }
-    val shellDesc = profile.shellPath?.ifBlank { null } ?: "/bin/sh"
-    return context.getString(R.string.container_shell_desc, shellDesc)
-}
-
-/**
- * 添加/编辑镜像的 ModalBottomSheet：顶部标签切换本地镜像 / 远程 SSH。
- * 本地镜像分支：名称、shell 路径、额外绑定、额外参数、选 tar.gz 文件。
- * 远程 SSH 分支：名称、下拉选工作区已配置的 SFTP 通道、远程工作区路径。
- * 编辑内置 Alpine 时镜像来源保持内置（可选导入新文件覆盖，导入后转为自定义容器）。
- */
+/** 添加/编辑镜像的 ModalBottomSheet，包含本地镜像字段与 SSH 通道选择。 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ProfileEditSheet(
@@ -491,6 +470,7 @@ private fun ProfileEditSheet(
     onReset: (() -> Unit)? = null,
     onConfirm: (ContainerProfile, Boolean) -> Unit
 ) {
+    val context = LocalContext.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val configuration = LocalConfiguration.current
     val screenHeight = configuration.screenHeightDp.dp
@@ -510,6 +490,7 @@ private fun ProfileEditSheet(
     var setAsDefault by remember { mutableStateOf(initial?.id == defaultContainerId) }
     // 本地镜像字段
     var shellPath by remember { mutableStateOf(initial?.shellPath ?: "/bin/sh") }
+    var runtimeBackend by remember { mutableStateOf(initial?.runtimeBackend ?: ContainerRuntimeBackend.PROOT) }
     val bindingsList = remember {
         mutableStateListOf<Pair<String, String>>().apply {
             addAll(initial?.extraBindings?.map { b ->
@@ -531,7 +512,6 @@ private fun ProfileEditSheet(
     val initialUri = (initial?.rootfsSource as? RootfsSource.LocalFile)?.uri
     var pickedUri by remember { mutableStateOf(initialUri) }
     var pickedName by remember { mutableStateOf<String?>(null) }
-    val context = LocalContext.current
     LaunchedEffect(pickedUri) {
         pickedName = pickedUri?.let { queryImageDisplayName(context, it) }
     }
@@ -630,6 +610,13 @@ private fun ProfileEditSheet(
                             value = shellPath,
                             onValueChange = { shellPath = it },
                             label = stringResource(R.string.container_shell_path)
+                        )
+
+                        ContainerRuntimeBackendRow(
+                            profile = initial,
+                            mode = mode,
+                            backend = runtimeBackend,
+                            onBackendChange = { runtimeBackend = it }
                         )
 
                         MountListEditor(
@@ -822,6 +809,7 @@ private fun ProfileEditSheet(
                                 .map { it.first.trim() to it.second }
                                 .filter { it.first.isNotEmpty() }
                                 .toMap(),
+                            runtimeBackend = runtimeBackend,
                             pickedUri = finalUri,
                             selectedConnId = selectedConnId,
                             remotePath = remotePath
@@ -1139,6 +1127,7 @@ private fun buildProfile(
     bindings: List<String>,
     args: List<String>,
     env: Map<String, String>,
+    runtimeBackend: ContainerRuntimeBackend,
     pickedUri: String?,
     selectedConnId: String,
     remotePath: String
@@ -1157,6 +1146,7 @@ private fun buildProfile(
                 extraArgs = if (args.isEmpty() && rootfsSource is RootfsSource.LocalFile)
                     ContainerProfile.DEFAULT_PROOT_ARGS else args,
                 env = env,
+                runtimeBackend = runtimeBackend,
                 isBuiltin = rootfsSource is RootfsSource.Asset,
                 mode = ExecutionMode.LOCAL_PROOT
             )
@@ -1170,7 +1160,8 @@ private fun buildProfile(
                 rootfsSource = RootfsSource.RemoteSsh(selectedConnId, remotePath),
                 shellPath = null,
                 isBuiltin = false,
-                mode = ExecutionMode.REMOTE_SSH
+                mode = ExecutionMode.REMOTE_SSH,
+                runtimeBackend = ContainerRuntimeBackend.PROOT
             )
         }
     }

@@ -3,7 +3,6 @@ package com.aharou.feature.agent.domain.container
 import android.content.Context
 import android.os.Build
 import android.os.Process
-import com.aharou.feature.settings.data.repository.ContainerSettingsRepository
 import java.io.File
 import java.io.IOException
 
@@ -19,6 +18,14 @@ internal object TawcrootRuntime {
 
     fun requireAvailable(context: Context) {
         check(available(context)) { "tawcroot requires Android 10+, a 64-bit ARM64 process and its bundled executable" }
+    }
+
+    fun availableForProfile(context: Context, profile: ContainerProfile, rootfs: File): Boolean {
+        if (!available(context) || profile.mode != com.aharou.feature.settings.data.repository.ExecutionMode.LOCAL_PROOT) return false
+        if (profile.isBuiltin && !rootfs.exists()) return true
+        val marker = if (profile.isBuiltin) File(rootfs, ".installed") else File(rootfs, ".installed_custom")
+        if (!marker.isFile) return false
+        return runCatching { requireRootfs(rootfs) }.isSuccess
     }
 
     fun requireRootfs(rootfs: File) {
@@ -80,7 +87,9 @@ internal object TawcrootRuntime {
     fun resultEnvironment(argv: List<String>, base: Map<String, String>, overrides: Map<String, String>): Map<String, String> =
         environmentIfEnabled(argv, base + overrides)
 
-    fun enabled(settings: ContainerSettingsRepository): Boolean = settings.useTawcrootEnabledSnapshot()
+    fun enabled(profile: ContainerProfile): Boolean =
+        profile.mode == com.aharou.feature.settings.data.repository.ExecutionMode.LOCAL_PROOT &&
+            profile.runtimeBackend == ContainerRuntimeBackend.TAWCROOT
 
     fun executable(context: Context): String = binary(context).absolutePath
 

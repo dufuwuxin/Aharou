@@ -49,8 +49,6 @@ class ExecuteCommandTool @Inject constructor(
     private val commandEngine: CommandEngine,
     private val workspaceRepository: WorkspaceRepository,
     private val terminalSessionProvider: TerminalSessionProvider,
-    private val envVarRepository: com.aharou.feature.settings.data.repository.EnvVarRepository,
-    private val profileResolver: ContainerProfileResolver,
     private val containerSettings: ContainerSettingsRepository
 ) : AgentTool(), StreamingAgentTool {
     private companion object {
@@ -185,7 +183,7 @@ class ExecuteCommandTool @Inject constructor(
                     workspacePath = context.projectRoot
                 )
             }
-            FileLogger.i(TAG, "已提交后台任务 tab=$tabId: $command")
+            FileLogger.i(TAG, "已提交后台任务 tab=$tabId")
             ToolResult.Success(
                 JsonPrimitive(
                     "已提交到后台终端（tab $tabId），命令结束时会自动通知；" +
@@ -197,7 +195,7 @@ class ExecuteCommandTool @Inject constructor(
             throw e
         } catch (e: Exception) {
             if (granted) revokeBuildToken(context.projectRoot)
-            FileLogger.e(TAG, "提交后台任务失败: $command", e)
+            FileLogger.e(TAG, "提交后台任务失败", e)
             ToolResult.Error("提交后台任务失败: ${e.message}")
         }
     }
@@ -230,12 +228,13 @@ class ExecuteCommandTool @Inject constructor(
         validationError(args)?.let { return it }
         val command = args.getValue("command").jsonPrimitive.content
         if (isBackground(args)) return startBackground(command, args, context)
+        val redaction = containerSettings.redactEnvOutputState()
         return try {
             val result = executeForeground(args, context)
-            ToolResult.Success(JsonPrimitive(toModelOutput(result.output, result.exitCode, context)))
+            ToolResult.Success(JsonPrimitive(toModelOutput(result.output, result.exitCode, result.injectedEnv, redaction.enabled)))
         } catch (e: CancellationException) { throw e }
         catch (e: Exception) {
-            FileLogger.e(TAG, "execute_command 失败: $command", e)
+            FileLogger.e(TAG, "execute_command 失败", e)
             ToolResult.Error("执行命令失败: ${e.message}")
         }
     }
@@ -289,32 +288,38 @@ class ExecuteCommandTool @Inject constructor(
         // 限幅累积：喂回模型的最终结果只保留开头+结尾，避免超大输出撑爆上下文。
         val accumulated = BoundedOutput()
         var exitCode: Int? = null
+        var injectedEnv: Map<String, String> = emptyMap()
+        val redaction = containerSettings.redactEnvOutputState()
         val workdir = sessionWorkdir(context)
         val granted = grantBuildToken(command, workdir)
         try {
             val timeoutMs = resolveTimeoutMs(args)
-            FileLogger.d(TAG, "execute_command(流式, timeout=${timeoutMs}ms): $command")
+            FileLogger.d(TAG, "execute_command(流式, timeout=${timeoutMs}ms，commandChars=${command.length})")
             commandEngine.runCommandStream(command, workdir, timeoutMs).collect { event ->
                 when (event) {
                     is CommandEvent.Line -> {
+                        injectedEnv = event.injectedEnv
                         accumulated.append(event.text)
                         accumulated.append("\n")
-                        emit(ToolStreamEvent.Progress(redactEnvValues(ContainerOutputSanitizer.sanitize(event.text), context)))
+                        emit(ToolStreamEvent.Progress(redactOutput(ContainerOutputSanitizer.sanitize(event.text), injectedEnv, redaction.enabled)))
                     }
-                    is CommandEvent.Exit -> exitCode = event.code
+                    is CommandEvent.Exit -> {
+                        exitCode = event.code
+                        injectedEnv = event.injectedEnv
+                    }
                 }
             }
             FileLogger.v(TAG, "execute_command(流式) 完成，输出 ${accumulated.totalChars} 字符，退出码 $exitCode")
-            emit(ToolStreamEvent.Completed(ToolResult.Success(JsonPrimitive(toModelOutput(accumulated.build(), exitCode, context)))))
+            emit(ToolStreamEvent.Completed(ToolResult.Success(JsonPrimitive(toModelOutput(accumulated.build(), exitCode, injectedEnv, redaction.enabled)))))
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             // 兜底：底层 flow 异常终止时，已逐行 emit 给用户的 Progress 仍应作为最终结果保留，
             // 而不是被这里抛出的空 Error 覆盖掉（否则模型只看到“执行失败”，之前展示的输出全丢）。
-            FileLogger.e(TAG, "execute_command(流式) 异常(已保留此前输出 ${accumulated.totalChars} 字符): $command", e)
+            FileLogger.e(TAG, "execute_command(流式) 异常(已保留此前输出 ${accumulated.totalChars} 字符)", e)
             val saved = accumulated.build()
             val result = if (saved.isNotEmpty()) {
-                ToolResult.Success(JsonPrimitive(toModelOutput(saved, exitCode, context)))
+                ToolResult.Success(JsonPrimitive(toModelOutput(saved, exitCode, injectedEnv, redaction.enabled)))
             } else {
                 ToolResult.Error("执行命令失败: ${e.message}")
             }
@@ -340,18 +345,31 @@ class ExecuteCommandTool @Inject constructor(
      * 退出码拼在清洗之后的末尾，让模型能分辨「跑完没输出」和「失败没输出」；拿不到退出码（超时、
      * 引擎异常、远程通道断开）就不拼，别让模型把未知当成成功。退出码行是本函数生成的，不参与清洗。
      */
-    private fun toModelOutput(output: String, exitCode: Int?, context: com.aharou.feature.agent.domain.model.AgentContext): String {
+    private fun toModelOutput(
+        output: String,
+        exitCode: Int?,
+        injectedEnv: Map<String, String>,
+        redactEnvValues: Boolean
+    ): String {
         val cleaned = ContainerOutputSanitizer.sanitize(output)
-        val redacted = redactEnvValues(cleaned, context)
+        val redacted = redactOutput(cleaned, injectedEnv, redactEnvValues)
         val line = exitCode?.let { "[退出码: $it]" } ?: return redacted
         return if (redacted.isBlank()) line else "$redacted\n$line"
     }
 
-    private fun redactEnvValues(text: String, context: com.aharou.feature.agent.domain.model.AgentContext): String {
-        if (text.isBlank() || !containerSettings.redactEnvOutputEnabledSnapshot()) return text
-        val profileEnv = profileResolver.forWorkspace(context.projectRoot).env
-        val result = ContainerEnvValueRedactor.redact(text, envVarRepository.asMap() + profileEnv)
-        if (result.hit) FileLogger.i(TAG, "命令输出包含环境变量值，已隐藏")
-        return result.text
+    internal fun shouldRedactInjectedEnvironment(): Boolean = containerSettings.redactEnvOutputEnabledSnapshot()
+
+    internal fun redactOutput(
+        text: String,
+        injectedEnv: Map<String, String>,
+        redactEnvValues: Boolean = shouldRedactInjectedEnvironment()
+    ): String {
+        if (text.isBlank()) return text
+        val envRedacted = if (redactEnvValues) {
+            ContainerEnvValueRedactor.redact(text, injectedEnv).also { result ->
+                if (result.hit) FileLogger.i(TAG, "命令输出包含环境变量值，已隐藏")
+            }.text
+        } else text
+        return com.aharou.feature.vault.VaultRedactor.redact(envRedacted, redactEnvValues)
     }
 }

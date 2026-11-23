@@ -240,18 +240,23 @@ class TerminalSessionManager @Inject constructor(
 
         tab(id)?.let(::startKeepaliveService)
         if (notify) monitorBackgroundExit(id)
-        FileLogger.i(TAG, "后台命令标签 $id: $command")
+        FileLogger.i(TAG, "后台命令标签 $id，命令 ${command.length} 字符")
         return id
     }
 
-    override fun redactTabOutput(id: String, output: String): String {
-        if (!containerSettings.redactEnvOutputEnabledSnapshot() || output.isBlank()) return output
-        return tabOutputRedactor(id)(output)
+    override fun redactTabOutput(id: String, output: String): String =
+        redactTabOutput(id, output, containerSettings.redactEnvOutputEnabledSnapshot())
+
+    override fun redactTabOutput(id: String, output: String, redactEnvironment: Boolean): String {
+        if (output.isBlank()) return output
+        val envRedacted = if (redactEnvironment) {
+            ContainerEnvValueRedactor.redact(output, tab(id)?.injectedEnv.orEmpty()).text
+        } else output
+        return com.aharou.feature.vault.VaultRedactor.redact(envRedacted, redactEnvironment)
     }
 
-    override fun tabOutputRedactor(id: String): (String) -> String {
-        val environment = tab(id)?.injectedEnv.orEmpty()
-        return { output -> ContainerEnvValueRedactor.redact(output, environment).text }
+    override fun tabOutputRedactor(id: String): (String) -> String = { output ->
+        redactTabOutput(id, output, redactEnvironment = true)
     }
 
     private fun safeTailOutput(id: String, output: String? = getTabOutput(id)): String? =

@@ -15,6 +15,9 @@ object VaultRedactor {
     @Volatile
     var delegate: ((String) -> String)? = null
 
+    @Volatile
+    var snapshotDelegate: ((String, Boolean) -> String)? = null
+
     private val inRedact = ThreadLocal.withInitial { false }
 
     /** 对文本做凭据库脱敏；未注册或当前正处在一次脱敏中时原样返回。 */
@@ -25,6 +28,18 @@ object VaultRedactor {
         inRedact.set(true)
         return try {
             redactFn(text)
+        } finally {
+            inRedact.set(false)
+        }
+    }
+
+    fun redact(text: String, privacyEnabled: Boolean): String {
+        if (text.isEmpty()) return text
+        val redactFn = snapshotDelegate ?: return redact(text)
+        if (inRedact.get()) return text
+        inRedact.set(true)
+        return try {
+            redactFn(text, privacyEnabled)
         } finally {
             inRedact.set(false)
         }

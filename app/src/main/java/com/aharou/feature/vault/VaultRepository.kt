@@ -3,13 +3,15 @@ package com.aharou.feature.vault
 import android.content.Context
 import com.aharou.core.security.KeystoreCipher
 import com.aharou.core.util.FileLogger
+import com.aharou.feature.settings.data.repository.ContainerSettingsRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONObject
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -37,18 +39,12 @@ class VaultReadOnlyException(val reason: String) :
 @Singleton
 class VaultRepository @Inject constructor(
     @param:ApplicationContext private val context: Context,
+    private val containerSettings: ContainerSettingsRepository,
 ) {
     private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     private val lock = Any()
     private var cache: Map<String, String>? = null
-    private val _privacyRedaction = MutableStateFlow(prefs.getBoolean("privacy_redaction", false))
-    val privacyRedaction = _privacyRedaction.asStateFlow()
-
-    fun setPrivacyRedaction(enabled: Boolean): Boolean = synchronized(lock) {
-        if (!prefs.edit().putBoolean("privacy_redaction", enabled).commit()) return@synchronized false
-        _privacyRedaction.value = enabled
-        true
-    }
+    val privacyRedaction: Flow<Boolean> = containerSettings.redactEnvOutputFlow
 
     fun previewRedaction(text: String): String = PrivacyRedaction.redact(redact(text), personalData = true)
 
@@ -57,7 +53,8 @@ class VaultRepository @Inject constructor(
 
     init {
         // 暴露脱敏入口给非 DI 组件（FileLogger / DecisionAuditLog 注入不到本类）。
-        VaultRedactor.delegate = ::redact
+        VaultRedactor.delegate = { text -> redact(text) }
+        VaultRedactor.snapshotDelegate = { text, enabled -> redact(text, enabled) }
         com.aharou.core.privacy.MaskingRules.literalValues = ::literalMaskingValues
     }
 
@@ -201,11 +198,13 @@ class VaultRepository @Inject constructor(
      * 把文本里看起来像凭据的库内值替换为 `[REDACTED:NAME]`。命中条件见 [looksLikeCredential]。
      * 替换顺序仍是长值优先（见 [redactText]），一个值包含另一个时才不会留下半截。
      */
-    fun redact(text: String): String {
+    fun redact(text: String): String = redact(text, containerSettings.redactEnvOutputEnabledSnapshot())
+
+    internal fun redact(text: String, privacyEnabled: Boolean): String {
         if (text.isEmpty()) return text
         val secrets = synchronized(lock) { load().map { (name, value) -> name to value } }
         val masked = redactText(text, secrets)
-        return if (_privacyRedaction.value) PrivacyRedaction.redact(masked, personalData = true) else masked
+        return if (privacyEnabled) PrivacyRedaction.redact(masked, personalData = true) else masked
     }
 
     /**

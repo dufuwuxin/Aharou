@@ -2,6 +2,7 @@ package com.aharou.feature.agent.domain.tool.custom
 
 import com.aharou.feature.agent.domain.container.CommandEngine
 import com.aharou.feature.agent.domain.tool.AgentTool
+import com.aharou.feature.settings.data.repository.ContainerSettingsRepository
 import com.aharou.feature.workspace.data.repository.WorkspaceRepository
 import android.content.Context
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -27,6 +28,7 @@ class CustomToolRuntime @Inject constructor(
     private val commandEngine: CommandEngine,
     private val workspaceRepository: WorkspaceRepository,
     @param:ApplicationContext private val context: Context,
+    private val containerSettings: ContainerSettingsRepository,
 ) : CustomToolSource {
 
     override fun customTools(): List<AgentTool> = toolsFrom(store.snapshotCustomTools())
@@ -35,6 +37,6 @@ class CustomToolRuntime @Inject constructor(
 
     private fun toolsFrom(definitions: List<CustomToolDefinition>): List<AgentTool> =
         definitions.map { definition ->
-            CustomCommandTool(definition, commandEngine, workspaceRepository, context)
+            CustomCommandTool(definition, commandEngine, workspaceRepository, context, containerSettings)
         }
 }

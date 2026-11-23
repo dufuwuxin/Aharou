@@ -180,7 +180,7 @@ class ContainerDoctor @Inject constructor(
             summaryRes = R.string.container_health_stale_found,
             summaryArgs = listOf(stale.size, stopped),
             detailRes = R.string.container_health_stale_detail,
-            detailArgs = listOf(stale.take(3).joinToString("、") { it.command.take(40) }),
+            detailArgs = listOf(stale.take(3).joinToString("、") { "pid ${it.pid}" }),
         )
     }
 

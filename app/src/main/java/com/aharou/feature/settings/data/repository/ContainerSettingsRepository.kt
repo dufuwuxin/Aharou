@@ -10,13 +10,18 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.aharou.core.datastore.preferencesCorruptionHandler
 import com.aharou.feature.agent.domain.container.ContainerProfile
+import com.aharou.feature.agent.domain.container.ContainerRuntimeBackend
 import com.aharou.feature.agent.domain.container.ContainerWorkspaceKeys
 import com.aharou.feature.agent.domain.container.TawcrootRuntime
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.MapSerializer
@@ -51,13 +56,12 @@ data class DownloadedImageRecord(
  */
 @Singleton
 class ContainerSettingsRepository @Inject constructor(
-    @param:ApplicationContext private val context: Context
+    @param:ApplicationContext private val context: Context,
 ) {
-    @Volatile
-    private var useTawcrootSnapshot = false
     internal data class RedactionState(val enabled: Boolean, val enabledGeneration: Long)
 
-    private val redactionState = java.util.concurrent.atomic.AtomicReference(RedactionState(true, 0))
+    private val redactionState = MutableStateFlow(RedactionState(true, 0))
+    private val redactionMutex = kotlinx.coroutines.sync.Mutex()
 
     private val snapshotScope = kotlinx.coroutines.CoroutineScope(
         kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO
@@ -65,9 +69,9 @@ class ContainerSettingsRepository @Inject constructor(
 
     init {
         snapshotScope.launch {
-            context.containerDataStore.data.collect { preferences ->
-                useTawcrootSnapshot = preferences[USE_TAWCROOT_KEY] ?: false
-                updateRedaction(preferences[REDACT_ENV_OUTPUT_KEY] ?: true)
+            redactionMutex.withLock {
+                migrateLegacyPrivacyRedactionLocked()
+                updateRedaction(context.containerDataStore.data.first()[REDACT_ENV_OUTPUT_KEY] ?: true)
             }
         }
     }
@@ -104,8 +108,12 @@ class ContainerSettingsRepository @Inject constructor(
         }
 
         val ACTIVE_PROFILE_ID_KEY = stringPreferencesKey("active_profile_id")
+        @Deprecated("Migrated into ContainerProfile.runtimeBackend")
         val USE_TAWCROOT_KEY = booleanPreferencesKey("use_tawcroot")
         val REDACT_ENV_OUTPUT_KEY = booleanPreferencesKey("redact_env_output")
+        private val REDACTION_MIGRATED_KEY = booleanPreferencesKey("redaction_migrated_to_canonical")
+        private const val LEGACY_VAULT_PREFERENCES = "aharou_vault"
+        private const val LEGACY_VAULT_PRIVACY_KEY = "privacy_redaction"
         val CUSTOM_PROFILES_KEY = stringPreferencesKey("custom_profiles_json")
         /** 远程工作区模式下本地 MCP stdio 等服务的运行容器；无值时默认内置 Ubuntu。 */
         val DEFAULT_CONTAINER_ID_KEY = stringPreferencesKey("default_container_profile_id")
@@ -125,33 +133,80 @@ class ContainerSettingsRepository @Inject constructor(
         val profileSerializer = ListSerializer(ContainerProfile.serializer())
         val workspaceProfilesSerializer = MapSerializer(String.serializer(), String.serializer())
         val json = Json { ignoreUnknownKeys = true }
+
+        internal fun migrateLegacyRuntime(
+            profiles: List<ContainerProfile>,
+            legacyBackend: Boolean?,
+            tawcrootCompatibleIds: Set<String> = emptySet()
+        ): List<ContainerProfile> = profiles.map { profile ->
+            profile.normalizeBuiltin().let {
+                when {
+                    it.runtimeBackend != null || legacyBackend == null -> it
+                    legacyBackend && it.id in tawcrootCompatibleIds -> it.copy(runtimeBackend = ContainerRuntimeBackend.TAWCROOT)
+                    else -> it.copy(runtimeBackend = ContainerRuntimeBackend.PROOT)
+                }
+            }
+        }.distinctBy { it.id }
+
+        internal fun mergeLegacyPrivacyRedaction(
+            containerValue: Boolean?,
+            vaultValue: Boolean?,
+            vaultWasExplicitlySet: Boolean
+        ): Boolean = when {
+            containerValue != null && vaultWasExplicitlySet -> containerValue || vaultValue == true
+            containerValue != null -> containerValue
+            vaultWasExplicitlySet -> vaultValue == true
+            else -> true
+        }
     }
 
-    val useTawcrootFlow: Flow<Boolean> = context.containerDataStore.data.map { it[USE_TAWCROOT_KEY] ?: false }
-    val redactEnvOutputFlow: Flow<Boolean> = context.containerDataStore.data.map { it[REDACT_ENV_OUTPUT_KEY] ?: true }
+    val redactEnvOutputFlow: Flow<Boolean> = redactionState.map { it.enabled }.distinctUntilChanged()
 
-    fun useTawcrootEnabledSnapshot(): Boolean = useTawcrootSnapshot
-    fun redactEnvOutputEnabledSnapshot(): Boolean = redactionState.get().enabled
+    fun redactEnvOutputEnabledSnapshot(): Boolean = redactionState.value.enabled
 
-    internal fun redactEnvOutputState(): RedactionState = redactionState.get()
+    internal fun redactEnvOutputState(): RedactionState = redactionState.value
 
     private fun updateRedaction(enabled: Boolean) {
-        redactionState.updateAndGet { current ->
+        redactionState.update { current ->
             if (enabled == current.enabled) current
             else RedactionState(enabled, current.enabledGeneration + if (enabled) 1 else 0)
         }
     }
 
-    suspend fun setUseTawcroot(enabled: Boolean) {
-        if (enabled) TawcrootRuntime.requireAvailable(context)
-        context.containerDataStore.edit { it[USE_TAWCROOT_KEY] = enabled }
-        useTawcrootSnapshot = enabled
+    suspend fun setRedactEnvOutput(enabled: Boolean) = redactionMutex.withLock {
+        migrateLegacyPrivacyRedactionLocked()
+        val persisted = context.containerDataStore.edit {
+            it[REDACT_ENV_OUTPUT_KEY] = enabled
+            it[REDACTION_MIGRATED_KEY] = true
+            enabled
+        }
+        updateRedaction(persisted)
     }
 
-    suspend fun setRedactEnvOutput(enabled: Boolean) {
-        context.containerDataStore.edit { it[REDACT_ENV_OUTPUT_KEY] = enabled }
-        updateRedaction(enabled)
+    internal suspend fun migrateLegacyPrivacyRedaction() = redactionMutex.withLock {
+        migrateLegacyPrivacyRedactionLocked()
+        updateRedaction(context.containerDataStore.data.first()[REDACT_ENV_OUTPUT_KEY] ?: true)
     }
+
+    private suspend fun migrateLegacyPrivacyRedactionLocked() {
+        val legacyVaultPrefs = context.getSharedPreferences(LEGACY_VAULT_PREFERENCES, Context.MODE_PRIVATE)
+        var migrated = false
+        context.containerDataStore.edit { preferences ->
+            if (preferences[REDACTION_MIGRATED_KEY] == true) return@edit
+            val oldContainerValue = preferences[REDACT_ENV_OUTPUT_KEY]
+            val vaultWasExplicitlySet = legacyVaultPrefs.contains(LEGACY_VAULT_PRIVACY_KEY)
+            val oldVaultValue = legacyVaultPrefs.getBoolean(LEGACY_VAULT_PRIVACY_KEY, false)
+            preferences[REDACT_ENV_OUTPUT_KEY] = mergeLegacyPrivacyRedaction(
+                oldContainerValue, oldVaultValue.takeIf { vaultWasExplicitlySet }, vaultWasExplicitlySet
+            )
+            preferences[REDACTION_MIGRATED_KEY] = true
+            migrated = true
+        }
+        if (migrated && legacyVaultPrefs.contains(LEGACY_VAULT_PRIVACY_KEY)) {
+            legacyVaultPrefs.edit().remove(LEGACY_VAULT_PRIVACY_KEY).apply()
+        }
+    }
+
 
     /** 当前选中的 profile id；无值时默认内置 Ubuntu。 */
     val activeProfileIdFlow: Flow<String> = context.containerDataStore.data.map { prefs ->
@@ -245,11 +300,6 @@ class ContainerSettingsRepository @Inject constructor(
         prefs[WORKSPACE_PROFILES_KEY]?.let {
             prefs[WORKSPACE_PROFILES_KEY] = json.encodeToString(workspaceProfilesSerializer, decodeWorkspaceProfiles(it))
         }
-        prefs[CUSTOM_PROFILES_KEY]?.let { raw ->
-            val profiles = runCatching { json.decodeFromString(profileSerializer, raw) }.getOrNull() ?: return@let
-            prefs[CUSTOM_PROFILES_KEY] = json.encodeToString(profileSerializer,
-                profiles.map { it.normalizeBuiltin() }.distinctBy { it.id })
-        }
     }
 
     /**
@@ -259,17 +309,40 @@ class ContainerSettingsRepository @Inject constructor(
      */
     suspend fun ensureBuiltinDefault() {
         context.containerDataStore.edit { prefs ->
-            migrateBuiltinPreferences(prefs)
-            if (prefs[INITIALIZED_KEY] == true) return@edit
-            prefs[INITIALIZED_KEY] = true
-            val current = prefs[CUSTOM_PROFILES_KEY]?.let { raw ->
-                runCatching { json.decodeFromString(profileSerializer, raw) }.getOrNull()
-            } ?: emptyList()
-            if (current.none { it.id == ContainerProfile.BUILTIN_ID }) {
-                prefs[CUSTOM_PROFILES_KEY] = json.encodeToString(
-                    profileSerializer, listOf(ContainerProfile.BUILTIN_UBUNTU) + current
-                )
+            val raw = prefs[CUSTOM_PROFILES_KEY]
+            val current = if (raw == null) emptyList() else {
+                runCatching { json.decodeFromString(profileSerializer, raw) }.getOrNull() ?: return@edit
             }
+            migrateBuiltinPreferences(prefs)
+            val initialized = prefs[INITIALIZED_KEY] == true
+            val legacyBackend = prefs[USE_TAWCROOT_KEY]
+            val tawcrootCompatibleIds = if (legacyBackend == true && TawcrootRuntime.available(context)) {
+                current.filter { profile ->
+                    if (!profile.isBuiltin) return@filter false
+                    TawcrootRuntime.availableForProfile(
+                        context,
+                        profile,
+                        File(context.filesDir, "rootfs_ubuntu")
+                    )
+                }.map { it.id }.toSet()
+            } else emptySet()
+            val migrated = migrateLegacyRuntime(current, legacyBackend, tawcrootCompatibleIds)
+            val migrateToTawcroot = legacyBackend == true && TawcrootRuntime.available(context)
+            val builtinExists = migrated.any { it.id == ContainerProfile.BUILTIN_ID }
+            val withBuiltin = if (!initialized && !builtinExists) {
+                listOf(ContainerProfile.BUILTIN_UBUNTU.copy(
+                    runtimeBackend = legacyBackend?.let {
+                        if (migrateToTawcroot) ContainerRuntimeBackend.TAWCROOT else ContainerRuntimeBackend.PROOT
+                    }
+                )) + migrated
+            } else migrated
+            if (withBuiltin != current) {
+                prefs[CUSTOM_PROFILES_KEY] = json.encodeToString(profileSerializer, withBuiltin)
+            }
+            if (builtinExists || withBuiltin.any { it.id == ContainerProfile.BUILTIN_ID }) {
+                prefs.remove(USE_TAWCROOT_KEY)
+            }
+            if (!initialized) prefs[INITIALIZED_KEY] = true
         }
     }
 
@@ -281,13 +354,14 @@ class ContainerSettingsRepository @Inject constructor(
     suspend fun ensureProfileDisplayOrder() {
         context.containerDataStore.edit { prefs ->
             if (prefs[ORDER_MIGRATED_KEY] == true) return@edit
-            prefs[ORDER_MIGRATED_KEY] = true
-            val current = prefs[CUSTOM_PROFILES_KEY]?.let { raw ->
-                runCatching { json.decodeFromString(profileSerializer, raw) }.getOrNull()
-            } ?: emptyList()
+            val raw = prefs[CUSTOM_PROFILES_KEY]
+            val current = if (raw == null) emptyList() else {
+                runCatching { json.decodeFromString(profileSerializer, raw) }.getOrNull() ?: return@edit
+            }
             prefs[CUSTOM_PROFILES_KEY] = json.encodeToString(
                 profileSerializer, current.sortedByDescending { it.createdAt }
             )
+            prefs[ORDER_MIGRATED_KEY] = true
         }
     }
 
@@ -364,15 +438,23 @@ class ContainerSettingsRepository @Inject constructor(
     suspend fun upsertCustomProfile(profile: ContainerProfile) {
         val normalized = profile.normalizeBuiltin()
         context.containerDataStore.edit { prefs ->
+            val legacyBackend = prefs[USE_TAWCROOT_KEY]
+            val runtimeSupported = legacyBackend == true && normalized.isBuiltin &&
+                TawcrootRuntime.availableForProfile(context, normalized, File(context.filesDir, "rootfs_ubuntu"))
+            val runtimeProfile = if (normalized.isBuiltin && normalized.runtimeBackend == null && legacyBackend != null) {
+                normalized.copy(
+                    runtimeBackend = if (runtimeSupported) ContainerRuntimeBackend.TAWCROOT else ContainerRuntimeBackend.PROOT
+                )
+            } else normalized
             val current = prefs[CUSTOM_PROFILES_KEY]?.let { raw ->
                 runCatching { json.decodeFromString(profileSerializer, raw) }.getOrNull()
             } ?: emptyList()
             val migrated = current.map { it.normalizeBuiltin() }.distinctBy { it.id }
-            val existing = migrated.firstOrNull { it.id == normalized.id }
+            val existing = migrated.firstOrNull { it.id == runtimeProfile.id }
             val final = when {
-                normalized.createdAt != 0L -> normalized
-                existing != null && existing.createdAt != 0L -> normalized.copy(createdAt = existing.createdAt)
-                else -> normalized.copy(createdAt = System.currentTimeMillis())
+                runtimeProfile.createdAt != 0L -> runtimeProfile
+                existing != null && existing.createdAt != 0L -> runtimeProfile.copy(createdAt = existing.createdAt)
+                else -> runtimeProfile.copy(createdAt = System.currentTimeMillis())
             }
             val merged = if (existing != null) {
                 migrated.map { if (it.id == final.id) final else it }
@@ -380,6 +462,7 @@ class ContainerSettingsRepository @Inject constructor(
                 listOf(final) + migrated
             }
             prefs[CUSTOM_PROFILES_KEY] = json.encodeToString(profileSerializer, merged)
+            if (final.isBuiltin) prefs.remove(USE_TAWCROOT_KEY)
         }
     }
 

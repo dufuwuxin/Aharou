@@ -1038,7 +1038,6 @@ fun SettingsScreen(
                     )
                 }
                 SettingsSection.Container -> {
-                    ContainerRuntimeSettingsSection()
                     ContainerSection(
                         profiles = containerProfiles,
                         activeProfileId = activeProfileId,

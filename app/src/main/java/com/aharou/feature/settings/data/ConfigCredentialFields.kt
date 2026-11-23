@@ -44,6 +44,7 @@ class ConfigCredentialFields @Inject constructor(
     private val loginKeyStore: SshLoginKeyStore,
     private val remote: com.aharou.feature.workspace.data.local.dao.RemoteConnectionDao,
     private val vault: VaultRepository,
+    private val containerSettings: com.aharou.feature.settings.data.repository.ContainerSettingsRepository,
     private val credentialRepository: CredentialRepository,
     private val gitRepository: GitRepository,
     /**
@@ -79,13 +80,13 @@ class ConfigCredentialFields @Inject constructor(
         ))
         registry.register(ClosureField(
             path = "vault.privacy_redaction",
-            displayName = "额外隐私脱敏",
-            description = "对工具结果、日志与审计中的常见凭据、邮箱和大陆手机号额外脱敏；不修改原文件、登录认证或手写消息。默认关闭。",
+            displayName = "统一隐私脱敏",
+            description = "与容器环境值脱敏共用一个设置。工具结果、日志与审计识别常见凭据、邮箱和大陆手机号；命令回传给 AI 时隐藏本次实际注入的环境变量值。默认开启；不修改原文件、登录认证或终端本地屏幕。",
             valueSchema = ConfigSchema.Bool,
-            reader = { ConfigValue.Bool(vault.privacyRedaction.value) },
+            reader = { ConfigValue.Bool(runBlocking { containerSettings.redactEnvOutputFlow.first() }) },
             writer = { value ->
                 val enabled = (value as? ConfigValue.Bool)?.value ?: throw ConfigError.TypeMismatch("boolean")
-                if (!vault.setPrivacyRedaction(enabled)) throw ConfigError.PermissionDenied("隐私脱敏设置保存失败")
+                runBlocking { containerSettings.setRedactEnvOutput(enabled) }
             },
         ))
     }

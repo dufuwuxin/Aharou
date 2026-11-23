@@ -129,7 +129,8 @@ class LiveContextScriptRunner @Inject constructor(
         val result = executor.executeForeground(args, context)
         check(manager.revision == revision && manager.definitions.value.any { it == definition && it.enabled }) { "Script changed during execution" }
         check(result.exitCode == 0 && !result.outputTruncated && result.output.length <= definition.outputLimit) { "Script failed or output was truncated" }
-        return com.aharou.feature.agent.domain.container.ContainerOutputSanitizer.sanitize(result.output)
+        val cleaned = com.aharou.feature.agent.domain.container.ContainerOutputSanitizer.sanitize(result.output)
+        return executor.redactOutput(cleaned, result.injectedEnv)
     }
 
     private fun diagnostic(definition: ScriptToolDefinition, reason: String) {

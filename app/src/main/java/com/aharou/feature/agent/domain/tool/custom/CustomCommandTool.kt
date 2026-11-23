@@ -4,6 +4,7 @@ import android.content.Context
 import com.aharou.R
 import com.aharou.core.util.FileLogger
 import com.aharou.feature.agent.domain.container.CommandEngine
+import com.aharou.feature.agent.domain.container.ContainerEnvValueRedactor
 import com.aharou.feature.agent.domain.container.ContainerOutputSanitizer
 import com.aharou.feature.agent.domain.model.AgentContext
 import com.aharou.feature.agent.domain.tool.AgentTool
@@ -12,6 +13,8 @@ import com.aharou.feature.agent.domain.tool.ToolCapability
 import com.aharou.feature.agent.domain.tool.ToolParameter
 import com.aharou.feature.agent.domain.tool.ToolPermissionPolicy
 import com.aharou.feature.agent.domain.tool.ToolResult
+import com.aharou.feature.settings.data.repository.ContainerSettingsRepository
+import com.aharou.feature.vault.VaultRedactor
 import com.aharou.feature.workspace.data.repository.WorkspaceRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.JsonElement
@@ -35,6 +38,7 @@ class CustomCommandTool(
     private val commandEngine: CommandEngine,
     private val workspaceRepository: WorkspaceRepository,
     private val appContext: Context,
+    private val containerSettings: ContainerSettingsRepository,
 ) : AgentTool() {
 
     override val name: String = definition.name
@@ -98,6 +102,7 @@ class CustomCommandTool(
             is CustomCommandRender.Failure -> return ToolResult.Error(result.message, result.code)
             is CustomCommandRender.Success -> result.command
         }
+        val redactEnvValues = containerSettings.redactEnvOutputEnabledSnapshot()
         return try {
             // 与 ExecuteCommandTool 同一根目录：会话绑定的工作区，没绑定就退到全局当前工作区。
             val workdir = context.projectRoot.takeIf { it.isNotBlank() } ?: workspaceRepository.currentPath()
@@ -105,7 +110,7 @@ class CustomCommandTool(
                 .coerceIn(CustomToolDefinition.MIN_TIMEOUT_SECONDS, CustomToolDefinition.MAX_TIMEOUT_SECONDS) * 1000L
             FileLogger.d(TAG, "Custom tool ${definition.name} execution (timeout=${timeoutMs}ms)")
             val result = commandEngine.runCommandSyncWithExit(rendered, workdir, timeoutMs)
-            ToolResult.Success(JsonPrimitive(toModelOutput(result.output, result.exitCode)))
+            ToolResult.Success(JsonPrimitive(toModelOutput(result.output, result.exitCode, result.injectedEnv, redactEnvValues)))
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -126,10 +131,19 @@ class CustomCommandTool(
      * 结果出口与 [com.aharou.feature.agent.domain.tool.container.ExecuteCommandTool] 对齐：
      * 先清洗控制字符，再拼退出码（拿不到退出码就不拼，别让模型把未知当成功）。
      */
-    private fun toModelOutput(output: String, exitCode: Int?): String {
+    internal fun toModelOutput(
+        output: String,
+        exitCode: Int?,
+        injectedEnv: Map<String, String>,
+        redactEnvValues: Boolean = containerSettings.redactEnvOutputEnabledSnapshot()
+    ): String {
         val cleaned = ContainerOutputSanitizer.sanitize(output)
-        val line = exitCode?.let { "[退出码: $it]" } ?: return cleaned
-        return if (cleaned.isBlank()) line else "$cleaned\n$line"
+        val withInjectedEnv = if (redactEnvValues) {
+            ContainerEnvValueRedactor.redact(cleaned, injectedEnv).text
+        } else cleaned
+        val redacted = VaultRedactor.redact(withInjectedEnv, redactEnvValues)
+        val line = exitCode?.let { "[退出码: $it]" } ?: return redacted
+        return if (redacted.isBlank()) line else "$redacted\n$line"
     }
 
     private companion object {

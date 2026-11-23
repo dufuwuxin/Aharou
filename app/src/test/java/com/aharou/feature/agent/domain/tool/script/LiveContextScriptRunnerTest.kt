@@ -199,13 +199,9 @@ class LiveContextScriptRunnerTest {
 
     @Test fun realExecutorNonzeroUnknownAndTruncatedOutputNeverInject() = runTest {
         val engine = mockk<com.aharou.feature.agent.domain.container.CommandEngine>()
-        val envVars = mockk<com.aharou.feature.settings.data.repository.EnvVarRepository>()
-        val profiles = mockk<com.aharou.feature.agent.domain.container.ContainerProfileResolver>()
         val settings = mockk<com.aharou.feature.settings.data.repository.ContainerSettingsRepository>()
-        every { envVars.asMap() } returns emptyMap()
-        every { profiles.forWorkspace(any()) } returns com.aharou.feature.agent.domain.container.ContainerProfile.BUILTIN_UBUNTU
         every { settings.redactEnvOutputEnabledSnapshot() } returns true
-        val real = ExecuteCommandTool(engine, mockk(), mockk(), envVars, profiles, settings)
+        val real = ExecuteCommandTool(engine, mockk(), mockk(), settings)
         registry.bindDiscoveryTools(listOf(real), context)
         val consumer = LiveContextScriptRunner(manager, real, Lazy { registry }, policy, permissions, mockk(), mockk(relaxed = true), notifications)
         for (result in listOf(CommandResult("stale_value\n[退出码: 0]", 7), CommandResult("unknown", null), CommandResult("partial", 0, true))) {

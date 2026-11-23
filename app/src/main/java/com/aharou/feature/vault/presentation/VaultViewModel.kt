@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.aharou.feature.vault.VaultReadOnlyException
 import com.aharou.feature.vault.VaultRepository
+import com.aharou.feature.settings.data.repository.ContainerSettingsRepository
 import com.aharou.feature.settings.data.repository.GeneralSettingsRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.SharingStarted
@@ -21,11 +22,12 @@ import javax.inject.Inject
 class VaultViewModel @Inject constructor(
     private val repository: VaultRepository,
     private val generalSettings: GeneralSettingsRepository,
+    private val containerSettings: ContainerSettingsRepository,
 ) : ViewModel() {
 
     private val _names = MutableStateFlow<List<String>>(emptyList())
     val names: StateFlow<List<String>> = _names.asStateFlow()
-    val privacyRedaction = repository.privacyRedaction
+    val privacyRedaction = containerSettings.redactEnvOutputFlow
     val keywordNames = repository.keywordNames
 
     fun keywordEntries(): List<Pair<String, String>> = repository.keywordEntries()
@@ -60,7 +62,14 @@ class VaultViewModel @Inject constructor(
     val privacyError = _privacyError.asStateFlow()
 
     fun setPrivacyRedaction(enabled: Boolean) = viewModelScope.launch(Dispatchers.IO) {
-        _privacyError.value = !repository.setPrivacyRedaction(enabled)
+        try {
+            containerSettings.setRedactEnvOutput(enabled)
+            _privacyError.value = false
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            _privacyError.value = true
+        }
     }
 
     fun previewRedaction(text: String): String = repository.previewRedaction(text)

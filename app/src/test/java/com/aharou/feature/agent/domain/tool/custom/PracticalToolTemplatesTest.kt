@@ -23,11 +23,24 @@ class PracticalToolTemplatesTest {
             assertTrue(draft.keywords.isNotEmpty())
             assertTrue(draft.parameters.all { it.isValidName })
             assertTrue(CustomCommandTemplate.placeholders(draft.command).all { placeholder -> draft.parameters.any { it.name == placeholder } })
-            val tool = CustomCommandTool(draft, io.mockk.mockk(), io.mockk.mockk(), io.mockk.mockk())
+            val tool = CustomCommandTool(
+                draft, io.mockk.mockk(), io.mockk.mockk(), io.mockk.mockk(), io.mockk.mockk()
+            )
             val schema = tool.toJsonSchema()
             assertTrue(ToolSchemaOverride.isCompatible(schema, Gson().toJson(schema)))
             assertEquals(draft.parameters.map { it.name }.toSet(), (schema["properties"] as Map<*, *>).keys)
         }
+    }
+
+    @Test fun customCommandResultsHonorContainerEnvRedactionSetting() {
+        val settings = io.mockk.mockk<com.aharou.feature.settings.data.repository.ContainerSettingsRepository>()
+        io.mockk.every { settings.redactEnvOutputEnabledSnapshot() } returns true
+        val tool = CustomCommandTool(
+            PracticalToolTemplates.all.first(), io.mockk.mockk(), io.mockk.mockk(), io.mockk.mockk(), settings
+        )
+        assertEquals("TOKEN=[已隐藏]\n[退出码: 0]", tool.toModelOutput("TOKEN=private-token", 0, mapOf("TOKEN" to "private-token")))
+        io.mockk.every { settings.redactEnvOutputEnabledSnapshot() } returns false
+        assertEquals("TOKEN=private-token\n[退出码: 0]", tool.toModelOutput("TOKEN=private-token", 0, mapOf("TOKEN" to "private-token")))
     }
 
     @Test fun untrustedValuesStayInQuotedArgvNotShellSource() {
