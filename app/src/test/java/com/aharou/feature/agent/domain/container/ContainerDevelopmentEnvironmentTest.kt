@@ -50,9 +50,17 @@ class ContainerDevelopmentEnvironmentTest {
     @Test fun consumerSourceWiringUsesBothWrappersAndDoesNotLogThePayload() {
         var root = File(requireNotNull(System.getProperty("user.dir")))
         while (!File(root, "app/src/main").isDirectory && root.parentFile != null) root = checkNotNull(root.parentFile)
-        val source = File(root, "app/src/main/java/com/aharou/feature/agent/domain/container/LinuxContainerEngine.kt").readText()
-        assertEquals(2, Regex("ContainerDevelopmentEnvironment\\.wrap\\(").findAll(source).count())
+        val container = File(root, "app/src/main/java/com/aharou/feature/agent/domain/container")
+        val source = File(container, "LinuxContainerEngine.kt").readText()
+        assertTrue(source.contains("TawcrootRuntime.wrapCommand(argv, \"exec \\\"\$0\\\" \\\"\$@\\\"\", projectPath != null, overrides)"))
+        assertTrue(source.contains("TawcrootRuntime.wrapCommand(argv, command, projectPath != null, overrides)"))
         assertTrue(source.contains("envVarRepository.asMap() + profile.env + extraEnv"))
+        val overrides = mapOf("JAVA_HOME" to "/user's jdk")
+        val command = "printf '%s' \"\$JAVA_HOME\""
+        assertEquals(ContainerDevelopmentEnvironment.wrap(command, overrides),
+            TawcrootRuntime.wrapCommand(listOf("/native/libproot.so"), command, false, overrides))
+        assertEquals(ContainerDevelopmentEnvironment.wrap(TawcrootRuntime.command(command, true), overrides),
+            TawcrootRuntime.wrapCommand(listOf("/native/libtawcroot.so"), command, true, overrides))
         val terminal = File(root, "app/src/main/java/com/aharou/feature/terminal/domain/TerminalSessionManager.kt").readText()
         assertFalse(terminal.contains("export ENV=/etc/profile"))
         assertFalse(terminal.contains("invocation.argv.joinToString"))

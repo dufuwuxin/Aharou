@@ -5,6 +5,7 @@ import androidx.activity.ComponentActivity
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.test.assertHasNoClickAction
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
@@ -24,6 +25,7 @@ import okhttp3.Protocol
 import okhttp3.Response
 import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -121,9 +123,16 @@ class RevericMarketPanelTest {
         compose.onNode(hasSetTextAction()).performTextInput("@magpie-community/agent-pine")
         compose.onNodeWithText(label(R.string.reveric_catalog_count, 127, 1)).assertExists()
         compose.onNode(hasText("@magpie-community/agent-pine") and !hasSetTextAction()).assertHasNoClickAction()
-        compose.onNodeWithText(label(R.string.reveric_zip_catalog_title)).performClick()
-        compose.waitUntil(timeoutMillis = 5_000) { owner.state.value.loaded }
-        compose.onNodeWithText(label(R.string.reveric_catalog_count, 1, 1)).assertExists()
+        compose.onNode(hasText(label(R.string.reveric_zip_catalog_title)) and hasClickAction())
+            .performClick().assertIsSelected()
+        compose.onNodeWithText(label(R.string.reveric_source)).assertExists()
+        val zipCount = label(R.string.reveric_catalog_count, 1, 1)
+        compose.waitUntil(timeoutMillis = 5_000) {
+            compose.onAllNodes(hasText(zipCount)).fetchSemanticsNodes().isNotEmpty() ||
+                owner.state.value.let { it.loadAttempted && !it.loading && !it.loaded }
+        }
+        assertTrue("Reveric ZIP load failed: requests=${calls.get()}, notice=${owner.state.value.notice}", owner.state.value.loaded)
+        compose.onNodeWithText(zipCount).assertExists()
         assertEquals(1, calls.get())
     }
 
