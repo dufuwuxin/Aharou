@@ -39,6 +39,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -59,6 +60,8 @@ import com.aharou.feature.agent.presentation.AgentUIState
 import com.aharou.feature.agent.domain.model.ChatSession
 import com.aharou.feature.workspace.domain.model.Workspace
 import compose.icons.FeatherIcons
+import compose.icons.feathericons.ChevronDown
+import compose.icons.feathericons.ChevronRight
 import compose.icons.feathericons.Folder
 import compose.icons.feathericons.MessageSquare
 import compose.icons.feathericons.Plus
@@ -91,6 +94,7 @@ fun SessionListScreen(
     onMove: (ChatSession, String) -> Unit = { _, _ -> },
 ) {
     var pendingDelete by remember { mutableStateOf<ChatSession?>(null) }
+    var collapsedWorkspaces by rememberSaveable { mutableStateOf(emptyList<String>()) }
     var pendingMove by remember { mutableStateOf<ChatSession?>(null) }
 
     // 根用 Box：内层 Column 铺满（标题 + 会话列表），右下角叠加一个棕黄色悬浮「新建会话」按钮。
@@ -143,23 +147,39 @@ fun SessionListScreen(
                 }
                 if (grouped) {
                     workspacePaths.forEach { group ->
+                        val collapsed = group in collapsedWorkspaces
                         item(key = "workspace:$group") {
-                            Text(
-                                text = group.ifBlank { stringResource(R.string.common_workspace) },
-                                style = MaterialTheme.typography.labelLarge,
-                                color = MaterialTheme.semanticColors.subtleText,
-                                modifier = Modifier.padding(top = Spacing.sm, bottom = Spacing.xs)
-                            )
-                        }
-                        workspaceStatuses[group]?.let { status ->
-                            item(key = "workspace-status:$group") {
-                                Text(status, style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.semanticColors.subtleText)
+                            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = group.ifBlank { stringResource(R.string.common_workspace) },
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.semanticColors.subtleText,
+                                    modifier = Modifier.weight(1f).padding(top = Spacing.sm, bottom = Spacing.xs)
+                                        .testTag("workspace_group_title:$group")
+                                )
+                                IconButton(
+                                    onClick = { collapsedWorkspaces = if (collapsed) collapsedWorkspaces - group else collapsedWorkspaces + group },
+                                    modifier = Modifier.size(48.dp).testTag("workspace_group_toggle:$group")
+                                ) {
+                                    Icon(if (collapsed) FeatherIcons.ChevronRight else FeatherIcons.ChevronDown,
+                                        contentDescription = stringResource(
+                                            if (collapsed) R.string.session_group_expand else R.string.session_group_collapse,
+                                            group.ifBlank { stringResource(R.string.common_workspace) }
+                                        ))
+                                }
                             }
                         }
-                        items(groups[group].orEmpty(), key = { "session:${it.id}" }) { session ->
-                            SessionCard(session, currentSessionId, activeSessionIds, awaitingPermissionSessionIds,
-                                onSelect, { pendingDelete = session }, { pendingMove = session })
+                        if (!collapsed) {
+                            workspaceStatuses[group]?.let { status ->
+                                item(key = "workspace-status:$group") {
+                                    Text(status, style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.semanticColors.subtleText)
+                                }
+                            }
+                            items(groups[group].orEmpty(), key = { "session:${it.id}" }) { session ->
+                                SessionCard(session, currentSessionId, activeSessionIds, awaitingPermissionSessionIds,
+                                    onSelect, { pendingDelete = session }, { pendingMove = session })
+                            }
                         }
                     }
                 } else {

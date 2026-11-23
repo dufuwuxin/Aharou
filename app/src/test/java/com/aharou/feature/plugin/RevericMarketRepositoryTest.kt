@@ -35,6 +35,12 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
 import okhttp3.Call
 import okhttp3.ConnectionSpec
 import okhttp3.OkHttpClient
@@ -65,6 +71,17 @@ class RevericMarketRepositoryTest {
 
     private fun expect(reason: RevericFailure, action: () -> Unit) {
         try { action(); fail("Expected $reason") } catch (failure: RevericMarketException) { assertEquals(reason, failure.reason) }
+    }
+
+    @Test fun parsesEveryPluginEntryBeyondFourWithoutApplyingAnImplicitPageLimit() {
+        val root = Json.parseToJsonElement(fixture).jsonObject
+        val template = root.getValue("plugins").jsonArray.single().jsonObject
+        val ids = (1..7).map { "fixture.plugin.$it" }
+        val entries = ids.map { id ->
+            JsonObject(template + ("id" to JsonPrimitive(id)))
+        }
+        val catalog = JsonObject(root + ("plugins" to JsonArray(entries)))
+        assertEquals(ids, RevericCatalog.parse(catalog.toString()).map { it.id })
     }
 
     @Test fun parsesLocalizedNamesAndRevericCompatibilityWithoutHostCapabilities() {

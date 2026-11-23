@@ -31,6 +31,8 @@ import com.aharou.core.ui.AppTextField
 import com.aharou.feature.agent.domain.task.*
 import com.aharou.feature.agent.presentation.ProjectTaskViewModel
 import compose.icons.FeatherIcons
+import compose.icons.feathericons.ChevronDown
+import compose.icons.feathericons.ChevronRight
 import compose.icons.feathericons.Search
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
@@ -46,6 +48,7 @@ fun ProjectListScreen(viewModel: ProjectTaskViewModel, createRequested: Boolean,
     val focusManager = LocalFocusManager.current
     var createMenu by remember { mutableStateOf(false) }
     var projectSearchOpen by rememberSaveable { mutableStateOf(false) }
+    var collapsedProjects by rememberSaveable { mutableStateOf(emptyList<String>()) }
     var projectQuery by rememberSaveable { mutableStateOf("") }
     val visibleProjects = remember(state.projects, projectQuery) {
         val query = projectQuery.trim()
@@ -148,25 +151,40 @@ fun ProjectListScreen(viewModel: ProjectTaskViewModel, createRequested: Boolean,
                                 onLongClickLabel = stringResource(R.string.project_delete),
                                 onLongClick = { menuProject = project }
                             )) {
+                            val collapsed = project.id in collapsedProjects
                             Column(Modifier.padding(Spacing.lg), verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-                                Text(project.title, style = MaterialTheme.typography.titleLarge,
-                                    maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                    Text(project.title, style = MaterialTheme.typography.titleLarge,
+                                        maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                                    IconButton(
+                                        onClick = { collapsedProjects = if (collapsed) collapsedProjects - project.id else collapsedProjects + project.id },
+                                        modifier = Modifier.size(48.dp).testTag("project_details_toggle:${project.id}")
+                                    ) {
+                                        Icon(if (collapsed) FeatherIcons.ChevronRight else FeatherIcons.ChevronDown,
+                                            contentDescription = stringResource(
+                                                if (collapsed) R.string.project_details_expand else R.string.project_details_collapse,
+                                                project.title
+                                            ))
+                                    }
+                                }
                                 Text(stringResource(if (project.workspaceOwnership == "owned") R.string.project_workspace_owned else R.string.project_workspace_legacy, project.workspace),
                                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     maxLines = 2, overflow = TextOverflow.Ellipsis)
-                                project.continuationSourceProjectId?.let { Text(stringResource(R.string.project_workspace_continuation_source, it)) }
-                                if (project.workspaceOwnership == "legacy_shared") TextButton(
-                                    onClick = { continuationId = project.id },
-                                    enabled = viewModel.canContinueInOwnedWorkspace(project),
-                                    modifier = Modifier.testTag("project_continue_owned_${project.id}")) {
-                                    Text(stringResource(R.string.project_workspace_continue))
+                                if (!collapsed) {
+                                    project.continuationSourceProjectId?.let { Text(stringResource(R.string.project_workspace_continuation_source, it)) }
+                                    if (project.workspaceOwnership == "legacy_shared") TextButton(
+                                        onClick = { continuationId = project.id },
+                                        enabled = viewModel.canContinueInOwnedWorkspace(project),
+                                        modifier = Modifier.testTag("project_continue_owned_${project.id}")) {
+                                        Text(stringResource(R.string.project_workspace_continue))
+                                    }
+                                    if (project.purpose.isNotBlank()) {
+                                        Text(stringResource(R.string.project_purpose), style = MaterialTheme.typography.labelMedium)
+                                        Text(project.purpose, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                                            style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    if (project.requirements.isNotBlank()) Text(project.requirements, maxLines = 2, style = MaterialTheme.typography.bodySmall)
                                 }
-                                if (project.purpose.isNotBlank()) {
-                                    Text(stringResource(R.string.project_purpose), style = MaterialTheme.typography.labelMedium)
-                                    Text(project.purpose, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                                        style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
-                                if (project.requirements.isNotBlank()) Text(project.requirements, maxLines = 2, style = MaterialTheme.typography.bodySmall)
                                 Text(stringResource(R.string.project_task_count, state.projectTaskCounts[project.id] ?: 0))
                             }
                         }

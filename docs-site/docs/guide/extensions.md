@@ -62,7 +62,7 @@ Operit 的 ToolPkg 和宿主脚本依赖不同的 API，当前仅提供下载，
 
 ## Reveric 官方目录与原始 ZIP
 
-**Reveric** 页签从固定的 `https://downloads.reveric.app/plugins/index.json` 加载公开目录，可手动刷新并在本地筛选名称、描述和作者。页面显示已加载总数与当前筛选数量；条目数量取决于官方目录的实际内容。
+**Reveric** 页签从固定的 `https://downloads.reveric.app/plugins/index.json` 加载公开目录，可手动刷新并在本地筛选名称、描述和作者。页面显示已加载总数与当前筛选数量；会渲染目录中所有通过校验的插件条目，不在本地固定截取前几项。条目数量取决于官方目录的实际内容。
 
 点击条目打开详情，可查看完整描述、插件标识、作者、仓库，以及各版本的 Reveric API、平台、文件大小、SHA-256、源码提交和发布地址，并从详情选择下载。即使平台包含 Android，也只说明面向 Reveric 的兼容线索，不表示 Aharou 可执行。仓库与发布地址只作纯文本展示。
 

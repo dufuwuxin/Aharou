@@ -10,6 +10,9 @@ import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.lifecycle.SavedStateHandle
@@ -76,6 +79,31 @@ class RevericMarketPanelTest {
         card.assertDoesNotExist()
         assertEquals(1, calls.get())
     }
+
+    @Test fun rendersCatalogEntriesBeyondThePreviousFourItemObservation() {
+        val client = OkHttpClient.Builder().addInterceptor { chain ->
+            val request = chain.request()
+            Response.Builder().request(request).protocol(Protocol.HTTP_1_1).code(200).message("fixture")
+                .body(catalogWithPlugins(5).toResponseBody()).build()
+        }.build()
+        val owner = RevericMarketViewModel(RevericMarketRepository(compose.activity, client), SavedStateHandle())
+        fun label(id: Int, vararg args: Any) = compose.activity.getString(id, *args)
+        compose.setContent { MaterialTheme { RevericMarketPanel(owner) } }
+        compose.waitUntil(timeoutMillis = 5_000) { owner.state.value.loaded }
+        compose.onNodeWithText(label(R.string.reveric_catalog_count, 5, 5)).assertExists()
+        compose.onNodeWithTag("reveric_catalog_list").performScrollToNode(hasText("Fixture plugin 5"))
+        compose.onNodeWithText("Fixture plugin 5").assertExists()
+        compose.onNode(hasSetTextAction()).performTextInput("fixture.5")
+        compose.onNodeWithText(label(R.string.reveric_catalog_count, 5, 1)).assertExists()
+        compose.onNodeWithText("Fixture plugin 5").assertExists()
+        compose.onNodeWithText("Fixture plugin 1").assertDoesNotExist()
+        compose.onNode(hasSetTextAction()).performTextReplacement("")
+        compose.onNodeWithText(label(R.string.reveric_catalog_count, 5, 5)).assertExists()
+    }
+
+    private fun catalogWithPlugins(count: Int): String = """{"schemaVersion":1,"plugins":[${(1..count).joinToString(",") { index ->
+        """{"id":"fixture.$index","name":{"en":"Fixture plugin $index"},"description":{"en":"Fixture $index"},"author":"Fixture author","repository":"https://example.invalid/repository","versions":[{"version":"1.0.0","pluginApiVersion":"^1","platforms":["android"],"url":"https://downloads.reveric.app/plugins/fixture-$index.zip","fallbackUrl":"https://example.invalid/fallback.zip","size":12,"sha256":"$hash","releaseUrl":"https://example.invalid/release","sourceCommit":"fixture-commit"}]}"""
+    }}]}"""
 
     private val description = "The full English description should survive the card summary. " +
         "This final sentence is only fully visible in the detail view."

@@ -17,6 +17,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -24,6 +25,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
@@ -222,6 +224,49 @@ class ProjectListScreenTest {
             assertEquals(1, openedChats)
         }
         verify(exactly = 1) { agent.selectSession("regular") }
+    }
+
+    @Test fun workspaceSessionGroupsCanCollapseAndExpandIndependently() {
+        val first = ChatSession("first-session", "First session", 1, 1, workspacePath = "/first")
+        val second = ChatSession("second-session", "Second session", 1, 1, workspacePath = "/second")
+        val selected = mutableListOf<String>()
+        val deleted = mutableListOf<String>()
+        compose.setContent {
+            MaterialTheme {
+                com.aharou.feature.agent.presentation.component.SessionListScreen(
+                    sessions = listOf(first, second), currentSessionId = null, agentStates = emptyMap(),
+                    awaitingPermissionSessionIds = emptySet(), workspaceName = "Workspaces",
+                    onSelect = { selected += it.id }, onDelete = { deleted += it.id }, onNewSession = {},
+                    sessionGroups = mapOf("/first" to listOf(first), "/second" to listOf(second)),
+                    workspaceStatuses = mapOf("/first" to "First ready", "/second" to "Second ready")
+                )
+            }
+        }
+        compose.onNodeWithText("First session").assertIsDisplayed()
+        compose.onNodeWithText("Second session").assertIsDisplayed()
+        compose.onNodeWithTag("workspace_group_toggle:/first").performClick()
+        assertEquals(emptyList<String>(), selected)
+        assertEquals(emptyList<String>(), deleted)
+        compose.onNodeWithText("First session").assertDoesNotExist()
+        compose.onNodeWithText("First ready").assertDoesNotExist()
+        compose.onNodeWithText("Second session").assertIsDisplayed()
+        compose.onNodeWithTag("workspace_group_toggle:/first").performClick()
+        compose.onNodeWithText("First session").assertIsDisplayed()
+        compose.onNodeWithText("First ready").assertIsDisplayed()
+    }
+
+    @Test fun projectCardDetailsCanCollapseAndExpandWithoutOpeningTheProject() {
+        val agent = mockk<AIAgentViewModel>()
+        mountWorkspaceHome(agent)
+        compose.onNodeWithText(project.purpose).assertIsDisplayed()
+        compose.onNodeWithTag("project_details_toggle:${project.id}").performTouchInput { click() }
+        compose.onNodeWithText(project.purpose).assertDoesNotExist()
+        compose.onNodeWithTag("project_${project.id}").assertIsDisplayed()
+        compose.runOnIdle { assertEquals(emptyList<String>(), opened) }
+        compose.onNodeWithTag("project_details_toggle:${project.id}").performTouchInput { click() }
+        compose.onNodeWithText(project.purpose).assertIsDisplayed()
+        compose.onNodeWithTag("project_${project.id}").performClick()
+        compose.runOnIdle { assertEquals(listOf(project.id), opened) }
     }
 
     @Test fun projectSearchIsOptionalAndClearingRestoresTheHomeLayout() {
