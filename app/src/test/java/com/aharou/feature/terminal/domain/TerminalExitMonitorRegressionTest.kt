@@ -43,7 +43,8 @@ class TerminalExitMonitorRegressionTest {
         val scope = CoroutineScope(dispatcher)
         try {
             val manager = TerminalSessionManager(mockk<Context>(relaxed = true),
-                mockk<LinuxContainerEngine>(), mockk<WorkspaceRepository>())
+                mockk<LinuxContainerEngine>(), mockk<WorkspaceRepository>(),
+                mockk(relaxed = true))
             val buffer = mockk<TerminalBuffer>()
             val emulator = mockk<TerminalEmulator>()
             val session = mockk<TerminalSession>()

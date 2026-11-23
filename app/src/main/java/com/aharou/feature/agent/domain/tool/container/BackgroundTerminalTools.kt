@@ -2,6 +2,7 @@ package com.aharou.feature.agent.domain.tool.container
 
 import com.aharou.core.util.FileLogger
 import com.aharou.feature.agent.domain.tool.AgentTool
+import com.aharou.feature.settings.data.repository.ContainerSettingsRepository
 import com.aharou.feature.agent.domain.tool.ParameterType
 import com.aharou.feature.agent.domain.tool.PendingToolPermission
 import com.aharou.feature.agent.domain.tool.StreamingAgentTool
@@ -74,7 +75,8 @@ private fun filterOutputLines(output: String, regex: Regex): List<String> =
  * send 动作按输入内容匹配，key/read/close 按整工具匹配。
  */
 class TerminalSessionTool @Inject constructor(
-    private val sessionManager: TerminalSessionProvider
+    private val sessionManager: TerminalSessionProvider,
+    private val containerSettings: ContainerSettingsRepository
 ) : AgentTool(), StreamingAgentTool {
     private companion object {
         const val TAG = "TerminalSessionTool"
@@ -292,7 +294,7 @@ class TerminalSessionTool @Inject constructor(
     ): ToolResult =
         when (actionOf(args)) {
             "start" -> start(args, context)
-            "send" -> send(args)
+            "send" -> send(args, context)
             "key" -> sendKey(args)
             "read" -> read(args, context)
             "close" -> close(args)
@@ -309,8 +311,8 @@ class TerminalSessionTool @Inject constructor(
     ): Flow<ToolStreamEvent> = flow {
         when (actionOf(args)) {
             "start" -> streamStart(args, context)
-            "send" -> streamSend(args)
-            else -> emit(ToolStreamEvent.Completed(execute(args)))
+            "send" -> streamSend(args, context)
+            else -> emit(ToolStreamEvent.Completed(execute(args, context)))
         }
     }
 
@@ -325,6 +327,7 @@ class TerminalSessionTool @Inject constructor(
         }
         val title = args["title"]?.asPlainString()
         val notify = args["notify"]?.asPlainString()?.toBooleanStrictOrNull() ?: false
+        val initialRedaction = containerSettings.redactEnvOutputState()
         val tabId = try {
             withContext(Dispatchers.Main) {
                 sessionManager.startBackgroundCommand(
@@ -344,12 +347,16 @@ class TerminalSessionTool @Inject constructor(
         }
 
         FileLogger.i(TAG, "后台命令已启动 tab=$tabId(流式捕获): $command")
-        captureOutputFor(tabId, initialOutput = "")
-        val result = withContext(Dispatchers.Main) { capturedResult(tabId, actionLabel = "start") }
+        val redaction = withContext(Dispatchers.Main) { CaptureRedaction(tabId, initialRedaction) }
+        captureOutputFor(tabId, initialOutput = "", redaction = redaction)
+        val result = withContext(Dispatchers.Main) { capturedResult(tabId, actionLabel = "start", redaction = redaction) }
         emit(ToolStreamEvent.Completed(result))
     }
 
-    private suspend fun kotlinx.coroutines.flow.FlowCollector<ToolStreamEvent>.streamSend(args: Map<String, JsonElement>) {
+    private suspend fun kotlinx.coroutines.flow.FlowCollector<ToolStreamEvent>.streamSend(
+        args: Map<String, JsonElement>,
+        context: com.aharou.feature.agent.domain.model.AgentContext
+    ) {
         val tabId = args["tab_id"]?.asPlainString()
         if (tabId.isNullOrBlank()) {
             emit(ToolStreamEvent.Completed(ToolResult.Error("send 操作缺少必需参数: tab_id")))
@@ -362,7 +369,9 @@ class TerminalSessionTool @Inject constructor(
         }
         val submit = args["submit"]?.asPlainString()?.toBooleanStrictOrNull() ?: true
 
-        val before = withContext(Dispatchers.Main) { sessionManager.getTabOutput(tabId) }
+        val (before, redaction) = withContext(Dispatchers.Main) {
+            sessionManager.getTabOutput(tabId) to CaptureRedaction(tabId)
+        }
         if (before == null) {
             emit(ToolStreamEvent.Completed(ToolResult.Error("未找到终端标签: $tabId")))
             return
@@ -375,28 +384,40 @@ class TerminalSessionTool @Inject constructor(
         }
         FileLogger.i(TAG, "向 $tabId 发送输入(流式捕获): $input")
 
-        captureOutputFor(tabId, initialOutput = before)
-        val result = withContext(Dispatchers.Main) { capturedResult(tabId, actionLabel = "send") }
+        captureOutputFor(tabId, initialOutput = before, redaction = redaction)
+        val result = withContext(Dispatchers.Main) { capturedResult(tabId, actionLabel = "send", redaction = redaction) }
         emit(ToolStreamEvent.Completed(result))
     }
 
     private suspend fun kotlinx.coroutines.flow.FlowCollector<ToolStreamEvent>.captureOutputFor(
         tabId: String,
-        initialOutput: String
+        initialOutput: String,
+        redaction: CaptureRedaction,
     ) {
         var elapsed = 0L
-        var lastOutput = initialOutput
+        var latestOutput = initialOutput
+        var lastEmitted = initialOutput
+        var protectedStart: String? = initialOutput.takeIf { redaction.observe() }
         while (elapsed < START_CAPTURE_MS) {
             delay(START_POLL_INTERVAL_MS)
             elapsed += START_POLL_INTERVAL_MS
-
-            val output = withContext(Dispatchers.Main) { sessionManager.getTabOutput(tabId) }
-                ?: break
-            val delta = outputDelta(lastOutput, output)
-            if (delta.isNotEmpty()) {
-                emit(ToolStreamEvent.Progress(delta))
-                lastOutput = output
+            val output = withContext(Dispatchers.Main) { sessionManager.getTabOutput(tabId) } ?: break
+            if (protectedStart == null) {
+                if (redaction.observe()) {
+                    protectedStart = lastEmitted
+                } else {
+                    val delta = outputDelta(lastEmitted, output)
+                    if (delta.isNotEmpty()) {
+                        emit(ToolStreamEvent.Progress(delta))
+                        lastEmitted = output
+                    }
+                }
             }
+            latestOutput = output
+        }
+        protectedStart?.let { previous ->
+            val delta = outputDelta(redaction.apply(previous), redaction.apply(latestOutput))
+            if (delta.isNotEmpty()) emit(ToolStreamEvent.Progress(delta))
         }
     }
 
@@ -418,16 +439,19 @@ class TerminalSessionTool @Inject constructor(
             ?: return@withContext ToolResult.Error("start 操作缺少必需参数: command")
         val title = args["title"]?.asPlainString()
         val notify = args["notify"]?.asPlainString()?.toBooleanStrictOrNull() ?: false
+        val initialRedaction = containerSettings.redactEnvOutputState()
         try {
             // 新建标签绑定发起会话的工作区：proot 挂载写死在进程 argv 里，用全局工作区会在切工作区后落错仓库。
             val tabId = sessionManager.startBackgroundCommand(command, title, notify, context?.sessionId, context?.projectRoot)
             FileLogger.i(TAG, "后台命令已启动 tab=$tabId: $command")
+            val redaction = CaptureRedaction(tabId, initialRedaction)
 
             // 轮询捕获初始输出：命令退出则提前结束，否则最多等满 START_CAPTURE_MS。
             var elapsed = 0L
             while (elapsed < START_CAPTURE_MS) {
                 delay(START_POLL_INTERVAL_MS)
                 elapsed += START_POLL_INTERVAL_MS
+                redaction.observe()
                 val running = sessionManager.listTabs().firstOrNull { it.id == tabId }?.running ?: false
                 if (!running) break
             }
@@ -440,7 +464,7 @@ class TerminalSessionTool @Inject constructor(
                     mapOf(
                         "tab_id" to JsonPrimitive(tabId),
                         "running" to JsonPrimitive(running),
-                        "output" to JsonPrimitive(output)
+                        "output" to JsonPrimitive(redaction.apply(output))
                     )
                 )
             )
@@ -456,12 +480,16 @@ class TerminalSessionTool @Inject constructor(
      * 与 start 保持一致：返回 tab_id / running / output，避免 AI 发送命令后必须再手动 read 一次
      * 才能看到即时结果。交互 shell 没有可靠的“命令结束”信号，因此这里固定等待 [START_CAPTURE_MS]。
      */
-    private suspend fun send(args: Map<String, JsonElement>): ToolResult = withContext(Dispatchers.Main) {
+    private suspend fun send(
+        args: Map<String, JsonElement>,
+        context: com.aharou.feature.agent.domain.model.AgentContext?
+    ): ToolResult = withContext(Dispatchers.Main) {
         val tabId = args["tab_id"]?.asPlainString()
             ?: return@withContext ToolResult.Error("send 操作缺少必需参数: tab_id")
         val input = args["input"]?.asPlainString()
             ?: return@withContext ToolResult.Error("send 操作缺少必需参数: input")
         val submit = args["submit"]?.asPlainString()?.toBooleanStrictOrNull() ?: true
+        val redaction = CaptureRedaction(tabId)
         val ok = sessionManager.sendInput(tabId, input, appendNewline = submit)
         if (ok) {
             FileLogger.i(TAG, "向 $tabId 发送输入: $input")
@@ -469,8 +497,9 @@ class TerminalSessionTool @Inject constructor(
             while (elapsed < START_CAPTURE_MS) {
                 delay(START_POLL_INTERVAL_MS)
                 elapsed += START_POLL_INTERVAL_MS
+                redaction.observe()
             }
-            capturedResult(tabId, actionLabel = "send")
+            capturedResult(tabId, actionLabel = "send", redaction = redaction)
         } else {
             val exists = sessionManager.listTabs().any { it.id == tabId }
             if (exists) {
@@ -591,8 +620,9 @@ class TerminalSessionTool @Inject constructor(
             }
         }
         val note = mismatchNote(tabId, context)
-        if (note == null) ToolResult.Success(JsonPrimitive(body))
-        else ToolResult.Success(JsonPrimitive("$note\n\n$body"))
+        val safeBody = sessionManager.redactTabOutput(tabId, body)
+        if (note == null) ToolResult.Success(JsonPrimitive(safeBody))
+        else ToolResult.Success(JsonPrimitive("$note\n\n$safeBody"))
     }
 
     /**
@@ -640,7 +670,11 @@ class TerminalSessionTool @Inject constructor(
     private fun normalizeKey(key: String): String =
         key.trim().lowercase().replace(" ", "").replace("_", "+").replace("-", "+")
 
-    private fun capturedResult(tabId: String, actionLabel: String): ToolResult {
+    private fun capturedResult(
+        tabId: String,
+        actionLabel: String,
+        redaction: CaptureRedaction,
+    ): ToolResult {
         val tab = sessionManager.listTabs().firstOrNull { it.id == tabId }
             ?: return ToolResult.Error("未找到终端标签: $tabId")
         val rawOutput = sessionManager.getTabOutput(tabId) ?: ""
@@ -653,25 +687,33 @@ class TerminalSessionTool @Inject constructor(
                 mapOf(
                     "tab_id" to JsonPrimitive(tabId),
                     "running" to JsonPrimitive(tab.running),
-                    "output" to JsonPrimitive(rawOutput)
+                    "output" to JsonPrimitive(redaction.apply(rawOutput))
                 )
             )
         )
     }
 
-    private fun outputDelta(previous: String, current: String): String {
-        if (current == previous) return ""
-        if (current.startsWith(previous)) return current.substring(previous.length)
+    private inner class CaptureRedaction(
+        tabId: String,
+        private val initial: ContainerSettingsRepository.RedactionState = containerSettings.redactEnvOutputState(),
+    ) {
+        private val redact = sessionManager.tabOutputRedactor(tabId)
 
-        val maxOverlap = minOf(previous.length, current.length)
-        for (length in maxOverlap downTo 1) {
-            // 逐个长度比时不能先 current.take(length)（长 transcript 上 O(n²) 分配）；
-            // 重叠区间的首字符必然相同，先用它预筛再交给 regionMatches 逐字符比对。
-            if (previous[previous.length - length] != current[0]) continue
-            if (previous.regionMatches(previous.length - length, current, 0, length)) {
-                return current.substring(length)
-            }
+        fun observe(): Boolean {
+            val current = containerSettings.redactEnvOutputState()
+            return initial.enabled || current.enabled || current.enabledGeneration != initial.enabledGeneration
+        }
+
+        fun apply(output: String): String = if (observe()) redact(output) else output
+    }
+
+    private fun outputDelta(previous: String, current: String): String {
+        if (current.startsWith(previous)) return current.substring(previous.length)
+        val overlap = minOf(previous.length, current.length)
+        for (length in overlap downTo 1) if (previous.regionMatches(previous.length - length, current, 0, length)) {
+            return current.substring(length)
         }
         return current
     }
+
 }

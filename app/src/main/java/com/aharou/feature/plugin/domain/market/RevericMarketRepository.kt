@@ -191,6 +191,20 @@ internal class RevericMarketRepository internal constructor(
         RevericCatalog.parse(output.toString("UTF-8"))
     }
 
+    suspend fun loadMagpie(bundled: Boolean): List<MagpieListing> = withContext(Dispatchers.IO) {
+        val output = ByteArrayOutputStream()
+        if (bundled) {
+            context.assets.open(MagpieCatalog.ASSET).use { input ->
+                RevericCatalog.copyBounded(input, output, RevericCatalog.MAX_CATALOG)
+            }
+        } else {
+            request(MagpieCatalog.URL, "https://github.com/magpie-community/plugins") { input ->
+                RevericCatalog.copyBounded(input, output, RevericCatalog.MAX_CATALOG)
+            }
+        }
+        MagpieCatalog.parse(output.toString("UTF-8"))
+    }
+
     /** A cancelled SAF selection never starts a request or opens a destination. */
     suspend fun save(version: RevericVersion, uri: Uri?): Boolean {
         if (uri == null) return false
@@ -222,9 +236,11 @@ internal class RevericMarketRepository internal constructor(
         }
     }
 
-    private suspend fun <T> request(url: String, consume: suspend (InputStream) -> T): T = coroutineScope {
+    private suspend fun <T> request(
+        url: String, referer: String = "https://reveric.app/", consume: suspend (InputStream) -> T,
+    ): T = coroutineScope {
         val call = client.newCall(Request.Builder().url(url).header("User-Agent", "Aharou-RevericMarket/1.0")
-            .header("Referer", "https://reveric.app/").build())
+            .header("Referer", referer).build())
         val cancellation = launch(start = CoroutineStart.UNDISPATCHED) {
             try { awaitCancellation() } finally { call.cancel() }
         }

@@ -76,6 +76,10 @@ class DelegatingTerminalSessionProvider @Inject constructor(
 
     override fun getTabOutput(id: String): String? = delegate().getTabOutput(id)
 
+    override fun redactTabOutput(id: String, output: String): String = delegate().redactTabOutput(id, output)
+
+    override fun tabOutputRedactor(id: String): (String) -> String = delegate().tabOutputRedactor(id)
+
     override fun listTabs(): List<TabInfo> = delegate().listTabs()
 
     override fun closeTab(id: String): Boolean = delegate().closeTab(id)

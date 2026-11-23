@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "origin": {
+    "project": "https://github.com/wmww/tawc",
+    "tag": "v6",
+    "sourceCommit": "bf81550ca5fd86bd82f9c9ecd588cdafb3e03459",
+    "sourceArchiveUrl": "https://codeload.github.com/wmww/tawc/tar.gz/refs/tags/v6",
+    "sourceArchiveSha256": "a8059db235d440c3699f1b3d8f8dab3179b2bcdf8953cfbca72c1b8b1932dec8",
+    "apkUrl": "https://github.com/wmww/tawc/releases/download/v6/tawc-v6.apk",
+    "apkSha256": "31037eb3c080bcdb772fe01fd989a44cee525499accecdb591a3dc9baeace07d",
+    "apkDigestEvidence": "https://api.github.com/repos/wmww/tawc/releases/tags/v6",
+    "apkEntry": "lib/arm64-v8a/libtawcroot.so",
+    "packaging": "Unmodified bytes extracted from the official release APK; APK SHA-256 matches GitHub release asset digest.",
+    "license": "MIT",
+    "licenseSource": "https://github.com/wmww/tawc/blob/bf81550ca5fd86bd82f9c9ecd588cdafb3e03459/LICENSE.MIT",
+    "licenseScope": "README.md:61 licenses all code outside deps/ under MIT. Only the standalone tawcroot executable is imported; not the GPLv3 app."
+  },
+  "files": [
+    {
+      "repoPath": "app/src/_armJniLibs/arm64-v8a/libtawcroot.so",
+      "sizeBytes": 116672,
+      "sha256": "48eeb93c0083f33f6e53b722684e704ba9b2a34d90f681c560e06edfa871f323",
+      "abi": "arm64-v8a",
+      "role": "tawcroot-executable",
+      "elfClass": 64,
+      "elfMachine": 183,
+      "elfType": "ET_EXEC",
+      "static": true
+    }
+  ],
+  "licenseFile": {
+    "repoPath": "app/src/main/assets/licenses/tawcroot-MIT.txt",
+    "sizeBytes": 1057,
+    "sha256": "9d3d5eaf56a806858bc38364d32aae696b6a94d5746f4b24d050ef4cfcbe02ad"
+  },
+  "runtimeContract": {
+    "minimumAndroidApi": 29,
+    "processBits": 64,
+    "abi": "arm64-v8a",
+    "cli": "libtawcroot.so [-s] -r ROOTFS [-b SRC:DST[:ro]]... -- CMD [ARGS...]",
+    "cliEvidence": "tawcroot/src/main.c:446-504 at sourceCommit",
+    "environment": "Guest inherits envp directly (main.c:504). No PRoot loader variables or LD_PRELOAD are required. No CLI cwd, UID or environment flags; change directory in the guest shell.",
+    "documentationCaveat": "v6 notes/tawcroot/bootstrap-and-modules.md:21 mentions -w, but the actual production parser rejects it.",
+    "mainComparison": {
+      "checkedAtUtc": "2026-11-21",
+      "scope": [
+        "tawcroot/src/main.c",
+        "notes/distro-options.md"
+      ],
+      "result": "Both files byte-identical to main when retrieved; this does not imply the complete source trees are identical."
+    },
+    "buildEvidence": "tawcroot/build.sh builds a freestanding static non-PIE ET_EXEC and stages it as libtawcroot.so.",
+    "packaging": "armsolo jniLibs; useLegacyPackaging=true; keepDebugSymbols prevents binary stripping."
+  },
+  "compatibility": {
+    "ubuntu2404": "unverified_on_device",
+    "evidence": "v6 notes/distro-options.md:177 calls Ubuntu technically viable. This is not an Ubuntu 24.04 runtime test. The glibc-only distribution constraint at :67 is motivated by libhybris graphics integration, not proof that all musl programs fail in tawcroot.",
+    "smokePrerequisites": "Run from an Android app context on API >=29, arm64 64-bit process, with NATIVE_DIR=applicationInfo.nativeLibraryDir and ROOTFS=the installed Ubuntu rootfs absolute path. A successful shell smoke does not validate PTY, DNS, all workloads or all devices.",
+    "smokeCommand": "\"$NATIVE_DIR/libtawcroot.so\" -r \"$ROOTFS\" -b /dev:/dev -b /proc:/proc -b /sys:/sys -- /bin/sh -c 'set -eu; cd /root; /usr/bin/getconf GNU_LIBC_VERSION; /bin/bash -c \"test -d /proc/self; test -c /dev/null\"; printf \"tawcroot-stdin\\n\" | /bin/cat; printf \"tawcroot-smoke-ok\\n\"'",
+    "smokeExpected": "Exit 0, a glibc version, tawcroot-stdin and tawcroot-smoke-ok. Then verify interactive PTY and disabling tawcroot on the target app. No automatic retry of failed commands."
+  }
+}

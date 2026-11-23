@@ -1,5 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="magpie_catalog_title">Magpie 社区目录</string>
+    <string name="reveric_zip_catalog_title">Reveric ZIP</string>
+    <string name="magpie_catalog_scope">浏览 Magpie 社区包。它们不是 Reveric ZIP，Aharou 不直接安装或运行这些包。</string>
+    <string name="magpie_catalog_filter">筛选名称、包名、类型或供应商</string>
+    <string name="magpie_catalog_refresh_failed">未能加载目录；已显示的目录会保留，可重试。</string>
+    <string name="magpie_catalog_bundled">来源：随应用附带的 Magpie 社区目录</string>
+    <string name="magpie_catalog_live">来源：Magpie 社区在线目录</string>
+    <string name="settings_container_env_redaction_title">命令输出隐藏环境变量值</string>
+    <string name="settings_container_env_redaction_desc">默认开启。命令输出中与已注入环境变量相同的值会替换为「已隐藏」，避免密钥进入会话上下文与日志。</string>
+    <string name="tawcroot_title">实验性 tawcroot 运行时</string>
+    <string name="tawcroot_description">默认关闭。仅支持 Android 10+、64 位 ARM64 设备和 Ubuntu glibc 容器；开启后新启动的命令与终端使用实验后端。</string>
+    <string name="tawcroot_unavailable">当前设备未包含可用的 ARM64 实验运行时。</string>
     <string name="project_horizon_short">短期</string>
     <string name="project_horizon_medium">中期</string>
     <string name="project_horizon_long">长期</string>

@@ -3,7 +3,9 @@ package com.aharou.feature.terminal.domain
 import android.content.Context
 import com.aharou.core.util.FileLogger
 import com.aharou.feature.agent.domain.container.ContainerProfile
+import com.aharou.feature.agent.domain.container.ContainerEnvValueRedactor
 import com.aharou.feature.agent.domain.container.LinuxContainerEngine
+import com.aharou.feature.settings.data.repository.ContainerSettingsRepository
 import com.aharou.feature.terminal.presentation.component.AppTerminalSessionClient
 import com.aharou.feature.workspace.data.repository.WorkspaceRepository
 import com.termux.terminal.TerminalSession
@@ -49,7 +51,8 @@ import javax.inject.Singleton
 class TerminalSessionManager @Inject constructor(
     @param:ApplicationContext private val appContext: Context,
     private val containerEngine: LinuxContainerEngine,
-    private val workspaceRepository: WorkspaceRepository
+    private val workspaceRepository: WorkspaceRepository,
+    private val containerSettings: ContainerSettingsRepository
 ) : TerminalSessionProvider {
     private companion object {
         const val TAG = "TerminalSessionManager"
@@ -128,7 +131,7 @@ class TerminalSessionManager @Inject constructor(
         val profile = ensureContainer(workspace)
         val shellCommand = buildInteractiveCommand(profile)
         FileLogger.i(TAG, "交互 shell 命令（$id）：$shellCommand")
-        val (session, client) = try {
+        val (session, client, injectedEnv) = try {
             buildSession(shellCommand, workspace)
         } catch (e: Exception) {
             FileLogger.e(TAG, "创建交互终端会话失败（$id）", e)
@@ -145,7 +148,7 @@ class TerminalSessionManager @Inject constructor(
                 workspacePath = workspace,
                 client = client,
                 runState = RunState.Running
-            )
+            ).also { it.injectedEnv = injectedEnv }
         )
         _activeTabId.value = id
         FileLogger.i(TAG, "新建交互终端标签 $id：pid=${session.pid} 运行中=${session.isRunning}")
@@ -212,7 +215,7 @@ class TerminalSessionManager @Inject constructor(
         // 用大括号包住命令再接退出标记：命令末行若是 heredoc 结束符、注释或 `&`，直接接分号会让标记被吞掉或报语法错误。
         val shellCommand = "cd ~/workspace 2>/dev/null; " +
             "{ $command\n}; ec=\$?; printf '\\n[command exited: %s]\\n' \"\$ec\"$afterCommand"
-        val (session, client) = buildSession(shellCommand, workspace)
+        val (session, client, injectedEnv) = buildSession(shellCommand, workspace)
         addTab(
             TerminalTab(
                 id = id,
@@ -230,7 +233,7 @@ class TerminalSessionManager @Inject constructor(
                 client = client,
                 runState = RunState.Running,
                 exitReceiptToken = receiptToken
-            )
+            ).also { it.injectedEnv = injectedEnv }
         )
         // 后台命令不抢占当前标签焦点：仅当没有活动标签时才设为当前。
         if (_activeTabId.value == null) _activeTabId.value = id
@@ -240,6 +243,19 @@ class TerminalSessionManager @Inject constructor(
         FileLogger.i(TAG, "后台命令标签 $id: $command")
         return id
     }
+
+    override fun redactTabOutput(id: String, output: String): String {
+        if (!containerSettings.redactEnvOutputEnabledSnapshot() || output.isBlank()) return output
+        return tabOutputRedactor(id)(output)
+    }
+
+    override fun tabOutputRedactor(id: String): (String) -> String {
+        val environment = tab(id)?.injectedEnv.orEmpty()
+        return { output -> ContainerEnvValueRedactor.redact(output, environment).text }
+    }
+
+    private fun safeTailOutput(id: String, output: String? = getTabOutput(id)): String? =
+        output?.let { redactTabOutput(id, it).takeTailLines(TAIL_LINES) }
 
     private fun runningTab(id: String): TerminalTab? {
         val t = tab(id) ?: return null
@@ -427,7 +443,7 @@ class TerminalSessionManager @Inject constructor(
                                 TabFinishedEvent(
                                     current.id, current.title, current.command, exitCode, current.sourceSessionId,
                                     startedAt = current.startedAt,
-                                    tailOutput = tail.takeTailLines(TAIL_LINES)
+                                    tailOutput = safeTailOutput(tabId, tail)
                                 )
                             )
                         }
@@ -466,7 +482,7 @@ class TerminalSessionManager @Inject constructor(
     private fun resolveWorkspace(workspacePath: String?): String =
         workspacePath?.takeIf { it.isNotBlank() } ?: workspaceRepository.currentPath()
 
-    private fun buildSession(shellCommand: String, workspace: String): Pair<TerminalSession, AppTerminalSessionClient> {
+    private fun buildSession(shellCommand: String, workspace: String): Triple<TerminalSession, AppTerminalSessionClient, Map<String, String>> {
         val invocation = containerEngine.buildProotInvocation(shellCommand, workspace)
         FileLogger.i(
             TAG,
@@ -490,7 +506,7 @@ class TerminalSessionManager @Inject constructor(
                             TabFinishedEvent(
                                 target.id, target.title, target.command, finished.exitStatus, target.sourceSessionId,
                                 startedAt = target.startedAt,
-                                tailOutput = getTabOutput(target.id)?.takeTailLines(TAIL_LINES)
+                                tailOutput = safeTailOutput(target.id)
                             )
                         )
                     }
@@ -507,7 +523,7 @@ class TerminalSessionManager @Inject constructor(
         )
         session.updateSize(DEFAULT_COLUMNS, DEFAULT_ROWS)
         FileLogger.i(TAG, "PTY 会话已创建：pid=${session.pid} 运行中=${session.isRunning}")
-        return session to client
+        return Triple(session, client, invocation.injectedEnv)
     }
 
     private fun startKeepaliveService(tab: TerminalTab) {

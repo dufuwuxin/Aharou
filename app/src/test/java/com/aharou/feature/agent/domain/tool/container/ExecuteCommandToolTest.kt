@@ -13,7 +13,13 @@ import org.junit.Test
 class ExecuteCommandToolTest {
     @Test fun structuredForegroundPreservesEngineStatusAndOrdinaryToolCompatibility() = runTest {
         val engine = mockk<CommandEngine>()
-        val tool = ExecuteCommandTool(engine, mockk(), mockk())
+        val envVars = mockk<com.aharou.feature.settings.data.repository.EnvVarRepository>()
+        val profiles = mockk<com.aharou.feature.agent.domain.container.ContainerProfileResolver>()
+        val settings = mockk<com.aharou.feature.settings.data.repository.ContainerSettingsRepository>()
+        every { envVars.asMap() } returns emptyMap()
+        every { profiles.forWorkspace(any()) } returns com.aharou.feature.agent.domain.container.ContainerProfile.BUILTIN_UBUNTU
+        every { settings.redactEnvOutputEnabledSnapshot() } returns true
+        val tool = ExecuteCommandTool(engine, mockk(), mockk(), envVars, profiles, settings)
         val context = AgentContext(null, null, "/fixture", null)
         val args = mapOf("command" to JsonPrimitive("printf data"))
         val result = CommandResult("stale_value\n[退出码: 0]", 7, true)

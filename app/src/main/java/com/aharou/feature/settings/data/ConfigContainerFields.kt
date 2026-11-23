@@ -9,6 +9,7 @@ import com.aharou.core.config.ConfigRisk
 import com.aharou.core.config.ConfigSchema
 import com.aharou.core.config.ConfigValue
 import com.aharou.core.config.fields.ClosureField
+import com.aharou.core.config.fields.DataStoreBoolField
 import com.aharou.core.config.fields.DataStoreEnumField
 import com.aharou.core.config.fields.DataStoreIntField
 import com.aharou.core.config.fields.DataStoreStrField
@@ -44,6 +45,20 @@ class ConfigContainerFields @Inject constructor(
 
     fun registerInto(registry: ConfigRegistry) {
         registry.registerSources()
+        registry.register(DataStoreBoolField(
+            path = "container.use_tawcroot",
+            displayName = context.getString(com.aharou.R.string.tawcroot_title),
+            description = context.getString(com.aharou.R.string.tawcroot_description),
+            flow = containerSettings.useTawcrootFlow,
+            setter = { containerSettings.setUseTawcroot(it) }
+        ))
+        registry.register(DataStoreBoolField(
+            path = "container.redact_env_output",
+            displayName = context.getString(com.aharou.R.string.settings_container_env_redaction_title),
+            description = context.getString(com.aharou.R.string.settings_container_env_redaction_desc),
+            flow = containerSettings.redactEnvOutputFlow,
+            setter = { containerSettings.setRedactEnvOutput(it) }
+        ))
         registry.register(
             DataStoreStrField(
                 path = "container.active_profile",

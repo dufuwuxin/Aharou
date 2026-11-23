@@ -101,6 +101,32 @@ class RevericMarketPanelTest {
         compose.onNodeWithText(label(R.string.reveric_catalog_count, 5, 5)).assertExists()
     }
 
+    @Test fun showsBundledMagpieCatalogAndPreservesTheRevericZipSource() {
+        val calls = AtomicInteger()
+        val client = OkHttpClient.Builder().addInterceptor { chain ->
+            val request = chain.request()
+            check(request.url.toString() == RevericCatalog.URL)
+            calls.incrementAndGet()
+            Response.Builder().request(request).protocol(Protocol.HTTP_1_1).code(200).message("fixture")
+                .body(catalog.toResponseBody()).build()
+        }.build()
+        val owner = RevericMarketViewModel(RevericMarketRepository(compose.activity, client), SavedStateHandle())
+        fun label(id: Int, vararg args: Any) = compose.activity.getString(id, *args)
+        compose.setContent { MaterialTheme { RevericSourcePanel(owner) } }
+        val snapshotCount = label(R.string.reveric_catalog_count, 127, 127)
+        compose.waitUntil(timeoutMillis = 5_000) {
+            compose.onAllNodes(hasText(snapshotCount)).fetchSemanticsNodes().isNotEmpty()
+        }
+        assertEquals(0, calls.get())
+        compose.onNode(hasSetTextAction()).performTextInput("@magpie-community/agent-pine")
+        compose.onNodeWithText(label(R.string.reveric_catalog_count, 127, 1)).assertExists()
+        compose.onNode(hasText("@magpie-community/agent-pine") and !hasSetTextAction()).assertHasNoClickAction()
+        compose.onNodeWithText(label(R.string.reveric_zip_catalog_title)).performClick()
+        compose.waitUntil(timeoutMillis = 5_000) { owner.state.value.loaded }
+        compose.onNodeWithText(label(R.string.reveric_catalog_count, 1, 1)).assertExists()
+        assertEquals(1, calls.get())
+    }
+
     private fun catalogWithPlugins(count: Int): String = """{"schemaVersion":1,"plugins":[${(1..count).joinToString(",") { index ->
         """{"id":"fixture.$index","name":{"en":"Fixture plugin $index"},"description":{"en":"Fixture $index"},"author":"Fixture author","repository":"https://example.invalid/repository","versions":[{"version":"1.0.0","pluginApiVersion":"^1","platforms":["android"],"url":"https://downloads.reveric.app/plugins/fixture-$index.zip","fallbackUrl":"https://example.invalid/fallback.zip","size":12,"sha256":"$hash","releaseUrl":"https://example.invalid/release","sourceCommit":"fixture-commit"}]}"""
     }}]}"""

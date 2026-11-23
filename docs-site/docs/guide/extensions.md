@@ -4,7 +4,7 @@
 
 入口：**设置 → 插件**或**设置 → 连接器**。
 
-插件页使用可横向滚动的五个页签：**已安装**、**Operit2**、**DSH**、**NPM** 与 **Reveric**。已安装保留本地导入、启停和卸载；Operit2 提供对方公开市场的浏览、下载与兼容技能导入；NPM 仅展示公开包元数据；Reveric 仅浏览官方目录和下载原始 ZIP。连接器在连接器页配置。原扩展聚合页已移除，其他能力从配置页各自的入口进入。
+插件页使用可横向滚动的五个页签：**已安装**、**Operit2**、**DSH**、**NPM** 与 **Reveric**。已安装保留本地导入、启停和卸载；Operit2 提供对方公开市场的浏览、下载与兼容技能导入；NPM 仅展示公开包元数据；Reveric 可浏览 Magpie 社区目录，或切换到 Reveric ZIP 目录下载原始包。连接器在连接器页配置。原扩展聚合页已移除，其他能力从配置页各自的入口进入。
 
 ## 五类分别是什么
 
@@ -62,7 +62,9 @@ Operit 的 ToolPkg 和宿主脚本依赖不同的 API，当前仅提供下载，
 
 ## Reveric 官方目录与原始 ZIP
 
-**Reveric** 页签从固定的 `https://downloads.reveric.app/plugins/index.json` 加载公开目录，可手动刷新并在本地筛选名称、描述和作者。页面显示已加载总数与当前筛选数量；会渲染目录中所有通过校验的插件条目，不在本地固定截取前几项。条目数量取决于官方目录的实际内容。
+**Reveric** 页签默认打开 **Magpie 社区目录**，可按名称、包名、类型或供应商筛选。初次打开读取随应用附带的[官方目录快照](https://github.com/magpie-community/plugins/blob/c681c309305348d9cab71d4f609ee9d97564b0fe/registry.json)，点击刷新从 [Magpie 社区在线目录](https://github.com/magpie-community/plugins/blob/main/registry.json)更新；失败保留已显示的结果。Magpie 的 NPM 插件不是 Aharou 的原生插件，此处不直接下载、安装或执行。
+
+切换到 **Reveric ZIP** 后，从固定的 `https://downloads.reveric.app/plugins/index.json` 加载原有公开目录，可手动刷新并在本地筛选名称、描述和作者。页面显示已加载总数与当前筛选数量；会渲染目录中所有通过校验的插件条目，不在本地固定截取前几项。条目数量取决于官方目录的实际内容。
 
 点击条目打开详情，可查看完整描述、插件标识、作者、仓库，以及各版本的 Reveric API、平台、文件大小、SHA-256、源码提交和发布地址，并从详情选择下载。即使平台包含 Android，也只说明面向 Reveric 的兼容线索，不表示 Aharou 可执行。仓库与发布地址只作纯文本展示。
 

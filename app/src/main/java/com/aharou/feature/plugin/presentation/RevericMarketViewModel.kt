@@ -75,6 +75,8 @@ internal class RevericMarketViewModel @Inject constructor(
         }
     }
 
+    suspend fun loadMagpie(bundled: Boolean) = repository.loadMagpie(bundled)
+
     fun chooseDownload(entry: RevericEntry, version: RevericVersion): String? {
         val current = mutable.value
         if (current.busy || current.loading || entry !in current.entries || version !in entry.versions ||

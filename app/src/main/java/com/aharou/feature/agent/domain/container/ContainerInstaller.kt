@@ -293,6 +293,9 @@ class ContainerInstaller @Inject constructor(
     val prootBin: File
         get() = File(nativeLibDir, "libproot.so")
 
+    val tawcrootBin: File
+        get() = File(nativeLibDir, "libtawcroot.so")
+
     /** PRoot 的 64/32 位 loader（Termux proot loader 分离，由 PROOT_LOADER/_32 指向）。 */
     val prootLoader: File
         get() = File(nativeLibDir, "libproot-loader.so")

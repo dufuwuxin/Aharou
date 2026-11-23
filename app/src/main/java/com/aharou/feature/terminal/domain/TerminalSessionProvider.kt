@@ -44,6 +44,10 @@ interface TerminalSessionProvider {
     /** 按 id 读取终端内容（emulator 屏幕缓冲）。返回 null 表示无此标签。 */
     fun getTabOutput(id: String): String?
 
+    fun redactTabOutput(id: String, output: String): String = output
+
+    fun tabOutputRedactor(id: String): (String) -> String = { it }
+
     /** 列出全部标签的摘要。 */
     fun listTabs(): List<TabInfo>
 

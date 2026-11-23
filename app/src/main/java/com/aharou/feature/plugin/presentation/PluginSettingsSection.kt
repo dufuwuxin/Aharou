@@ -147,7 +147,7 @@ internal fun PluginSettingsSection(
             }
         } else if (selectedTab == 4) {
             marketState.SaveableStateProvider("reveric") {
-                RevericMarketPanel(revericViewModel, Modifier.weight(1f))
+                RevericSourcePanel(revericViewModel, Modifier.weight(1f))
             }
         } else Column(
             modifier = Modifier

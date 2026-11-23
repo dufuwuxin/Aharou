@@ -17,7 +17,7 @@ class ContainerWatchdogRegressionTest {
     @Test fun aDeadRootDoesNotDisableTheOutstandingExecutionDeadline() = runTest {
         val engine = LinuxContainerEngine(mockk(relaxed = true), mockk(relaxed = true),
             mockk(relaxed = true), mockk(relaxed = true), mockk(relaxed = true), mockk(relaxed = true),
-            mockk(relaxed = true), mockk(relaxed = true))
+            mockk(relaxed = true), mockk(relaxed = true), mockk(relaxed = true))
         val process = mockk<Process>(relaxed = true)
         every { process.isAlive } returns false
         val timedOut = AtomicBoolean(false)

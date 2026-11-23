@@ -11,9 +11,12 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.aharou.core.datastore.preferencesCorruptionHandler
 import com.aharou.feature.agent.domain.container.ContainerProfile
 import com.aharou.feature.agent.domain.container.ContainerWorkspaceKeys
+import com.aharou.feature.agent.domain.container.TawcrootRuntime
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.MapSerializer
@@ -50,6 +53,25 @@ data class DownloadedImageRecord(
 class ContainerSettingsRepository @Inject constructor(
     @param:ApplicationContext private val context: Context
 ) {
+    @Volatile
+    private var useTawcrootSnapshot = false
+    internal data class RedactionState(val enabled: Boolean, val enabledGeneration: Long)
+
+    private val redactionState = java.util.concurrent.atomic.AtomicReference(RedactionState(true, 0))
+
+    private val snapshotScope = kotlinx.coroutines.CoroutineScope(
+        kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO
+    )
+
+    init {
+        snapshotScope.launch {
+            context.containerDataStore.data.collect { preferences ->
+                useTawcrootSnapshot = preferences[USE_TAWCROOT_KEY] ?: false
+                updateRedaction(preferences[REDACT_ENV_OUTPUT_KEY] ?: true)
+            }
+        }
+    }
+
     companion object {
         /** Gradle 堆上限可调范围与步进（设置页滑条与配置通道共用）。 */
         const val GRADLE_HEAP_MIN_MB = 2048
@@ -82,6 +104,8 @@ class ContainerSettingsRepository @Inject constructor(
         }
 
         val ACTIVE_PROFILE_ID_KEY = stringPreferencesKey("active_profile_id")
+        val USE_TAWCROOT_KEY = booleanPreferencesKey("use_tawcroot")
+        val REDACT_ENV_OUTPUT_KEY = booleanPreferencesKey("redact_env_output")
         val CUSTOM_PROFILES_KEY = stringPreferencesKey("custom_profiles_json")
         /** 远程工作区模式下本地 MCP stdio 等服务的运行容器；无值时默认内置 Ubuntu。 */
         val DEFAULT_CONTAINER_ID_KEY = stringPreferencesKey("default_container_profile_id")
@@ -101,6 +125,32 @@ class ContainerSettingsRepository @Inject constructor(
         val profileSerializer = ListSerializer(ContainerProfile.serializer())
         val workspaceProfilesSerializer = MapSerializer(String.serializer(), String.serializer())
         val json = Json { ignoreUnknownKeys = true }
+    }
+
+    val useTawcrootFlow: Flow<Boolean> = context.containerDataStore.data.map { it[USE_TAWCROOT_KEY] ?: false }
+    val redactEnvOutputFlow: Flow<Boolean> = context.containerDataStore.data.map { it[REDACT_ENV_OUTPUT_KEY] ?: true }
+
+    fun useTawcrootEnabledSnapshot(): Boolean = useTawcrootSnapshot
+    fun redactEnvOutputEnabledSnapshot(): Boolean = redactionState.get().enabled
+
+    internal fun redactEnvOutputState(): RedactionState = redactionState.get()
+
+    private fun updateRedaction(enabled: Boolean) {
+        redactionState.updateAndGet { current ->
+            if (enabled == current.enabled) current
+            else RedactionState(enabled, current.enabledGeneration + if (enabled) 1 else 0)
+        }
+    }
+
+    suspend fun setUseTawcroot(enabled: Boolean) {
+        if (enabled) TawcrootRuntime.requireAvailable(context)
+        context.containerDataStore.edit { it[USE_TAWCROOT_KEY] = enabled }
+        useTawcrootSnapshot = enabled
+    }
+
+    suspend fun setRedactEnvOutput(enabled: Boolean) {
+        context.containerDataStore.edit { it[REDACT_ENV_OUTPUT_KEY] = enabled }
+        updateRedaction(enabled)
     }
 
     /** 当前选中的 profile id；无值时默认内置 Ubuntu。 */

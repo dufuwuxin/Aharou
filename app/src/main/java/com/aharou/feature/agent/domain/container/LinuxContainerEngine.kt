@@ -4,6 +4,7 @@ import com.aharou.core.util.LINE_TRUNCATED_NOTE
 import com.aharou.core.util.ProcessIdentity
 import com.aharou.R
 import com.aharou.feature.settings.data.repository.ExecutionMode
+import com.aharou.feature.settings.data.repository.ContainerSettingsRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -39,37 +40,6 @@ import javax.inject.Singleton
  * 本类不再自行定义。PRoot 专属方法（[startStdioProcess]/[buildProotInvocation]/
  * [incPromptInFlight] 等）不属于接口，仅供本地 MCP stdio / 凭据 helper / 终端 PTY 使用。
  */
-/**
- * 一次 PRoot 调用的完整描述：可执行文件 + 参数列表 + 环境变量。
- *
- * [argv] 的第 0 个元素即 proot 二进制路径，其余为参数。
- *
- * 两种消费方都要拿到「完整 argv」：
- *  - [ProcessBuilder] 直接接收 argv 列表；
- *  - Termux TerminalSession 的 cmd 仅用于 execvp 查找可执行文件，真正的 argv 由它的
- *    args 参数原样构成（native execvp(cmd, argv)，不会自动补 argv[0]），故 args 必须
- *    也是「含 argv[0]=proot 二进制」的完整 argv，否则选项整体错位一位、proot 会把
- *    rootfs 路径误当客户机程序（"is not a regular file"）。[executable] 只用于前者的 cmd 槽位。
- */
-data class ProotInvocation(
-    val argv: List<String>,
-    val env: Map<String, String>
-) {
-    val executable: String get() = argv.first()
-
-    /**
-     * 供 Termux [com.termux.terminal.TerminalSession] 使用的完整环境数组（"KEY=VALUE"）。
-     *
-     * [ProcessBuilder] 的 environment() 初始即为父进程（App）环境的副本，再叠加 [env]，
-     * 因此 proot 能拿到 ANDROID_ROOT/ANDROID_DATA/LD_LIBRARY_PATH 等系统变量；但
-     * TerminalSession 接收的是「完整、不继承父进程」的环境数组，只喂 [env] 会让 proot
-     * 这个动态链接的 Android 可执行文件因缺系统环境而 exec 失败、瞬间退出（终端表现为
-     * 「会话已结束」而日志无其他报错）。故在此显式合并父进程环境（先经 [ContainerEnvSanitizer] 清洗）后叠加 [env]。
-     */
-    val ptyEnvArray: Array<String>
-        get() = (ContainerEnvSanitizer.scrubbedSystemEnv() + env).map { "${it.key}=${it.value}" }.toTypedArray()
-}
-
 @Singleton
 class LinuxContainerEngine @Inject constructor(
     @param:ApplicationContext private val context: android.content.Context,
@@ -79,7 +49,8 @@ class LinuxContainerEngine @Inject constructor(
     private val profileResolver: ContainerProfileResolver,
     private val pathHomeResolver: com.aharou.feature.workspace.domain.PathHomeResolver,
     private val runtimeProcessStore: RuntimeProcessStore,
-    private val gradleHeapApplier: ContainerGradleHeapApplier
+    private val gradleHeapApplier: ContainerGradleHeapApplier,
+    private val runtimeSettings: ContainerSettingsRepository
 ) : CommandEngine {
     /** 容器初始化的实时进度，供所有入口（终端页/AI/后台终端/MCP）共享同一份状态。 */
     private val _initProgress = MutableStateFlow<ContainerInitState>(ContainerInitState.Idle)
@@ -801,10 +772,13 @@ class LinuxContainerEngine @Inject constructor(
         argv.add("/bin/sh")
         argv.add("-c")
         val overrides = envVarRepository.asMap() + profile.env + extraEnv
-        argv.add(ContainerDevelopmentEnvironment.wrap("exec \"\$0\" \"\$@\"", overrides))
+        argv.add(TawcrootRuntime.wrapCommand(argv, "exec \"\$0\" \"\$@\"", projectPath != null, overrides))
         argv.add(program)
         argv.addAll(programArgs)
-        return ProotInvocation(argv, buildContainerEnv(profile, projectPath) + overrides)
+        return ProotInvocation(
+            argv, TawcrootRuntime.resultEnvironment(argv, buildContainerEnv(profile, projectPath), overrides),
+            TawcrootRuntime.environmentIfEnabled(argv, overrides),
+        )
     }
 
     /**
@@ -825,8 +799,11 @@ class LinuxContainerEngine @Inject constructor(
         argv.add(shell)
         argv.add("-c")
         val overrides = envVarRepository.asMap() + profile.env
-        argv.add(ContainerDevelopmentEnvironment.wrap(command, overrides))
-        return ProotInvocation(argv, buildContainerEnv(profile, projectPath) + overrides)
+        argv.add(TawcrootRuntime.wrapCommand(argv, command, projectPath != null, overrides))
+        return ProotInvocation(
+            argv, TawcrootRuntime.resultEnvironment(argv, buildContainerEnv(profile, projectPath), overrides),
+            TawcrootRuntime.environmentIfEnabled(argv, overrides),
+        )
     }
 
     /**
@@ -897,9 +874,10 @@ class LinuxContainerEngine @Inject constructor(
                 FileLogger.w(TAG, "忽略非法挂载绑定 $b：$error")
             }
         }
-        argv.addAll(profile.extraArgs)
         gradleHeapApplier.apply(profile)
-        return argv
+        return TawcrootRuntime.prefixIfEnabled(
+            context, containerInstaller, profile, argv, TawcrootRuntime.enabled(runtimeSettings)
+        )
     }
 
     /** 容器内进程的标准环境变量（proot loader / 动态库 / PATH / HOME 等）。 */
@@ -985,7 +963,10 @@ class LinuxContainerEngine @Inject constructor(
 
     private fun buildProcessBuilder(invocation: ProotInvocation): ProcessBuilder {
         val processBuilder = ProcessBuilder(invocation.argv)
-        processBuilder.environment().apply { ContainerEnvSanitizer.scrubInherited(this); putAll(invocation.env) }
+        processBuilder.environment().apply {
+            ContainerEnvSanitizer.scrubInherited(this)
+            TawcrootRuntime.prepareProcessEnvironment(invocation.argv, this, invocation.env)
+        }
         return processBuilder
     }
 

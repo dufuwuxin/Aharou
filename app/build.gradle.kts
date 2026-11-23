@@ -216,6 +216,7 @@ android {
                 "**/libproot.so",
                 "**/libproot-loader.so",
                 "**/libproot-loader32.so",
+                "**/libtawcroot.so",
                 "**/libtalloc.so",
                 "**/libandroid-shmem.so"
             )
@@ -499,8 +500,13 @@ val checkProotAssets = tasks.register<Exec>("checkProotAssets") {
     workingDir(rootProject.projectDir)
 }
 
+val checkTawcrootAssets = tasks.register<Exec>("checkTawcrootAssets") {
+    commandLine("python3", "scripts/check_tawcroot_assets.py")
+    workingDir(rootProject.projectDir)
+}
+
 // assets 合并前必须先生成文档，否则首次构建（或 clean 后）APK 里会没有 docs/。
-tasks.named("preBuild") { dependsOn(syncAiDocs, checkArchitecture, checkProotAssets) }
+tasks.named("preBuild") { dependsOn(syncAiDocs, checkArchitecture, checkProotAssets, checkTawcrootAssets) }
 
 // Keep the source-only SDK separate from plugin DEX payloads.
 val pluginSdkAssets = layout.buildDirectory.dir("generated/pluginSdkAssets")

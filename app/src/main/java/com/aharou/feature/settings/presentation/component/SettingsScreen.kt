@@ -1037,29 +1037,32 @@ fun SettingsScreen(
                         }
                     )
                 }
-                SettingsSection.Container -> ContainerSection(
-                    profiles = containerProfiles,
-                    activeProfileId = activeProfileId,
-                    defaultContainerId = defaultContainerId,
-                    osMap = containerOsMap,
-                    showAddSheetExternal = showContainerAddSheet,
-                    onDismissAddSheet = { showContainerAddSheet = false },
-                    onSelect = { viewModel.setActiveContainerProfile(it) },
-                    onSetDefaultContainer = { viewModel.setDefaultContainerId(it) },
-                    onSaveCustom = { viewModel.saveCustomContainerProfile(it) },
-                    onEditCustom = { viewModel.editCustomContainerProfile(it) },
-                    onDeleteProfile = { viewModel.deleteContainerProfile(it) },
-                    onSwitchConfirmed = onStopAllAndCloseTerminal,
-                    onResetProfile = { profile ->
-                        // 重置与切换容器同等破坏性：rootfs 整体删掉，必须先停掉 AI 会话与终端标签。
-                        onStopAllAndCloseTerminal()
-                        viewModel.resetContainer(profile)
-                    },
-                    resetState = containerReset, onRestoreBuiltin = { viewModel.restoreBuiltinAlpine() },
-                    onOpenSources = { section = SettingsSection.ContainerSources },
-                    remoteConnections = remoteConnections,
-                    onReorder = viewModel::reorderContainerProfiles
-                )
+                SettingsSection.Container -> {
+                    ContainerRuntimeSettingsSection()
+                    ContainerSection(
+                        profiles = containerProfiles,
+                        activeProfileId = activeProfileId,
+                        defaultContainerId = defaultContainerId,
+                        osMap = containerOsMap,
+                        showAddSheetExternal = showContainerAddSheet,
+                        onDismissAddSheet = { showContainerAddSheet = false },
+                        onSelect = { viewModel.setActiveContainerProfile(it) },
+                        onSetDefaultContainer = { viewModel.setDefaultContainerId(it) },
+                        onSaveCustom = { viewModel.saveCustomContainerProfile(it) },
+                        onEditCustom = { viewModel.editCustomContainerProfile(it) },
+                        onDeleteProfile = { viewModel.deleteContainerProfile(it) },
+                        onSwitchConfirmed = onStopAllAndCloseTerminal,
+                        onResetProfile = { profile ->
+                            // 重置与切换容器同等破坏性：rootfs 整体删掉，必须先停掉 AI 会话与终端标签。
+                            onStopAllAndCloseTerminal()
+                            viewModel.resetContainer(profile)
+                        },
+                        resetState = containerReset, onRestoreBuiltin = { viewModel.restoreBuiltinAlpine() },
+                        onOpenSources = { section = SettingsSection.ContainerSources },
+                        remoteConnections = remoteConnections,
+                        onReorder = viewModel::reorderContainerProfiles
+                    )
+                }
                 SettingsSection.ContainerSources -> ContainerSourcesSection()
                 SettingsSection.ContainerDownloads -> ContainerImageDownloadSection(
                     catalog = imageCatalog,

@@ -69,6 +69,8 @@ class TerminalTab(
     runState: RunState,
     val exitReceiptToken: String? = null
 ) {
+    internal var injectedEnv: Map<String, String> = emptyMap()
+
     var title: String = title
         internal set
 

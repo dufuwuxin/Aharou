@@ -4,6 +4,8 @@ import com.aharou.feature.agent.domain.container.BoundedOutput
 import com.aharou.feature.agent.domain.container.CommandEngine
 import com.aharou.feature.agent.domain.container.CommandEvent
 import com.aharou.feature.agent.domain.container.ContainerOutputSanitizer
+import com.aharou.feature.agent.domain.container.ContainerEnvValueRedactor
+import com.aharou.feature.agent.domain.container.ContainerProfileResolver
 import com.aharou.core.util.FileLogger
 import com.aharou.feature.agent.domain.tool.AgentTool
 import com.aharou.feature.agent.domain.tool.ParameterType
@@ -16,6 +18,7 @@ import com.aharou.feature.agent.domain.tool.ToolResult
 import com.aharou.feature.agent.domain.tool.ToolStreamEvent
 import com.aharou.feature.terminal.domain.TerminalSessionProvider
 import com.aharou.feature.workspace.data.repository.WorkspaceRepository
+import com.aharou.feature.settings.data.repository.ContainerSettingsRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -45,7 +48,10 @@ import javax.inject.Inject
 class ExecuteCommandTool @Inject constructor(
     private val commandEngine: CommandEngine,
     private val workspaceRepository: WorkspaceRepository,
-    private val terminalSessionProvider: TerminalSessionProvider
+    private val terminalSessionProvider: TerminalSessionProvider,
+    private val envVarRepository: com.aharou.feature.settings.data.repository.EnvVarRepository,
+    private val profileResolver: ContainerProfileResolver,
+    private val containerSettings: ContainerSettingsRepository
 ) : AgentTool(), StreamingAgentTool {
     private companion object {
         const val TAG = "ExecuteCommandTool"
@@ -226,7 +232,7 @@ class ExecuteCommandTool @Inject constructor(
         if (isBackground(args)) return startBackground(command, args, context)
         return try {
             val result = executeForeground(args, context)
-            ToolResult.Success(JsonPrimitive(toModelOutput(result.output, result.exitCode)))
+            ToolResult.Success(JsonPrimitive(toModelOutput(result.output, result.exitCode, context)))
         } catch (e: CancellationException) { throw e }
         catch (e: Exception) {
             FileLogger.e(TAG, "execute_command 失败: $command", e)
@@ -293,13 +299,13 @@ class ExecuteCommandTool @Inject constructor(
                     is CommandEvent.Line -> {
                         accumulated.append(event.text)
                         accumulated.append("\n")
-                        emit(ToolStreamEvent.Progress(event.text))
+                        emit(ToolStreamEvent.Progress(redactEnvValues(ContainerOutputSanitizer.sanitize(event.text), context)))
                     }
                     is CommandEvent.Exit -> exitCode = event.code
                 }
             }
             FileLogger.v(TAG, "execute_command(流式) 完成，输出 ${accumulated.totalChars} 字符，退出码 $exitCode")
-            emit(ToolStreamEvent.Completed(ToolResult.Success(JsonPrimitive(toModelOutput(accumulated.build(), exitCode)))))
+            emit(ToolStreamEvent.Completed(ToolResult.Success(JsonPrimitive(toModelOutput(accumulated.build(), exitCode, context)))))
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -308,7 +314,7 @@ class ExecuteCommandTool @Inject constructor(
             FileLogger.e(TAG, "execute_command(流式) 异常(已保留此前输出 ${accumulated.totalChars} 字符): $command", e)
             val saved = accumulated.build()
             val result = if (saved.isNotEmpty()) {
-                ToolResult.Success(JsonPrimitive(toModelOutput(saved, exitCode)))
+                ToolResult.Success(JsonPrimitive(toModelOutput(saved, exitCode, context)))
             } else {
                 ToolResult.Error("执行命令失败: ${e.message}")
             }
@@ -334,9 +340,18 @@ class ExecuteCommandTool @Inject constructor(
      * 退出码拼在清洗之后的末尾，让模型能分辨「跑完没输出」和「失败没输出」；拿不到退出码（超时、
      * 引擎异常、远程通道断开）就不拼，别让模型把未知当成成功。退出码行是本函数生成的，不参与清洗。
      */
-    private fun toModelOutput(output: String, exitCode: Int?): String {
+    private fun toModelOutput(output: String, exitCode: Int?, context: com.aharou.feature.agent.domain.model.AgentContext): String {
         val cleaned = ContainerOutputSanitizer.sanitize(output)
-        val line = exitCode?.let { "[退出码: $it]" } ?: return cleaned
-        return if (cleaned.isBlank()) line else "$cleaned\n$line"
+        val redacted = redactEnvValues(cleaned, context)
+        val line = exitCode?.let { "[退出码: $it]" } ?: return redacted
+        return if (redacted.isBlank()) line else "$redacted\n$line"
+    }
+
+    private fun redactEnvValues(text: String, context: com.aharou.feature.agent.domain.model.AgentContext): String {
+        if (text.isBlank() || !containerSettings.redactEnvOutputEnabledSnapshot()) return text
+        val profileEnv = profileResolver.forWorkspace(context.projectRoot).env
+        val result = ContainerEnvValueRedactor.redact(text, envVarRepository.asMap() + profileEnv)
+        if (result.hit) FileLogger.i(TAG, "命令输出包含环境变量值，已隐藏")
+        return result.text
     }
 }
