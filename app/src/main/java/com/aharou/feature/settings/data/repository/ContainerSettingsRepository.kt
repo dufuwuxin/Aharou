@@ -23,6 +23,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.Serializable
+import java.io.File
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
@@ -175,12 +176,11 @@ class ContainerSettingsRepository @Inject constructor(
 
     suspend fun setRedactEnvOutput(enabled: Boolean) = redactionMutex.withLock {
         migrateLegacyPrivacyRedactionLocked()
-        val persisted = context.containerDataStore.edit {
+        context.containerDataStore.edit {
             it[REDACT_ENV_OUTPUT_KEY] = enabled
             it[REDACTION_MIGRATED_KEY] = true
-            enabled
         }
-        updateRedaction(persisted)
+        updateRedaction(enabled)
     }
 
     internal suspend fun migrateLegacyPrivacyRedaction() = redactionMutex.withLock {

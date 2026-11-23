@@ -59,7 +59,7 @@ internal fun VaultSection(viewModel: VaultViewModel = hiltViewModel()) {
     val names by viewModel.names.collectAsStateWithLifecycle()
     val keywordNames by viewModel.keywordNames.collectAsStateWithLifecycle()
     val writeBlocked by viewModel.writeBlocked.collectAsStateWithLifecycle()
-    val privacyEnabled by viewModel.privacyRedaction.collectAsStateWithLifecycle()
+    val privacyEnabled by viewModel.privacyRedaction.collectAsStateWithLifecycle(initialValue = true)
     val privacyError by viewModel.privacyError.collectAsStateWithLifecycle()
     val outboundEnabled by viewModel.outboundMasking.collectAsStateWithLifecycle()
     val outboundError by viewModel.outboundError.collectAsStateWithLifecycle()
