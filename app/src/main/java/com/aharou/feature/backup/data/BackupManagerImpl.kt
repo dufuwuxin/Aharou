@@ -46,7 +46,6 @@ import com.aharou.feature.settings.data.repository.LogSettingsRepository
 import com.aharou.feature.settings.data.repository.SyncSettingsRepository
 import com.aharou.feature.settings.data.repository.ThemeSettingsRepository
 import com.aharou.feature.settings.data.repository.VisionModelSettingsRepository
-import com.aharou.feature.settings.domain.model.PROVIDER_MAX_CONCURRENT_REQUESTS
 import com.aharou.feature.workspace.data.local.dao.RemoteConnectionDao
 import com.aharou.feature.workspace.data.local.entity.RemoteConnectionEntity
 import com.aharou.feature.workspace.data.local.entity.RemoteMountEntity
@@ -890,8 +889,7 @@ class BackupManagerImpl @Inject constructor(
         keySwitchStatusCodes = keySwitchStatusCodes ?: "",
         customIcon = customIcon ?: "",
         fallbackProviderId = fallbackProviderId ?: "", fallbackModel = fallbackModel ?: "",
-        fallbackChain = fallbackChain ?: "",
-        maxConcurrentRequests = maxConcurrentRequests?.takeIf { it in 0..PROVIDER_MAX_CONCURRENT_REQUESTS } ?: 0
+        fallbackChain = fallbackChain ?: "", maxConcurrentRequests = maxConcurrentRequests?.takeIf { it in 0..com.aharou.feature.settings.domain.model.PROVIDER_MAX_CONCURRENT_REQUESTS } ?: 0
     )
 
     private fun RemoteConnectionEntity.toDto() = RemoteConnectionDto(
