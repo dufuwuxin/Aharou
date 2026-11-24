@@ -316,6 +316,12 @@
     <string name="settings_background_image_remove">移除背景</string>
     <string name="provider_cache_anthropic_title">Anthropic 缓存断点</string>
     <string name="provider_cache_anthropic_subtitle">为 system/工具/消息前缀打显式缓存断点，降低重复输入成本</string>
+    <string name="provider_concurrency_title">限制并发请求</string>
+    <string name="provider_concurrency_subtitle">同一供应商共享上限；关闭时不限制</string>
+    <string name="provider_concurrency_dialog_title">供应商并发上限</string>
+    <string name="provider_concurrency_dialog_hint">输入 1–%1$d；上限按此供应商跨会话共享，0 表示关闭限制。</string>
+    <string name="provider_concurrency_dialog_value">同时请求数</string>
+    <string name="provider_concurrency_invalid">请输入 1–%1$d 的整数</string>
     <string name="provider_cache_openai_chat_title">OpenAI 兼容缓存键</string>
     <string name="provider_cache_openai_chat_subtitle">为请求携带 prompt_cache_key 缓存键</string>
     <string name="provider_section_dashboard">自定义面板</string>

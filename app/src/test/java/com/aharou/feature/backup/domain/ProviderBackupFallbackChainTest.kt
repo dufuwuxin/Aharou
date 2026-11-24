@@ -30,12 +30,14 @@ class ProviderBackupFallbackChainTest {
             val export = BackupManagerImpl::class.java.getDeclaredMethod("toDto", AIProviderEntity::class.java)
                 .apply { isAccessible = true }
             val source = AIProviderEntity(id = "p", name = "P", type = "OPENAI", apiKey = "", baseUrl = "", defaultModel = "m",
-                fallbackProviderId = "a", fallbackModel = "m1", fallbackChain = "a|m1\nb|m2")
+                fallbackProviderId = "a", fallbackModel = "m1", fallbackChain = "a|m1\nb|m2",
+                maxConcurrentRequests = 6)
             val dto = export.invoke(manager, source) as ProviderDto
             val restored = import(manager, json.decodeFromString(ProviderDto.serializer(), json.encodeToString(ProviderDto.serializer(), dto)))
             assertEquals(listOf(FallbackTarget("a", "m1"), FallbackTarget("b", "m2")), parseFallbackChain(restored.fallbackChain))
             assertEquals(source.fallbackProviderId, restored.fallbackProviderId)
             assertEquals(source.fallbackModel, restored.fallbackModel)
+            assertEquals(6, restored.maxConcurrentRequests)
         } finally { unmockkObject(KeystoreCipher) }
     }
 
@@ -43,10 +45,12 @@ class ProviderBackupFallbackChainTest {
         val dto = json.decodeFromString(ProviderDto.serializer(),
             """{"id":"p","name":"P","type":"OPENAI","apiKey":"","baseUrl":"","defaultModel":"m"}""")
         assertNull(dto.fallbackChain)
+        assertNull(dto.maxConcurrentRequests)
         mockkObject(KeystoreCipher)
         try {
             every { KeystoreCipher.encryptString(any()) } answers { firstArg() }
             val restored = import(createManager(), dto)
+            assertEquals(0, restored.maxConcurrentRequests)
             assertEquals("", restored.fallbackChain)
             assertEquals("", restored.fallbackProviderId)
             assertEquals("", restored.fallbackModel)
@@ -60,6 +64,7 @@ class ProviderBackupFallbackChainTest {
         return BackupManagerImpl(
             context = context,
             aiProviderDao = mockk(),
+            providerRepository = mockk(),
             remoteConnectionDao = mockk(),
             chatSessionDao = mockk(),
             agentMessageDao = mockk(),

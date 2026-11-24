@@ -10,6 +10,7 @@ import com.aharou.feature.agent.domain.provider.bearerTokenOrNull
 import com.aharou.feature.agent.domain.provider.EnrichedHttpException
 import com.aharou.feature.agent.domain.provider.enrichWithHttpErrorBody
 import com.aharou.feature.agent.domain.provider.joinUrl
+import com.aharou.feature.agent.domain.provider.ProviderRequestLimiter
 import com.aharou.feature.settings.domain.model.AIProviderConfig
 import kotlinx.coroutines.CancellationException
 import java.io.IOException
@@ -28,6 +29,7 @@ import javax.inject.Singleton
  */
 @Singleton
 class ChatImageFallback @Inject constructor(
+    private val providerRequestLimiter: ProviderRequestLimiter,
     private val openAIApi: OpenAIApi
 ) {
 
@@ -47,12 +49,14 @@ class ChatImageFallback @Inject constructor(
         )
         val seq = AILogger.logRequest(sessionId, provider.id, model, "POST", url, request)
         val response = try {
-            openAIApi.createChatCompletion(
-                url = url,
-                authorization = bearerTokenOrNull(apiKey),
-                extraHeaders = extraHeaders,
-                request = request
-            )
+            providerRequestLimiter.withPermit(provider.id) {
+                openAIApi.createChatCompletion(
+                    url = url,
+                    authorization = bearerTokenOrNull(apiKey),
+                    extraHeaders = extraHeaders,
+                    request = request
+                )
+            }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {

@@ -19,6 +19,7 @@ import com.aharou.feature.agent.domain.provider.AnthropicAdapter
 import com.aharou.feature.agent.domain.provider.fixedTemperature
 import com.aharou.feature.agent.domain.provider.GeminiAdapter
 import com.aharou.feature.agent.domain.provider.OpenAIAdapter
+import com.aharou.feature.agent.domain.provider.ProviderRequestLimiter
 import com.aharou.feature.agent.domain.session.SessionUseCase
 import com.aharou.feature.agent.domain.tool.AbstractContextualTool
 import com.aharou.feature.agent.domain.tool.ParameterType
@@ -54,6 +55,7 @@ import javax.inject.Inject
  */
 class ViewImageTool @Inject constructor(
     private val fileAccess: FileAccessProvider,
+    private val providerRequestLimiter: ProviderRequestLimiter,
     private val visionSessionStore: VisionSessionStore,
     private val aiProviderRepository: AIProviderRepository,
     private val defaultModelSettingsRepository: DefaultModelSettingsRepository,
@@ -365,7 +367,7 @@ class ViewImageTool @Inject constructor(
         provider.firstByteTimeoutMs = generalSettingsRepository.firstByteTimeoutMs()
         provider.streamIdleTimeoutMs = generalSettingsRepository.streamIdleTimeoutMs()
         provider.maxNetworkRetries = generalSettingsRepository.maxNetworkRetries()
-        return provider
+        return providerRequestLimiter.wrap(config.id, config.maxConcurrentRequests, provider)
     }
 
     private fun encodeImage(access: FileAccessProvider, path: String, detail: String): EncodeOutcome {

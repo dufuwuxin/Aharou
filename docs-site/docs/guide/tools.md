@@ -344,7 +344,7 @@ Android 参数是一个任务名，必须按实际项目修改；项目的构建
 
 Project tasks open in map view. The overflow menu includes start/stop, tree/map, search, fit, and conversation actions. Delete removes project/task records only; stop running work first. Workspace files and conversations are retained.
 
-工具目录为空查询时只按 `offset` 分页返回名称和描述，不会自动激活；以工具名或用途查询后才展开选中的参数。严格工具白名单成员仍有只读发现和本工作区过程查询入口，显式黑名单、关闭和关键词策略优先。目录在默认原生记忆中显示有界摘要和完整目录入口，不因工具数量超过单条记忆预算而失去入口。
+工具目录为空查询时只按 `offset` 分页返回名称和描述，不会自动激活；准确完整工具名优先只展开该项，以用途关键词查询时按空格分词且每个词都须命中，之后才激活选中工具的参数。严格工具白名单成员仍有只读发现和本工作区过程查询入口，显式黑名单、关闭和关键词策略优先。目录在默认原生记忆中显示有界摘要和完整目录入口，不因工具数量超过单条记忆预算而失去入口。
 
 
 ### DSH 目录网络通道

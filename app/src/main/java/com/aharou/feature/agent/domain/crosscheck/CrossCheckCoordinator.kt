@@ -14,6 +14,7 @@ import com.aharou.feature.agent.domain.provider.AIProvider
 import com.aharou.feature.agent.domain.provider.AnthropicAdapter
 import com.aharou.feature.agent.domain.provider.GeminiAdapter
 import com.aharou.feature.agent.domain.provider.OpenAIAdapter
+import com.aharou.feature.agent.domain.provider.ProviderRequestLimiter
 import com.aharou.feature.agent.domain.provider.fixedTemperature
 import com.aharou.feature.agent.domain.session.SessionUseCase
 import com.aharou.feature.agent.domain.subagent.AgentDefinitionRepository
@@ -42,6 +43,7 @@ sealed interface CrossCheckOutcome {
 // 这里要的是「当前模型之外」的那一个，只能自己解析配置并另建一个独立的 provider 实例。
 @Singleton
 class CrossCheckCoordinator @Inject constructor(
+    private val providerRequestLimiter: ProviderRequestLimiter,
     private val aiProviderRepository: AIProviderRepository,
     private val defaultModelSettingsRepository: DefaultModelSettingsRepository,
     private val generalSettingsRepository: GeneralSettingsRepository,
@@ -156,7 +158,7 @@ class CrossCheckCoordinator @Inject constructor(
         provider.firstByteTimeoutMs = generalSettingsRepository.firstByteTimeoutMs()
         provider.streamIdleTimeoutMs = generalSettingsRepository.streamIdleTimeoutMs()
         provider.maxNetworkRetries = generalSettingsRepository.maxNetworkRetries()
-        return provider
+        return providerRequestLimiter.wrap(target.id, target.maxConcurrentRequests, provider)
     }
 
     private data class Reviewer(val config: AIProviderConfig, val model: String)

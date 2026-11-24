@@ -135,6 +135,7 @@ class StatefulAgentWorkflowTest {
         keyRotator = mockk(),
         generatedImagePersister = imagePersister,
         failoverCoordinator = failoverCoordinator,
+        providerRequestLimiter = com.aharou.feature.agent.domain.provider.ProviderRequestLimiter(),
         workspaceModelChain = workspaceModels,
         agentNotificationCenter = notifications,
         eventInjector = eventInjector,

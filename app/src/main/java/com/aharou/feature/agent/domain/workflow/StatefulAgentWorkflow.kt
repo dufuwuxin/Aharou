@@ -37,6 +37,7 @@ import com.aharou.feature.agent.domain.provider.AIProvider
 import com.aharou.feature.agent.domain.provider.AIResponse
 import com.aharou.feature.agent.domain.provider.AIStreamChunk
 import com.aharou.feature.agent.domain.provider.ProviderFailoverCoordinator
+import com.aharou.feature.agent.domain.provider.ProviderRequestLimiter
 import com.aharou.feature.localmodel.runtime.LocalLlmEngine
 import com.aharou.feature.localmodel.runtime.LocalProvider
 import com.aharou.feature.agent.domain.tool.AgentTool
@@ -135,6 +136,7 @@ class StatefulAgentWorkflow @Inject constructor(
     private val keyRotator: ProviderKeyRotator,
     private val generatedImagePersister: GeneratedImagePersister,
     private val failoverCoordinator: ProviderFailoverCoordinator,
+    private val providerRequestLimiter: ProviderRequestLimiter,
     private val workspaceModelChain: WorkspaceModelChain,
     private val agentNotificationCenter: AgentNotificationCenter,
     private val eventInjector: AgentEventInjector,
@@ -391,7 +393,10 @@ class StatefulAgentWorkflow @Inject constructor(
         provider.streamIdleTimeoutMs = generalSettingsRepository.streamIdleTimeoutMs()
         provider.maxNetworkRetries = generalSettingsRepository.maxNetworkRetries()
         val transport = com.aharou.feature.settings.data.account.WebsiteTextProvider.wrap(provider)
-        return failoverCoordinator.bindOrigin(languageRoutingFactory?.wrap(transport) ?: transport, config)
+        val routed = languageRoutingFactory?.wrap(transport) ?: transport
+        return failoverCoordinator.bindOrigin(
+            providerRequestLimiter.wrap(config.id, config.maxConcurrentRequests, routed), config
+        )
     }
 
     private suspend fun middlewareConfig(providerId: String) =
@@ -461,7 +466,9 @@ class StatefulAgentWorkflow @Inject constructor(
         val chainConfig = workspaceModelChain.begin(currentContext.projectRoot, currentContext.sessionId,
             currentContext.agentDefinition == null && currentContext.sessionId?.let { sessionUseCase.getSessionById(it)?.parentId } == null)
         val aiProvider = chainConfig?.let { createStandaloneProvider(it, currentContext.sessionId) } ?: getEffectiveProvider(currentContext.sessionId)
-        val metadata = modelMetadataService.configureChatModel(aiProvider)
+        val metadata = modelMetadataService.configureChatModel(
+            aiProvider, aiProviderRepository.getProviderById(aiProvider.providerId)?.type
+        )
         val inputBudget = ModelContextPolicy.effectiveInputBudget(metadata)
         val historyStartedNs = System.nanoTime()
         FileLogger.memoryCheckpoint(TAG, "history.start", details = "operation=$historyStartedNs")
@@ -598,7 +605,9 @@ class StatefulAgentWorkflow @Inject constructor(
         var state = initialState.copy(messages = initialState.messages + drainInsertedUserMessages(currentContext.sessionId))
         val providerInUse = workspaceModelChain.current(currentContext.sessionId)?.let { createStandaloneProvider(it, currentContext.sessionId) } ?: aiProvider
         budget.selectProvider("${providerInUse.providerId.length}:${providerInUse.providerId}:${providerInUse.model}")
-        val callMetadata = modelMetadataService.configureChatModel(providerInUse)
+        val callMetadata = modelMetadataService.configureChatModel(
+            providerInUse, aiProviderRepository.getProviderById(providerInUse.providerId)?.type
+        )
         val contextPreferences = generalSettingsRepository.contextPreferences()
         val inputBudget = ContextWatermarks.from(ModelContextPolicy.effectiveInputBudget(callMetadata),
             contextPreferences.soft, contextPreferences.hard).maxTokens

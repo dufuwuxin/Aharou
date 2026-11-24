@@ -247,6 +247,9 @@ class ConfigProviderFields @Inject constructor(
                 reader = { ConfigValue.Int(snapshot(forId)?.let(read) ?: 0) },
                 writer = { v ->
                     val i = (v as? ConfigValue.Int)?.value ?: throw ConfigError.TypeMismatch("integer")
+                    if ((min != null && i < min) || (max != null && i > max)) {
+                        throw ConfigError.InvalidValue("$name 需在 ${min ?: Int.MIN_VALUE}..${max ?: Int.MAX_VALUE} 范围内")
+                    }
                     val current = snapshot(forId) ?: throw ConfigError.InvalidValue("供应商不存在：$forId")
                     save(write(current, i))
                 },
@@ -606,6 +609,15 @@ class ConfigProviderFields @Inject constructor(
                     desc = "Chat Completion 请求发送 prompt_cache_key（分片路由）；仅 OPENAI 类型生效。默认关闭。",
                     read = { it.openaiChatCacheKey },
                     write = { p, b -> p.copy(openaiChatCacheKey = b) },
+                ),
+                int(
+                    field = "max_concurrent_requests",
+                    name = "供应商并发请求上限",
+                    desc = "该供应商同时执行的模型请求数；0 表示不限，允许 0..${com.aharou.feature.settings.domain.model.PROVIDER_MAX_CONCURRENT_REQUESTS}。",
+                    min = 0,
+                    max = com.aharou.feature.settings.domain.model.PROVIDER_MAX_CONCURRENT_REQUESTS,
+                    read = { it.maxConcurrentRequests },
+                    write = { p, value -> p.copy(maxConcurrentRequests = value) },
                 ),
             ).filter { field ->
                 val accountMode = snapshot(forId)?.let { accounts.kind(it.baseUrl) != null } == true

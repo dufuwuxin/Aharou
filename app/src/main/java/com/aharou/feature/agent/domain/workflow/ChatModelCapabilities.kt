@@ -8,8 +8,11 @@ import com.aharou.feature.settings.domain.model.ModelContextPolicy
 import com.aharou.feature.settings.domain.model.ModelMetadata
 import com.aharou.feature.settings.domain.model.ProviderType
 
-internal suspend fun ModelMetadataService.configureChatModel(provider: AIProvider): ModelMetadata {
-    val type = when (provider) {
+internal suspend fun ModelMetadataService.configureChatModel(
+    provider: AIProvider,
+    configuredType: ProviderType? = null,
+): ModelMetadata {
+    val type = configuredType ?: when (provider) {
         is AnthropicAdapter -> ProviderType.ANTHROPIC
         is GeminiAdapter -> ProviderType.GEMINI
         else -> ProviderType.OPENAI

@@ -35,6 +35,7 @@ import com.aharou.feature.backup.domain.TodoItemDto
 import com.aharou.feature.backup.domain.WorkspaceBackupMeta
 import com.aharou.feature.backup.domain.toMetadata
 import com.aharou.feature.settings.data.local.dao.AIProviderDao
+import com.aharou.feature.settings.data.repository.AIProviderRepositoryImpl
 import com.aharou.feature.settings.data.local.entity.AIProviderEntity
 import com.aharou.feature.settings.data.repository.CompactionModelSettingsRepository
 import com.aharou.feature.settings.data.repository.AgentSoundSettingsRepository
@@ -81,6 +82,7 @@ import javax.inject.Singleton
 class BackupManagerImpl @Inject constructor(
     @param:ApplicationContext private val context: Context,
     private val aiProviderDao: AIProviderDao,
+    private val providerRepository: AIProviderRepositoryImpl,
     private val remoteConnectionDao: RemoteConnectionDao,
     private val chatSessionDao: ChatSessionDao,
     private val agentMessageDao: AgentMessageDao,
@@ -660,7 +662,7 @@ class BackupManagerImpl @Inject constructor(
             }
         }
         if (toInsert.isNotEmpty()) {
-            aiProviderDao.insertAllProviders(toInsert.map { it.toEntity() })
+            providerRepository.restoreProviders(toInsert.map { it.toEntity() })
         }
         FileLogger.i(TAG, "供应商还原：备份 ${providers.size} 项，策略=$strategy，实际写入 ${toInsert.size} 项")
     }
@@ -857,9 +859,8 @@ class BackupManagerImpl @Inject constructor(
         scriptParams = scriptParams,
         keySwitchStatusCodes = keySwitchStatusCodes,
         customIcon = customIcon,
-        fallbackProviderId = fallbackProviderId,
-        fallbackModel = fallbackModel,
-        fallbackChain = fallbackChain
+        fallbackProviderId = fallbackProviderId, fallbackModel = fallbackModel, fallbackChain = fallbackChain,
+        maxConcurrentRequests = maxConcurrentRequests
     )
 
     private fun ProviderDto.toEntity() = AIProviderEntity(
@@ -887,9 +888,8 @@ class BackupManagerImpl @Inject constructor(
         scriptParams = restoreSecret(scriptParams),
         keySwitchStatusCodes = keySwitchStatusCodes ?: "",
         customIcon = customIcon ?: "",
-        fallbackProviderId = fallbackProviderId ?: "",
-        fallbackModel = fallbackModel ?: "",
-        fallbackChain = fallbackChain ?: ""
+        fallbackProviderId = fallbackProviderId ?: "", fallbackModel = fallbackModel ?: "",
+        fallbackChain = fallbackChain ?: "", maxConcurrentRequests = maxConcurrentRequests ?: 0
     )
 
     private fun RemoteConnectionEntity.toDto() = RemoteConnectionDto(

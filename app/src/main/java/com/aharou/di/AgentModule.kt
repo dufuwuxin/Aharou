@@ -132,6 +132,7 @@ import com.aharou.feature.agent.domain.workflow.ContextCompactor
 import com.aharou.feature.agent.domain.workflow.GeneratedImagePersister
 import com.aharou.feature.agent.domain.ocr.TesseractOcrEngine
 import com.aharou.feature.agent.domain.provider.ProviderFailoverCoordinator
+import com.aharou.feature.agent.domain.provider.ProviderRequestLimiter
 import com.aharou.feature.agent.domain.workflow.StatefulAgentWorkflow
 import com.aharou.feature.localmodel.runtime.LocalLlmEngine
 import com.aharou.feature.settings.data.repository.CompactionModelSettingsRepository
@@ -589,6 +590,7 @@ object AgentModule {
         keyRotator: ProviderKeyRotator,
         generatedImagePersister: GeneratedImagePersister,
         failoverCoordinator: ProviderFailoverCoordinator,
+        providerRequestLimiter: ProviderRequestLimiter,
         workspaceModelChain: com.aharou.feature.agent.domain.workflow.WorkspaceModelChain,
         agentNotificationCenter: AgentNotificationCenter,
         eventInjector: AgentEventInjector,
@@ -628,6 +630,7 @@ object AgentModule {
             keyRotator,
             generatedImagePersister,
             failoverCoordinator,
+            providerRequestLimiter,
             workspaceModelChain,
             agentNotificationCenter,
             eventInjector,

@@ -5,7 +5,9 @@ import com.aharou.core.util.FileLogger
 import com.aharou.feature.agent.data.local.dao.AgentMessageDao
 import com.aharou.feature.agent.data.local.dao.ChatSessionDao
 import com.aharou.feature.agent.data.local.dao.TodoItemDao
+import com.aharou.feature.agent.domain.provider.ProviderRequestLimiter
 import com.aharou.feature.settings.data.local.dao.AIProviderDao
+import com.aharou.feature.settings.data.repository.AIProviderRepositoryImpl
 import com.aharou.feature.workspace.data.repository.WorkspaceRepository
 import com.aharou.feature.workspace.domain.model.Workspace
 import io.mockk.coVerify
@@ -52,6 +54,7 @@ class BackupManagerImplTest {
         every { workspaces.workspaces } returns MutableStateFlow(listOf(Workspace("demo", workspace.path)))
         manager = BackupManagerImpl(
             context = context, aiProviderDao = providers,
+            providerRepository = AIProviderRepositoryImpl(providers, mockk(), mockk(), ProviderRequestLimiter()),
             remoteConnectionDao = mockk(relaxed = true), chatSessionDao = sessions,
             agentMessageDao = messages, messageArchiveStore = mockk(relaxed = true), todoItemDao = todos,
             mcpConfigRepository = mockk(relaxed = true), mcpManager = mockk(relaxed = true),
