@@ -70,6 +70,8 @@ class ProviderConcurrencyLimitSectionTest {
         }
         fun advanceFrame() = compose.mainClock.advanceTimeBy(1_000)
         fun dialogTitle() = compose.onNodeWithText("供应商并发上限")
+        fun openFromRow() = compose.onNodeWithTag("provider_concurrency_row")
+            .performSemanticsAction(SemanticsActions.OnClick) { action -> action() }
         fun saveValue(value: String) {
             compose.onNode(hasSetTextAction()).performTextReplacement(value)
             advanceFrame()
@@ -80,7 +82,7 @@ class ProviderConcurrencyLimitSectionTest {
         advanceFrame()
         val toggle = compose.onNodeWithTag("provider_concurrency_toggle")
         toggle.assertIsOff()
-        compose.onNodeWithTag("provider_concurrency_row").performClick()
+        openFromRow()
         advanceFrame()
         dialogTitle().assertExists()
         compose.onNodeWithText("取消").performClick()
@@ -97,7 +99,7 @@ class ProviderConcurrencyLimitSectionTest {
         dialogTitle().assertDoesNotExist()
         assertEquals(0, changes)
 
-        compose.onNodeWithTag("provider_concurrency_row").performClick()
+        openFromRow()
         advanceFrame()
         saveValue("0")
         compose.onNodeWithText("请输入 1–32 的整数").assertExists()
@@ -118,7 +120,7 @@ class ProviderConcurrencyLimitSectionTest {
         compose.onNodeWithText("取消").performClick()
         advanceFrame()
         dialogTitle().assertDoesNotExist()
-        compose.onNodeWithTag("provider_concurrency_row").performClick()
+        openFromRow()
         advanceFrame()
         dialogTitle().assertExists()
         compose.onNode(hasSetTextAction()).assertTextEquals("4")
@@ -127,7 +129,7 @@ class ProviderConcurrencyLimitSectionTest {
         advanceFrame()
         dialogTitle().assertDoesNotExist()
         assertEquals(0, changes)
-        compose.onNodeWithTag("provider_concurrency_row").performClick()
+        openFromRow()
         advanceFrame()
 
         saveValue("1")
@@ -141,7 +143,7 @@ class ProviderConcurrencyLimitSectionTest {
         assertEquals(2, changes)
         advanceFrame()
         dialogTitle().assertDoesNotExist()
-        compose.onNodeWithTag("provider_concurrency_row").performClick()
+        openFromRow()
         advanceFrame()
         dialogTitle().assertExists()
         compose.onNodeWithText("取消").performClick()
@@ -149,7 +151,7 @@ class ProviderConcurrencyLimitSectionTest {
         dialogTitle().assertDoesNotExist()
         assertEquals(2, changes)
 
-        compose.onNodeWithTag("provider_concurrency_row").performClick()
+        openFromRow()
         advanceFrame()
         saveValue("32")
         assertEquals(32, limit)
