@@ -40,7 +40,7 @@ class LiveContextScriptRunnerTest {
         every { manager.revision } returns 0L
         every { executor.name } returns "Bash"
         every { executor.effectivePermissionPolicy(any()) } returns ToolPermissionPolicy.ASK
-        every { executor.redactOutput(any(), any(), any()) } answers { firstArg() }
+        every { executor.redactOutput(any(), any(), false) } answers { firstArg() }
         registry.bindDiscoveryTools(listOf(executor), context)
         coEvery { policy.evaluate(any(), any(), any(), any(), any(), any()) } returns
             ToolPermissionPolicyEngine.EvalResult(ToolPermissionPolicyEngine.Verdict.ALLOW, emptyList())
@@ -54,8 +54,9 @@ class LiveContextScriptRunnerTest {
         }
         val first = context.copy(currentUserText = "first_value")
         val second = context.copy(currentUserText = "second_value", projectRoot = "/fixture/two", sessionId = "two")
-        registry.bindDiscoveryTools(listOf(executor), second)
+        registry.bindDiscoveryTools(listOf(executor), first)
         assertTrue(runner.build(first).contains("first_value"))
+        registry.bindDiscoveryTools(listOf(executor), second)
         val next = runner.build(second)
         assertTrue(next.contains("second_value"))
         assertFalse(next.contains("first_value"))
