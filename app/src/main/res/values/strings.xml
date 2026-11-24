@@ -3585,10 +3585,10 @@
     <string name="project_task_map_page">第 %1$d / %2$d 段，每段最多 48 个节点；跨段关系可在任务树中定位</string>
     <string name="project_home">首页</string>
     <string name="project_list_section">项目</string>
-    <string name="project_home_heading">我的工作台</string>
-    <string name="project_home_description">从想法开始，在项目中持续推进</string>
-    <string name="project_empty_title">开始第一个项目</string>
-    <string name="project_empty_description">先记录项目名称和用途，之后再与 AI 讨论需求。创建项目无需配置模型。</string>
+    <string name="project_home_heading">Aharou 项目工作台</string>
+    <string name="project_home_description">创建、查找和打开项目</string>
+    <string name="project_empty_title">暂无项目</string>
+    <string name="project_empty_description">填写项目名称和用途。创建项目时会为此项目分配工作区；创建无需配置模型。</string>
     <string name="project_sessions">会话</string>
     <string name="project_create">创建项目</string>
     <string name="project_name">项目名称</string>

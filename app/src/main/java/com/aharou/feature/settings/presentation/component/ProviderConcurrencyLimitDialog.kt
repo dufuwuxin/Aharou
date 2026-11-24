@@ -23,6 +23,9 @@ import com.aharou.core.ui.AppSwitch
 import com.aharou.core.ui.AppTextField
 import com.aharou.feature.settings.domain.model.PROVIDER_MAX_CONCURRENT_REQUESTS
 
+internal fun parseProviderConcurrencyLimit(input: String): Int? =
+    input.trim().toIntOrNull()?.takeIf { it in 1..PROVIDER_MAX_CONCURRENT_REQUESTS }
+
 @Composable
 internal fun ProviderConcurrencyLimitSection(
     providerId: String,
@@ -50,7 +53,7 @@ internal fun ProviderConcurrencyLimitSection(
         },
     )
     if (!showDialog) return
-    val parsed = input.trim().toIntOrNull()
+    val parsed = parseProviderConcurrencyLimit(input)
     AlertDialog(
         onDismissRequest = { showDialog = false },
         title = { Text(stringResource(R.string.provider_concurrency_dialog_title)) },

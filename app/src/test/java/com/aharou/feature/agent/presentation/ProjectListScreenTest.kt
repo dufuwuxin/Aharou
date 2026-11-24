@@ -316,7 +316,9 @@ class ProjectListScreenTest {
     @Test fun emptyHomeProvidesAnActionableCreateWithoutStartingTheModel() {
         mount()
         initialize()
-        compose.onNodeWithTag("project_home_heading").assertExists()
+        compose.onNodeWithTag("project_home_heading").assertTextContains("Aharou 项目工作台")
+        compose.onNodeWithText("暂无项目").assertExists()
+        compose.onNodeWithText("填写项目名称和用途。创建项目时会为此项目分配工作区；创建无需配置模型。").assertExists()
         compose.onNodeWithTag("project_empty_state").assertExists()
         compose.onNodeWithTag("project_empty_create").assertIsEnabled().performClick()
         compose.onAllNodes(hasSetTextAction() and !hasTestTag("project_search")).assertCountEquals(2)
