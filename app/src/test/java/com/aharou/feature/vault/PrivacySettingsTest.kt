@@ -35,6 +35,10 @@ class PrivacySettingsTest {
         try {
             val container = ContainerSettingsRepository(context)
             container.migrateLegacyPrivacyRedaction()
+            vaultPrefs.edit().putBoolean("privacy_redaction", false).commit()
+            container.migrateLegacyPrivacyRedaction()
+            assertFalse(vaultPrefs.contains("privacy_redaction"))
+            assertTrue(container.redactEnvOutputEnabledSnapshot())
             val repository = VaultRepository(context, container)
             val sample = "test@example.org phone=13812345678"
             container.setRedactEnvOutput(true)
