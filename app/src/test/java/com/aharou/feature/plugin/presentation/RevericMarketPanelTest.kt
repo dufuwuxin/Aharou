@@ -20,6 +20,9 @@ import androidx.lifecycle.SavedStateHandle
 import com.aharou.R
 import com.aharou.feature.plugin.domain.market.RevericCatalog
 import com.aharou.feature.plugin.domain.market.RevericMarketRepository
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.TestCoroutineScheduler
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Response
@@ -82,16 +85,29 @@ class RevericMarketPanelTest {
         assertEquals(1, calls.get())
     }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
     @Test fun rendersCatalogEntriesBeyondThePreviousFourItemObservation() {
+        val scheduler = TestCoroutineScheduler()
+        val dispatcher = StandardTestDispatcher(scheduler)
+        val calls = AtomicInteger()
         val client = OkHttpClient.Builder().addInterceptor { chain ->
+            calls.incrementAndGet()
             val request = chain.request()
+            check(request.url.toString() == RevericCatalog.URL)
             Response.Builder().request(request).protocol(Protocol.HTTP_1_1).code(200).message("fixture")
                 .body(catalogWithPlugins(5).toResponseBody()).build()
         }.build()
-        val owner = RevericMarketViewModel(RevericMarketRepository(compose.activity, client), SavedStateHandle())
+        val repository = RevericMarketRepository(compose.activity, client, catalogDispatcher = dispatcher)
+        val owner = RevericMarketViewModel(repository, SavedStateHandle())
         fun label(id: Int, vararg args: Any) = compose.activity.getString(id, *args)
         compose.setContent { MaterialTheme { RevericMarketPanel(owner) } }
-        compose.waitUntil(timeoutMillis = 5_000) { owner.state.value.loaded }
+        compose.waitUntil(timeoutMillis = 5_000) {
+            // Compose advances its own clock, not the catalog dispatcher.
+            scheduler.runCurrent()
+            owner.state.value.let { it.loadAttempted && !it.loading }
+        }
+        assertTrue("Reveric ZIP load failed: requests=${calls.get()}, notice=${owner.state.value.notice}", owner.state.value.loaded)
+        assertEquals(1, calls.get())
         compose.onNodeWithText(label(R.string.reveric_catalog_count, 5, 5)).assertExists()
         compose.onNodeWithTag("reveric_catalog_list").performScrollToNode(hasText("Fixture plugin 5"))
         compose.onNodeWithText("Fixture plugin 5").assertExists()

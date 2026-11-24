@@ -12,6 +12,7 @@ import java.io.OutputStream
 import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.awaitCancellation
@@ -172,6 +173,7 @@ internal object RevericCatalog {
 
 internal class RevericMarketRepository internal constructor(
     private val context: Context, private val client: OkHttpClient,
+    private val catalogDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) {
     @Inject constructor(@ApplicationContext context: Context) : this(context, newClient())
 
@@ -185,7 +187,7 @@ internal class RevericMarketRepository internal constructor(
             .readTimeout(30, TimeUnit.SECONDS).callTimeout(120, TimeUnit.SECONDS).build()
     }
 
-    suspend fun load(): List<RevericEntry> = withContext(Dispatchers.IO) {
+    suspend fun load(): List<RevericEntry> = withContext(catalogDispatcher) {
         val output = ByteArrayOutputStream()
         request(RevericCatalog.URL) { input -> RevericCatalog.copyBounded(input, output, RevericCatalog.MAX_CATALOG) }
         RevericCatalog.parse(output.toString("UTF-8"))
