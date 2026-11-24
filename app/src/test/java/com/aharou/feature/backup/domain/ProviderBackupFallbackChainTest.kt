@@ -41,6 +41,19 @@ class ProviderBackupFallbackChainTest {
         } finally { unmockkObject(KeystoreCipher) }
     }
 
+    @Test fun outOfRangeConcurrencyLimitsImportAsUnlimited() {
+        mockkObject(KeystoreCipher)
+        try {
+            every { KeystoreCipher.encryptString(any()) } answers { firstArg() }
+            val manager = createManager()
+            for ((limit, expected) in listOf(33 to 0, -1 to 0, 32 to 32)) {
+                val dto = json.decodeFromString(ProviderDto.serializer(),
+                    """{"id":"p","name":"P","type":"OPENAI","apiKey":"","baseUrl":"","defaultModel":"m","maxConcurrentRequests":$limit}""")
+                assertEquals("imported limit $limit", expected, import(manager, dto).maxConcurrentRequests)
+            }
+        } finally { unmockkObject(KeystoreCipher) }
+    }
+
     @Test fun oldBackupDefaultsRemainCompatible() {
         val dto = json.decodeFromString(ProviderDto.serializer(),
             """{"id":"p","name":"P","type":"OPENAI","apiKey":"","baseUrl":"","defaultModel":"m"}""")
