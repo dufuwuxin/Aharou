@@ -190,7 +190,6 @@ class ContainerSettingsRepository @Inject constructor(
 
     private suspend fun migrateLegacyPrivacyRedactionLocked() {
         val legacyVaultPrefs = context.getSharedPreferences(LEGACY_VAULT_PREFERENCES, Context.MODE_PRIVATE)
-        var migrated = false
         context.containerDataStore.edit { preferences ->
             if (preferences[REDACTION_MIGRATED_KEY] == true) return@edit
             val oldContainerValue = preferences[REDACT_ENV_OUTPUT_KEY]
@@ -200,9 +199,8 @@ class ContainerSettingsRepository @Inject constructor(
                 oldContainerValue, oldVaultValue.takeIf { vaultWasExplicitlySet }, vaultWasExplicitlySet
             )
             preferences[REDACTION_MIGRATED_KEY] = true
-            migrated = true
         }
-        if (migrated && legacyVaultPrefs.contains(LEGACY_VAULT_PRIVACY_KEY)) {
+        if (legacyVaultPrefs.contains(LEGACY_VAULT_PRIVACY_KEY)) {
             legacyVaultPrefs.edit().remove(LEGACY_VAULT_PRIVACY_KEY).apply()
         }
     }
