@@ -30,15 +30,20 @@ class ContainerRuntimeSettingsTest {
             id = "custom-ubuntu", name = "Ubuntu", rootfsSource = RootfsSource.LocalFile("file:///ubuntu.tar.gz"),
             shellPath = null, isBuiltin = false
         )
-        val explicitProot = builtin.copy(id = "builtin-explicit-proot", runtimeBackend = ContainerRuntimeBackend.PROOT)
         val migrated = ContainerSettingsRepository.migrateLegacyRuntime(
-            listOf(builtin, custom, explicitProot), legacyBackend = true,
+            listOf(builtin, custom), legacyBackend = true,
             tawcrootCompatibleIds = setOf(builtin.id)
         )
         assertEquals(ContainerRuntimeBackend.TAWCROOT, migrated.first().runtimeBackend)
         assertEquals(ContainerRuntimeBackend.PROOT, migrated[1].runtimeBackend)
-        assertEquals(ContainerRuntimeBackend.PROOT, migrated[2].runtimeBackend)
-        assertEquals(listOf(builtin.id, custom.id, explicitProot.id), migrated.map { it.id })
+        assertEquals(listOf(builtin.id, custom.id), migrated.map { it.id })
+
+        val explicitProot = ContainerSettingsRepository.migrateLegacyRuntime(
+            listOf(builtin.copy(runtimeBackend = ContainerRuntimeBackend.PROOT)),
+            legacyBackend = true,
+            tawcrootCompatibleIds = setOf(builtin.id)
+        ).single()
+        assertEquals(ContainerRuntimeBackend.PROOT, explicitProot.runtimeBackend)
     }
 
     @Test fun absentLegacyRuntimeSettingKeepsBuiltInProfileDefaultOnProot() {

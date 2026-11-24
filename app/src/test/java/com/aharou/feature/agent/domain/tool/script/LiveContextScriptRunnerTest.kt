@@ -40,6 +40,7 @@ class LiveContextScriptRunnerTest {
         every { manager.revision } returns 0L
         every { executor.name } returns "Bash"
         every { executor.effectivePermissionPolicy(any()) } returns ToolPermissionPolicy.ASK
+        every { executor.redactOutput(any(), any(), any()) } answers { firstArg() }
         registry.bindDiscoveryTools(listOf(executor), context)
         coEvery { policy.evaluate(any(), any(), any(), any(), any(), any()) } returns
             ToolPermissionPolicyEngine.EvalResult(ToolPermissionPolicyEngine.Verdict.ALLOW, emptyList())

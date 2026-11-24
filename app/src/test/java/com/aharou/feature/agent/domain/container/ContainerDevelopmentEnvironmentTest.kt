@@ -54,7 +54,7 @@ class ContainerDevelopmentEnvironmentTest {
         val source = File(container, "LinuxContainerEngine.kt").readText()
         assertTrue(source.contains("TawcrootRuntime.wrapCommand(argv, \"exec \\\"\\\$0\\\" \\\"\\\$@\\\"\", projectPath != null, overrides)"))
         assertTrue(source.contains("TawcrootRuntime.wrapCommand(argv, command, projectPath != null, overrides)"))
-        assertTrue(source.contains("envVarRepository.asMap() + profile.env + extraEnv"))
+        assertTrue(source.contains("envVarRepository.asMap() + profile.env + proxyEnv + extraEnv"))
         val overrides = mapOf("JAVA_HOME" to "/user's jdk")
         val command = "printf '%s' \"\$JAVA_HOME\""
         assertEquals(ContainerDevelopmentEnvironment.wrap(command, overrides),

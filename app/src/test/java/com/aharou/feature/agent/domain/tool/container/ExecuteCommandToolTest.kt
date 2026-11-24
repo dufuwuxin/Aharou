@@ -5,6 +5,7 @@ import com.aharou.feature.agent.domain.container.CommandResult
 import com.aharou.feature.agent.domain.container.CommandEvent
 import com.aharou.feature.agent.domain.model.AgentContext
 import com.aharou.feature.agent.domain.tool.ToolResult
+import com.aharou.feature.settings.data.repository.ContainerSettingsRepository
 import io.mockk.*
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.toList
@@ -18,6 +19,7 @@ class ExecuteCommandToolTest {
         val engine = mockk<CommandEngine>()
         val settings = mockk<com.aharou.feature.settings.data.repository.ContainerSettingsRepository>()
         every { settings.redactEnvOutputEnabledSnapshot() } returns true
+        every { settings.redactEnvOutputState() } returns ContainerSettingsRepository.RedactionState(true, 0)
         val tool = ExecuteCommandTool(engine, mockk(), mockk(), settings)
         val context = AgentContext(null, null, "/fixture", null)
         val args = mapOf("command" to JsonPrimitive("printf data"))
@@ -40,6 +42,7 @@ class ExecuteCommandToolTest {
         val engine = mockk<CommandEngine>()
         val settings = mockk<com.aharou.feature.settings.data.repository.ContainerSettingsRepository>()
         every { settings.redactEnvOutputEnabledSnapshot() } returns true
+        every { settings.redactEnvOutputState() } returns ContainerSettingsRepository.RedactionState(true, 0)
         every { engine.runCommandStream(any(), any(), any()) } returns flowOf(
             CommandEvent.Line("TOKEN=private-token", mapOf("TOKEN" to "private-token")),
             CommandEvent.Exit(0, mapOf("TOKEN" to "private-token"))
