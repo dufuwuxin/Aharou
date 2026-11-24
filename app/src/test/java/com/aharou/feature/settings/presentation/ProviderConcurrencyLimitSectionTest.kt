@@ -59,7 +59,6 @@ class ProviderConcurrencyLimitSectionTest {
     @Test fun rowOpensDialogAndToggleAndValidationRespectTheLimitBounds() {
         var limit by mutableIntStateOf(0)
         var changes = 0
-        compose.mainClock.autoAdvance = false
         compose.setContent {
             AIEditorTheme {
                 Column {
@@ -70,7 +69,7 @@ class ProviderConcurrencyLimitSectionTest {
                 }
             }
         }
-        fun advanceFrame() = compose.mainClock.advanceTimeBy(1_000)
+        fun advanceFrame() = compose.waitForIdle()
         fun dialogTitle() = compose.onNodeWithText("供应商并发上限")
         fun openFromRow() = compose.onNode(hasText("限制并发请求") and hasClickAction()).performClick()
         fun saveValue(value: String) {
