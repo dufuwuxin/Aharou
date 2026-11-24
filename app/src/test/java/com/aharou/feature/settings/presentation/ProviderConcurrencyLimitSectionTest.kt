@@ -10,8 +10,6 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performSemanticsAction
-import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.performTextClearance
@@ -70,8 +68,7 @@ class ProviderConcurrencyLimitSectionTest {
         }
         fun advanceFrame() = compose.mainClock.advanceTimeBy(1_000)
         fun dialogTitle() = compose.onNodeWithText("供应商并发上限")
-        fun openFromRow() = compose.onNodeWithTag("provider_concurrency_row")
-            .performSemanticsAction(SemanticsActions.OnClick) { action -> action() }
+        fun openFromRow() = compose.onNode(hasText("限制并发请求") and hasClickAction()).performClick()
         fun saveValue(value: String) {
             compose.onNode(hasSetTextAction()).performTextReplacement(value)
             advanceFrame()
