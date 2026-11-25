@@ -158,6 +158,31 @@ class BuiltinAssetExtractorTest {
         assertEquals(2000, state.lastModified())
     }
 
+    @Test fun deletedHistoricalAgentStaysDeletedWhileNewBuiltinAgentsInstall() {
+        val old = "old"
+        val source = seedAssets(
+            mapOf("agents/a.md" to "updated", "agents/b.md" to "new"),
+            mapOf("agents/a.md" to old),
+        )
+        val state = File(root, "builtin-seed-state/agents.json")
+        state.parentFile!!.mkdirs()
+        state.writeText("""{"version":1,"files":{"agents/a.md":["${hash(old)}"]}}""")
+        val extractor = BuiltinAssetExtractor({ true }, { true })
+
+        assertEquals(1, extractor.extract(source, root, "agents"))
+        assertFalse(File(root, "agents/a.md").exists())
+        assertEquals("new", File(root, "agents/b.md").readText())
+        assertTrue(state.readText().contains("agents/b.md"))
+    }
+
+    @Test fun freshInstallDoesNotMistakeAnUncreatedAgentForAUserDeletion() {
+        val source = seedAssets(mapOf("agents/a.md" to "new"), emptyMap())
+        val extractor = BuiltinAssetExtractor({ true }, { false })
+
+        assertEquals(1, extractor.extract(source, root, "agents"))
+        assertEquals("new", File(root, "agents/a.md").readText())
+    }
+
     @Test fun userEditedSameNameAndRetiredCustomFilesArePreserved() {
         val same = put("agents/a.md", "edited")
         val retired = put("agents/old.md", "also edited")

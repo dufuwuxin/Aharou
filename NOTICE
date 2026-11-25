@@ -167,7 +167,7 @@ accordance with the respective license terms.
    上游许可。源码可从上述项目地址获取。
 
 ========================================================================
-13. oh-my-pi（按需提示词设计记忆摘要）
+13. oh-my-pi（按需记忆摘要与工作流技能）
 ------------------------------------------------------------------------
    Project:  https://github.com/can1357/oh-my-pi
    Revision: 4df653426f40ee1eb78ef408528eb9e6a5275b9d
@@ -179,9 +179,11 @@ accordance with the respective license terms.
    Two independent rule summaries in the native Context Library draw on
    `.omp/skills/system-prompts/SKILL.md`,
    `.omp/skills/tool-prompt-optimization/SKILL.md`, and
-   `.omp/skills/semantic-compression/SKILL.md`. These entries
-   are search-only and are not automatically injected. No upstream code or
-   full skill text is bundled. The full MIT license text is at
+   `.omp/skills/semantic-compression/SKILL.md`, and `docs/memory.md`. These
+   entries are search-only and are not automatically injected. Seven original,
+   Aharou-adapted workflow skills also draw on the three upstream skill files
+   and five `.omp/commands/*.md` templates. They are not copied source text;
+   no upstream executable code is bundled. The full MIT license text is at
    `app/src/main/assets/licenses/oh-my-pi-MIT.txt`.
 
 ========================================================================

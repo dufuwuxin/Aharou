@@ -130,7 +130,12 @@ class ContainerInstaller @Inject constructor(
         internal fun updateBuiltinAssets(context: Context) {
             val upgrade = BuiltinAssetUpgradeCoordinator.initialize(context)
             upgrade.extractIfAllowed {
-                val extractor = BuiltinAssetExtractor { upgrade.canUpgrade }
+                val extractor = BuiltinAssetExtractor(
+                    allowUpgrade = { upgrade.canUpgrade },
+                    preserveMissingHistoricalSeeds = {
+                        upgrade.state.value.choice != BuiltinAssetUpgradeCoordinator.Choice.FRESH
+                    },
+                )
                 for (directory in listOf("docs", "skills", "agents", "teams")) {
                     upgrade.extractDirectory(directory) {
                         extractor.extract(context.assets, migrateLegacyDir(context), directory)
@@ -143,7 +148,12 @@ class ContainerInstaller @Inject constructor(
             runCatching {
                 val upgrade = BuiltinAssetUpgradeCoordinator.initialize(context)
                 upgrade.extractDirectory(directory) {
-                    BuiltinAssetExtractor { upgrade.canUpgrade }.extract(context.assets, migrateLegacyDir(context), directory)
+                    BuiltinAssetExtractor(
+                        allowUpgrade = { upgrade.canUpgrade },
+                        preserveMissingHistoricalSeeds = {
+                            upgrade.state.value.choice != BuiltinAssetUpgradeCoordinator.Choice.FRESH
+                        },
+                    ).extract(context.assets, migrateLegacyDir(context), directory)
                 }
             }
                 .onFailure { FileLogger.w(TAG, "提取内置资源失败: $directory", it) }

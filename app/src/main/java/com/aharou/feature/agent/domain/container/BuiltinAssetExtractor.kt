@@ -21,7 +21,10 @@ internal fun collectBuiltinAssets(assets: AssetManager, directory: String): Map<
     return files
 }
 
-internal class BuiltinAssetExtractor(private val allowUpgrade: () -> Boolean = { true }) {
+internal class BuiltinAssetExtractor(
+    private val allowUpgrade: () -> Boolean = { true },
+    private val preserveMissingHistoricalSeeds: () -> Boolean = { false },
+) {
     private val extractedDocs = mutableSetOf<String>()
 
     @Synchronized
@@ -34,7 +37,9 @@ internal class BuiltinAssetExtractor(private val allowUpgrade: () -> Boolean = {
         if (directory == "docs" && root.isDirectory && key in extractedDocs) return 0
         val files = collectBuiltinAssets(assets, directory)
         if (directory == "docs" || directory == "prompts") check(files.isNotEmpty()) { "Missing builtin assets: $directory" }
-        if (directory == "agents" || directory == "teams") return BuiltinSeedHistory(configDir, directory).extract(assets, files)
+        if (directory == "agents" || directory == "teams") {
+            return BuiltinSeedHistory(configDir, directory, preserveMissingHistoricalSeeds()).extract(assets, files)
+        }
         check(root.isDirectory || root.mkdirs()) { "Cannot create builtin asset directory" }
         var written = 0
         for ((name, bytes) in files) {

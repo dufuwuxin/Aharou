@@ -15,8 +15,15 @@ SKILLS = (
     "third-party-app",
     "root-cause-debugging",
     "delivery-verification",
+    "omi-cleanup",
+    "omi-fix-issues",
+    "omi-release-readiness",
+    "omi-review-prs",
+    "omi-system-prompt-design",
+    "omi-tool-prompt-optimization",
+    "omi-triage",
 )
-NEW_SKILLS = SKILLS[-2:]
+NEW_SKILLS = SKILLS[-7:]
 AGENTS = {
     "decision-advisor": "决策顾问",
     "design-ui-designer": "UI Designer",
@@ -140,7 +147,7 @@ class BuiltinSystemTest(unittest.TestCase):
                 self.assertTrue(expected.issubset(set(AGENTS.values())))
                 self.assertEqual(len(re.findall(r"(?m)^    level: [1-9][0-9]*$", roster.group(1))), len(names))
 
-    def test_six_skill_entrypoints_have_valid_unique_metadata(self):
+    def test_thirteen_skill_entrypoints_have_valid_unique_metadata(self):
         names = []
         for entry in SKILLS:
             with self.subTest(skill=entry):
@@ -154,7 +161,7 @@ class BuiltinSystemTest(unittest.TestCase):
                 self.assertTrue(body.strip())
                 self.assertLessEqual(len(body.splitlines()), 200)
                 names.append(metadata["name"])
-        self.assertEqual(len(names), 6)
+        self.assertEqual(len(names), 13)
         self.assertEqual(len(names), len(set(names)))
 
     def test_24_agent_ids_and_names_are_stable(self):

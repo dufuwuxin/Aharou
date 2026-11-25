@@ -19,7 +19,11 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 
 /** Content evidence, not filenames, distinguishes installed seeds from user files. */
-internal class BuiltinSeedHistory(private val configDir: File, private val directory: String) {
+internal class BuiltinSeedHistory(
+    private val configDir: File,
+    private val directory: String,
+    private val preserveMissingHistoricalSeeds: Boolean = false,
+) {
     private val stateFile get() = resolve("builtin-seed-state/$directory.json")
     private val digestPattern = Regex("[0-9a-f]{64}")
 
@@ -44,6 +48,7 @@ internal class BuiltinSeedHistory(private val configDir: File, private val direc
             val target = resolve(name)
             val previous = if (exists(target)) target.readBytes() else null
             val hash = sha256(bytes)
+            if (previous == null && preserveMissingHistoricalSeeds && known[name].orEmpty().isNotEmpty()) continue
             if (previous != null && !previous.contentEquals(bytes) && sha256(previous) !in known[name].orEmpty()) continue
             if (previous == null || !previous.contentEquals(bytes)) {
                 writeAtomically(name, bytes, previous)

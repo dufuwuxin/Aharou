@@ -35,16 +35,17 @@ class BuiltinContextEntriesTest {
     private val auditTitles = setOf("Aharou 公开资产核对", "Aharou 资产关系整理")
     private val promptDesignIds = setOf("oh-my-pi-prompt-design", "oh-my-pi-semantic-compression")
     private val promptDesignTitles = setOf("提示词与工具描述设计", "提示词语义压缩保真检查")
+    private val omiMemoryId = "oh-my-pi-memory-evidence"
     private val executionIds = setOf("main-execution-contract", "member-execution-contract", "execution-source-map",
         "archive-execution-supplement", "crosscheck-system-request", "steward-judge-system-request",
         "steward-judge-input-request", "mobile-operator-system-request",
         "mobile-operator-format-retry-request", "mobile-operator-input-request",
-        "project-task-context-rules-request", "project-task-context-slot") + promptDesignIds
+        "project-task-context-rules-request", "project-task-context-slot") + promptDesignIds + setOf(omiMemoryId)
     private val auxiliaryPromptIds = listOf("crosscheck-system-request", "steward-judge-system-request",
         "steward-judge-input-request", "mobile-operator-system-request",
         "mobile-operator-format-retry-request", "mobile-operator-input-request")
     private val changedSeedOrder = listOf("archive-execution-supplement") + auxiliaryPromptIds + listOf(
-        "project-task-context-rules-request", "project-task-context-slot") + auditIds + promptDesignIds
+        "project-task-context-rules-request", "project-task-context-slot") + auditIds + promptDesignIds + listOf(omiMemoryId)
     private val legacyRecordedIds = setOf("main-foundation", "member-foundation", "title-request",
         "main-tool-directory", "member-tool-directory")
     private fun seeds() = BuiltinContextEntries(File(temp.root, ".context-defaults-v1")) { asset.readText() }
@@ -74,6 +75,10 @@ class BuiltinContextEntriesTest {
                 it.requestKey == null && it.folder == "执行机制" && it.worldbook.priority == -1
         })
         assertTrue(promptDesignEntries.all { it.content.contains("oh-my-pi main@4df653426f40ee1eb78ef408528eb9e6a5275b9d") })
+        val omiMemory = defaults.single { it.id == omiMemoryId }
+        assertEquals("记忆是线索，不是当前事实", omiMemory.title)
+        assertTrue(omiMemory.category == ContextCategory.RULE && omiMemory.loading == ContextLoad.SEARCH)
+        assertTrue(omiMemory.content.contains("oh-my-pi docs/memory.md"))
         assertEquals(auxiliaryPromptIds, defaults.filter { it.id in auxiliaryPromptIds }.map { it.id })
         assertEquals(changedSeedOrder, defaults.filter { it.id in changedSeedOrder }.map { it.id })
         defaults.filter { it.id in changedSeedOrder }.forEach { assertEquals(-1, it.worldbook.priority) }
@@ -584,7 +589,7 @@ class BuiltinContextEntriesTest {
     @Test fun realManifestAuditEntriesUpgradeCompleteReceiptAndDirectDeletionSurvivesNewRepositories() {
         val defaults = seeds().defaults()
         val oldIds = defaults.filter { it.id !in auditIds }.map { it.id }
-        assertEquals(46, oldIds.size)
+        assertEquals(47, oldIds.size)
         val receipt = File(temp.root, ".context-defaults-v1")
         receipt.writeText("version=1\n" + oldIds.joinToString("\n") + "\n")
         val library = ContextLibraryRepository(memories(), seeds())
