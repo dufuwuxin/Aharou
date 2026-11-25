@@ -304,7 +304,7 @@ class BuiltinAssetExtractorTest {
         val custom = put("skills/custom/SKILL.md", "user instructions")
         val docs = put("docs/old.md", "old guide")
         val disabled = put("agents/disabled.json", "user disabled state")
-        val extractor = BuiltinAssetExtractor { false }
+        val extractor = BuiltinAssetExtractor(allowUpgrade = { false })
         for (directory in listOf("skills", "docs", "agents", "teams")) {
             assertEquals(0, extractor.extract(source, root, directory))
         }

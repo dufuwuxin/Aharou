@@ -11,10 +11,11 @@ class CodexCacheIdentityTest {
     @Test fun providerAndSessionBoundariesCannotCollide() = runTest {
         val api = mockk<OpenAIApi>()
         val headers = mutableListOf<Map<String, String>>()
-        coEvery { api.createResponses(any(), any(), capture(headers), any()) } returns JsonObject().apply {
+        val requests = mutableListOf<Map<String, Any?>>()
+        coEvery { api.createResponses(any(), any(), capture(headers), capture(requests)) } returns JsonObject().apply {
             addProperty("status", "completed")
         }
-        for ((provider, session) in listOf("a:b" to "c", "a" to "b:c")) {
+        for ((provider, session) in listOf("a:b" to "c", "a" to "b:c", "a:b" to "c")) {
             OpenAIAdapter(api).apply {
                 providerId = provider
                 logSessionId = session
@@ -24,6 +25,8 @@ class CodexCacheIdentityTest {
             }.complete("stable", emptyList())
         }
         assertNotEquals(headers[0]["session-id"], headers[1]["session-id"])
+        assertEquals(requests[0]["prompt_cache_key"], requests[2]["prompt_cache_key"])
+        assertNotEquals(requests[0]["prompt_cache_key"], requests[1]["prompt_cache_key"])
     }
 
     @Test fun recreatedAdaptersKeepTheSameSessionButEachRequestHasItsOwnTurn() = runTest {
