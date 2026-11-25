@@ -11,10 +11,10 @@ import com.aharou.feature.agent.domain.model.AgentMessage
 import com.aharou.feature.agent.domain.tool.ToolCall
 import kotlinx.coroutines.test.runTest
 import io.mockk.every
-import io.mockk.firstArg
 import io.mockk.just
 import io.mockk.mockk
 import io.mockk.Runs
+import kotlinx.coroutines.flow.toList
 import kotlinx.serialization.json.JsonObject
 import okhttp3.ResponseBody
 import okhttp3.ResponseBody.Companion.toResponseBody
