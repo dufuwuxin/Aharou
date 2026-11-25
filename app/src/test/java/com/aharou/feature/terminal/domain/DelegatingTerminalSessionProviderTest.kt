@@ -86,21 +86,22 @@ class DelegatingTerminalSessionProviderTest {
     }
 
     @Test
-    fun mode_is_read_on_every_call_not_cached_at_construction() {
+    fun writing_retired_remote_mode_keeps_calls_on_local_delegate() {
         val provider = newProvider()
         every { local.closeTab(any()) } returns true
-        every { remote.closeTab(any()) } returns false
 
         assertTrue(provider.closeTab("a"))
 
         modeHolder.setMode(ExecutionMode.REMOTE_SSH)
-        assertFalse(provider.closeTab("b"))
+        assertEquals(ExecutionMode.LOCAL_PROOT, modeHolder.currentMode())
+        assertTrue(provider.closeTab("b"))
 
         modeHolder.setMode(ExecutionMode.LOCAL_PROOT)
+        assertEquals(ExecutionMode.LOCAL_PROOT, modeHolder.currentMode())
         assertTrue(provider.closeTab("c"))
 
-        verify(exactly = 2) { local.closeTab(any()) }
-        verify(exactly = 1) { remote.closeTab(any()) }
+        verify(exactly = 3) { local.closeTab(any()) }
+        verify(exactly = 0) { remote.closeTab(any()) }
     }
 
     @Test

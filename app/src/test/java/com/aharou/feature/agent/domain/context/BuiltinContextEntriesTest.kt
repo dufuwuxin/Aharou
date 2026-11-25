@@ -68,7 +68,7 @@ class BuiltinContextEntriesTest {
             (it.category.isInjection || it.id == "project-task-context-slot" || it.worldbook.triggers.isNotEmpty()) &&
                 it.content.length <= ContextLibraryPlanner.FULL_ENTRY_CHARS
         })
-        assertEquals(32, defaults.count { it.requestKey != null })
+        assertEquals(31, defaults.count { it.requestKey != null })
         val promptDesignEntries = defaults.filter { it.id in promptDesignIds }
         assertEquals(promptDesignIds, promptDesignEntries.map { it.id }.toSet())
         assertEquals(promptDesignTitles, promptDesignEntries.map { it.title }.toSet())
@@ -609,7 +609,7 @@ class BuiltinContextEntriesTest {
     @Test fun realManifestAuditEntriesUpgradeCompleteReceiptAndDirectDeletionSurvivesNewRepositories() {
         val defaults = seeds().defaults()
         val oldIds = defaults.filter { it.id !in auditIds }.map { it.id }
-        assertEquals(47, oldIds.size)
+        assertEquals(46, oldIds.size)
         val receipt = File(temp.root, ".context-defaults-v1")
         receipt.writeText("version=1\n" + oldIds.joinToString("\n") + "\n")
         val library = ContextLibraryRepository(memories(), seeds())

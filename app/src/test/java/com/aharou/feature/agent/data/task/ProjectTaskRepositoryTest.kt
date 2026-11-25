@@ -117,9 +117,23 @@ class ProjectTaskRepositoryTest {
         assertTrue(reopened.workspaces.value.any { it.path == allocated.path })
         assertTrue(reopened.activateProjectWorkspace(allocated.path, reopened.currentPath()) { true })
         assertEquals(allocated.path, reopened.currentPath())
+        val remoteProfile = com.aharou.feature.agent.domain.container.ContainerProfile.BUILTIN_UBUNTU.copy(
+            mode = com.aharou.feature.settings.data.repository.ExecutionMode.REMOTE_SSH
+        )
+        every { resolver.forWorkspace(source.path) } returns remoteProfile
+        try {
+            workspaces.allocateProjectWorkspace(java.util.UUID.randomUUID().toString(), source.path)
+            fail("legacy remote source profile accepted")
+        } catch (expected: IllegalStateException) {
+            assertEquals(context.getString(com.aharou.R.string.project_workspace_remote_unsupported), expected.message)
+        }
+        every { resolver.forWorkspace(source.path) } returns com.aharou.feature.agent.domain.container.ContainerProfile.BUILTIN_UBUNTU
+
         mode.setMode(com.aharou.feature.settings.data.repository.ExecutionMode.REMOTE_SSH)
-        try { workspaces.allocateProjectWorkspace(java.util.UUID.randomUUID().toString(), source.path); fail("remote allocation accepted") }
-        catch (_: IllegalStateException) { }
+        assertEquals(com.aharou.feature.settings.data.repository.ExecutionMode.LOCAL_PROOT, mode.currentMode())
+        val afterRetiredModeWrite = workspaces.allocateProjectWorkspace(java.util.UUID.randomUUID().toString(), source.path)
+        assertTrue(File(afterRetiredModeWrite.path).isDirectory)
+        assertTrue(File(afterRetiredModeWrite.path, ".aharou-project-owner").isFile)
     }
 
     @Test fun ownedProjectsWithTheSameTitleUseDifferentPathsAndSurviveReload() = runBlocking {

@@ -49,13 +49,6 @@ class SshRetirementTest {
             shellPath = null,
             isBuiltin = false
         )
-        val localOverride = ContainerProfile(
-            id = "local-workspace",
-            name = "Local workspace",
-            rootfsSource = RootfsSource.LocalFile("file:///local-workspace.tar.gz"),
-            shellPath = null,
-            isBuiltin = false
-        )
         val remote = ContainerProfile(
             id = "legacy-ssh-profile",
             name = "Legacy SSH",
@@ -64,27 +57,16 @@ class SshRetirementTest {
             isBuiltin = false,
             mode = ExecutionMode.REMOTE_SSH
         )
-        val activeId = MutableStateFlow(localOverride.id)
         val settings = mockk<ContainerSettingsRepository>()
-        every { settings.activeProfileIdFlow } returns activeId
-        every { settings.customProfilesFlow } returns MutableStateFlow(listOf(localDefault, localOverride, remote))
-        every { settings.workspaceProfilesFlow } returns MutableStateFlow(
-            mapOf("/workspace/local" to localOverride.id, "/workspace/legacy" to remote.id)
-        )
+        every { settings.activeProfileIdFlow } returns MutableStateFlow(remote.id)
+        every { settings.customProfilesFlow } returns MutableStateFlow(listOf(localDefault, remote))
+        every { settings.workspaceProfilesFlow } returns MutableStateFlow(mapOf("/workspace/legacy" to remote.id))
 
         val resolver = ContainerProfileResolver(settings, mockk(relaxed = true))
         withTimeout(2_000) {
-            while (resolver.defaultProfile().id != localOverride.id ||
-                resolver.forWorkspace("/workspace/local").id != localOverride.id
+            while (resolver.defaultProfile().id != localDefault.id ||
+                resolver.forWorkspace("/workspace/legacy").id != localDefault.id
             ) delay(10)
-        }
-
-        assertEquals(localOverride, resolver.defaultProfile())
-        assertEquals(localOverride, resolver.forWorkspace("/workspace/local"))
-
-        activeId.value = remote.id
-        withTimeout(2_000) {
-            while (resolver.defaultProfile().id != localDefault.id) delay(10)
         }
 
         assertEquals(localDefault, resolver.defaultProfile())

@@ -41,19 +41,25 @@ class PathHomeResolverTest {
     }
 
     @Test
-    fun home_remoteMode_remoteHomeUnknown_fallsBackToRoot() {
-        val resolver = newResolver(ExecutionMode.REMOTE_SSH)
+    fun home_legacyRemoteMode_remoteHomeUnknown_usesContainerHome() {
+        val holder = ExecutionModeHolder().apply { setMode(ExecutionMode.REMOTE_SSH) }
+        val resolver = PathHomeResolver(holder, remoteSshConnection)
         every { remoteSshConnection.remoteHome } returns null
-        // 本地 containerHome 即使有值，远程模式也不采用
         resolver.containerHome = "/data/container-home"
-        assertEquals("/root", resolver.home())
+
+        assertEquals(ExecutionMode.LOCAL_PROOT, holder.currentMode())
+        assertEquals("/data/container-home", resolver.home())
     }
 
     @Test
-    fun home_remoteMode_returnsRemoteHome() {
-        val resolver = newResolver(ExecutionMode.REMOTE_SSH)
+    fun home_legacyRemoteMode_ignoresRemoteHome() {
+        val holder = ExecutionModeHolder().apply { setMode(ExecutionMode.REMOTE_SSH) }
+        val resolver = PathHomeResolver(holder, remoteSshConnection)
         every { remoteSshConnection.remoteHome } returns "/home/dev"
-        assertEquals("/home/dev", resolver.home())
+        resolver.containerHome = "/data/container-home"
+
+        assertEquals(ExecutionMode.LOCAL_PROOT, holder.currentMode())
+        assertEquals("/data/container-home", resolver.home())
     }
 
     // ---------- expandHome()：~ 展开 ----------
@@ -82,10 +88,14 @@ class PathHomeResolverTest {
     }
 
     @Test
-    fun expandHome_remoteMode_usesRemoteHome() {
-        val resolver = newResolver(ExecutionMode.REMOTE_SSH)
+    fun expandHome_legacyRemoteMode_usesLocalHome() {
+        val holder = ExecutionModeHolder().apply { setMode(ExecutionMode.REMOTE_SSH) }
+        val resolver = PathHomeResolver(holder, remoteSshConnection)
         every { remoteSshConnection.remoteHome } returns "/home/dev/"
-        assertEquals("/home/dev/workspace", resolver.expandHome("~/workspace"))
+        resolver.containerHome = "/data/container-home/"
+
+        assertEquals(ExecutionMode.LOCAL_PROOT, holder.currentMode())
+        assertEquals("/data/container-home/workspace", resolver.expandHome("~/workspace"))
     }
 
     @Test
