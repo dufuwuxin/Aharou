@@ -29,7 +29,7 @@ Tag 驱动发版，平时 `main` 上的提交不影响发布包。
    - 新引入的库在 `app/build.gradle.kts` 里是否已有
    - 新用的 `R.string.xxx` 在中文 `values/strings.xml` 里是否都存在
    - 调用的既有组件签名是否匹配；被改了签名的组件用 `rg` 找出全部调用点确认都改到
-   - 新交互是否复用既有实现（例：模型拖拽排序对照 `ProvidersAndLogSection.kt` 的手柄写法）
+   - 新交互是否复用既有实现（例：供应商拖拽排序对照 `ProviderLibrarySection.kt` 的手柄写法）
    - 安全面：可疑网络请求、凭据外发、命令拼接
    - `30-assets-sync.md` 各项；含数据库迁移的 PR 必须跑 `python3 scripts/check_migrations.py` 对账（编号连续、与已发布 tag 无冲突）
    - 超出 PR 标题范围的改动记下来交用户定夺

@@ -114,6 +114,7 @@ internal fun ContainerSection(
     resetState: ContainerResetUiState? = null,
     onRestoreBuiltin: () -> Unit = {},
     remoteConnections: List<RemoteConnection> = emptyList(),
+    onRuntimeBackendChange: (ContainerProfile) -> Unit,
     onReorder: (fromIndex: Int, toIndex: Int) -> Unit = { _, _ -> }, onOpenSources: () -> Unit = {}
 ) {
     val context = LocalContext.current
@@ -175,6 +176,11 @@ internal fun ContainerSection(
                     )
                 }
             }
+
+            ActiveContainerRuntimeBackendSection(
+                profile = profiles.firstOrNull { it.id == activeProfileId },
+                onChange = onRuntimeBackendChange,
+            )
 
             ContainerGradleHeapSection()
             ContainerWorkspaceProfilesSection()

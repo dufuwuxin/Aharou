@@ -1059,6 +1059,7 @@ fun SettingsScreen(
                         resetState = containerReset, onRestoreBuiltin = { viewModel.restoreBuiltinAlpine() },
                         onOpenSources = { section = SettingsSection.ContainerSources },
                         remoteConnections = remoteConnections,
+                        onRuntimeBackendChange = viewModel::editCustomContainerProfile,
                         onReorder = viewModel::reorderContainerProfiles
                     )
                 }

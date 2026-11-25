@@ -7,7 +7,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import com.aharou.R
 import com.aharou.core.ui.AppSwitch
@@ -19,6 +21,22 @@ import com.aharou.feature.workspace.domain.model.RemoteConnection
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+
+@Composable
+internal fun ActiveContainerRuntimeBackendSection(
+    profile: ContainerProfile?,
+    onChange: (ContainerProfile) -> Unit,
+) {
+    val activeLocal = profile?.takeIf { it.mode == ExecutionMode.LOCAL_PROOT } ?: return
+    SettingsGroup {
+        ContainerRuntimeBackendRow(
+            profile = activeLocal,
+            mode = ExecutionMode.LOCAL_PROOT,
+            backend = activeLocal.runtimeBackend ?: ContainerRuntimeBackend.PROOT,
+            onBackendChange = { onChange(activeLocal.copy(runtimeBackend = it)) },
+        )
+    }
+}
 
 @Composable
 internal fun ContainerRuntimeBackendRow(
@@ -49,6 +67,7 @@ internal fun ContainerRuntimeBackendRow(
             AppSwitch(
                 checked = backend == ContainerRuntimeBackend.TAWCROOT,
                 enabled = available || backend == ContainerRuntimeBackend.TAWCROOT,
+                modifier = Modifier.testTag("container_runtime_backend_switch"),
                 onCheckedChange = { enabled ->
                     onBackendChange(if (enabled) ContainerRuntimeBackend.TAWCROOT else ContainerRuntimeBackend.PROOT)
                 }

@@ -147,8 +147,8 @@
 | 用户能做什么 | 界面入口（file:line） | Agent 有对应工具吗 | 工具名与入口（file:line） | 差距说明 |
 |---|---|---|---|---|
 | 新增供应商 | `component/SettingsScreen.kt:745-752`（顶栏 +） | 有 | `config` `action=add path=providers`（`domain/tool/config/ConfigTool.kt:349`；集合 `feature/settings/data/ConfigProviderFields.kt:86`、`:446`） | 无；api_key 类字段是 SENSITIVE，需弹确认 |
-| 编辑供应商（baseUrl/key/多 key/模型/面板脚本/代理/自定义头/缓存开关） | `component/ProvidersAndLogSection.kt:113` → `ProviderEditorScreen.kt:169`（`:398` 保存） | 有 | `config` `action=set path=providers.<id>.<字段>`（字段表 `ConfigProviderFields.kt:85-100` 描述行） | 无 |
-| 删除供应商 | `ProvidersAndLogSection.kt:114` | 有 | `config` `action=remove path=providers id=<id>`（`ConfigProviderFields.kt:470`） | 无 |
+| 编辑供应商（baseUrl/key/多 key/模型/面板脚本/代理/自定义头/缓存开关） | `component/SettingsScreen.kt:854-865` → `component/ProviderLibrarySection.kt:138` → `ProviderEditorScreen.kt` | 有 | `config` `action=set path=providers.<id>.<字段>`（字段表 `ConfigProviderFields.kt:85-100` 描述行） | 无 |
+| 删除供应商 | `component/SettingsScreen.kt:854-865` → `ProviderLibrarySection.kt:138` | 有 | `config` `action=remove path=providers id=<id>`（`ConfigProviderFields.kt:470`） | 无 |
 | 选当前会话的模型 | `component/ChatModelSheet.kt:56`（`ModelIconButton`）、`:89`（`onSelect`）→ `ChatInputBar.kt:584` → `AIChatPanel.kt:1505` | 无 | 未找到（`sessions` 只读，`SessionTool.kt:31`；config 无会话级模型字段） | **缺口**：只能改全局默认/角色模型，不能改当前会话 |
 | 设全局角色模型（默认/标题/压缩/视觉/生图） | `component/DefaultModelsSection.kt:93`、挂载 `SettingsScreen.kt:1024` | 有 | `config` `model.roles.default` / `.default_effort` / `.title` / `.compaction` / `.vision` / `.image_gen`（`feature/settings/data/ConfigModelRoleFields.kt:41`、`:51`、`:82`、`:92`、`:102`、`:112`） | 无 |
 | 改采样温度 | 未找到（用户界面也没有） | 无 | 未找到 | 双方都没有：温度由固定表决定（`feature/agent/domain/provider/AIProvider.kt:251` `fixedTemperature`），不是可配置项 |

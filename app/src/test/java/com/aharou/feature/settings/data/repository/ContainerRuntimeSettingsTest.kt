@@ -46,6 +46,29 @@ class ContainerRuntimeSettingsTest {
         assertEquals(ContainerRuntimeBackend.PROOT, explicitProot.runtimeBackend)
     }
 
+    @Test fun runtimeBackendIsStoredPerProfile() = runBlocking {
+        val repository = ContainerSettingsRepository(RuntimeEnvironment.getApplication())
+        val first = ContainerProfile(
+            id = "test-runtime-first", name = "First", rootfsSource = RootfsSource.LocalFile("file:///first.tar.gz"),
+            shellPath = null, isBuiltin = false, runtimeBackend = ContainerRuntimeBackend.PROOT
+        )
+        val second = ContainerProfile(
+            id = "test-runtime-second", name = "Second", rootfsSource = RootfsSource.LocalFile("file:///second.tar.gz"),
+            shellPath = null, isBuiltin = false, runtimeBackend = ContainerRuntimeBackend.PROOT
+        )
+        try {
+            repository.upsertCustomProfile(first)
+            repository.upsertCustomProfile(second)
+            repository.upsertCustomProfile(first.copy(runtimeBackend = ContainerRuntimeBackend.TAWCROOT))
+            val profiles = repository.customProfilesFlow.first().associateBy { it.id }
+            assertEquals(ContainerRuntimeBackend.TAWCROOT, profiles.getValue(first.id).runtimeBackend)
+            assertEquals(ContainerRuntimeBackend.PROOT, profiles.getValue(second.id).runtimeBackend)
+        } finally {
+            repository.deleteCustomProfile(first.id)
+            repository.deleteCustomProfile(second.id)
+        }
+    }
+
     @Test fun absentLegacyRuntimeSettingKeepsBuiltInProfileDefaultOnProot() {
         val migrated = ContainerSettingsRepository.migrateLegacyRuntime(
             listOf(ContainerProfile.BUILTIN_UBUNTU), legacyBackend = null

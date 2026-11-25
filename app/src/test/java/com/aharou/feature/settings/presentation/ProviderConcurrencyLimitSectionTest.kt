@@ -3,11 +3,16 @@ package com.aharou.feature.settings.presentation
 import android.app.Application
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.Column
+import androidx.compose.ui.test.assertDoesNotExist
+import androidx.compose.ui.test.assertHasNoClickAction
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.setValue
@@ -51,25 +56,34 @@ class ProviderConcurrencyLimitSectionTest {
 
     @After fun clearTranslationEntryPoint() = unmockkStatic(EntryPointAccessors::class)
 
-    @Test fun disablingAnEnabledLimitResetsItAndUpdatesTheSwitch() {
-        var limit by mutableIntStateOf(2)
-        val changes = mutableListOf<Int>()
+    @Test fun enablingShowsInlineLimitAndInvalidInputDoesNotChangeTheSavedValue() {
+        var limit by mutableIntStateOf(0)
         compose.setContent {
             AIEditorTheme {
                 Column {
-                    ProviderConcurrencyLimitSection("provider-fixture", limit) {
-                        limit = it
-                        changes += it
-                    }
+                    ProviderConcurrencyLimitSection("provider-fixture", limit) { limit = it }
                 }
             }
         }
+        compose.onNodeWithTag("provider_concurrency_row").assertHasNoClickAction()
         val toggle = compose.onNodeWithTag("provider_concurrency_toggle")
-        toggle.assertIsOn().performClick()
-        compose.runOnIdle {
-            assertEquals(0, limit)
-            assertEquals(listOf(0), changes)
-        }
+        val field = compose.onNodeWithTag("provider_concurrency_input")
+        toggle.assertIsOff().performClick()
+        field.assertDoesNotExist()
+        toggle.assertIsOn()
+        field.performTextReplacement("12")
+        compose.runOnIdle { assertEquals(12, limit) }
+        compose.runOnIdle { limit = 7 }
+        field.assertTextContains("7")
+        field.performTextReplacement("")
+        compose.onNodeWithText("请输入 1–32 的整数").assertExists()
+        compose.runOnIdle { assertEquals(7, limit) }
+        field.performTextReplacement("33")
+        compose.onNodeWithText("请输入 1–32 的整数").assertExists()
+        compose.runOnIdle { assertEquals(7, limit) }
+        toggle.performClick()
+        field.assertDoesNotExist()
+        compose.runOnIdle { assertEquals(0, limit) }
         toggle.assertIsOff()
     }
 }
