@@ -13,12 +13,10 @@ import com.aharou.feature.agent.domain.memory.MemoryScope
 import com.aharou.feature.agent.domain.memory.MemoryType
 import com.aharou.core.util.FileLogger
 import com.aharou.core.util.LogLevel
-import com.aharou.feature.agent.domain.container.ConnectionState
 import com.aharou.feature.agent.domain.container.ContainerImageEntry
 import com.aharou.feature.agent.domain.container.ContainerInstaller
 import com.aharou.feature.agent.domain.container.ContainerOsDetector
 import com.aharou.feature.agent.domain.container.ContainerProfile
-import com.aharou.feature.agent.domain.container.RemoteSshConnection
 import com.aharou.feature.agent.domain.container.RootfsSource
 import com.aharou.feature.agent.domain.mcp.McpConfigRepository
 import com.aharou.feature.agent.domain.mcp.McpManager
@@ -77,8 +75,6 @@ import com.aharou.feature.settings.data.repository.BackgroundSettingsRepository
 import com.aharou.feature.settings.data.repository.ImageGenModelSettingsRepository
 import com.aharou.feature.settings.data.repository.MemoryModelSettingsRepository
 import com.aharou.feature.settings.data.repository.VisionModelSettingsRepository
-import com.aharou.feature.workspace.domain.model.RemoteConnection
-import com.aharou.feature.workspace.data.local.dao.RemoteConnectionDao
 import com.aharou.feature.settings.domain.model.AIProviderConfig
 import com.aharou.feature.settings.domain.model.DashboardContext
 import com.aharou.feature.settings.domain.model.ModelMetadata
@@ -167,8 +163,6 @@ class SettingsViewModel @Inject constructor(
     private val containerOsDetector: ContainerOsDetector,
     private val executionModeRepository: ExecutionModeRepository,
     private val executionModeHolder: ExecutionModeHolder,
-    private val remoteSshConnection: RemoteSshConnection,
-    private val remoteConnectionDao: RemoteConnectionDao,
     private val hostShell: HostShellManager,
     private val providerDashboardRunner: ProviderDashboardRunner,
     private val terminalSettingsRepository: TerminalSettingsRepository,
@@ -574,24 +568,10 @@ class SettingsViewModel @Inject constructor(
     val containerImageDownload: StateFlow<ContainerImageDownloadUiState> get() = containerImageController.download
 
 
-    /** 当前执行模式（本地 PRoot / 远程 SSH），供 UI 判断是否显示远程连接指示器。 */
-    val executionMode: StateFlow<ExecutionMode> = executionModeHolder.mode
-
-    /** 远程 SSH 连接状态，供 UI 显示指示器。 */
-    val connectionState: StateFlow<ConnectionState> = remoteSshConnection.connectionState
-
     /** Token 统计：整块状态与操作已搬到 [TokenStatsController]，这里只做转发。 */
     val tokenStats: StateFlow<TokenStatsUiState> = tokenStatsController.state
     val filterProviderId: StateFlow<String?> = tokenStatsController.filterProviderId
     val filterModel: StateFlow<String?> = tokenStatsController.filterModel
-
-    /** 工作区已配置的远程连接通道，供容器镜像 SSH 模式下拉复用。 */
-    val remoteConnections: StateFlow<List<RemoteConnection>> = remoteConnectionDao.getAllConnections().map { connections ->
-        connections.map { RemoteConnection(id = it.id, name = it.name, protocol = it.protocol,
-            host = it.host, port = it.port, username = it.username, authType = it.authType,
-            authData = it.authData, passphrase = it.passphrase, sortOrder = it.sortOrder) }
-    }
-        .stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.Eagerly, emptyList())
 
     /**
      * 把某个 [flow] 的最新值持续写入一个 [MutableStateFlow]（配置项订阅的样板收敛）：
@@ -652,22 +632,14 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             containerSettingsRepository.ensureBuiltinDefault()
             containerSettingsRepository.ensureProfileDisplayOrder()
-            containerSettingsRepository.customProfilesFlow.collectLatest { _customProfiles.value = it }
+            containerSettingsRepository.customProfilesFlow.collectLatest { profiles ->
+                _customProfiles.value = profiles.filter { it.mode == ExecutionMode.LOCAL_PROOT }
+            }
         }
         syncFlow(mcpConfigRepository.effectiveEntriesFlow, _mcpEntries)
         // 技能配置变更（含外部改动）→ 刷新列表；数据源在 SkillSettingsController。
         viewModelScope.launch { skillController.changes.collectLatest { refreshSkills() } }
         viewModelScope.launch { agentDefinitionConfigRepository.changes.collectLatest { refreshSubAgents() } }
-        // 全局技能/子代理在远程模式以远端为源，本地目录监听不触发；执行模式切换或远程就绪后重扫。
-        viewModelScope.launch { executionMode.collectLatest { refreshSkills(); refreshSubAgents() } }
-        viewModelScope.launch {
-            connectionState.collectLatest { state ->
-                if (state == ConnectionState.CONNECTED) {
-                    refreshSkills()
-                    refreshSubAgents()
-                }
-            }
-        }
         viewModelScope.launch { refreshSkills() }
         syncFlow(permissionRulesRepository.globalRulesFlow, _globalRules)
         syncFlow(permissionRulesRepository.currentProjectRulesFlow, _projectRules)
@@ -1235,13 +1207,7 @@ class SettingsViewModel @Inject constructor(
 
     /** 设置应用语言；tag 为空字符串或 null 表示跟随系统。 */
 
-    /**
-     * 切换当前选中的容器 profile，并按其 [ContainerProfile.mode] 同步切全局执行模式。
-     *
-     * 本地镜像 → [ExecutionMode.LOCAL_PROOT]；远程 SSH 镜像 → [ExecutionMode.REMOTE_SSH]，
-     * 连接参数由 ActiveRemoteConnectionResolver 按激活 profile 实时解析，AIEditorApp 的常驻订阅据此重连。
-     * 委托层每次调用读 holder，切换即时生效，无需重启。
-     */
+    /** 切换当前选中的本地容器 Profile；运行后端只影响新启动的命令与终端。 */
     fun setActiveContainerProfile(id: String) {
         viewModelScope.launch {
             applyProfile(id)
@@ -1262,19 +1228,8 @@ class SettingsViewModel @Inject constructor(
             ?: _customProfiles.value.firstOrNull()
             ?: return
         containerSettingsRepository.setActiveProfile(profile.id)
-        when (profile.mode) {
-            ExecutionMode.LOCAL_PROOT -> {
-                executionModeRepository.setExecutionMode(ExecutionMode.LOCAL_PROOT)
-                executionModeHolder.setMode(ExecutionMode.LOCAL_PROOT)
-            }
-
-            ExecutionMode.REMOTE_SSH -> {
-                if (profile.rootfsSource !is RootfsSource.RemoteSsh) return
-                // 连接参数由 ActiveRemoteConnectionResolver 按激活 profile 实时解析，AIEditorApp 的常驻订阅据此重连。
-                executionModeRepository.setExecutionMode(ExecutionMode.REMOTE_SSH)
-                executionModeHolder.setMode(ExecutionMode.REMOTE_SSH)
-            }
-        }
+        executionModeRepository.setExecutionMode(ExecutionMode.LOCAL_PROOT)
+        executionModeHolder.setMode(ExecutionMode.LOCAL_PROOT)
     }
 
     // ── 容器镜像：操作一律转到 [ContainerImageController] ──

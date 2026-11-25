@@ -7,11 +7,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * 执行模式的同步缓存：App 启动时从 [ExecutionModeRepository] 读首帧模式缓存到内存，
- * 供各委托层（`DelegatingCommandEngine`/`DelegatingFileAccess`/`DelegatingTerminalSessionProvider`）
- * 每次调用时同步读取，决定转发到本地还是远程实现。
- *
- * 模式切换后（设置页）调 [setMode] 更新缓存，切换即时生效，无需重启。
+ * 旧执行模式仓储的同步缓存。远程 SSH 能力退役后，旧调用方写入的 REMOTE_SSH 一律不再生效。
  */
 @Singleton
 class ExecutionModeHolder @Inject constructor() {
@@ -19,7 +15,7 @@ class ExecutionModeHolder @Inject constructor() {
     val mode: StateFlow<ExecutionMode> = _mode.asStateFlow()
 
     fun setMode(mode: ExecutionMode) {
-        _mode.value = mode
+        _mode.value = ExecutionMode.LOCAL_PROOT
     }
 
     fun currentMode(): ExecutionMode = _mode.value

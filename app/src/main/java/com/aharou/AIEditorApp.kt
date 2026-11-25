@@ -329,25 +329,6 @@ class AIEditorApp : Application(), Configuration.Provider {
     @Inject
     lateinit var executionModeHolder: com.aharou.feature.settings.data.repository.ExecutionModeHolder
 
-    /** 远程 SSH 连接管理器：远程模式下启动即用配置建立连接。 */
-    @Inject
-    lateinit var remoteSshConnection: com.aharou.feature.agent.domain.container.RemoteSshConnection
-
-    @Inject
-    lateinit var remoteBootstrapSync: com.aharou.feature.agent.domain.container.RemoteBootstrapSync
-
-    /** 全局网络可用性监听：网络恢复/切换链路时驱动即时重连。 */
-    @Inject
-    lateinit var networkConnectivityObserver: com.aharou.core.net.NetworkConnectivityObserver
-
-    /** 当前激活 profile 的连接配置解析器：连接/profile/模式变化时驱动重连。 */
-    @Inject
-    lateinit var activeRemoteConnectionResolver: com.aharou.feature.agent.domain.container.ActiveRemoteConnectionResolver
-
-    /** 工作区仓库：SSH 重连成功后重新加载工作区。 */
-    @Inject
-    lateinit var workspaceRepository: com.aharou.feature.workspace.data.repository.WorkspaceRepository
-
     /** 模型元数据服务：启动即异步从本仓库拉取模型目录（12h 缓存，失败静默，兜底内置数据）。 */
     @Inject
     lateinit var modelMetadataService: ModelMetadataService
@@ -509,29 +490,6 @@ class AIEditorApp : Application(), Configuration.Provider {
             val mode = executionModeRepository.executionModeFlow.first()
             executionModeHolder.setMode(mode)
         }
-        // SSH 连接监督只在远程模式下常驻：切回本地时停监督并断开（原因见 RemoteSshConnection.superviseByExecutionMode）
-        appScope.launch {
-            remoteSshConnection.superviseByExecutionMode(appScope, executionModeHolder.mode) {
-                runCatching { workspaceRepository.initialize() }
-                    .onFailure { FileLogger.w(TAG, "SSH 重连后重新加载工作区失败", it) }
-                remoteBootstrapSync.syncIfNeeded()
-            }
-        }
-        // 当前激活 profile 的连接配置变化（编辑连接/编辑 profile/切 profile/切模式）即重连，改连接即时生效。
-        appScope.launch {
-            combine(
-                activeRemoteConnectionResolver.activeConfigFlow,
-                executionModeHolder.mode
-            ) { config, mode -> config to mode }.collect { (config, mode) ->
-                if (mode != com.aharou.feature.settings.data.repository.ExecutionMode.REMOTE_SSH) return@collect
-                if (config == null || (config == remoteSshConnection.config && remoteSshConnection.isConnected())) return@collect // 配置没变且仍连着才跳过；切回远程时连接已断，需重连
-                runCatching {
-                    remoteSshConnection.connect(config)
-                    // 连接成功后同步内置文档到远程 ~/.aharou/docs/，供 AI 查阅。
-                    remoteBootstrapSync.syncIfNeeded()
-                }.onFailure { FileLogger.e(TAG, "SSH 连接失败，将在首次命令时重试", it) }
-            }
-        }
         // 后台保活常驻通知的唯一反应器：监听开关，启停 TerminalKeepaliveService 的常驻模式。
         // 既覆盖设置页实时切换，也覆盖冷启动恢复。仅在「由开变关」时发 disable，
         // 避免为关闭而凭空拉起从未开过的 Service。
@@ -547,28 +505,6 @@ class AIEditorApp : Application(), Configuration.Provider {
                     KeepaliveWorker.cancel(this@AIEditorApp)
                 }
                 last = enabled
-            }
-        }
-        // 网络恢复或切换链路时立即重连 SSH，不等 supervisor 轮询（并带动远端工作区刷新）。
-        appScope.launch {
-            networkConnectivityObserver.recovered.collect {
-                runCatching { remoteSshConnection.tryReconnectIfDisconnected() }
-                    .onFailure { FileLogger.w(TAG, "网络恢复后重连 SSH 失败", it) }
-            }
-        }
-        // 远程 SSH 连接期间维持前台服务：否则远程模式下的空闲会话切后台会被冻结、连接被切断。
-        // 用会话计数（而非用户常驻开关）表达，连接断开即释放，不影响用户对保活开关的选择。
-        appScope.launch {
-            var held = false
-            remoteSshConnection.connectionState.collect { state ->
-                val connected = state == com.aharou.feature.agent.domain.container.ConnectionState.CONNECTED
-                if (connected && !held) {
-                    TerminalKeepaliveService.startSession(this@AIEditorApp)
-                    held = true
-                } else if (!connected && held) {
-                    TerminalKeepaliveService.stopSession(this@AIEditorApp)
-                    held = false
-                }
             }
         }
         // 连接已配置的 MCP server，把其工具注册进 ToolRegistry（内部自有 scope，失败不影响启动）。

@@ -1075,9 +1075,6 @@ fun AIChatPanel(
             }
     }
 
-    val executionMode = settingsViewModel?.executionMode?.collectAsStateWithLifecycle()?.value
-    val connectionState = settingsViewModel?.connectionState?.collectAsStateWithLifecycle()?.value
-    val isRemote = executionMode == com.aharou.feature.settings.data.repository.ExecutionMode.REMOTE_SSH
 
     val markdownImageTransformer = remember(viewModel.fileAccess) {
         MarkdownImageTransformer(viewModel.fileAccess)
@@ -1199,7 +1196,6 @@ fun AIChatPanel(
                 onNavigateToSandbox = onNavigateToSandbox,
                 onNavigateToShared = onNavigateToShared,
                 onSessionDiagnostics = { showSessionDiagnostics = true },
-                connectionState = connectionState?.takeIf { isRemote },
                 terminalActive = terminalActive,
                 gitActive = gitActive,
                 browserActive = browserActive
@@ -1228,17 +1224,14 @@ fun AIChatPanel(
             Box(modifier = Modifier.weight(1f)) {
                 if (bodyOverride != null) {
                     Box(Modifier.fillMaxSize().padding(bottom = with(LocalDensity.current) { floatingLayerHeightPx.toDp() })) {
-                        ProjectChatMenuHost(sessionId = diagnosticsSessionId?.takeIf { sessionReady && currentSession?.parentId == null }, onTerminal = onNavigateToTerminal, onGit = onNavigateToGit, onBrowser = onNavigateToBrowser, onSandbox = onNavigateToSandbox, onShared = onNavigateToShared, onDiagnostics = { showSessionDiagnostics = true }, unifiedDiagnostics = projectConversation != null, connectionState = connectionState?.takeIf { isRemote }, inputTokens = sessionInputTokens, outputTokens = sessionOutputTokens, contextStatus = {
+                        ProjectChatMenuHost(sessionId = diagnosticsSessionId?.takeIf { sessionReady && currentSession?.parentId == null }, onTerminal = onNavigateToTerminal, onGit = onNavigateToGit, onBrowser = onNavigateToBrowser, onSandbox = onNavigateToSandbox, onShared = onNavigateToShared, onDiagnostics = { showSessionDiagnostics = true }, unifiedDiagnostics = projectConversation != null, inputTokens = sessionInputTokens, outputTokens = sessionOutputTokens, contextStatus = {
                             SessionContextStatus(sessionContextMetrics(contextUsages[diagnosticsSessionId], if (diagnosticsSessionId == null) 0 else sessionLastInputTokens,
                                 activeModelMetadata?.takeIf { diagnosticsSessionId != null }?.let { com.aharou.feature.settings.domain.model.ModelContextPolicy.effectiveInputBudget(it) } ?: 0),
                                 onClick = { showSessionDiagnostics = true })
                         }) { bodyOverride(composer::collapse) }
                     }
                 } else if (!messagesReady) {
-                    // 远程模式连接未就绪时显示连接状态占位，避免空白或旧工作区记录闪烁
-                    if (isRemote && connectionState != null && connectionState != com.aharou.feature.agent.domain.container.ConnectionState.CONNECTED) {
-                        RemoteConnectingPlaceholder(state = connectionState)
-                    } else if (showMessagesLoading) {
+                    if (showMessagesLoading) {
                         // 本地模式读库偏慢时的占位：以前这里什么都不画，切会话会先闪一下空白。
                         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             androidx.compose.material3.CircularProgressIndicator(

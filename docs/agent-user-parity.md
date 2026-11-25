@@ -217,11 +217,11 @@ SOMCP is included in the HTTP connector catalog. The existing connector installe
 
 ## 8. Peer collaboration removed
 
-Peer pairing, remote-device services, settings and configuration endpoints have been removed. Existing saved user data is retained. Ordinary SSH, MCP clients and memory synchronization remain available.
+Peer pairing, remote-device services, settings and configuration endpoints have been removed. Existing saved user data is retained. Legacy SSH connection and profile data remain available for compatibility; remote SSH execution is retired. MCP clients and memory synchronization remain available.
 
 ## 9. Messaging bots removed
 
-WeChat, Feishu, QQ and Telegram bot settings, services, startup restoration, configuration fields and the bot file-sending tool have been removed. Existing conversations, files and saved configuration data are retained. Agent communication, MCP and SSH are unchanged.
+WeChat, Feishu, QQ and Telegram bot settings, services, startup restoration, configuration fields and the bot file-sending tool have been removed. Existing conversations, files and saved configuration data are retained. Agent communication and MCP are unchanged; remote SSH execution is retired, while legacy SSH data remains compatible.
 
 ## 10. 会话
 
@@ -423,7 +423,7 @@ Second-pass corrections: long-session creation routes to project creation; expli
 
 ## 本地容器基线
 
-默认内置 Ubuntu 24.04 LTS ARM64，用户与 agent 共用同一本地执行环境。仅接受原生 ARM64 rootfs，不再安装或启动 Alpine、x86/AMD64、32 位 ARM，不使用跨指令集转译；远程 SSH 不受此本地架构限制。旧内置迁移先验证 Ubuntu 并保留 /root 与 /home，成功后才移除旧内置系统；失败保留旧数据且不回退 Alpine。工作区、全局配置与共享目录不参与清理。此处不代表所有工具或真机构建已完成兼容性验收。
+默认内置 Ubuntu 24.04 LTS ARM64，用户与 agent 共用同一本地执行环境。仅接受原生 ARM64 rootfs，不再安装或启动 Alpine、x86/AMD64、32 位 ARM，不使用跨指令集转译；退役前保存的 SSH 连接配置、Profile 和工作区记录作为历史数据保留，不恢复远程执行。旧内置迁移先验证 Ubuntu 并保留 /root 与 /home，成功后才移除旧内置系统；失败保留旧数据且不回退 Alpine。工作区、全局配置与共享目录不参与清理。此处不代表所有工具或真机构建已完成兼容性验收。
 
 ### Restored project and tool entry points
 

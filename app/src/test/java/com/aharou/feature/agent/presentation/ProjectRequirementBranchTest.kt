@@ -105,7 +105,7 @@ class ProjectRequirementBranchTest {
                     CompositionLocalProvider(LocalViewModelStoreOwner provides panelOwner) {
                         com.aharou.feature.agent.presentation.component.ProjectChatMenuHost(sessionId = binding?.sessionId,
                             onTerminal = {}, onGit = {}, onBrowser = {}, onSandbox = {}, onShared = {},
-                            onDiagnostics = { diagnosticsOpened = true }, connectionState = null, inputTokens = 0, outputTokens = 0,
+                            onDiagnostics = { diagnosticsOpened = true }, inputTokens = 0, outputTokens = 0,
                             unifiedDiagnostics = true) { binding?.body?.invoke({}) }
                     }
                 }

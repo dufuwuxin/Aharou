@@ -31,8 +31,6 @@ features:
     details: Supports OpenAI / Anthropic / Gemini compatible protocols, with multiple vendors switchable anytime. Built-in tools cover file read/write, shell execution, background terminal, web search and image recognition, with streaming output and automatic context compression for long conversations.
   - title: Built-in Terminal & Linux Container
     details: A local container built on Termux components and PRoot, shipping with an Alpine image. Import custom rootfs, mount host directories, and keep terminals running in the background.
-  - title: Remote SSH Mode
-    details: Use a remote server as the execution backend — commands over the exec channel, files over SFTP, terminals over the shell channel. Operate remote projects directly from your phone.
   - title: Checkpoints & Undo
     details: File snapshots are recorded automatically before the AI modifies code, so you can roll back with one tap in the conversation — restore code only, conversation only, or both.
   - title: MCP, Skills & Memory

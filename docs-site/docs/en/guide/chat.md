@@ -14,7 +14,7 @@ This page explains what every button and area on the main screen does.
 
 (The current model is not shown in the title bar but on the model button in the toolbar below the input box; the session title is no longer shown in the title bar either.)
 
-In remote SSH mode an extra line appears below the title bar: the SSH connection status on the left (a dot plus text), and the token totals for the current session on the right (up arrow for input, down arrow for output). The line is not shown in local mode.
+The line below the title bar shows token totals for the current session (up arrow for input, down arrow for output).
 
 ## Sidebar
 
@@ -93,7 +93,7 @@ The panel opened by the workspace button lets you:
 - **New workspace**: enter a name to create one; it maps to a separate folder on the phone.
 - **Rename workspace** (**since 1.14.3**): tap the pencil icon to the right of the workspace row to rename it. For an internal workspace the directory under `projects/` is renamed along with it and session records move to the new path; for an external workspace only the name shown in the list changes, and **the directory on the device is not renamed**. The name can't be empty or duplicate an existing workspace. Renaming the current workspace stops running AI sessions and terminals first.
 - **Add local directory** (local mode): use a directory that already exists on the device as a workspace. The first tap shows a risk confirmation dialog (the AI will read and write your real files), with a "Don't show again" checkbox. Only folders from "Internal storage" or "SD card" can be picked; other file providers such as cloud drives are not supported. On Android 11 and above you also need to enable "All files access" in "Settings → App permissions → Storage access" first, otherwise adding one reports that the permission is missing.
-- **Delete workspace**: an internal workspace is deleted together with its files; an external workspace added with "Add local directory" is only unlinked, and **its contents are not deleted**. Chat history is deleted along with internal and remote workspaces; for an external workspace, whether chat history is deleted depends on a switch in "Preferences".
+- **Delete workspace**: an internal workspace is deleted together with its files; an external workspace added with "Add local directory" is only unlinked, and **its contents are not deleted**. Chat history is deleted along with internal workspaces; for an external workspace, whether chat history is deleted depends on a switch in "Preferences".
 
 A workspace is the project root the AI works in. **Each session is bound to its own workspace**: the AI's file reads and writes and command execution all land in that session's workspace, and do not move elsewhere just because you switched the workspace in the UI.
 

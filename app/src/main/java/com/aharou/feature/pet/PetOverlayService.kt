@@ -13,8 +13,6 @@ import android.content.pm.ServiceInfo
 import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.drawable.Icon
-import android.media.AudioManager
-import android.media.ToneGenerator
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.ServiceCompat
@@ -59,7 +57,6 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * 小染悬浮层服务：屏幕上的**唯一**悬浮实体。
@@ -116,10 +113,8 @@ class PetOverlayService : Service() {
         private const val WAIT_REMIND_MS = 20_000L
 
         /** 两次「带记忆生成台词」之间的最小间隔。 */
-        private const val LINE_COOLDOWN_MS = 8_000L
 
         /** 生成一句台词的超时：超了就退回写死的台词，不能让她干张着嘴。 */
-        private const val LINE_TIMEOUT_MS = 12_000L
         private const val EXTRA_SIZE = "size"
         private const val EXTRA_ROLE = "role"
         private const val EXTRA_ALWAYS = "always"
@@ -237,9 +232,6 @@ class PetOverlayService : Service() {
     internal lateinit var planApprovalManager: PlanApprovalManager
 
     /** 带记忆生成台词的那一半。 */
-    @Inject
-    internal lateinit var petVoice: PetVoice
-
     /** 截图落盘要写工作区。 */
     @Inject
     internal lateinit var fileAccess: FileAccessProvider
@@ -272,13 +264,9 @@ class PetOverlayService : Service() {
     private var lastNotificationText: String? = null
 
     private var remindJob: Job? = null
-    private var tone: ToneGenerator? = null
 
     /** 上一帧她是不是在屏幕上：用来抓「刚现身」那一刻报每日一句。 */
     private var wasShown = false
-
-    /** 上次向模型要台词的时间：冷却用，免得连点她一直烧模型。 */
-    private var lastLineAt = 0L
 
     private val foregroundObserver = object : DefaultLifecycleObserver {
         override fun onStart(owner: LifecycleOwner) {
@@ -325,7 +313,6 @@ class PetOverlayService : Service() {
                         PetEasterEgg.showRandom(this, PetOverlay.readRole(this))
                 }
             }
-            pet.onSpeakRequest = { requestLine() }
         }
         always.value = prefs().getBoolean(PetOverlay.KEY_ALWAYS, true)
         hidden.value = prefs().getBoolean(PetOverlay.KEY_HIDDEN, false)
@@ -400,7 +387,6 @@ class PetOverlayService : Service() {
                     remindJob = scope.launch {
                         delay(WAIT_REMIND_MS)
                         overlay.say(getString(R.string.pet_agent_waiting))
-                        ringBell()
                     }
                 }
         }
@@ -517,7 +503,6 @@ class PetOverlayService : Service() {
             else -> getString(R.string.pet_bg_failed, name)
         }
         overlay.say(line)
-        ringBell()
     }
 
     /** 把后台任务那一行并到已有状态下面；没有后台任务就不加空行。 */
@@ -533,40 +518,6 @@ class PetOverlayService : Service() {
         scope.launch {
             val line = PetDailyBrief.take(this@PetOverlayService) ?: return@launch
             overlay.say(line, holdMs = 9_000L)
-        }
-    }
-
-    /**
-     * 点她说话：带记忆去问一句。
-     *
-     * 生成失败、超时、或刚生成过（冷却，免得连点她一直烧模型）都退化成写死的台词——
-     * 宁可说老词，不能张嘴却没有话。
-     */
-    private fun requestLine() {
-        val now = System.currentTimeMillis()
-        if (now - lastLineAt < LINE_COOLDOWN_MS) {
-            overlay.speakStaticLine()
-            return
-        }
-        lastLineAt = now
-        scope.launch {
-            val scene = getString(R.string.pet_scene_tap)
-            val line = withTimeoutOrNull(LINE_TIMEOUT_MS) { petVoice.line(scene) }
-            if (line.isNullOrBlank()) {
-                overlay.speakStaticLine()
-            } else {
-                PetMoodStore.markSaid(this@PetOverlayService, line)
-                overlay.say(line, wave = true)
-            }
-        }
-    }
-
-    /** 摇铃：通知流量的短提示音，不占 TTS（避免和通话/朗读撞）。 */
-    private fun ringBell() {
-        runCatching {
-            val player = tone ?: ToneGenerator(AudioManager.STREAM_NOTIFICATION, 85)
-                .also { tone = it }
-            player.startTone(ToneGenerator.TONE_PROP_BEEP2, 250)
         }
     }
 
@@ -669,7 +620,6 @@ class PetOverlayService : Service() {
                 return@launch
             }
             overlay.say(getString(R.string.pet_shot_sent), holdMs = 5_000L)
-            ringBell()
             sendShotToSession(pending)
         }
     }
@@ -805,8 +755,6 @@ class PetOverlayService : Service() {
         running = false
         collectorJob?.cancel()
         remindJob?.cancel()
-        runCatching { tone?.release() }
-        tone = null
         runCatching { ProcessLifecycleOwner.get().lifecycle.removeObserver(foregroundObserver) }
         runCatching { overlay.release() }
         scope.cancel()

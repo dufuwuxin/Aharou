@@ -173,7 +173,7 @@ export default defineConfig({
           items: [
             { text: '容器与镜像', link: '/guide/container' },
             { text: '环境变量', link: '/guide/env-vars' },
-            { text: '远程 SSH 模式', link: '/guide/remote-ssh' },
+            { text: '远程 SSH 历史兼容', link: '/guide/remote-ssh' },
             { text: '网络代理', link: '/guide/proxy' },
             { text: 'Shizuku 执行后端', link: '/guide/shizuku' },
             { text: '影子屏', link: '/guide/shadow-screen' }

@@ -206,9 +206,15 @@ class ContainerSettingsRepository @Inject constructor(
     }
 
 
-    /** 当前选中的 profile id；无值时默认内置 Ubuntu。 */
+    /** 当前可执行的本地 profile；历史远程 profile 保留存储，但不再激活。 */
     val activeProfileIdFlow: Flow<String> = context.containerDataStore.data.map { prefs ->
-        ContainerProfile.normalizeId(prefs[ACTIVE_PROFILE_ID_KEY]?.takeIf { it.isNotBlank() } ?: ContainerProfile.BUILTIN_ID)
+        val id = ContainerProfile.normalizeId(prefs[ACTIVE_PROFILE_ID_KEY]?.takeIf { it.isNotBlank() } ?: ContainerProfile.BUILTIN_ID)
+        val profiles = prefs[CUSTOM_PROFILES_KEY]?.let { raw ->
+            runCatching { json.decodeFromString(profileSerializer, raw) }.getOrNull()
+        }.orEmpty()
+        val active = profiles.firstOrNull { it.id == id }
+            ?: ContainerProfile.BUILTIN_UBUNTU.takeIf { it.id == id }
+        if (active?.mode == ExecutionMode.REMOTE_SSH) ContainerProfile.BUILTIN_ID else id
     }
 
     /**
@@ -218,12 +224,24 @@ class ContainerSettingsRepository @Inject constructor(
      * 只有用户显式 add 过的工作区才会用别的容器。
      */
     val workspaceProfilesFlow: Flow<Map<String, String>> = context.containerDataStore.data.map { prefs ->
-        decodeWorkspaceProfiles(prefs[WORKSPACE_PROFILES_KEY])
+        val localProfileIds = (prefs[CUSTOM_PROFILES_KEY]?.let { raw ->
+            runCatching { json.decodeFromString(profileSerializer, raw) }.getOrNull()
+        }.orEmpty() + ContainerProfile.BUILTIN_UBUNTU)
+            .filter { it.mode == ExecutionMode.LOCAL_PROOT }
+            .map { it.id }
+            .toSet()
+        decodeWorkspaceProfiles(prefs[WORKSPACE_PROFILES_KEY]).filterValues { it in localProfileIds }
     }
 
     /** 远程模式下的默认容器 id；无值时默认内置 Ubuntu。 */
     val defaultContainerIdFlow: Flow<String> = context.containerDataStore.data.map { prefs ->
-        ContainerProfile.normalizeId(prefs[DEFAULT_CONTAINER_ID_KEY]?.takeIf { it.isNotBlank() } ?: ContainerProfile.BUILTIN_ID)
+        val id = ContainerProfile.normalizeId(prefs[DEFAULT_CONTAINER_ID_KEY]?.takeIf { it.isNotBlank() } ?: ContainerProfile.BUILTIN_ID)
+        val profiles = prefs[CUSTOM_PROFILES_KEY]?.let { raw ->
+            runCatching { json.decodeFromString(profileSerializer, raw) }.getOrNull()
+        }.orEmpty()
+        val selected = profiles.firstOrNull { it.id == id }
+            ?: ContainerProfile.BUILTIN_UBUNTU.takeIf { it.id == id }
+        if (selected?.mode == ExecutionMode.REMOTE_SSH) ContainerProfile.BUILTIN_ID else id
     }
 
     /** 用户自定义 profile 列表（不含内置）。解析失败回退空列表。 */
@@ -251,11 +269,19 @@ class ContainerSettingsRepository @Inject constructor(
     }
 
     suspend fun setActiveProfile(id: String) {
-        context.containerDataStore.edit { it[ACTIVE_PROFILE_ID_KEY] = ContainerProfile.normalizeId(id) }
+        val normalized = ContainerProfile.normalizeId(id)
+        val profile = customProfilesFlow.first().firstOrNull { it.id == normalized }
+            ?: ContainerProfile.BUILTIN_UBUNTU.takeIf { it.id == normalized }
+        val executableId = if (profile?.mode == ExecutionMode.REMOTE_SSH) ContainerProfile.BUILTIN_ID else normalized
+        context.containerDataStore.edit { it[ACTIVE_PROFILE_ID_KEY] = executableId }
     }
 
     suspend fun setDefaultContainerId(id: String) {
-        context.containerDataStore.edit { it[DEFAULT_CONTAINER_ID_KEY] = ContainerProfile.normalizeId(id) }
+        val normalized = ContainerProfile.normalizeId(id)
+        val profile = customProfilesFlow.first().firstOrNull { it.id == normalized }
+            ?: ContainerProfile.BUILTIN_UBUNTU.takeIf { it.id == normalized }
+        val localId = if (profile?.mode == ExecutionMode.REMOTE_SSH) ContainerProfile.BUILTIN_ID else normalized
+        context.containerDataStore.edit { it[DEFAULT_CONTAINER_ID_KEY] = localId }
     }
 
     /**
@@ -264,6 +290,10 @@ class ContainerSettingsRepository @Inject constructor(
      */
     suspend fun putWorkspaceProfile(workspacePath: String, profileId: String) {
         val key = ContainerWorkspaceKeys.normalize(workspacePath) ?: return
+        val normalizedId = ContainerProfile.normalizeId(profileId)
+        val selected = customProfilesFlow.first().firstOrNull { it.id == normalizedId }
+            ?: ContainerProfile.BUILTIN_UBUNTU.takeIf { it.id == normalizedId }
+        if (selected?.mode == ExecutionMode.REMOTE_SSH) return
         context.containerDataStore.edit { prefs ->
             val current = decodeWorkspaceProfiles(prefs[WORKSPACE_PROFILES_KEY])
             prefs[WORKSPACE_PROFILES_KEY] = json.encodeToString(

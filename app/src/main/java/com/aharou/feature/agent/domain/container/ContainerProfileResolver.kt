@@ -53,7 +53,9 @@ class ContainerProfileResolver @Inject constructor(
         // 只在 activeProfileId 发射时算一次会永远停在启动时的内置 Ubuntu。
         CoroutineScope(Dispatchers.IO).launch {
             containerSettingsRepository.customProfilesFlow.collect { profiles ->
-                customProfiles = profiles
+                customProfiles = profiles.filter {
+                    it.mode == com.aharou.feature.settings.data.repository.ExecutionMode.LOCAL_PROOT
+                }
                 refreshDefaultProfile()
             }
         }

@@ -53,9 +53,9 @@ Entries marked with a version (e.g. "since v1.11.0-dev") were introduced in that
 
 | Entry | Description |
 | --- | --- |
-| Container & images | Local Linux container, environment health check with one-tap install, custom images, mounting phone directories, remote SSH backend |
+| Container & images | Local Linux container, environment health check with one-tap install, custom images, mounting phone directories |
 | Network proxy | Global proxy and vendor-level proxy (since v1.11.0-dev) |
-| Connections & sync | SFTP / FTP channels, workspace sync, built-in FTP server |
+| Legacy SSH data compatibility | Legacy SSH profiles and connection records are retained as history and do not enable remote execution |
 | Host execution backend | Run system commands and read/write `/sdcard` — as root (uid 0) when root is granted, otherwise as adb shell via Shizuku (uid 2000) |
 | Shadow screen | A virtual display that is not shown on the phone screen; the agent can launch apps, take screenshots and tap inside it |
 | Environment variables | Global environment variables injected into every process in the container (values stored encrypted) |

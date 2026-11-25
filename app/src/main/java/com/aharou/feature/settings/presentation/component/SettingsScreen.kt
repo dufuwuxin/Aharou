@@ -243,7 +243,6 @@ fun SettingsScreen(
     val activeProfileId by viewModel.activeProfileId.collectAsStateWithLifecycle()
     val defaultContainerId by viewModel.defaultContainerId.collectAsStateWithLifecycle()
     val containerOsMap by viewModel.containerOsMap.collectAsStateWithLifecycle()
-    val remoteConnections by viewModel.remoteConnections.collectAsStateWithLifecycle()
     val tokenStats by viewModel.tokenStats.collectAsStateWithLifecycle()
     val containerAnnouncementText by viewModel.containerAnnouncementText.collectAsStateWithLifecycle()
     val containerAnnouncementOutdated by viewModel.containerAnnouncementOutdated.collectAsStateWithLifecycle()
@@ -1058,7 +1057,6 @@ fun SettingsScreen(
                         },
                         resetState = containerReset, onRestoreBuiltin = { viewModel.restoreBuiltinAlpine() },
                         onOpenSources = { section = SettingsSection.ContainerSources },
-                        remoteConnections = remoteConnections,
                         onRuntimeBackendChange = viewModel::editCustomContainerProfile,
                         onReorder = viewModel::reorderContainerProfiles
                     )

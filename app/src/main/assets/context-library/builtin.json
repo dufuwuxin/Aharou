@@ -182,15 +182,6 @@
       "folder": "辅助请求", "requestKey": "agent/skill-categorize.md"
     },
     {
-      "id": "pet-line",
-      "title": "伙伴短句请求",
-      "description": "从当前场景生成简短中文回应，不恢复旧人格。",
-      "content": "针对用户给出的当前场景，用自然、友善的中文说一句简短回应。只用提供的事实，不编造记忆、关系或已经发生的行为。只返回一句话。",
-      "category": "RULE",
-      "loading": "SEARCH",
-      "folder": "辅助请求", "requestKey": "agent/pet-line.md"
-    },
-    {
       "id": "project-init",
       "title": "项目初始化请求",
       "description": "根据实际仓库信息建立必要的项目说明。",

@@ -2,17 +2,17 @@
 
 In Aharou, the place where the AI runs commands is called the "container". The entry point is "Settings → Container & Images"; the list is single-select — whichever one you pick is where the AI's commands, file reads and writes, and terminal all run.
 
-Backends come in two kinds: a **local container** (runs a Linux system on your phone) and **remote SSH** (runs on your own server). You must pick one of them. For remote mode, see [Remote SSH mode](/guide/remote-ssh).
+The current execution backend is a **local container** running a Linux system on your phone. Legacy remote SSH profiles are retained only as historical data and are not executable.
 
 ## Container List
 
-Each row is one container config, with a source badge after the name: Built-in, Custom, SSH, told apart by color; the current default container also carries a **"Default" badge**, and the edit dialog has a "Set as default container" switch (local containers only). The default container is where local MCP and similar services run in remote workspace mode, and it is the built-in Alpine unless you change it.
+Each row is one container config, with a source badge after the name: Built-in or Custom; the current default container also carries a **"Default" badge**, and the edit dialog has a "Set as default container" switch. The built-in Alpine is the default unless you change it.
 
 Three operations work the same for every container:
 
 - **Edit**: the pencil icon at the end of the row.
 - **Reset**: the refresh icon at the top-right of the edit dialog. This is destructive — it deletes the tools and configs installed in the container and asks for confirmation; as with switching containers, all running AI sessions and terminal tabs close once you confirm. Deleting a large container with a lot installed takes tens of seconds; during that time "Cleaning Container Data" appears and shows the number of items removed in real time, then closes automatically, so the UI never freezes.
-- **Delete**: swipe the row left to reveal the red delete button. Deleting a local image also clears its rootfs to free space (with the same progress display); deleting a remote SSH config only removes the config and leaves the data on the server alone.
+- **Delete**: swipe the row left to reveal the red delete button. Deleting a local image also clears its rootfs to free space (with the same progress display); legacy SSH profiles are retained only for historical data compatibility.
 
 The built-in Alpine can be deleted too. If you delete everything, the list shows an empty state with a button that restores the built-in Alpine in one tap, so there's no need to worry about deleting it by mistake.
 
@@ -256,7 +256,7 @@ The inbox identity is the full workspace path: renaming or moving the directory 
 :::
 
 ::: warning Local workspaces only
-The inbox lives in the shared area (`/root/shared` in the container). A remote SSH workspace's `~/shared` lives on the server and is a different directory, so remote workspaces don't take part in the inbox for now.
+The inbox lives in the shared area (`/root/shared` in the local container).
 :::
 
 ## What Happens If You Delete Everything

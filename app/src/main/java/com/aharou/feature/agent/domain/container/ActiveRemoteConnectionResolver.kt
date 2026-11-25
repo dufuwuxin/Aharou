@@ -53,15 +53,7 @@ class ActiveRemoteConnectionResolver @Inject constructor(
     ): RemoteConnectionConfig? {        val profile = profiles.firstOrNull { it.id == activeId }
             ?: ContainerProfile.BUILTIN_UBUNTU.takeIf { it.id == activeId }
             ?: return null
-        val ssh = profile.rootfsSource as? RootfsSource.RemoteSsh ?: return null
-        val conn = connections.firstOrNull { it.id == ssh.connectionId } ?: return null
-        return RemoteConnectionConfig(
-            host = conn.host,
-            port = conn.port,
-            username = conn.username,
-            auth = conn.toRemoteAuth(),
-            remoteWorkspacePath = normalizeRemoteWorkspacePath(ssh.remoteWorkspacePath, conn.username)
-        )
+        return null
     }
 
     /**

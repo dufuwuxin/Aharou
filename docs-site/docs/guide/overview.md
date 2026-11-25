@@ -81,9 +81,9 @@
 
 | 入口 | 说明 |
 | --- | --- |
-| 容器与镜像 | 默认 Ubuntu 24.04 LTS 原生 ARM64 容器（不含 Alpine、不做跨架构转译）、环境体检与一键补装、自定义镜像、挂载手机目录、远程 SSH 后端 → [文档](/guide/container) |
+| 容器与镜像 | 默认 Ubuntu 24.04 LTS 原生 ARM64 容器（不含 Alpine、不做跨架构转译）、环境体检与一键补装、自定义镜像、挂载手机目录 → [文档](/guide/container) |
 | 授权离线逆向分析 | 容器终端 `aicode → 环境安装`，补装基础分析工具并按需选择 jadx / apktool，不执行样本 → [文档](/guide/tools#安装离线分析环境) |
-| 远程 SSH 模式 | 把终端与 AI 命令放到另一台服务器上跑 → [文档](/guide/remote-ssh) |
+| 远程 SSH 历史兼容 | 旧版 SSH Profile 与连接记录的兼容边界 → [文档](/guide/remote-ssh) |
 | 网络代理 | 全局代理与供应商级代理（v1.11.0-dev 起）→ [文档](/guide/proxy) |
 | 宿主执行后端 | 执行系统命令、读写 /sdcard：使用 Shizuku（adb shell，uid 2000） → [文档](/guide/shizuku) |
 | 影子屏 | 不显示在屏幕上的虚拟显示屏，Agent 可在其中启动 App、截图、点按 → [文档](/guide/shadow-screen) |

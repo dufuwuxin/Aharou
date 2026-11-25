@@ -28,11 +28,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.ExposedDropdownMenuAnchorType
-import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -40,7 +36,6 @@ import com.aharou.core.ui.AdaptiveModalBottomSheet
 import com.aharou.core.ui.rememberSafeDocumentPicker
 import androidx.compose.material3.Surface
 import com.aharou.core.ui.AppSwitch
-import com.aharou.core.ui.SegmentedTabs
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -77,24 +72,20 @@ import com.aharou.feature.agent.domain.container.ContainerProfile
 import com.aharou.feature.agent.domain.container.ContainerRuntimeBackend
 import com.aharou.feature.agent.domain.container.RootfsSource
 import com.aharou.feature.settings.data.repository.ExecutionMode
-import com.aharou.feature.settings.data.repository.DEFAULT_REMOTE_WORKSPACE_ROOT
 import com.aharou.feature.settings.presentation.ContainerResetUiState
-import com.aharou.feature.workspace.domain.model.RemoteConnection
-import com.aharou.feature.workspace.domain.model.RemoteProtocol
 import compose.icons.FeatherIcons
 import compose.icons.feathericons.Check
 import compose.icons.feathericons.Edit3
 import compose.icons.feathericons.HardDrive
 import compose.icons.feathericons.Plus
 import compose.icons.feathericons.RefreshCw
-import compose.icons.feathericons.Server
 import compose.icons.feathericons.Trash2
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** 容器镜像二级页：管理本地镜像与 SSH profile，并按 profile 切换对应执行模式。 */
+/** 容器镜像二级页：管理和切换本地容器 Profile。 */
 @Composable
 internal fun ContainerSection(
     profiles: List<ContainerProfile>,
@@ -113,7 +104,6 @@ internal fun ContainerSection(
     /** 非 null 说明正在重置，界面弹不可取消的进度框直到删完。 */
     resetState: ContainerResetUiState? = null,
     onRestoreBuiltin: () -> Unit = {},
-    remoteConnections: List<RemoteConnection> = emptyList(),
     onRuntimeBackendChange: (ContainerProfile) -> Unit,
     onReorder: (fromIndex: Int, toIndex: Int) -> Unit = { _, _ -> }, onOpenSources: () -> Unit = {}
 ) {
@@ -168,7 +158,7 @@ internal fun ContainerSection(
                         active = profile.id == activeProfileId,
                         defaultContainerId = defaultContainerId,
                         osId = osMap[profile.id],
-                        subtitle = containerProfileSubtitle(context, profile, remoteConnections),
+                        subtitle = containerProfileSubtitle(context, profile),
                         onSelect = { if (profile.id != activeProfileId) pendingSwitch = profile },
                         onEdit = { editingProfile = profile },
                         onDelete = { deletingProfile = profile },
@@ -194,18 +184,13 @@ internal fun ContainerSection(
         ProfileEditSheet(
             initial = null,
             defaultContainerId = defaultContainerId,
-            remoteConnections = remoteConnections,
             onDismiss = {
                 showAddSheetInternal = false
                 onDismissAddSheet()
             },
             onConfirm = { profile, setDefault ->
                 val id = "custom-${System.currentTimeMillis()}"
-                val final = if (profile.mode == ExecutionMode.REMOTE_SSH) {
-                    profile.copy(id = id, name = profile.name.ifBlank { context.getString(R.string.container_remote_ssh) })
-                } else {
-                    profile.copy(id = id, name = profile.name.ifBlank { context.getString(R.string.container_custom_image) })
-                }
+                val final = profile.copy(id = id, name = profile.name.ifBlank { context.getString(R.string.container_custom_image) })
                 onSaveCustom(final)
                 if (setDefault) onSetDefaultContainer(final.id)
                 showAddSheetInternal = false
@@ -218,7 +203,6 @@ internal fun ContainerSection(
         ProfileEditSheet(
             initial = editing,
             defaultContainerId = defaultContainerId,
-            remoteConnections = remoteConnections,
             onDismiss = { editingProfile = null },
             onReset = { pendingReset = editing },
             onConfirm = { profile, setDefault ->
@@ -300,12 +284,10 @@ internal fun ContainerSection(
         )
     }
 }
-/** 删除确认的补充说明：内置可恢复、自定义本地清 rootfs、远程 SSH 无额外说明。 */
-private fun deleteHint(context: Context, profile: ContainerProfile): String = when {
-    profile.isBuiltin -> context.getString(R.string.container_builtin_restorable)
-    profile.mode == ExecutionMode.REMOTE_SSH -> ""
-    else -> context.getString(R.string.container_rootfs_will_be_cleared)
-}
+/** 删除确认的补充说明：内置容器可恢复，自定义本地容器会清理 rootfs。 */
+private fun deleteHint(context: Context, profile: ContainerProfile): String =
+    if (profile.isBuiltin) context.getString(R.string.container_builtin_restorable)
+    else context.getString(R.string.container_rootfs_will_be_cleared)
 
 /** 系统 logo 映射：已识别的系统返回对应单色图标，未知/未识别返回 null（调用方回退通用图标）。 */
 @Composable
@@ -366,7 +348,7 @@ private fun ContainerRow(
                     )
                 } else {
                     Icon(
-                        imageVector = if (profile.mode == ExecutionMode.REMOTE_SSH) FeatherIcons.Server else FeatherIcons.HardDrive,
+                        imageVector = FeatherIcons.HardDrive,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier
@@ -395,12 +377,6 @@ private fun ContainerRow(
                         SourceBadge(
                             text = stringResource(R.string.container_builtin_badge),
                             color = MaterialTheme.colorScheme.primary
-                        )
-                    } else if (profile.mode == ExecutionMode.REMOTE_SSH) {
-                        Spacer(modifier = Modifier.width(Spacing.xs))
-                        SourceBadge(
-                            text = stringResource(R.string.container_ssh_badge),
-                            color = MaterialTheme.colorScheme.secondary
                         )
                     } else {
                         Spacer(modifier = Modifier.width(Spacing.xs))
@@ -465,13 +441,12 @@ private fun SourceBadge(text: String, color: Color) {
     }
 }
 
-/** 添加/编辑镜像的 ModalBottomSheet，包含本地镜像字段与 SSH 通道选择。 */
+/** 添加/编辑本地容器镜像的底部弹层。 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ProfileEditSheet(
     initial: ContainerProfile?,
     defaultContainerId: String = ContainerProfile.BUILTIN_ID,
-    remoteConnections: List<RemoteConnection>,
     onDismiss: () -> Unit,
     onReset: (() -> Unit)? = null,
     onConfirm: (ContainerProfile, Boolean) -> Unit
@@ -482,15 +457,11 @@ private fun ProfileEditSheet(
     val screenHeight = configuration.screenHeightDp.dp
     val flingFix = rememberSheetFlingFix(sheetState)
     val localScrollState = rememberScrollState()
-    val remoteScrollState = rememberScrollState()
     val scope = rememberCoroutineScope()
     var importing by remember { mutableStateOf(false) }
-    // SFTP 通道才适合 SSH exec（FTP/LOCAL 不走 sshj）
-    val sshConnections = remoteConnections.filter { it.protocol == RemoteProtocol.SFTP }
     // 编辑内置 Alpine 时保持 Asset 来源（可选导入覆盖）
     val initialAsset = initial?.rootfsSource as? RootfsSource.Asset
 
-    var mode by remember { mutableStateOf(initial?.mode ?: ExecutionMode.LOCAL_PROOT) }
     var name by remember { mutableStateOf(initial?.name ?: "") }
     // 是否设为默认容器（仅本地镜像生效；默认容器是远程模式下本地 MCP 等服务的运行容器）
     var setAsDefault by remember { mutableStateOf(initial?.id == defaultContainerId) }
@@ -526,11 +497,6 @@ private fun ProfileEditSheet(
         arrayOf("*/*"),
         { Toast.makeText(context, R.string.document_picker_unavailable, Toast.LENGTH_LONG).show() },
     ) { uri -> pickedUri = uri.toString() }
-    // 远程 SSH 字段
-    val initialSsh = (initial?.rootfsSource as? RootfsSource.RemoteSsh)
-    var selectedConnId by remember { mutableStateOf(initialSsh?.connectionId ?: sshConnections.firstOrNull()?.id ?: "") }
-    var remotePath by remember { mutableStateOf(initialSsh?.remoteWorkspacePath ?: "") }
-    var connExpanded by remember { mutableStateOf(false) }
 
     AdaptiveModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -583,15 +549,6 @@ private fun ProfileEditSheet(
                 }
             }
 
-            // 本地镜像 / 远程 SSH 切换：与侧边栏共用同一份滑块分段控件；编辑时锁定——模式创建后不可改（本地切远程会丢 rootfs），换模式只能新建。
-            val modes = listOf(ExecutionMode.LOCAL_PROOT, ExecutionMode.REMOTE_SSH)
-            SegmentedTabs(
-                selected = modes.indexOf(mode).coerceAtLeast(0),
-                labels = listOf(stringResource(R.string.container_local_image), stringResource(R.string.container_remote_ssh)),
-                onSelect = { mode = modes[it] },
-                enabled = initial == null
-            )
-
             // 中间可滚动表单区域：通过 weight(1f) 撑满剩余高度，杜绝左右 tab 切换时高度跳动
             Box(
                 modifier = Modifier
@@ -599,11 +556,10 @@ private fun ProfileEditSheet(
                     .fillMaxWidth()
                     .nestedScroll(flingFix)
             ) {
-                if (mode == ExecutionMode.LOCAL_PROOT) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .verticalScroll(localScrollState),
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(localScrollState),
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         ContainerField(
@@ -620,7 +576,7 @@ private fun ProfileEditSheet(
 
                         ContainerRuntimeBackendRow(
                             profile = initial,
-                            mode = mode,
+                            mode = ExecutionMode.LOCAL_PROOT,
                             backend = runtimeBackend,
                             onBackendChange = { runtimeBackend = it }
                         )
@@ -720,67 +676,6 @@ private fun ProfileEditSheet(
                             )
                         }
                     }
-                } else {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .verticalScroll(remoteScrollState),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        ContainerField(
-                            value = name,
-                            onValueChange = { name = it },
-                            label = stringResource(R.string.common_name)
-                        )
-
-                        ExposedDropdownMenuBox(
-                            expanded = connExpanded,
-                            onExpandedChange = { connExpanded = !connExpanded }
-                        ) {
-                            val selectedName = sshConnections.firstOrNull { it.id == selectedConnId }?.name
-                                ?: stringResource(R.string.container_select_ssh_channel)
-                            ContainerField(
-                                value = selectedName,
-                                onValueChange = {},
-                                readOnly = true,
-                                label = stringResource(R.string.container_ssh_channel),
-                                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = connExpanded) },
-                                modifier = Modifier.menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
-                            )
-                            ExposedDropdownMenu(
-                                expanded = connExpanded,
-                                onDismissRequest = { connExpanded = false }
-                            ) {
-                                if (sshConnections.isEmpty()) {
-                                    DropdownMenuItem(
-                                        text = { Text(stringResource(R.string.container_no_sftp_channel)) },
-                                        onClick = { connExpanded = false }
-                                    )
-                                } else {
-                                    sshConnections.forEach { conn ->
-                                        DropdownMenuItem(
-                                            text = { Text("${conn.name} (${conn.host}:${conn.port})") },
-                                            onClick = {
-                                                selectedConnId = conn.id
-                                                if (remotePath.isBlank()) {
-                                                    remotePath = DEFAULT_REMOTE_WORKSPACE_ROOT
-                                                }
-                                                connExpanded = false
-                                            }
-                                        )
-                                    }
-                                }
-                            }
-                        }
-
-                        ContainerField(
-                            value = remotePath,
-                            onValueChange = { remotePath = it },
-                            label = stringResource(R.string.container_remote_workspace_path),
-                            placeholder = DEFAULT_REMOTE_WORKSPACE_ROOT
-                        )
-                    }
-                }
             }
 
             Spacer(modifier = Modifier.size(Spacing.xs))
@@ -796,7 +691,6 @@ private fun ProfileEditSheet(
                         bindingError = null
                         val profile = buildProfile(
                             initial = initial,
-                            mode = mode,
                             name = name,
                             shellPath = shellPath,
                             bindings = bindingsList
@@ -816,16 +710,14 @@ private fun ProfileEditSheet(
                                 .filter { it.first.isNotEmpty() }
                                 .toMap(),
                             runtimeBackend = runtimeBackend,
-                            pickedUri = finalUri,
-                            selectedConnId = selectedConnId,
-                            remotePath = remotePath
+                            pickedUri = finalUri
                         )
                         if (profile != null) {
                             onConfirm(profile, setAsDefault && profile.mode == ExecutionMode.LOCAL_PROOT)
                         }
                     }
                 },
-                enabled = !importing && canConfirm(mode, pickedUri, initialAsset, selectedConnId, sshConnections),
+                enabled = !importing && (pickedUri != null || initialAsset != null),
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(44.dp),
@@ -1127,62 +1019,29 @@ private fun PairListEditor(
  */
 private fun buildProfile(
     initial: ContainerProfile?,
-    mode: ExecutionMode,
     name: String,
     shellPath: String,
     bindings: List<String>,
     args: List<String>,
     env: Map<String, String>,
     runtimeBackend: ContainerRuntimeBackend,
-    pickedUri: String?,
-    selectedConnId: String,
-    remotePath: String
+    pickedUri: String?
 ): ContainerProfile? {
-    return when (mode) {
-        ExecutionMode.LOCAL_PROOT -> {
-            val assetSource = initial?.rootfsSource as? RootfsSource.Asset
-            val rootfsSource = if (pickedUri != null) RootfsSource.LocalFile(pickedUri) else assetSource ?: return null
-            ContainerProfile(
-                id = "", // 由调用方覆写
-                name = name,
-                rootfsSource = rootfsSource,
-                shellPath = shellPath.ifBlank { null },
-                extraBindings = bindings,
-                // 本地导入镜像默认注入 proot 参数；与用户手动添加走同一路径（extraArgs），拼接位置一致。
-                extraArgs = if (args.isEmpty() && rootfsSource is RootfsSource.LocalFile)
-                    ContainerProfile.DEFAULT_PROOT_ARGS else args,
-                env = env,
-                runtimeBackend = runtimeBackend,
-                isBuiltin = rootfsSource is RootfsSource.Asset,
-                mode = ExecutionMode.LOCAL_PROOT
-            )
-        }
-
-        ExecutionMode.REMOTE_SSH -> {
-            if (selectedConnId.isBlank()) return null
-            ContainerProfile(
-                id = "", // 由调用方覆写
-                name = name,
-                rootfsSource = RootfsSource.RemoteSsh(selectedConnId, remotePath),
-                shellPath = null,
-                isBuiltin = false,
-                mode = ExecutionMode.REMOTE_SSH,
-                runtimeBackend = ContainerRuntimeBackend.PROOT
-            )
-        }
-    }
-}
-
-/** 保存按钮可用条件：本地镜像需选了文件（编辑内置时保持内置也可保存），远程 SSH 需选了通道。 */
-private fun canConfirm(
-    mode: ExecutionMode,
-    pickedUri: String?,
-    initialAsset: RootfsSource.Asset?,
-    selectedConnId: String,
-    sshConnections: List<RemoteConnection>
-): Boolean = when (mode) {
-    ExecutionMode.LOCAL_PROOT -> pickedUri != null || initialAsset != null
-    ExecutionMode.REMOTE_SSH -> sshConnections.isNotEmpty() && selectedConnId.isNotBlank()
+    val assetSource = initial?.rootfsSource as? RootfsSource.Asset
+    val rootfsSource = if (pickedUri != null) RootfsSource.LocalFile(pickedUri) else assetSource ?: return null
+    return ContainerProfile(
+        id = "", // 由调用方覆写
+        name = name,
+        rootfsSource = rootfsSource,
+        shellPath = shellPath.ifBlank { null },
+        extraBindings = bindings,
+        extraArgs = if (args.isEmpty() && rootfsSource is RootfsSource.LocalFile)
+            ContainerProfile.DEFAULT_PROOT_ARGS else args,
+        env = env,
+        runtimeBackend = runtimeBackend,
+        isBuiltin = rootfsSource is RootfsSource.Asset,
+        mode = ExecutionMode.LOCAL_PROOT
+    )
 }
 
 /**

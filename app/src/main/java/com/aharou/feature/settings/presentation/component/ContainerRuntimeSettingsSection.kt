@@ -1,6 +1,5 @@
 package com.aharou.feature.settings.presentation.component
 
-import android.content.Context
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -17,7 +16,6 @@ import com.aharou.feature.agent.domain.container.ContainerProfile
 import com.aharou.feature.agent.domain.container.ContainerRuntimeBackend
 import com.aharou.feature.agent.domain.container.TawcrootRuntime
 import com.aharou.feature.settings.data.repository.ExecutionMode
-import com.aharou.feature.workspace.domain.model.RemoteConnection
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -76,12 +74,7 @@ internal fun ContainerRuntimeBackendRow(
     )
 }
 
-internal fun containerProfileSubtitle(context: Context, profile: ContainerProfile, connections: List<RemoteConnection>): String {
-    if (profile.mode == ExecutionMode.REMOTE_SSH) {
-        val ssh = profile.rootfsSource as? com.aharou.feature.agent.domain.container.RootfsSource.RemoteSsh
-        val connectionName = ssh?.connectionId?.let { id -> connections.firstOrNull { it.id == id }?.name }
-        return connectionName ?: context.getString(R.string.container_channel_deleted)
-    }
+internal fun containerProfileSubtitle(context: android.content.Context, profile: ContainerProfile): String {
     val shell = profile.shellPath?.ifBlank { null } ?: "/bin/sh"
     val backend = context.getString(
         if (TawcrootRuntime.enabled(profile)) R.string.container_runtime_backend_tawcroot

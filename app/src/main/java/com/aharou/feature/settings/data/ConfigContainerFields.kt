@@ -101,6 +101,7 @@ class ConfigContainerFields @Inject constructor(
 
     private fun profiles(): List<ContainerProfile> =
         runBlocking { containerSettings.customProfilesFlow.first() }
+            .filter { it.mode == ExecutionMode.LOCAL_PROOT }
 
     private fun profile(id: String): ContainerProfile? = profiles().firstOrNull { it.id == id }
 
@@ -286,25 +287,13 @@ class ConfigContainerFields @Inject constructor(
             val name = (obj["name"] as? ConfigValue.Str)?.value?.trim().orEmpty()
             if (name.isBlank()) throw ConfigError.InvalidValue("缺少 name")
 
-            val connectionId = (obj["connection_id"] as? ConfigValue.Str)?.value?.takeIf { it.isNotBlank() }
-            val remotePath = (obj["remote_workspace_path"] as? ConfigValue.Str)?.value?.trim().orEmpty()
+            if ((obj["connection_id"] as? ConfigValue.Str)?.value?.isNotBlank() == true ||
+                (obj["remote_workspace_path"] as? ConfigValue.Str)?.value?.isNotBlank() == true
+            ) throw ConfigError.InvalidValue("Remote SSH profiles are no longer executable")
             val rootfsUri = (obj["rootfs_uri"] as? ConfigValue.Str)?.value?.takeIf { it.isNotBlank() }
-
-            val source: RootfsSource = when {
-                connectionId != null -> {
-                    if (remotePath.isBlank()) {
-                        throw ConfigError.InvalidValue("远程 SSH profile 需要 remote_workspace_path")
-                    }
-                    RootfsSource.RemoteSsh(connectionId, remotePath)
-                }
-                rootfsUri != null -> RootfsSource.LocalFile(rootfsUri)
-                else -> throw ConfigError.InvalidValue("缺少镜像来源：需提供 rootfs_uri（本地 tar.gz）或 connection_id（远程 SSH）")
-            }
-            val mode = if (source is RootfsSource.RemoteSsh) {
-                ExecutionMode.REMOTE_SSH
-            } else {
-                ExecutionMode.LOCAL_PROOT
-            }
+                ?: throw ConfigError.InvalidValue("缺少 rootfs_uri（本地容器镜像）")
+            val source: RootfsSource = RootfsSource.LocalFile(rootfsUri)
+            val mode = ExecutionMode.LOCAL_PROOT
             val runtimeBackend = when (val value = obj["runtime_backend"]) {
                 null -> ContainerRuntimeBackend.PROOT
                 is ConfigValue.Str -> when (value.value) {

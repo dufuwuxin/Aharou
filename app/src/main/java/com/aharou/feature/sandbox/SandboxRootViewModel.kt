@@ -29,8 +29,9 @@ class SandboxRootViewModel @Inject constructor(
         containerSettingsRepository.activeProfileIdFlow,
         containerSettingsRepository.customProfilesFlow,
     ) { id, profiles ->
-        val profile = profiles.firstOrNull { it.id == id }
-            ?: profiles.firstOrNull()
+        val localProfiles = profiles.filter { it.mode == com.aharou.feature.settings.data.repository.ExecutionMode.LOCAL_PROOT }
+        val profile = localProfiles.firstOrNull { it.id == id }
+            ?: localProfiles.firstOrNull()
             ?: ContainerProfile.BUILTIN_UBUNTU
         containerInstaller.rootfsDirFor(profile)
     }.stateIn(

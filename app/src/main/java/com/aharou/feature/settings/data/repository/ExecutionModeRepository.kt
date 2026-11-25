@@ -40,15 +40,13 @@ class ExecutionModeRepository @Inject constructor(
         val MODE_KEY = stringPreferencesKey("execution_mode")
     }
 
-    /** 当前执行模式；无值时默认本地 PRoot。 */
-    val executionModeFlow: Flow<ExecutionMode> = context.executionModeDataStore.data.map { prefs ->
-        prefs[MODE_KEY]?.let {
-            runCatching { ExecutionMode.valueOf(it) }.getOrNull()
-        } ?: ExecutionMode.LOCAL_PROOT
+    /** 历史 REMOTE_SSH 偏好保留在磁盘，但远程执行能力退役后统一使用本地 PRoot。 */
+    val executionModeFlow: Flow<ExecutionMode> = context.executionModeDataStore.data.map {
+        ExecutionMode.LOCAL_PROOT
     }
 
     suspend fun setExecutionMode(mode: ExecutionMode) {
-        context.executionModeDataStore.edit { it[MODE_KEY] = mode.name }
+        context.executionModeDataStore.edit { it[MODE_KEY] = ExecutionMode.LOCAL_PROOT.name }
     }
 }
 

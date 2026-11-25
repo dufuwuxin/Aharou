@@ -7,7 +7,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.res.stringResource
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.aharou.R
-import com.aharou.feature.agent.domain.container.ConnectionState
 import com.aharou.feature.agent.presentation.StewardPanelViewModel
 
 internal val LocalProjectDiagnostics = staticCompositionLocalOf<(() -> Unit)?> { null }
@@ -19,7 +18,7 @@ internal fun ProjectChatMenuHost(
     sessionId: String?,
     onTerminal: () -> Unit, onGit: () -> Unit, onBrowser: () -> Unit,
     onSandbox: () -> Unit, onShared: () -> Unit, onDiagnostics: () -> Unit,
-    connectionState: ConnectionState?, inputTokens: Int, outputTokens: Int,
+    inputTokens: Int, outputTokens: Int,
     contextStatus: @Composable () -> Unit = {},
     unifiedDiagnostics: Boolean = false,
     content: @Composable () -> Unit
@@ -41,11 +40,6 @@ internal fun ProjectChatMenuHost(
         ).filterNot { unifiedDiagnostics && it.first == R.string.session_diagnostics_title }
             .forEach { (label, action) ->
             DropdownMenuItem(text = { Text(stringResource(label)) }, onClick = { dismiss(); action() })
-        }
-        if (connectionState != null) {
-            HorizontalDivider()
-            DropdownMenuItem(text = { ConnectionIndicator(connectionState) }, enabled = false, onClick = {})
-            DropdownMenuItem(text = { TokenStats(inputTokens, outputTokens) }, enabled = false, onClick = {})
         }
         ScheduledTaskPill(sessionId = sessionId)
     }

@@ -72,7 +72,6 @@ internal fun ChatHeader(
     onNavigateToSandbox: () -> Unit = {},
     onNavigateToShared: () -> Unit = {},
     onSessionDiagnostics: () -> Unit = {},
-    connectionState: com.aharou.feature.agent.domain.container.ConnectionState? = null,
     terminalActive: Boolean = false,
     gitActive: Boolean = false,
     browserActive: Boolean = false
@@ -162,22 +161,6 @@ internal fun ChatHeader(
                     }
                 }
             }
-            // 远程模式：左边 SSH 连接状态，右边 token 累计统计
-            if (connectionState != null) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = Spacing.md, vertical = Spacing.xs),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    ConnectionIndicator(state = connectionState)
-                    TokenStats(
-                        inputTokens = inputTokens,
-                        outputTokens = outputTokens
-                    )
-                }
-            }
             // 本地容器会话没有连接状态，胶囊不能挂在上面那个远程分支里。
             ScheduledTaskPill(sessionId = sessionId)
         }
@@ -220,39 +203,6 @@ private fun WorkbenchIconButton(
     }
 }
 
-@Composable
-internal fun ConnectionIndicator(
-    state: com.aharou.feature.agent.domain.container.ConnectionState
-) {
-    val (dotColor, text) = when (state) {
-        com.aharou.feature.agent.domain.container.ConnectionState.CONNECTED ->
-            MaterialTheme.colorScheme.primary to stringResource(R.string.chat_ssh_connected)
-        com.aharou.feature.agent.domain.container.ConnectionState.CONNECTING ->
-            MaterialTheme.colorScheme.tertiary to stringResource(R.string.chat_ssh_connecting)
-        com.aharou.feature.agent.domain.container.ConnectionState.FAILED ->
-            MaterialTheme.colorScheme.error to stringResource(R.string.chat_ssh_failed)
-        com.aharou.feature.agent.domain.container.ConnectionState.DISCONNECTED ->
-            MaterialTheme.colorScheme.outline to stringResource(R.string.chat_ssh_disconnected)
-    }
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(Spacing.xs)
-    ) {
-        Box(
-            modifier = Modifier
-                .size(6.dp)
-                .clip(CircleShape)
-                .background(dotColor)
-        )
-        Text(
-            text = text,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-    }
-}
 
 @Composable
 internal fun TokenStats(inputTokens: Int, outputTokens: Int) {
@@ -265,39 +215,6 @@ internal fun TokenStats(inputTokens: Int, outputTokens: Int) {
     )
 }
 
-@Composable
-internal fun RemoteConnectingPlaceholder(
-    state: com.aharou.feature.agent.domain.container.ConnectionState
-) {
-    val text = when (state) {
-        com.aharou.feature.agent.domain.container.ConnectionState.CONNECTING -> stringResource(R.string.chat_connecting_remote)
-        com.aharou.feature.agent.domain.container.ConnectionState.FAILED -> stringResource(R.string.chat_remote_connect_failed)
-        com.aharou.feature.agent.domain.container.ConnectionState.DISCONNECTED -> stringResource(R.string.chat_no_remote_connection)
-        com.aharou.feature.agent.domain.container.ConnectionState.CONNECTED -> ""
-    }
-    Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(Spacing.sm)
-        ) {
-            if (state == com.aharou.feature.agent.domain.container.ConnectionState.CONNECTING) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(28.dp),
-                    strokeWidth = 2.dp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            Text(
-                text = text,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-    }
-}
 
 @Composable
 internal fun WelcomeState(bottomReserve: Dp, modifier: Modifier = Modifier) {

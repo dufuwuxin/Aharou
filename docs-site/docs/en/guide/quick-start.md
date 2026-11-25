@@ -50,7 +50,7 @@ Back on the chat home, tap the model button in the toolbar below the input box a
 Go to "Settings → Runtime → Container & Images". Two choices:
 
 - **Local container** (default): uses the built-in Alpine Linux, nothing to configure.
-- **Remote SSH**: use a remote server as the execution backend (see Remote SSH mode in the full documentation).
+- **Local Linux container**: run commands, access files, and use the terminal in the on-device container (see [Container & images](/guide/container)).
 
 ::: tip Open the terminal once first
 The first-time container preparation (extracting the system, installing base tools) only triggers when you enter the **terminal page**. So go to the terminal from the title bar once, complete the initialization menu when prompted, and only then can the AI execute commands reliably.

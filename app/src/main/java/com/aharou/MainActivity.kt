@@ -153,14 +153,6 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var languageSettings: com.aharou.feature.settings.data.repository.LanguageSettingsRepository
 
-    /** App 回到前台时，远程模式下若 SSH 断了触发重连。 */
-    @Inject
-    lateinit var remoteSshConnection: com.aharou.feature.agent.domain.container.RemoteSshConnection
-
-    /** 全局主机指纹提醒：任意路径撞到未确认指纹时，App 根部弹「温柔提示」引导确认。 */
-    @Inject
-    lateinit var hostKeyVerifier: com.aharou.feature.agent.domain.container.SshHostKeyVerifier
-
     /** 外部分享文件的中转站；消费方在聊天面板。 */
     @Inject
     internal lateinit var sharedIntakeHolder: SharedIntakeHolder
@@ -168,9 +160,6 @@ class MainActivity : ComponentActivity() {
     /** 分享文件要经它写进当前工作区（本地映射到宿主工作区，远程落到远程）。 */
     @Inject
     lateinit var fileAccessProvider: FileAccessProvider
-
-    @Inject
-    lateinit var executionModeHolder: com.aharou.feature.settings.data.repository.ExecutionModeHolder
 
     /** 三端（UI/AI Bash/交互终端）git 缺凭据统一弹窗桥：在 AIEditorApp 启动后监听 helper 的文件 IPC 请求。 */
     @Inject
@@ -337,9 +326,6 @@ class MainActivity : ComponentActivity() {
                             bridge = credentialRequestBridge
                         )
                         // 全局主机指纹确认：任意路径撞到未确认的 SSH 指纹时温柔引导确认（而非默默失败）。
-                        com.aharou.feature.workspace.presentation.remote.HostKeyGlobalAlert(
-                            verifier = hostKeyVerifier
-                        )
                         if (bgPath != null && bgAlpha > 0f) {
                             val screen = LocalView.current
                             val bitmap by produceState<ImageBitmap?>(initialValue = null, bgPath) {
@@ -386,11 +372,6 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         // 远程模式回到前台时，若 SSH 断了立即触发重连，不等 supervisor 轮询
-        if (executionModeHolder.currentMode() == com.aharou.feature.settings.data.repository.ExecutionMode.REMOTE_SSH) {
-            lifecycleScope.launch {
-                runCatching { remoteSshConnection.tryReconnectIfDisconnected() }
-            }
-        }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {

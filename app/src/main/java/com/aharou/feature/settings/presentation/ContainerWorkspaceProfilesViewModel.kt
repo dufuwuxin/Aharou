@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.aharou.feature.agent.domain.container.ContainerProfile
 import com.aharou.feature.agent.domain.container.ContainerWorkspaceKeys
 import com.aharou.feature.settings.data.repository.ContainerSettingsRepository
+import com.aharou.feature.settings.data.repository.ExecutionMode
 import com.aharou.feature.workspace.data.repository.WorkspaceRepository
 import com.aharou.feature.workspace.domain.model.WorkspaceType
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -39,8 +40,7 @@ data class ContainerWorkspaceProfilesUiState(
  * 「容器 → 工作区运行环境」分区状态。
  *
  * 只读 `container.workspace_profiles` 覆盖表，写也只写这张表；全局默认（`container.active_profile`）
- * 在别处维护，这里只拿来显示「跟随全局（X）」。远程工作区走 SSH 执行，本地容器覆盖对它没有意义，
- * 列表里不出现。
+ * 在别处维护，这里只拿来显示「跟随全局（X）」。远程工作区不参与本地容器覆盖，列表里不出现。
  */
 @HiltViewModel
 class ContainerWorkspaceProfilesViewModel @Inject constructor(
@@ -54,10 +54,11 @@ class ContainerWorkspaceProfilesViewModel @Inject constructor(
         containerSettings.activeProfileIdFlow,
         containerSettings.workspaceProfilesFlow,
     ) { workspaces, customProfiles, activeId, overrides ->
-        val profiles = if (customProfiles.any { it.id == ContainerProfile.BUILTIN_ID }) {
-            customProfiles
+        val localProfiles = customProfiles.filter { it.mode == ExecutionMode.LOCAL_PROOT }
+        val profiles = if (localProfiles.any { it.id == ContainerProfile.BUILTIN_ID }) {
+            localProfiles
         } else {
-            listOf(ContainerProfile.BUILTIN_UBUNTU) + customProfiles
+            listOf(ContainerProfile.BUILTIN_UBUNTU) + localProfiles
         }
         val defaultName = profiles.firstOrNull { it.id == activeId }?.name
             ?: profiles.firstOrNull()?.name

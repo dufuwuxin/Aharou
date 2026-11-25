@@ -3,7 +3,6 @@ package com.aharou.feature.settings.presentation
 import android.app.Application
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.Column
-import androidx.compose.ui.test.assertDoesNotExist
 import androidx.compose.ui.test.assertHasNoClickAction
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
@@ -68,9 +67,10 @@ class ProviderConcurrencyLimitSectionTest {
         compose.onNodeWithTag("provider_concurrency_row").assertHasNoClickAction()
         val toggle = compose.onNodeWithTag("provider_concurrency_toggle")
         val field = compose.onNodeWithTag("provider_concurrency_input")
-        toggle.assertIsOff().performClick()
         field.assertDoesNotExist()
+        toggle.assertIsOff().performClick()
         toggle.assertIsOn()
+        field.assertExists()
         field.performTextReplacement("12")
         compose.runOnIdle { assertEquals(12, limit) }
         compose.runOnIdle { limit = 7 }
