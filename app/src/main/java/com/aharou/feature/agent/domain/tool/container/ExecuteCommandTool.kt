@@ -267,8 +267,7 @@ class ExecuteCommandTool @Inject constructor(
      * 其最终结果与 [execute] 等价（同样经 [BoundedOutput] 限幅：超大输出仅保留开头+结尾，
      * 再经 [toModelOutput] 清洗），保证喂回模型的内容一致且不会撑爆上下文。
      *
-     * 注意 [ToolStreamEvent.Progress] 逐行发给的是原始行（未清洗），供聊天里实时看进度；
-     * 清洗只作用于最终回给模型的文本。
+     * 聊天中的 [ToolStreamEvent.Progress] 与最终结果都在回传前按本次执行的环境快照脱敏。
      */
     override fun executeStream(
         args: Map<String, JsonElement>,

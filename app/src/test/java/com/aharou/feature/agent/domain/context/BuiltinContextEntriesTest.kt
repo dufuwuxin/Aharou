@@ -33,16 +33,18 @@ class BuiltinContextEntriesTest {
         File("app/src/main/assets/context-library/builtin.json")).first { it.isFile }
     private val auditIds = setOf("aharou-public-asset-review", "aharou-asset-relations")
     private val auditTitles = setOf("Aharou 公开资产核对", "Aharou 资产关系整理")
+    private val promptDesignIds = setOf("oh-my-pi-prompt-design", "oh-my-pi-semantic-compression")
+    private val promptDesignTitles = setOf("提示词与工具描述设计", "提示词语义压缩保真检查")
     private val executionIds = setOf("main-execution-contract", "member-execution-contract", "execution-source-map",
         "archive-execution-supplement", "crosscheck-system-request", "steward-judge-system-request",
         "steward-judge-input-request", "mobile-operator-system-request",
         "mobile-operator-format-retry-request", "mobile-operator-input-request",
-        "project-task-context-rules-request", "project-task-context-slot")
+        "project-task-context-rules-request", "project-task-context-slot") + promptDesignIds
     private val auxiliaryPromptIds = listOf("crosscheck-system-request", "steward-judge-system-request",
         "steward-judge-input-request", "mobile-operator-system-request",
         "mobile-operator-format-retry-request", "mobile-operator-input-request")
     private val changedSeedOrder = listOf("archive-execution-supplement") + auxiliaryPromptIds + listOf(
-        "project-task-context-rules-request", "project-task-context-slot") + auditIds
+        "project-task-context-rules-request", "project-task-context-slot") + auditIds + promptDesignIds
     private val legacyRecordedIds = setOf("main-foundation", "member-foundation", "title-request",
         "main-tool-directory", "member-tool-directory")
     private fun seeds() = BuiltinContextEntries(File(temp.root, ".context-defaults-v1")) { asset.readText() }
@@ -64,6 +66,14 @@ class BuiltinContextEntriesTest {
                 it.content.length <= ContextLibraryPlanner.FULL_ENTRY_CHARS
         })
         assertEquals(32, defaults.count { it.requestKey != null })
+        val promptDesignEntries = defaults.filter { it.id in promptDesignIds }
+        assertEquals(promptDesignIds, promptDesignEntries.map { it.id }.toSet())
+        assertEquals(promptDesignTitles, promptDesignEntries.map { it.title }.toSet())
+        assertTrue(promptDesignEntries.all {
+            it.category == ContextCategory.RULE && it.loading == ContextLoad.SEARCH &&
+                it.requestKey == null && it.folder == "执行机制" && it.worldbook.priority == -1
+        })
+        assertTrue(promptDesignEntries.all { it.content.contains("oh-my-pi main@4df653426f40ee1eb78ef408528eb9e6a5275b9d") })
         assertEquals(auxiliaryPromptIds, defaults.filter { it.id in auxiliaryPromptIds }.map { it.id })
         assertEquals(changedSeedOrder, defaults.filter { it.id in changedSeedOrder }.map { it.id })
         defaults.filter { it.id in changedSeedOrder }.forEach { assertEquals(-1, it.worldbook.priority) }
@@ -332,7 +342,7 @@ class BuiltinContextEntriesTest {
         val library = ContextLibraryRepository(memory, seeds())
         val first = library.list(null)
         val auxiliaryTitles = defaults.filter { it.id in auxiliaryPromptIds }.map { it.title }.toSet()
-        assertEquals(setOf(main.title, member.title, sourceMap.title, archiveSource.title) + projectPromptTitles + auxiliaryTitles + auditTitles,
+        assertEquals(setOf(main.title, member.title, sourceMap.title, archiveSource.title) + projectPromptTitles + auxiliaryTitles + auditTitles + promptDesignTitles,
             first.map { it.title }.toSet())
         assertEquals(bytes, File(existing.sourceLabel).readText())
         assertEquals(existing, first.single { it.title == main.title })
@@ -342,7 +352,7 @@ class BuiltinContextEntriesTest {
         assertTrue(library.delete(first.single { it.title == mobilePrompt.title }, null))
         val recorded = receipt.readText()
         val next = ContextLibraryRepository(memory, seeds()).list(null)
-        assertEquals(setOf(main.title, "用户改名契约", archiveSource.title) + projectPromptTitles + auxiliaryTitles + auditTitles - mobilePrompt.title,
+        assertEquals(setOf(main.title, "用户改名契约", archiveSource.title) + projectPromptTitles + auxiliaryTitles + auditTitles + promptDesignTitles - mobilePrompt.title,
             next.map { it.title }.toSet())
         assertEquals("用户已有契约", next.single { it.title == main.title }.content)
         assertEquals("用户改写正文", next.single { it.title == "用户改名契约" }.content)
@@ -484,6 +494,23 @@ class BuiltinContextEntriesTest {
         verify(exactly = 1) { store.record(null, roleText) }
     }
 
+    @Test fun promptDesignRulesAreSearchableButNotInjectedAfterLegacyUpgrade() {
+        legacyReceipt()
+        val memory = memories()
+        val library = ContextLibraryRepository(memory, seeds())
+        val preview = library.preview(null, promptDesignTitles.joinToString(" "), "prompt-design")
+        for (title in promptDesignTitles) {
+            val found = library.search(title, null).single { it.title == title }
+            assertEquals(ContextCategory.RULE, found.category)
+            assertEquals(ContextLoad.SEARCH, found.loading)
+            assertNull(found.requestKey)
+            assertEquals(found.content, memory.loadContent(title, null, MemoryScope.GLOBAL))
+            assertFalse(preview.rendered.contains(title))
+            assertTrue(library.delete(found, null))
+            assertTrue(ContextLibraryRepository(memory, seeds()).search(title, null).none { it.title == title })
+        }
+    }
+
     @Test fun realManifestAuditEntriesStaySearchOnlyAndUserOwnedOnFreshInstall() {
         assertAuditLifecycle(legacy = false)
     }
@@ -557,7 +584,7 @@ class BuiltinContextEntriesTest {
     @Test fun realManifestAuditEntriesUpgradeCompleteReceiptAndDirectDeletionSurvivesNewRepositories() {
         val defaults = seeds().defaults()
         val oldIds = defaults.filter { it.id !in auditIds }.map { it.id }
-        assertEquals(44, oldIds.size)
+        assertEquals(46, oldIds.size)
         val receipt = File(temp.root, ".context-defaults-v1")
         receipt.writeText("version=1\n" + oldIds.joinToString("\n") + "\n")
         val library = ContextLibraryRepository(memories(), seeds())

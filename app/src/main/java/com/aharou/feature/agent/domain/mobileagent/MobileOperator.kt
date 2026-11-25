@@ -19,6 +19,7 @@ import com.aharou.feature.agent.domain.provider.AIResponse
 import com.aharou.feature.agent.domain.provider.AnthropicAdapter
 import com.aharou.feature.agent.domain.provider.GeminiAdapter
 import com.aharou.feature.agent.domain.provider.OpenAIAdapter
+import com.aharou.feature.agent.domain.provider.ProviderRequestLimiter
 import com.aharou.feature.agent.domain.provider.fixedTemperature
 import com.aharou.feature.agent.domain.session.SessionUseCase
 import com.aharou.feature.agent.domain.subagent.AgentDefinitionRepository
@@ -108,6 +109,7 @@ class MobileOperator @Inject constructor(
     @param:ApplicationContext private val context: Context,
     private val traceStore: MobileTraceStore,
     private val aiProviderRepository: AIProviderRepository,
+    private val providerRequestLimiter: ProviderRequestLimiter,
     private val openAIApi: OpenAIApi,
     private val anthropicApi: AnthropicApi,
     private val geminiApi: GeminiApi,
@@ -530,7 +532,7 @@ class MobileOperator @Inject constructor(
         provider.firstByteTimeoutMs = generalSettingsRepository.firstByteTimeoutMs()
         provider.streamIdleTimeoutMs = generalSettingsRepository.streamIdleTimeoutMs()
         provider.maxNetworkRetries = generalSettingsRepository.maxNetworkRetries()
-        return provider
+        return providerRequestLimiter.wrap(config.id, config.maxConcurrentRequests, provider)
     }
 
     companion object {

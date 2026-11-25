@@ -454,6 +454,30 @@
       "worldbook": {
         "priority": -1
       }
+    },
+    {
+      "id": "oh-my-pi-prompt-design",
+      "worldbook": {
+        "priority": -1
+      },
+      "title": "提示词与工具描述设计",
+      "description": "编写或审核 system prompt、工具描述、成员约定时读取；检查静态/动态边界、工具职责、参数契约与可验证反例。",
+      "content": "适用：修改系统提示、工具描述/schema 说明或成员任务提示时先读。只改会影响模型选择、参数或错误处理的内容。\n结构：工具说明讲何时/为何使用、输入形状、输出与调用者可处理的失败；执行算法、缓存、重试和权限仍由代码负责。参数名、类型、必填与枚举以发送给模型的真实 schema 为准；文字不得与 schema 冲突，也不重复 schema 已明确表达的内容。\n缓存前缀：稳定的系统约定、工具定义和固定规则保持顺序；工作区动态信息、检索结果与本轮任务放后部。不得为提高缓存率重排用户历史、消息语义、工具结果或真实执行顺序。只有供应商 usage 中的 cached tokens 才是缓存命中证据；本地字符串/Token 估算只能标估算，不宣称节省或命中。\n验收：用一个正常请求和至少一个误用/失败用例，检查模型能选对工具、遵守参数边界并处理真实错误；若改动声称省 token，固定模型、schema、样本和测量口径，对照供应商 usage；数据缺失写“暂无数据”。修改前后的文案由独立复核者按原行为逐条核对；不能仅凭模型“应该能推断”删除默认值、例外、单位、失败条件或示例。\n来源设计材料：oh-my-pi main@4df653426f40ee1eb78ef408528eb9e6a5275b9d 的 `.omp/skills/system-prompts/SKILL.md` 与 `.omp/skills/tool-prompt-optimization/SKILL.md`。本条为独立适配摘要，不复制上游正文；来源为 MIT，完整许可见 `assets/licenses/oh-my-pi-MIT.txt`。",
+      "category": "RULE",
+      "loading": "SEARCH",
+      "folder": "执行机制"
+    },
+    {
+      "id": "oh-my-pi-semantic-compression",
+      "worldbook": {
+        "priority": -1
+      },
+      "title": "提示词语义压缩保真检查",
+      "description": "用户要求压缩提示词、工具描述、技能或成员规则时读取；先保留语义载荷，再比较长度，防止为省 token 丢约束。",
+      "content": "压缩是重编码，不是机械删字。先拆出每条要求的对象、动作、条件、默认值、单位、数值边界、例外、否定词、格式示例与失败后果；合并重复规则前确认其适用范围相同。\n不得删掉 MUST/NEVER、条件、例外、数字/单位、精确标识符、输出格式、导致静默失败的警告或已由事故教训固化的限制。不得把“通常/约/待核实”改写为确定事实。事实示例用于证明形状时应保留。\n改写后逐项对照原文列出保留项和任何损失；使用真实目标模型 Tokenizer 测同一段输入的前后 Token 数。Tokenizer/供应商 usage 不可得时只报字符差或标“未验证”，不声称 Token 节省。出现歧义、命令关系变向、参数边界变弱或用例无法再判真伪时，恢复该信息而非追求压缩率。长正文仅可把低频细节下沉到按需记忆/规则，并保留准确检索入口；不能把必需约束藏进模型未加载的文件。\n来源设计材料：oh-my-pi main@4df653426f40ee1eb78ef408528eb9e6a5275b9d 的 `.omp/skills/semantic-compression/SKILL.md`。本条为独立适配摘要，不复制上游正文；来源为 MIT，完整许可见 `assets/licenses/oh-my-pi-MIT.txt`。",
+      "category": "RULE",
+      "loading": "SEARCH",
+      "folder": "执行机制"
     }
   ]
 }

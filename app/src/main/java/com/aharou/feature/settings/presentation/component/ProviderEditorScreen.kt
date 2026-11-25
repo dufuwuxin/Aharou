@@ -88,7 +88,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -180,9 +179,7 @@ fun ProviderEditorScreen(
     val apiKeys = remember { mutableStateListOf<ProviderKey>().apply { addAll(initialProvider?.apiKeys ?: emptyList()) } }
     var keyRotationStrategy by remember { mutableStateOf(initialProvider?.keyRotationStrategy ?: KeyRotationStrategy.SEQUENTIAL) }
     var keyCooldownMinutes by remember { mutableIntStateOf(initialProvider?.keyCooldownMinutes ?: 5) }
-    var keySwitchStatusCodes by remember {
-        mutableStateOf(initialProvider?.keySwitchStatusCodes?.joinToString(",") ?: "")
-    }
+    var keySwitchStatusCodes by remember { mutableStateOf(initialProvider?.keySwitchStatusCodes?.joinToString(",") ?: "") }
     var baseUrl by remember {
         mutableStateOf(initialProvider?.baseUrl ?: accountPreset?.let { accountManager.baseUrl(it, providerId) } ?: presetPrefill?.baseUrl ?: "")
     }
@@ -191,6 +188,7 @@ fun ProviderEditorScreen(
     var useResponseApi by remember { mutableStateOf(initialProvider?.useResponseApi ?: presetPrefill?.useResponseApi ?: false) }
     var anthropicCacheBreakpoints by remember { mutableStateOf(initialProvider?.anthropicCacheBreakpoints ?: true) }
     var openaiChatCacheKey by remember { mutableStateOf(initialProvider?.openaiChatCacheKey ?: false) }
+    var maxConcurrentRequests by remember { mutableIntStateOf(initialProvider?.maxConcurrentRequests ?: 0) }
     var dashboardScriptPath by remember { mutableStateOf(initialProvider?.dashboardScriptPath ?: "") }
     val scriptParams = remember {
         mutableStateListOf<Pair<String, String>>().apply {
@@ -218,11 +216,7 @@ fun ProviderEditorScreen(
     }
     var showFallbackSheet by remember { mutableStateOf(false) }
     var showIconDialog by remember { mutableStateOf(false) }
-    val models = remember {
-        mutableStateListOf<String>().apply {
-            addAll(initialProvider?.models ?: presetPrefill?.models ?: emptyList())
-        }
-    }
+    val models = remember { mutableStateListOf<String>().apply { addAll(initialProvider?.models ?: presetPrefill?.models ?: emptyList()) } }
     val customMetadataStore = remember { CustomModelMetadataStore(context.applicationContext) }
     val scope = rememberCoroutineScope()
     var customMetadata by remember { mutableStateOf<Map<String, ModelMetadata>>(emptyMap()) }
@@ -340,6 +334,7 @@ fun ProviderEditorScreen(
         useResponseApi = useResponseApi,
         anthropicCacheBreakpoints = anthropicCacheBreakpoints,
         openaiChatCacheKey = openaiChatCacheKey,
+        maxConcurrentRequests = maxConcurrentRequests,
         dashboardScriptPath = dashboardScriptPath,
         dashboardRefreshInterval = initialProvider?.dashboardRefreshInterval ?: 5,
         customHeaders = customHeaders.filter { it.first.isNotBlank() }.toMap(),
@@ -423,11 +418,6 @@ fun ProviderEditorScreen(
     LaunchedEffect(pagerState.currentPage) {
         if (pagerState.currentPage == 0 && modelSelection.selectionMode) modelSelection.exit()
     }
-    fun saveAndNavigateBack() {
-        modelsOrderDirty = false
-        saveCurrent()
-        onNavigateBack()
-    }
     if (showProxyPage || showKeysPage) {
         BackHandler {
             showProxyPage = false
@@ -436,7 +426,7 @@ fun ProviderEditorScreen(
     } else if (modelSelection.selectionMode) {
         BackHandler { modelSelection.exit() }
     } else {
-        BackHandler { saveAndNavigateBack() }
+        BackHandler { modelsOrderDirty = false; saveCurrent(); onNavigateBack() }
     }
     Scaffold(
         containerColor = settingsPageBackground(),
@@ -449,7 +439,9 @@ fun ProviderEditorScreen(
                 ),
                 navigationIcon = {
                     IconButton(onClick = {
-                        if (modelSelection.selectionMode) modelSelection.exit() else saveAndNavigateBack()
+                        if (modelSelection.selectionMode) modelSelection.exit() else {
+                            modelsOrderDirty = false; saveCurrent(); onNavigateBack()
+                        }
                     }) {
                         Icon(FeatherIcons.ArrowLeft, contentDescription = stringResource(R.string.common_back))
                     }
@@ -587,6 +579,10 @@ fun ProviderEditorScreen(
                                 checked = anthropicCacheBreakpoints,
                                 onCheckedChange = { anthropicCacheBreakpoints = it }
                             )
+                        }
+                        ProviderConcurrencyLimitSection(providerId, maxConcurrentRequests) {
+                            maxConcurrentRequests = it
+                            saveCurrent()
                         }
                         if (accountKind == null) { SettingsDivider()
                         ProviderSwitchRow(

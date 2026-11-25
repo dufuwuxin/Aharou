@@ -54,7 +54,22 @@ class MigrationTest {
 
     @Test
     fun open_current_schema_passes_identity_check() {
-        helper.createDatabase(dbName, AgentDatabase.SCHEMA_VERSION).close()
+        helper.createDatabase(dbName, AgentDatabase.SCHEMA_VERSION).apply {
+            query("PRAGMA table_info(`ai_providers`)").use { cursor ->
+                val nameColumn = cursor.getColumnIndexOrThrow("name")
+                val defaultColumn = cursor.getColumnIndexOrThrow("dflt_value")
+                var found = false
+                while (cursor.moveToNext()) {
+                    if (cursor.getString(nameColumn) == "maxConcurrentRequests") {
+                        assertEquals("new databases should keep providers unlimited by default", "0", cursor.getString(defaultColumn))
+                        found = true
+                        break
+                    }
+                }
+                assertTrue("schema must include the provider concurrency limit", found)
+            }
+            close()
+        }
 
         val db = Room.databaseBuilder(context, AgentDatabase::class.java, dbName)
             .addMigrations(*MigrationLoader.loadMigrations(context))
@@ -106,8 +121,42 @@ class MigrationTest {
         db.close()
     }
 
+    @Test
+    fun migrate_81_to_current_keeps_existing_provider_unlimited_by_default() {
+        helper.createDatabase(dbName, 81).apply {
+            execSQL(
+                """
+                INSERT INTO `ai_providers` (
+                  `id`, `name`, `type`, `apiKey`, `multiKeyEnabled`, `apiKeys`, `keyRotationStrategy`,
+                  `keyFailoverThreshold`, `keyCooldownMinutes`, `keySwitchStatusCodes`, `baseUrl`,
+                  `defaultModel`, `models`, `selectedModel`, `isEnabled`, `useFullUrl`, `useResponseApi`,
+                  `anthropicCacheBreakpoints`, `openaiChatCacheKey`, `balanceScriptPath`,
+                  `balanceRefreshInterval`, `customHeaders`, `sortOrder`, `proxyEnabled`, `proxyType`,
+                  `proxyHost`, `proxyPort`, `proxyUsername`, `proxyPassword`, `scriptParams`, `customIcon`,
+                  `fallbackProviderId`, `fallbackModel`, `fallbackChain`, `requestMiddleware`
+                ) VALUES (
+                  'p1', 'old', 'OPENAI', 'k', 0, '', 'SEQUENTIAL', 2, 5, '', 'https://example.com',
+                  'm', 'm', 'm', 1, 0, 0, 1, 0, '', 5, '', 0, 0, 'HTTP', '', 0, '', '', '', '', '', '', '', ''
+                )
+                """.trimIndent()
+            )
+            close()
+        }
+
+        val db = Room.databaseBuilder(context, AgentDatabase::class.java, dbName)
+            .addMigrations(*MigrationLoader.loadMigrations(context))
+            .build()
+        db.openHelper.writableDatabase
+        db.openHelper.readableDatabase.query(
+            "SELECT `maxConcurrentRequests` FROM `ai_providers` WHERE `id` = 'p1'"
+        ).use { cursor ->
+            assertTrue("upgrade should keep existing provider", cursor.moveToFirst())
+            assertEquals("legacy provider should stay unlimited", 0, cursor.getInt(0))
+        }
+        db.close()
+    }
+
     /**
-     * 未来新增迁移（51+）时把 @AutoMigration/新迁移加进来后在此补升级用例：
-     * createDatabase(50) → 跑迁移数组 → 断言新列/新表存在。
+     * Future migrations must add an upgrade test from the last schema and assert old-row defaults.
      */
 }

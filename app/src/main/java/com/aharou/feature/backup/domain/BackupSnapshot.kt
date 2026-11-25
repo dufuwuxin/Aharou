@@ -168,7 +168,9 @@ data class ProviderDto(
     /** 回退字段只增不减；旧备份缺失时按空值导入，旧单项可由领域层归一。 */
     val fallbackProviderId: String? = null,
     val fallbackModel: String? = null,
-    val fallbackChain: String? = null
+    val fallbackChain: String? = null,
+    /** 供应商并发请求上限；null 表示旧备份，按不限并发导入。 */
+    val maxConcurrentRequests: Int? = null
 )
 
 @Serializable

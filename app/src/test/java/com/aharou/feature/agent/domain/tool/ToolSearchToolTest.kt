@@ -40,6 +40,21 @@ class ToolSearchToolTest {
         assertFalse(registry.isActivated("code_structure", context.copy(projectRoot = "/other")))
     }
 
+    @Test fun exactToolNameActivatesOnlyThatToolEvenWithSubstringMatches() = runTest {
+        val others = (1..11).map { index -> object : AgentTool() {
+            override val name = "code_structure_extra_$index"
+            override val description = "related fixture"
+            override val parameters = emptyMap<String, ToolParameter>()
+        } }
+        val allowed = others + registry.getAvailableTools()
+        registry.bindDiscoveryTools(allowed, context)
+        val result = tool.executeWithContext(mapOf("query" to JsonPrimitive("code_structure")), context)
+        assertTrue(result is ToolResult.Success)
+        val requested = registry.requestTools(allowed, context).map { it.name }.toSet()
+        assertTrue(requested.contains("code_structure"))
+        assertTrue(others.none { it.name in requested })
+    }
+
     @Test fun unmatchedQueriesDoNotActivateAnything() = runTest {
         tool.executeWithContext(mapOf("query" to JsonPrimitive("unmatched")), context)
         assertFalse(registry.isActivated("code_structure", context))

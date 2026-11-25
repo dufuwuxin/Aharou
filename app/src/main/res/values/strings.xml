@@ -316,6 +316,12 @@
     <string name="settings_background_image_remove">移除背景</string>
     <string name="provider_cache_anthropic_title">Anthropic 缓存断点</string>
     <string name="provider_cache_anthropic_subtitle">为 system/工具/消息前缀打显式缓存断点，降低重复输入成本</string>
+    <string name="provider_concurrency_title">限制并发请求</string>
+    <string name="provider_concurrency_subtitle">同一供应商共享上限；关闭时不限制</string>
+    <string name="provider_concurrency_dialog_title">供应商并发上限</string>
+    <string name="provider_concurrency_dialog_hint">输入 1–%1$d；上限按此供应商跨会话共享，0 表示关闭限制。</string>
+    <string name="provider_concurrency_dialog_value">同时请求数</string>
+    <string name="provider_concurrency_invalid">请输入 1–%1$d 的整数</string>
     <string name="provider_cache_openai_chat_title">OpenAI 兼容缓存键</string>
     <string name="provider_cache_openai_chat_subtitle">为请求携带 prompt_cache_key 缓存键</string>
     <string name="provider_section_dashboard">自定义面板</string>
@@ -3579,10 +3585,10 @@
     <string name="project_task_map_page">第 %1$d / %2$d 段，每段最多 48 个节点；跨段关系可在任务树中定位</string>
     <string name="project_home">首页</string>
     <string name="project_list_section">项目</string>
-    <string name="project_home_heading">我的工作台</string>
-    <string name="project_home_description">从想法开始，在项目中持续推进</string>
-    <string name="project_empty_title">开始第一个项目</string>
-    <string name="project_empty_description">先记录项目名称和用途，之后再与 AI 讨论需求。创建项目无需配置模型。</string>
+    <string name="project_home_heading">Aharou 项目工作台</string>
+    <string name="project_home_description">创建、查找和打开项目</string>
+    <string name="project_empty_title">暂无项目</string>
+    <string name="project_empty_description">填写项目名称和用途。创建项目时会为此项目分配工作区；创建无需配置模型。</string>
     <string name="project_sessions">会话</string>
     <string name="project_create">创建项目</string>
     <string name="project_name">项目名称</string>

@@ -110,6 +110,13 @@ class AIProviderConfigSanitizeTest {
         )
     }
 
+    @Test fun maxConcurrentRequestsDefaultsUnlimitedAndRejectsInvalidStoredValues() {
+        assertEquals(0, config().sanitized().maxConcurrentRequests)
+        assertEquals(0, config().copy(maxConcurrentRequests = -2).sanitized().maxConcurrentRequests)
+        assertEquals(0,
+            config().copy(maxConcurrentRequests = PROVIDER_MAX_CONCURRENT_REQUESTS + 1).sanitized().maxConcurrentRequests)
+    }
+
     @Test
     fun cleanConfig_unchanged() {
         val clean = config()

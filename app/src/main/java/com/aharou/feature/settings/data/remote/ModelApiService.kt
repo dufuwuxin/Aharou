@@ -2,9 +2,11 @@ package com.aharou.feature.settings.data.remote
 
 import android.content.Context
 import com.aharou.R
+import com.aharou.feature.agent.domain.provider.ProviderRequestLimiter
 import com.aharou.feature.agent.domain.provider.joinUrl
 import com.aharou.feature.localmodel.domain.LocalModelManager
 import com.aharou.feature.localmodel.domain.LocalModels
+import com.aharou.feature.settings.domain.model.AIProviderConfig
 import com.aharou.feature.settings.domain.model.ProviderType
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.InterruptedIOException
@@ -69,35 +71,36 @@ data class ModelTestResult(
 class ModelApiService @Inject constructor(
     private val client: OkHttpClient,
     private val localModelManager: LocalModelManager,
+    private val requestLimiter: ProviderRequestLimiter,
     @param:ApplicationContext private val context: Context
 ) {
     private val json = Json { ignoreUnknownKeys = true }
 
     /** 拉取提供商可用模型列表（OpenAI 兼容 / Anthropic 均为 GET /v1/models，Gemini 为 GET /v1beta/models）。 */
-    suspend fun fetchModels(
-        baseUrl: String,
-        apiKey: String,
-        type: ProviderType,
-        useFullUrl: Boolean = false,
-        customHeaders: Map<String, String> = emptyMap()
-    ): Result<FetchModelsResult> = withContext(Dispatchers.IO) {
+    suspend fun fetchModels(provider: AIProviderConfig): Result<FetchModelsResult> = withContext(Dispatchers.IO) {
         // 端侧模型的「模型列表」就是本地已下载的那几份 GGUF，不请求任何接口。
-        if (type == ProviderType.LOCAL) return@withContext fetchLocalModels()
+        if (provider.type == ProviderType.LOCAL) return@withContext fetchLocalModels()
+        requestLimiter.initializeLimit(provider.id, provider.maxConcurrentRequests)
+        requestLimiter.withPermit(provider.id) { fetchRemoteModels(provider) }
+    }
+
+    private fun fetchRemoteModels(provider: AIProviderConfig): Result<FetchModelsResult> {
+        val type = provider.type
         val start = System.nanoTime()
         // recoverCatching 在外层作用域，看不到块内的 url 与请求头；
         // 排错时最需要的恰好是「请求发到哪了」，所以先带出来再兜底。
         var failedUrl = ""
         var failedHeaders: Map<String, String> = emptyMap()
-        runCatching {
+        return runCatching {
             // 空 Key 也放行（免鉴权供应商）；真正需要 Key 的平台会由上游返回鉴权错误。
 
             val modelsPath = if (type == ProviderType.GEMINI) "v1beta/models" else "v1/models"
-            val url = if (useFullUrl) baseUrl else joinUrl(baseUrl, modelsPath)
+            val url = if (provider.useFullUrl) provider.baseUrl else joinUrl(provider.baseUrl, modelsPath)
             failedUrl = url
             val request = Request.Builder()
                 .url(url)
-                .applyAuth(apiKey, type)
-                .applyCustomHeaders(customHeaders)
+                .applyAuth(provider.firstUsableApiKey, type)
+                .applyCustomHeaders(provider.customHeaders)
                 .get()
                 .build()
 
@@ -196,23 +199,20 @@ class ModelApiService @Inject constructor(
     }
 
     /** 发送一条极短请求验证 Key + 模型 + 端点是否可用，返回耗时。 */
-    suspend fun testModel(
-        baseUrl: String,
-        apiKey: String,
-        type: ProviderType,
-        useFullUrl: Boolean,
-        useResponseApi: Boolean,
-        model: String,
-        customHeaders: Map<String, String> = emptyMap()
-    ): ModelTestResult = withContext(Dispatchers.IO) {
+    suspend fun testModel(provider: AIProviderConfig, model: String): ModelTestResult = withContext(Dispatchers.IO) {
         // 端侧模型不经过网络，连通性测试就变成「权重在不在、能不能加载」。
-        if (type == ProviderType.LOCAL) return@withContext testLocalModel(model)
+        if (provider.type == ProviderType.LOCAL) return@withContext testLocalModel(model)
+        requestLimiter.initializeLimit(provider.id, provider.maxConcurrentRequests)
         val start = System.nanoTime()
-        val first = testModelOnce(start, baseUrl, apiKey, type, useFullUrl, useResponseApi, model, customHeaders)
+        fun attempt() = testModelOnce(
+            start, provider.baseUrl, provider.firstUsableApiKey, provider.type,
+            provider.useFullUrl, provider.useResponseApi, model, provider.customHeaders,
+        )
+        val first = requestLimiter.withPermit(provider.id) { attempt() }
         if (!first.retryable) return@withContext first.result
-        // DNS 解析失败会被 libcore 缓存，紧接着重试必然重复失败；退避 3 秒再试一次（delay 不占线程）。
+        // DNS 解析失败会被 libcore 缓存，紧接着重试必然重复失败；退避 3 秒不占并发名额。
         delay(NETWORK_RETRY_DELAY_MS)
-        testModelOnce(start, baseUrl, apiKey, type, useFullUrl, useResponseApi, model, customHeaders).result
+        requestLimiter.withPermit(provider.id) { attempt() }.result
     }
 
     /** 一次尝试；「是否值得重试」随结果带出，因为网络异常类型只在 catch 里看得到。 */

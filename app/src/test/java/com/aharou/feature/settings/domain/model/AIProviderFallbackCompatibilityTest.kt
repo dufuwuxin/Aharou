@@ -21,7 +21,7 @@ class AIProviderFallbackCompatibilityTest {
             every { KeystoreCipher.decryptString(any()) } answers { firstArg() }
             val accounts = mockk<com.aharou.feature.settings.data.account.AccountProviderManager>()
             every { accounts.normalizeConfig(any()) } answers { firstArg() }
-            val repo = AIProviderRepositoryImpl(mockk(), mockk(), accounts)
+            val repo = AIProviderRepositoryImpl(mockk(), mockk(), accounts, com.aharou.feature.agent.domain.provider.ProviderRequestLimiter())
             val toEntity = AIProviderRepositoryImpl::class.java.getDeclaredMethod("toEntity", AIProviderConfig::class.java)
                 .apply { isAccessible = true }
             val toDomain = AIProviderRepositoryImpl::class.java.getDeclaredMethod("toDomainModel", AIProviderEntity::class.java)
@@ -31,6 +31,12 @@ class AIProviderFallbackCompatibilityTest {
             assertEquals("backup", entity.fallbackProviderId)
             assertEquals("old-model", entity.fallbackModel)
             assertEquals(listOf(FallbackTarget("backup", "old-model")), restored.fallbackChain)
+            assertEquals(0, restored.maxConcurrentRequests)
+
+            val limited = toDomain.invoke(repo,
+                toEntity.invoke(repo, legacy().copy(maxConcurrentRequests = 7).sanitized()) as AIProviderEntity
+            ) as AIProviderConfig
+            assertEquals(7, limited.maxConcurrentRequests)
         } finally { unmockkObject(KeystoreCipher) }
     }
 

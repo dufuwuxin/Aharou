@@ -2,6 +2,8 @@ package com.aharou.feature.settings.domain.model
 
 import kotlinx.serialization.Serializable
 
+const val PROVIDER_MAX_CONCURRENT_REQUESTS = 32
+
 data class AIProviderConfig(
     val id: String,
     val name: String,
@@ -32,6 +34,8 @@ data class AIProviderConfig(
     val anthropicCacheBreakpoints: Boolean = true,
     /** Chat Completion 路径发送 prompt_cache_key（shard 路由）。仅 OPENAI 类型生效，默认关闭。 */
     val openaiChatCacheKey: Boolean = false,
+    /** 0 表示不限；正数限制同 provider id 在进程内跨会话共享的模型请求数。 */
+    val maxConcurrentRequests: Int = 0,
     /** 自定义面板脚本路径（位于 ~/.aharou/scripts/，或绝对路径/自定义命令）。 */
     val dashboardScriptPath: String = "",
     /** 自定义面板自动刷新间隔（分钟），0 表示仅进入时/手动刷新，支持 1, 3, 5, 10 等。默认 5 分钟。 */
@@ -188,6 +192,7 @@ fun AIProviderConfig.sanitized(): AIProviderConfig = copy(
         .filter { it.value.isNotEmpty() }
         .distinctBy { it.value },
     keySwitchStatusCodes = keySwitchStatusCodes.filter { it in 100..599 }.distinct(),
+    maxConcurrentRequests = maxConcurrentRequests.takeIf { it in 0..PROVIDER_MAX_CONCURRENT_REQUESTS } ?: 0,
     baseUrl = baseUrl.stripAllWhitespace(),
     defaultModel = defaultModel.stripLineBreaks(),
     models = models.map { it.stripLineBreaks() }.filter { it.isNotEmpty() }.distinct(),

@@ -3,6 +3,7 @@ package com.aharou.feature.settings.data.repository
 import com.aharou.core.security.KeystoreCipher
 import com.aharou.core.util.FileLogger
 import com.aharou.feature.agent.data.local.database.AgentDatabase
+import com.aharou.feature.agent.domain.provider.ProviderRequestLimiter
 import com.aharou.feature.settings.data.local.dao.AIProviderDao
 import com.aharou.feature.settings.data.local.entity.AIProviderEntity
 import com.aharou.feature.settings.domain.model.AIProviderConfig
@@ -21,6 +22,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -32,7 +35,10 @@ class AIProviderRepositoryImpl @Inject constructor(
     private val aiProviderDao: AIProviderDao,
     private val agentDatabase: AgentDatabase,
     private val accounts: com.aharou.feature.settings.data.account.AccountProviderManager,
+    private val providerRequestLimiter: ProviderRequestLimiter,
 ) : AIProviderRepository {
+
+    private val providerWrites = Mutex()
 
     private companion object {
         const val TAG = "AIProviderRepo"
@@ -74,11 +80,16 @@ class AIProviderRepositoryImpl @Inject constructor(
      * sortOrder 可能陈旧，直接使用会撤销刚完成的排序）；新提供商取最大排序 +1。
      */
     override suspend fun saveProvider(provider: AIProviderConfig): Unit = withContext(Dispatchers.IO) {
-        agentDatabase.withTransaction {
-            val current = aiProviderDao.getProviderById(provider.id)
-            val sortOrder = current?.sortOrder ?: (aiProviderDao.getMaxSortOrder() + 1)
-            FileLogger.i(TAG, "保存提供商 id=${provider.id} name=${provider.name} sortOrder=$sortOrder")
-            aiProviderDao.insertProvider(accounts.normalizeConfig(provider.copy(sortOrder = sortOrder).sanitized()).toEntity())
+        providerWrites.withLock {
+            val saved = agentDatabase.withTransaction {
+                val current = aiProviderDao.getProviderById(provider.id)
+                val sortOrder = current?.sortOrder ?: (aiProviderDao.getMaxSortOrder() + 1)
+                FileLogger.i(TAG, "保存提供商 id=${provider.id} name=${provider.name} sortOrder=$sortOrder")
+                accounts.normalizeConfig(provider.copy(sortOrder = sortOrder).sanitized()).also {
+                    aiProviderDao.insertProvider(it.toEntity())
+                }
+            }
+            providerRequestLimiter.setLimit(saved.id, saved.maxConcurrentRequests)
         }
     }
 
@@ -86,6 +97,13 @@ class AIProviderRepositoryImpl @Inject constructor(
      * 按传入顺序重排提供商。只写 id + sortOrder 两列，
      * 避免整行 REPLACE 覆盖并发修改的其它字段（如 apiKey/模型列表）。
      */
+    internal suspend fun restoreProviders(providers: List<AIProviderEntity>) {
+        providerWrites.withLock {
+            aiProviderDao.insertAllProviders(providers)
+            providers.forEach { providerRequestLimiter.setLimit(it.id, it.maxConcurrentRequests) }
+        }
+    }
+
     override suspend fun reorderProviders(providers: List<AIProviderConfig>) {
         FileLogger.d(TAG, "重排提供商 共 ${providers.size} 个")
         agentDatabase.withTransaction {
@@ -151,6 +169,7 @@ class AIProviderRepositoryImpl @Inject constructor(
             useResponseApi = useResponseApi,
             anthropicCacheBreakpoints = anthropicCacheBreakpoints,
             openaiChatCacheKey = openaiChatCacheKey,
+            maxConcurrentRequests = maxConcurrentRequests,
             dashboardScriptPath = dashboardScriptPath,
             dashboardRefreshInterval = dashboardRefreshInterval,
             sortOrder = sortOrder,
@@ -167,7 +186,7 @@ class AIProviderRepositoryImpl @Inject constructor(
             fallbackModel = fallbackModel,
             fallbackChain = parseFallbackChain(fallbackChain),
             requestMiddleware = requestMiddleware
-        ).sanitized())
+        ).sanitized().also { providerRequestLimiter.initializeLimit(it.id, it.maxConcurrentRequests) })
     }
 
     private fun AIProviderConfig.toEntity(): AIProviderEntity {
@@ -191,6 +210,7 @@ class AIProviderRepositoryImpl @Inject constructor(
             useResponseApi = useResponseApi,
             anthropicCacheBreakpoints = anthropicCacheBreakpoints,
             openaiChatCacheKey = openaiChatCacheKey,
+            maxConcurrentRequests = maxConcurrentRequests,
             dashboardScriptPath = dashboardScriptPath,
             dashboardRefreshInterval = dashboardRefreshInterval,
             sortOrder = sortOrder,

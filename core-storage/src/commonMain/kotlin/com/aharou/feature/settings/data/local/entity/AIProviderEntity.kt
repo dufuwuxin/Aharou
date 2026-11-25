@@ -36,6 +36,9 @@ data class AIProviderEntity(
     val anthropicCacheBreakpoints: Boolean = true,
     /** Chat Completion 路径发送 prompt_cache_key（shard 路由）。仅 OPENAI 类型使用，默认关闭（官方 API 不接受该字段）。 */
     val openaiChatCacheKey: Boolean = false,
+    /** 单供应商同时运行的模型请求上限；0 表示不限制。 */
+    @ColumnInfo(defaultValue = "0")
+    val maxConcurrentRequests: Int = 0,
     /** 自定义面板脚本路径。列名沿用历史命名以兼容已发布数据库。 */
     @ColumnInfo(name = "balanceScriptPath")
     val dashboardScriptPath: String = "",
