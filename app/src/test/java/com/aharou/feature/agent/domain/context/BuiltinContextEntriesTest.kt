@@ -31,8 +31,10 @@ class BuiltinContextEntriesTest {
 
     private val asset: File get() = listOf(File("src/main/assets/context-library/builtin.json"),
         File("app/src/main/assets/context-library/builtin.json")).first { it.isFile }
-    private val auditIds = setOf("aharou-public-asset-review", "aharou-asset-relations")
-    private val auditTitles = setOf("Aharou 公开资产核对", "Aharou 资产关系整理")
+    private val nodeAuditId = "aharou-ai-node-audit"
+    private val nodeAuditTitle = "AI 节点审计流程"
+    private val auditIds = setOf("aharou-public-asset-review", "aharou-asset-relations", nodeAuditId)
+    private val auditTitles = setOf("Aharou 公开资产核对", "Aharou 资产关系整理", nodeAuditTitle)
     private val promptDesignIds = setOf("oh-my-pi-prompt-design", "oh-my-pi-semantic-compression")
     private val promptDesignTitles = setOf("提示词与工具描述设计", "提示词语义压缩保真检查")
     private val omiMemoryId = "oh-my-pi-memory-evidence"
@@ -63,7 +65,7 @@ class BuiltinContextEntriesTest {
         val defaults = seeds().defaults()
         assertTrue(defaults.isNotEmpty())
         assertTrue(defaults.filter { it.loading == ContextLoad.FULL }.all {
-            (it.category.isInjection || it.id == "project-task-context-slot") &&
+            (it.category.isInjection || it.id == "project-task-context-slot" || it.worldbook.triggers.isNotEmpty()) &&
                 it.content.length <= ContextLibraryPlanner.FULL_ENTRY_CHARS
         })
         assertEquals(32, defaults.count { it.requestKey != null })
@@ -81,7 +83,9 @@ class BuiltinContextEntriesTest {
         assertTrue(omiMemory.content.contains("oh-my-pi docs/memory.md"))
         assertEquals(auxiliaryPromptIds, defaults.filter { it.id in auxiliaryPromptIds }.map { it.id })
         assertEquals(changedSeedOrder, defaults.filter { it.id in changedSeedOrder }.map { it.id })
-        defaults.filter { it.id in changedSeedOrder }.forEach { assertEquals(-1, it.worldbook.priority) }
+        defaults.filter { it.id in changedSeedOrder }.forEach {
+            assertEquals(if (it.id == nodeAuditId) 100 else -1, it.worldbook.priority)
+        }
         defaults.filter { it.id !in changedSeedOrder }.forEach { assertEquals(0, it.worldbook.priority) }
         assertTrue(defaults.filter { it.requestKey != null }.all { it.folder == "辅助请求" && it.loading == ContextLoad.SEARCH })
         assertFalse(defaults.any { it.folder == "内置默认" || it.folder.startsWith("requests/") })
@@ -338,6 +342,7 @@ class BuiltinContextEntriesTest {
         val mobilePrompt = defaults.single { it.id == "mobile-operator-system-request" }
         val projectPromptTitles = defaults.filter { it.id in setOf("project-task-context-rules-request",
             "project-task-context-slot") }.map { it.title }.toSet()
+        val omiMemoryTitle = defaults.single { it.id == omiMemoryId }.title
         val plain = ContextLibraryRepository(memory)
         assertTrue(plain.create(main.title, "自定义说明", "用户已有契约", MemoryScope.GLOBAL,
             ContextKind.INSTRUCTION, ContextLoad.OFF, null, category = main.category))
@@ -347,7 +352,7 @@ class BuiltinContextEntriesTest {
         val library = ContextLibraryRepository(memory, seeds())
         val first = library.list(null)
         val auxiliaryTitles = defaults.filter { it.id in auxiliaryPromptIds }.map { it.title }.toSet()
-        assertEquals(setOf(main.title, member.title, sourceMap.title, archiveSource.title) + projectPromptTitles + auxiliaryTitles + auditTitles + promptDesignTitles,
+        assertEquals(setOf(main.title, member.title, sourceMap.title, archiveSource.title) + projectPromptTitles + auxiliaryTitles + auditTitles + promptDesignTitles + omiMemoryTitle,
             first.map { it.title }.toSet())
         assertEquals(bytes, File(existing.sourceLabel).readText())
         assertEquals(existing, first.single { it.title == main.title })
@@ -357,7 +362,7 @@ class BuiltinContextEntriesTest {
         assertTrue(library.delete(first.single { it.title == mobilePrompt.title }, null))
         val recorded = receipt.readText()
         val next = ContextLibraryRepository(memory, seeds()).list(null)
-        assertEquals(setOf(main.title, "用户改名契约", archiveSource.title) + projectPromptTitles + auxiliaryTitles + auditTitles + promptDesignTitles - mobilePrompt.title,
+        assertEquals(setOf(main.title, "用户改名契约", archiveSource.title) + projectPromptTitles + auxiliaryTitles + auditTitles + promptDesignTitles + omiMemoryTitle - mobilePrompt.title,
             next.map { it.title }.toSet())
         assertEquals("用户已有契约", next.single { it.title == main.title }.content)
         assertEquals("用户改写正文", next.single { it.title == "用户改名契约" }.content)
@@ -516,11 +521,11 @@ class BuiltinContextEntriesTest {
         }
     }
 
-    @Test fun realManifestAuditEntriesStaySearchOnlyAndUserOwnedOnFreshInstall() {
+    @Test fun realManifestAuditEntriesUseTriggerAndSearchLoadingOnFreshInstall() {
         assertAuditLifecycle(legacy = false)
     }
 
-    @Test fun realManifestAuditEntriesStaySearchOnlyAndUserOwnedAfterLegacyUpgrade() {
+    @Test fun realManifestAuditEntriesUseTriggerAndSearchLoadingAfterLegacyUpgrade() {
         assertAuditLifecycle(legacy = true)
     }
 
@@ -535,23 +540,38 @@ class BuiltinContextEntriesTest {
         for (expected in defaults) {
             val actual = initial.single { it.title == expected.title }
             assertEquals(ContextCategory.RULE, actual.category)
-            assertEquals(ContextLoad.SEARCH, actual.loading)
+            assertEquals(if (expected.id == nodeAuditId) ContextLoad.FULL else ContextLoad.SEARCH, actual.loading)
             assertEquals("Aharou 资产审计", actual.folder)
-            assertEquals(-1, actual.worldbook.priority)
+            assertEquals(if (expected.id == nodeAuditId) 100 else -1, actual.worldbook.priority)
             assertNull(actual.requestKey)
+            if (expected.id == nodeAuditId) {
+                assertEquals(listOf("节点审计", "审计节点", "AI 节点审计", "审计 AI 节点", "审计内置 AI 节点", "审计提示词"), actual.worldbook.triggers)
+                assertTrue(actual.content.contains("软件扫描、格式检查和门禁只能提供材料或发现"))
+                assertTrue(actual.content.contains("声明、静态推断、实测或未验证"))
+                assertTrue(actual.content.contains("阻塞、应该改、可选、做对了的四级"))
+            }
             assertTrue(actual.editable)
             assertEquals(actual.id, library.search(expected.title, null).single { it.title == expected.title }.id)
             assertEquals(expected.content, memory.loadContent(expected.title, null, MemoryScope.GLOBAL))
         }
         for (role in listOf<String?>(null, "fixture-member")) {
-            val preview = library.preview(null, auditTitles.joinToString(" "), "audit", roleName = role)
+            val preview = library.preview(null, "审计内置 AI 节点", "audit", roleName = role)
             for (expected in defaults) {
-                assertFalse(preview.full.any { it.title == expected.title })
-                assertFalse(preview.indexed.any { it.title == expected.title })
-                assertFalse(preview.rendered.contains(expected.content))
-                assertTrue(preview.omitted.any { it.first.title == expected.title &&
-                    it.second == "search only: explicit retrieval required" })
+                if (expected.id == nodeAuditId) {
+                    assertTrue("audit omitted=${preview.omitted.filter { it.first.title == nodeAuditTitle }.map { it.second }}; full=${preview.full.map { it.title }}; rendered=${preview.rendered.length}",
+                        preview.full.any { it.title == nodeAuditTitle })
+                    assertTrue(preview.rendered.contains(expected.content))
+                } else {
+                    assertFalse(preview.full.any { it.title == expected.title })
+                    assertFalse(preview.indexed.any { it.title == expected.title })
+                    assertFalse(preview.rendered.contains(expected.content))
+                    assertTrue(preview.omitted.any { it.first.title == expected.title &&
+                        it.second == "search only: explicit retrieval required" })
+                }
             }
+            val routine = library.preview(null, "普通 Kotlin 开发问题", "routine", roleName = role)
+            assertFalse(routine.full.any { it.id == nodeAuditId })
+            assertFalse(routine.rendered.contains(defaults.single { it.id == nodeAuditId }.content))
         }
         for (expected in defaults) {
             val entry = library.list(null).single { it.title == expected.title }
@@ -595,7 +615,10 @@ class BuiltinContextEntriesTest {
         val library = ContextLibraryRepository(memories(), seeds())
         val additions = library.list(null)
         assertEquals(auditTitles, additions.map { it.title }.toSet())
-        assertTrue(additions.all { it.loading == ContextLoad.SEARCH && it.category == ContextCategory.RULE })
+        assertTrue(additions.all { it.category == ContextCategory.RULE })
+        assertTrue("audit additions=${additions.map { it.title to it.loading }}", additions.filter { it.title != nodeAuditTitle }.all { it.loading == ContextLoad.SEARCH })
+        assertEquals(ContextLoad.FULL, additions.single { it.title == nodeAuditTitle }.loading)
+        assertEquals(100, additions.single { it.title == nodeAuditTitle }.worldbook.priority)
         assertEquals(oldIds.toSet() + auditIds, receipt.readLines().drop(1).toSet())
         for (entry in additions) assertTrue(library.delete(entry, null))
         val recorded = receipt.readText()

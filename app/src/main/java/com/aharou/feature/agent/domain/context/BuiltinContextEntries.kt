@@ -97,7 +97,7 @@ class BuiltinContextEntries internal constructor(
             "steward-judge-input-request", "mobile-operator-system-request",
             "mobile-operator-format-retry-request", "mobile-operator-input-request",
             "project-task-context-rules-request", "project-task-context-slot",
-            "aharou-public-asset-review", "aharou-asset-relations",
+            "aharou-public-asset-review", "aharou-asset-relations", "aharou-ai-node-audit",
             "oh-my-pi-prompt-design", "oh-my-pi-semantic-compression", "oh-my-pi-memory-evidence")
         val done = if (ledger.exists()) {
             val lines = try { ledger.readLines() } catch (e: Exception) {
