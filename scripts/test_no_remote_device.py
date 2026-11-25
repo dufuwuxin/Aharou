@@ -50,13 +50,17 @@ class NoRemoteDeviceTest(unittest.TestCase):
                 f"{field} = if (options.remoteConnections) remoteConnectionDao.{dao}().map {{ it.toDto() }} else emptyList()",
                 backup,
             )
-        self.assertIn("remoteConnectionDao.insertAllConnections(meta.remoteConnections.mapNotNull { it.toEntity() })", backup)
-        self.assertIn("val connectionIds = remoteConnectionDao.getAllConnectionsOnce().map { it.id }.toSet()", backup)
-        self.assertIn(
-            "meta.remoteMounts.map { it.toEntity() }.filter { it.connectionId in connectionIds }",
-            backup,
+        restore = backup[
+            backup.index("if (meta.remoteConnections.isNotEmpty())"):
+            backup.index("if (meta.mcpServers.isNotEmpty())")
+        ]
+        restore_steps = (
+            "remoteConnectionDao.insertAllConnections(meta.remoteConnections.mapNotNull { it.toEntity() })",
+            "val connectionIds = remoteConnectionDao.getAllConnectionsOnce().map { it.id }.toSet()",
+            "remoteConnectionDao.insertAllMounts(\n                meta.remoteMounts.map { it.toEntity() }.filter { it.connectionId in connectionIds }\n            )",
         )
-        self.assertIn("remoteConnectionDao.insertAllMounts(", backup)
+        positions = [restore.index(step) for step in restore_steps]
+        self.assertEqual(positions, sorted(positions))
 
 
 if __name__ == "__main__":
