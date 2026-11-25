@@ -595,6 +595,20 @@ class OpenAIAdapterTest {
     }
 
     @Test
+    fun streamChat_finishReasonWithoutDoneIsACompleteResponse() = runTest {
+        val api = api()
+        every { api.streamChatCompletion(any(), any(), any(), any()) } returns sseCall(
+            "data: {\"choices\":[{\"finish_reason\":\"stop\"}]}"
+        )
+
+        val chunks = adapter(api).apply { maxNetworkRetries = 0 }
+            .completeStream("", emptyList()).toList()
+
+        val final = chunks.filterIsInstance<AIStreamChunk.Final>().single()
+        assertEquals("stop", final.response.stopReason)
+    }
+
+    @Test
     fun streamChat_assemblesStreamedToolCallFragments() = runTest {
         val api = api()
         every { api.streamChatCompletion(any(), any(), any(), any()) } returns sseCall(

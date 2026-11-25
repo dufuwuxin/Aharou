@@ -498,7 +498,10 @@ class OpenAIAdapter @Inject constructor(
                     while (true) {
                         coroutineContext.ensureActive()
                         val line = reader.readLine()
-                            ?: throw IOException("SSE 流被中断：未收到 [DONE] 结束标记（疑似网络断开）")
+                        if (line == null) {
+                            if (finishReason != null) break
+                            throw IOException("SSE 流被中断：未收到 [DONE] 结束标记（疑似网络断开）")
+                        }
                         idleWatchdog.touch()
                         if (!line.startsWith("data:")) continue
                         val data = line.removePrefix("data:").trim()
@@ -525,11 +528,10 @@ class OpenAIAdapter @Inject constructor(
                                 streamCacheCreationTokens = u.getAsJsonObject("prompt_tokens_details")?.get("cache_write_tokens")?.takeIf { !it.isJsonNull }?.asInt ?: streamCacheCreationTokens
                             }
                             val choice = obj.getAsJsonArray("choices")?.firstOrNull()?.asJsonObject ?: continue
-                            val delta = choice.getAsJsonObject("delta") ?: continue
-
                             choice.get("finish_reason")?.takeIf { !it.isJsonNull }?.asString?.let {
                                 finishReason = it
                             }
+                            val delta = choice.getAsJsonObject("delta") ?: continue
 
                             // 文字增量
                             delta.get("content")?.takeIf { !it.isJsonNull }?.asString?.let { c ->

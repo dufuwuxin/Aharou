@@ -10,19 +10,28 @@ import com.aharou.feature.agent.data.remote.anthropic.AnthropicUsage
 import com.aharou.feature.agent.domain.model.AgentMessage
 import com.aharou.feature.agent.domain.tool.ToolCall
 import kotlinx.coroutines.test.runTest
+import io.mockk.every
+import io.mockk.firstArg
+import io.mockk.just
+import io.mockk.mockk
+import io.mockk.Runs
 import kotlinx.serialization.json.JsonObject
 import okhttp3.ResponseBody
+import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import retrofit2.Call
+import retrofit2.Callback
+import retrofit2.Response
 
 class AnthropicAdapterTest {
 
     /** 捕获实际上送的请求体，并返回可配置的响应。 */
     private class FakeApi(var response: AnthropicMessageResponse) : AnthropicApi {
         var lastRequest: AnthropicMessageRequest? = null
+        var streamCall: Call<ResponseBody>? = null
 
         override suspend fun createMessage(
             url: String,
@@ -41,7 +50,7 @@ class AnthropicAdapterTest {
             version: String,
             extraHeaders: Map<String, String>,
             request: AnthropicMessageRequest
-        ): Call<ResponseBody> = throw UnsupportedOperationException("本测试只覆盖非流式路径")
+        ): Call<ResponseBody> = streamCall ?: throw UnsupportedOperationException("streamCall is not configured")
     }
 
     private fun response(
@@ -67,6 +76,17 @@ class AnthropicAdapterTest {
             maxOutputTokens = maxOutput
         }
 
+    private fun sseCall(vararg lines: String): Call<ResponseBody> {
+        val body = (lines.joinToString("\n") + "\n").toResponseBody(null)
+        val call = mockk<Call<ResponseBody>>()
+        every { call.enqueue(any()) } answers {
+            firstArg<Callback<ResponseBody>>().onResponse(call, Response.success(body))
+        }
+        every { call.cancel() } just Runs
+        every { call.isCanceled } returns false
+        return call
+    }
+
     private fun blocksOf(request: AnthropicMessageRequest?, role: String): List<AnthropicContentBlock> {
         val message = request?.messages?.first { it.role == role } ?: return emptyList()
         @Suppress("UNCHECKED_CAST")
@@ -74,6 +94,22 @@ class AnthropicAdapterTest {
     }
 
     private fun toolCall(id: String) = ToolCall(id = id, name = "readFile", arguments = JsonObject(emptyMap()))
+
+    @Test
+    fun streamMessage_stopReasonBeforeEofIsACompleteResponse() = runTest {
+        val api = FakeApi(response())
+        api.streamCall = sseCall(
+            """data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hello"}}""",
+            """data: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}"""
+        )
+
+        val chunks = adapter(api).apply { maxNetworkRetries = 0 }
+            .completeStream("sys", listOf(AgentMessage.UserMessage(content = "hi"))).toList()
+
+        val final = chunks.filterIsInstance<AIStreamChunk.Final>().single()
+        assertEquals("hello", final.response.content)
+        assertEquals("end_turn", final.response.stopReason)
+    }
 
     @Test
     fun max_tokens_uses_model_metadata_output_limit() = runTest {
