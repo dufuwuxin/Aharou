@@ -484,8 +484,7 @@ class AIEditorApp : Application(), Configuration.Provider {
         appScope.launch {
             logSettings.levelFlow.collectLatest { FileLogger.setMinLevel(it) }
         }
-        // 启动即把首帧执行模式（从 DataStore 读）写入 ExecutionModeHolder，供 DI @Provides 同步读取；委托层每次调用才按 currentMode() 转发，不依赖注入时机。
-        // SSH 连接放后台，失败不阻塞 UI（连接失败时首次命令会触发 ensureInstalled 重试）。
+        // 启动即把执行模式写入 ExecutionModeHolder，供 DI 同步读取；远程 SSH 模式已归一化为本地。
         appScope.launch {
             val mode = executionModeRepository.executionModeFlow.first()
             executionModeHolder.setMode(mode)

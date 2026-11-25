@@ -60,9 +60,9 @@ class NoImBotsTest(unittest.TestCase):
         for retained in (
             "configMcpFields.registerInto(configRegistry)",
             "mcpManager.start()",
-            "remoteSshConnection.superviseByExecutionMode",
         ):
             self.assertIn(retained, app)
+        self.assertNotIn("remoteSshConnection.superviseByExecutionMode", app)
 
     def test_tool_registration_removes_only_im_sender(self):
         module = source(SRC / "di/AgentModule.kt")

@@ -31,7 +31,7 @@ class NoRemoteDeviceTest(unittest.TestCase):
         self.assertNotIn("/guide/cross-device", (ROOT / "docs-site/.vitepress/config.ts").read_text())
         self.assertFalse((ROOT / "docs-site/docs/guide/cross-device.md").exists())
 
-    def test_ssh_mcp_and_memory_sync_remain(self):
+    def test_legacy_ssh_data_mcp_and_memory_sync_remain_without_remote_startup(self):
         for path in ("feature/agent/domain/mcp/McpManager.kt",
                      "feature/agent/domain/container/RemoteSshConnection.kt",
                      "feature/agent/domain/memory/MemorySyncManager.kt",
@@ -40,7 +40,23 @@ class NoRemoteDeviceTest(unittest.TestCase):
         app = (SRC / "AIEditorApp.kt").read_text()
         self.assertIn("mcpManager.start()", app)
         self.assertIn("configMemorySyncFields.registerInto(configRegistry)", app)
-        self.assertIn("remoteSshConnection.superviseByExecutionMode", app)
+        self.assertNotIn("remoteSshConnection.superviseByExecutionMode", app)
+        backup = (SRC / "feature/backup/data/BackupManagerImpl.kt").read_text(encoding="utf-8")
+        for field, dao in (
+            ("remoteConnections", "getAllConnectionsOnce"),
+            ("remoteMounts", "getAllMountsOnce"),
+        ):
+            self.assertIn(
+                f"{field} = if (options.remoteConnections) remoteConnectionDao.{dao}().map {{ it.toDto() }} else emptyList()",
+                backup,
+            )
+        self.assertIn("remoteConnectionDao.insertAllConnections(meta.remoteConnections.mapNotNull { it.toEntity() })", backup)
+        self.assertIn("val connectionIds = remoteConnectionDao.getAllConnectionsOnce().map { it.id }.toSet()", backup)
+        self.assertIn(
+            "meta.remoteMounts.map { it.toEntity() }.filter { it.connectionId in connectionIds }",
+            backup,
+        )
+        self.assertIn("remoteConnectionDao.insertAllMounts(", backup)
 
 
 if __name__ == "__main__":
