@@ -5,23 +5,11 @@
 ## 系统要求
 
 - Android 8.0（API 26）及以上
-- arm64-v8a 或 x86_64 设备
+- ARMv8（arm64-v8a）设备
 
 ## 下载安装
 
-去 [GitHub Releases](https://github.com/520huxiangli/Aharou/releases/latest) 下载，三个包按设备选：
-
-| 包名 | 适用场景 |
-| --- | --- |
-| `armsolo` | 真机（arm64 设备），体积最小 |
-| `x86solo` | 模拟器、Chromebook（x86_64） |
-| `universal` | 通用包，同时含两种架构，体积较大 |
-
-::: warning 架构要选对
-架构不匹配会导致内置容器无法运行。不确定的话用 `universal`。
-:::
-
-推荐直接点击[文档站首页](/)的「下载 APK」，将通过加速镜像直接下载最新正式版的 `universal` 通用包（镜像不可用时自动回退至 GitHub 原链）。
+从 [Aharou Fork Releases](https://github.com/dufuwuxin/Aharou/releases/latest) 下载 `Aharou-arm64-*.apk`。当前仅提供 ARMv8（`arm64-v8a`）版本，不提供 x86、x86-64 或 32 位 ARM 安装包。
 
 ## 1. 首次启动与新手引导
 

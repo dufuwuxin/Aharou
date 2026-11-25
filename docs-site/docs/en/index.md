@@ -1,30 +1,30 @@
 ---
 layout: home
-title: Aharou - AI Coding Tool & Linux Terminal on Android
+title: Aharou Fork - AI Coding Tool & Linux Terminal on Android
 titleTemplate: false
-description: Aharou is an open-source AI coding tool for Android that needs no computer. It ships a built-in Linux container and terminal so the AI Agent can read/write code and run builds on its own, with Git version control, the MCP protocol and remote SSH support.
+description: Aharou Fork is an open-source AI coding tool for Android that needs no computer. It ships a built-in Linux container and terminal so the AI Agent can read/write code and run builds on its own, with Git version control, the MCP protocol and remote SSH support.
 head:
   - - meta
     - name: keywords
-      content: Aharou, Android AI coding, mobile development, Linux terminal, PRoot, Termux, AI Agent, MCP, code editor, Git client, mobile workstation, remote SSH
+      content: Aharou Fork, Android AI coding, mobile development, Linux terminal, PRoot, Termux, AI Agent, MCP, code editor, Git client, mobile workstation, remote SSH
 
 hero:
-  name: Aharou
+  name: Aharou Fork
   text: AI Coding Tool & Mobile Workstation on Your Phone
   tagline: No computer needed — write, debug and commit entirely from your phone. A built-in Linux container and terminal let the AI Agent read/write files, run shell commands and execute builds on its own, with Git, MCP, remote SSH and a full model ecosystem.
   image:
     src: /logo.png
-    alt: Aharou
+    alt: Aharou Fork
   actions:
     - theme: brand
       text: Quick Start
       link: /en/guide/quick-start
     - theme: alt
       text: Download APK
-      link: https://cnb.cool/huxiangli/aharou-releases/-/releases
+      link: https://github.com/dufuwuxin/Aharou/releases/latest
     - theme: alt
       text: GitHub
-      link: https://github.com/520huxiangli/Aharou
+      link: https://github.com/dufuwuxin/Aharou
 
 features:
   - title: AI Agent

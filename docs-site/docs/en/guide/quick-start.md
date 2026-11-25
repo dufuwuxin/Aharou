@@ -5,23 +5,11 @@ From installation to your first AI conversation.
 ## System Requirements
 
 - Android 8.0 (API 26) or higher
-- arm64-v8a or x86_64 device
+- ARMv8 (`arm64-v8a`) device
 
 ## Download & Install
 
-Download from [GitHub Releases](https://github.com/520huxiangli/Aharou/releases/latest). Pick the package that fits your device:
-
-| Package | Best for |
-| --- | --- |
-| `armsolo` | Real devices (arm64), smallest size |
-| `x86solo` | Emulators and Chromebooks (x86_64) |
-| `universal` | Both architectures in one package, larger size |
-
-::: warning Pick the right architecture
-A mismatched architecture will break the built-in container. If you are not sure, use `universal`.
-:::
-
-Tip: you can also tap "Download APK" on the [homepage](/en/), which fetches the latest stable `universal` package through an accelerated mirror (falls back to the GitHub link automatically if the mirror is unavailable).
+Download `Aharou-arm64-*.apk` from [Aharou Fork Releases](https://github.com/dufuwuxin/Aharou/releases/latest). Only the ARMv8 (`arm64-v8a`) package is currently provided; x86, x86-64, and 32-bit ARM packages are not available.
 
 ## 1. First Launch & Onboarding Guide
 

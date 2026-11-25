@@ -1,5 +1,5 @@
 <p align="center">
-  <h1 align="center">Aharou</h1>
+  <h1 align="center">Aharou Fork</h1>
   <p align="center">
     手机上的 AI 助手 · Coding Agent · 内置 Linux 环境
     <br />
@@ -13,21 +13,21 @@
   <img src="https://img.shields.io/badge/Language-Kotlin-purple.svg" alt="Kotlin" />
   <img src="https://img.shields.io/badge/UI-Jetpack%20Compose-4285F4.svg" alt="Jetpack Compose" />
   <img src="https://img.shields.io/badge/MinSDK-26-orange.svg" alt="Min SDK 26 (Android 8.0)" />
-  <a href="https://github.com/520huxiangli/Aharou/releases"><img src="https://img.shields.io/github/v/release/520huxiangli/Aharou?display_name=tag&include_prereleases" alt="Latest Release" /></a>
-  <a href="https://github.com/520huxiangli/Aharou/releases"><img src="https://img.shields.io/github/downloads/520huxiangli/Aharou/total" alt="Downloads" /></a>
+  <a href="https://github.com/dufuwuxin/Aharou/releases"><img src="https://img.shields.io/github/v/release/dufuwuxin/Aharou?display_name=tag&include_prereleases" alt="Latest Release" /></a>
+  <a href="https://github.com/dufuwuxin/Aharou/releases"><img src="https://img.shields.io/github/downloads/dufuwuxin/Aharou/total" alt="Downloads" /></a>
 </p>
 
 ---
 
 ## 下载安装
 
-- **最新安装包**：[Releases](https://github.com/520huxiangli/Aharou/releases/latest) 页面下载 `Aharou-*.apk`，允许「安装未知应用」后安装即可。
+- **最新安装包**：[Releases](https://github.com/dufuwuxin/Aharou/releases/latest) 页面下载 `Aharou-arm64-*.apk`，允许「安装未知应用」后安装即可。
 - 支持 Android 8.0+，无需 root；首次启动自动初始化内置 Linux 环境。
 - 模型、密钥、端点全部由你自行配置——不内置模型，不绑定供应商。
 
 ## 简介
 
-Aharou 把一套完整的 AI 助手与 Linux 环境装进手机：内置 Alpine 容器与多标签终端，Agent 能读写文件、执行命令、跑构建；也可以把执行后端切到远程 SSH。所有能力在本机完成，不用电脑，也不用自己搭环境。
+Aharou Fork 是 [Aharou](https://github.com/520huxiangli/Aharou) 的独立分支。它为 Android 提供 AI 助手、内置 Alpine 容器与多标签终端。Agent 可在本地读写文件和执行命令，也可通过 SSH 在远程环境中开发。
 
 ## 功能
 
@@ -58,7 +58,4 @@ Aharou 把一套完整的 AI 助手与 Linux 环境装进手机：内置 Alpine 
 
 ## 反馈与贡献
 
-- 🐧 **交流群**：QQ 群 **141882781**
-- **Bug 反馈**：到 [Issues](https://github.com/520huxiangli/Aharou/issues) 提交，附上复现步骤、设备型号与系统版本
-- **功能建议**：欢迎在 [Issues](https://github.com/520huxiangli/Aharou/issues) 讨论
-- **贡献代码**：欢迎提交 [Pull Request](https://github.com/520huxiangli/Aharou/pulls)
+- **贡献代码**：欢迎向 [Aharou Fork 提交 Pull Request](https://github.com/dufuwuxin/Aharou/pulls)。

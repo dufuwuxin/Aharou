@@ -2,7 +2,7 @@ name: Deploy Docs
 
 # 文档站部署：构建 VitePress 站点并发布到 GitHub Pages。
 # 选 Pages 是因为它用仓库自带的 GITHUB_TOKEN，不需要任何第三方凭据（Vercel 那套要人工配 token）。
-# 地址：https://520huxiangli.github.io/Aharou/
+# 地址：https://dufuwuxin.github.io/Aharou/
 # 仅在打 tag 时部署，避免 master 上尚未随版本发布的文档被公开。
 on:
   push:
@@ -49,7 +49,7 @@ jobs:
       - name: Build site
         env:
           VITEPRESS_BASE: /Aharou/
-          SITE_URL: https://520huxiangli.github.io/Aharou
+          SITE_URL: https://dufuwuxin.github.io/Aharou
         run: npm run build
 
       - name: Configure Pages

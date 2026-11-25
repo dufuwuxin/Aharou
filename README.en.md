@@ -1,5 +1,5 @@
 <p align="center">
-  <h1 align="center">Aharou</h1>
+  <h1 align="center">Aharou Fork</h1>
   <p align="center">
     AI assistant &amp; coding agent on Android · Built-in Linux environment
     <br />
@@ -13,21 +13,21 @@
   <img src="https://img.shields.io/badge/Language-Kotlin-purple.svg" alt="Kotlin" />
   <img src="https://img.shields.io/badge/UI-Jetpack%20Compose-4285F4.svg" alt="Jetpack Compose" />
   <img src="https://img.shields.io/badge/MinSDK-26-orange.svg" alt="Min SDK 26 (Android 8.0)" />
-  <a href="https://github.com/520huxiangli/Aharou/releases"><img src="https://img.shields.io/github/v/release/520huxiangli/Aharou?display_name=tag&include_prereleases" alt="Latest Release" /></a>
-  <a href="https://github.com/520huxiangli/Aharou/releases"><img src="https://img.shields.io/github/downloads/520huxiangli/Aharou/total" alt="Downloads" /></a>
+  <a href="https://github.com/dufuwuxin/Aharou/releases"><img src="https://img.shields.io/github/v/release/dufuwuxin/Aharou?display_name=tag&include_prereleases" alt="Latest Release" /></a>
+  <a href="https://github.com/dufuwuxin/Aharou/releases"><img src="https://img.shields.io/github/downloads/dufuwuxin/Aharou/total" alt="Downloads" /></a>
 </p>
 
 ---
 
 ## Download
 
-- Get the latest `Aharou-arm64-*.apk` from [Releases](https://github.com/520huxiangli/Aharou/releases/latest), allow "install unknown apps", and install. Requires Android 8.0+ on ARMv8 (`arm64-v8a`); x86, x86-64 and 32-bit ARM packages are no longer provided. No root required.
+- Get the latest `Aharou-arm64-*.apk` from [Releases](https://github.com/dufuwuxin/Aharou/releases/latest), allow "install unknown apps", and install. Requires Android 8.0+ on ARMv8 (`arm64-v8a`); x86, x86-64 and 32-bit ARM packages are no longer provided. No root required.
 - The built-in Linux environment initializes automatically on first launch.
 - Bring your own models and keys — no built-in model, no provider lock-in.
 
 ## About
 
-Aharou packs a full AI assistant and Linux environment into your phone: a built-in Alpine container with multi-tab terminal; the agent can read/write files, run commands and builds. You can also point the execution backend at a remote SSH server. Everything runs on-device.
+Aharou Fork is an independent fork of [Aharou](https://github.com/520huxiangli/Aharou). It brings an AI assistant, a built-in Alpine container and a multi-tab terminal to Android. The agent can work with local files and commands or use a remote environment over SSH.
 
 ## Features
 
@@ -58,6 +58,4 @@ Aharou packs a full AI assistant and Linux environment into your phone: a built-
 
 ## Feedback
 
-- **Community**: QQ group **141882781**
-- **Bug reports**: open an [Issue](https://github.com/520huxiangli/Aharou/issues) with repro steps, device model and OS version
-- **Pull requests**: welcome at [PRs](https://github.com/520huxiangli/Aharou/pulls)
+- **Contributions**: open a [pull request against Aharou Fork](https://github.com/dufuwuxin/Aharou/pulls).
