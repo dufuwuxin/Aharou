@@ -58,7 +58,8 @@ internal fun ProviderConcurrencyLimitSection(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = Spacing.lg, bottom = Spacing.md),
+            .padding(horizontal = Spacing.lg)
+            .padding(bottom = Spacing.md),
     ) {
         AppTextField(
             value = input,
