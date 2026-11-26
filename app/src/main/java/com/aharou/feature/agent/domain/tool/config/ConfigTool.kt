@@ -84,7 +84,7 @@ class ConfigTool @Inject constructor(
         "读写 Aharou 自身设置（配置通道）。action=list 列出可配字段；action=get 读字段（path）；" +
             "action=reveal 读取字段明文（path）：敏感字段（如 API Key）平时只回打码值，读真值必须弹确认面板、用户同意后才返回，并写审计；非敏感字段与 get 相同；" +
             "action=set 修改字段（path + value，value 为 JSON 编码，如 \"🦊\"、\"zh\"、true）；" +
-            "action=add 在集合下新增一项（path=集合名、value=新项 JSON）；action=remove 删除集合下的一项（path=集合名、id）。" +
+            "action=add 在允许的集合下新建团队/角色（path=teams|roles，团队 value={scope,content:Markdown}，角色 value={scope,form}）；action=remove 删除团队/角色（path=teams|roles，先 list 取 id）。这些增删走确认闸门；修改现有团队/角色仍需用户单独启用团队编辑权限。" +
             "action=logs 读应用日志（只读）；date=yyyy-MM-dd（缺省今天，只保留最近 7 天）、query=关键词过滤、limit=最多返回行数（默认 $DEFAULT_LOG_LINES）均可选。" +
             "set/add/remove 与 reveal 都要确认：AUTO 模式下非敏感字段的修改直接生效（不弹窗，审计里标 auto-approved），" +
             "敏感字段（密钥 / 密码 / 凭据）与集合的增删、以及 reveal 读明文一律照旧弹确认面板；用户同意后才生效，并写审计、可回滚。"
@@ -126,7 +126,21 @@ class ConfigTool @Inject constructor(
             return teamCapabilityRequest(context, action, path, (args["value"] as? JsonPrimitive)?.contentOrNull, workspace, teamFields, roleFields)
         }
         if (path == "roles" || path.startsWith("roles.")) {
-            return ToolResult.Error("Role definitions require the user-enabled scoped team channel", "TEAM_DETAILS_RESTRICTED")
+            if (path == "roles" && action == "list" && !workspace.isNullOrBlank() && roleFields != null) {
+                if (!mainAgent) return ToolResult.Error("Only the main agent may manage roles", "TEAM_ADMIN_DENIED")
+                return ToolResult.Success(roleFields.forWorkspace(workspace).collectionSummary())
+            }
+            if (path == "roles" && action in setOf("add", "remove")) {
+                if (!mainAgent) return ToolResult.Error("Only the main agent may create or delete roles", "TEAM_ADMIN_DENIED")
+                if (workspace.isNullOrBlank() || roleFields == null) return ToolResult.Error("Role CRUD unavailable", "TEAM_CRUD_UNAVAILABLE")
+            } else return ToolResult.Error("Editing existing role definitions requires the user-enabled scoped team channel", "TEAM_DETAILS_RESTRICTED")
+        }
+        if (path == "teams") {
+            if (action == "list" && !workspace.isNullOrBlank()) return ToolResult.Success(teamFields.forWorkspace(workspace).collectionSummary())
+            if (action in setOf("add", "remove")) {
+                if (!mainAgent) return ToolResult.Error("Only the main agent may create or delete teams", "TEAM_ADMIN_DENIED")
+                if (workspace.isNullOrBlank()) return ToolResult.Error("Team CRUD requires a workspace", "TEAM_CRUD_UNAVAILABLE")
+            } else if (action != "list") return ToolResult.Error("Existing team edits require the user-enabled scoped team channel", "TEAM_DETAILS_RESTRICTED")
         }
         if ((path == "teams" || path == "team.stages" || path.startsWith("teams.") || path.startsWith("team.stages.") || path == "workflows" || path.startsWith("workflows."))) {
             if (!mainAgent || workspace.isNullOrBlank() || !teamFields.forWorkspace(workspace).mainAgentMayRead(path)) {
@@ -138,6 +152,12 @@ class ConfigTool @Inject constructor(
                 require(!workspace.isNullOrBlank() && agentContext != null && pluginFields != null) { "Marketplace requires a session workspace" }
             }
             val boundRegistry = when {
+                path == "roles" && workspace != null && roleFields != null -> ConfigRegistry.isolated().also {
+                    roleFields.forWorkspace(workspace).registerInto(it)
+                }
+                path == "teams" && workspace != null -> ConfigRegistry.isolated().also {
+                    teamFields.forWorkspace(workspace).registerInto(it)
+                }
                 (path == "plugin_market" || path.startsWith("plugin_market.")) && workspace != null && pluginFields != null ->
                     ConfigRegistry.isolated().also { registry ->
                         pluginFields.get().forWorkspace(workspace, agentContext?.sessionId) { target ->

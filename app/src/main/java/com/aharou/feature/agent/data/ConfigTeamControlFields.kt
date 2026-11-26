@@ -16,6 +16,7 @@ import com.aharou.feature.agent.domain.teamworkflow.TeamWorkflowRepository
 import com.aharou.feature.agent.domain.teamworkflow.WorkflowTeamRefForm
 import com.aharou.feature.agent.domain.teamworkflow.toForm
 import com.aharou.feature.agent.domain.subagent.AgentTeamEntry
+import com.aharou.feature.agent.domain.subagent.AgentTeamParser
 import com.aharou.feature.agent.domain.subagent.AgentTeamRepository
 import com.aharou.feature.agent.domain.subagent.AgentTeamStageForm
 import com.aharou.feature.agent.domain.subagent.TeamFlowNode
@@ -23,6 +24,7 @@ import com.aharou.feature.agent.domain.subagent.TeamRoute
 import com.aharou.feature.agent.domain.subagent.TeamRouteAction
 import com.aharou.feature.agent.domain.subagent.TeamCommunication
 import com.aharou.feature.agent.domain.subagent.toForm
+import kotlinx.serialization.json.JsonPrimitive
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -51,6 +53,21 @@ class ConfigTeamControlFields @Inject constructor(
         registry.register(Stages()); registry.register(Teams()); registry.register(Workflows())
     }
 
+    /** Safe CRUD index: names/scopes only; editing existing fields still needs TeamEditCapability. */
+    fun collectionSummary() = kotlinx.serialization.json.buildJsonObject {
+        put("teams", kotlinx.serialization.json.buildJsonArray {
+            teams.listAll().forEach { entry -> add(kotlinx.serialization.json.buildJsonObject {
+                put("id", JsonPrimitive(teamId(entry))); put("scope", JsonPrimitive(entry.scope.name.lowercase()))
+                put("name", JsonPrimitive(entry.team.name)); put("description", JsonPrimitive(entry.team.description))
+            }) }
+        })
+        put("createValueShape", JsonPrimitive("{scope:global|project,content:team Markdown with name/admins/members/stages}"))
+    }
+
+    private fun teamId(entry: AgentTeamEntry): String =
+        "${entry.scope.name.lowercase()}:" + entry.team.name.toByteArray(Charsets.UTF_8)
+            .joinToString("") { "%02x".format(it.toInt() and 0xff) }
+
     private fun entries(): Map<String, Pair<AgentTeamEntry, Int>> = buildMap {
         teams.listAll().forEach { entry -> entry.team.stages.indices.forEach { index ->
             val nameId = entry.team.name.toByteArray(Charsets.UTF_8).joinToString("") { "%02x".format(it.toInt() and 0xff) }
@@ -78,10 +95,27 @@ class ConfigTeamControlFields @Inject constructor(
         override val basePath = "teams"
         override val displayName = "Team workflow"
         override val description = "Stable scope:hex-name ids; routes use concrete stage/task ids. Main-agent admins may reassign existing tasks through task team_assign; changes apply to the next run."
-        override val addable = false
-        override val removable = false
+        override val addable = true
+        override val removable = true
         private fun all() = entries().mapKeys { (id, _) -> id.substringBeforeLast(':') }
             .mapValues { (_, value) -> value.first }
+        override fun add(payload: ConfigValue): String {
+            val obj = (payload as? ConfigValue.Obj)?.value ?: throw ConfigError.TypeMismatch("object")
+            if (obj.keys != setOf("scope", "content")) throw ConfigError.InvalidValue("Expected only scope and content")
+            val scopeText = (obj["scope"] as? ConfigValue.Str)?.value ?: throw ConfigError.TypeMismatch("scope")
+            val scope = AgentDefinitionScope.entries.firstOrNull { it.name.equals(scopeText, true) }
+                ?: throw ConfigError.InvalidValue("Expected global or project scope")
+            val markdown = (obj["content"] as? ConfigValue.Str)?.value ?: throw ConfigError.TypeMismatch("content")
+            val parsed = AgentTeamParser.parseText(markdown, "${teams.teamsRoot(scope)}/new-team.md")
+                ?: throw ConfigError.InvalidValue("Team Markdown has no valid stages")
+            val form = parsed.toForm(scope)
+            teams.save(form)?.let { throw ConfigError.InvalidValue("Team creation failed: $it") }
+            return teamId(AgentTeamEntry(parsed.copy(filePath = "${teams.teamsRoot(scope)}/${form.name}.md"), scope))
+        }
+        override fun remove(id: String) {
+            val entry = all()[id] ?: throw ConfigError.InvalidValue("Unknown scoped team")
+            if (!teams.delete(entry.team.name, entry.scope)) throw ConfigError.InvalidValue("Team deletion failed")
+        }
         override fun childIds() = all().keys.toList()
         override fun fields(forId: String): List<ConfigField> {
             if (forId !in all()) return emptyList()
@@ -121,8 +155,6 @@ class ConfigTeamControlFields @Inject constructor(
                     })
             )
         }
-        override fun add(payload: ConfigValue): String = throw ConfigError.PermissionDenied("Use the team editor")
-        override fun remove(id: String) { throw ConfigError.PermissionDenied("Use the team editor") }
     }
 
     /** Uses the same scope-qualified files as the settings editor, never a second settings store. */

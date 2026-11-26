@@ -102,4 +102,22 @@ class TeamRoleCapabilityTest {
             assertTrue(request("get", "roles") is ToolResult.Error)
         } finally { sandbox.deleteRecursively() }
     }
+
+    @Test fun creationAndDeletionCollectionsAreEnabledWhileExistingEditsStayCapabilityGated() {
+        val teams = mockk<AgentTeamRepository>(relaxed = true)
+        val workflows = mockk<TeamWorkflowRepository>(relaxed = true)
+        val roles = mockk<AgentDefinitionRepository>(relaxed = true)
+        val access = mockk<com.aharou.feature.workspace.domain.FileAccessProvider>(relaxed = true)
+        val teamRegistry = ConfigRegistry.isolated()
+        ConfigTeamControlFields(teams, workflows).registerInto(teamRegistry)
+        assertTrue(teamRegistry.collection("teams")!!.addable)
+        assertTrue(teamRegistry.collection("teams")!!.removable)
+        val roleRegistry = ConfigRegistry.isolated()
+        ConfigTeamRoleFields(roles, access).registerInto(roleRegistry)
+        assertTrue(roleRegistry.collection("roles")!!.addable)
+        assertTrue(roleRegistry.collection("roles")!!.removable)
+        assertFalse(TeamEditCapability.allowed("teams"))
+        assertTrue(TeamEditCapability.allowed("roles.global:61.form"))
+    }
+
 }

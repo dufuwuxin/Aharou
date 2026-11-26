@@ -22,6 +22,18 @@ class ConfigTeamRoleFields @Inject constructor(
 
     fun creationTemplate(): JsonObject = form(AgentDefinition(name = "", description = "", prompt = ""))
 
+    /** Safe CRUD index: exposes names and ids, never existing role prompts/configuration. */
+    fun collectionSummary() = buildJsonObject {
+        put("roles", buildJsonArray {
+            AgentDefinitionScope.entries.forEach { scope -> roles.listInScope(scope).forEach { role -> add(buildJsonObject {
+                put("id", JsonPrimitive(id(scope, role.name))); put("scope", JsonPrimitive(scope.name.lowercase()))
+                put("name", JsonPrimitive(role.name)); put("description", JsonPrimitive(role.description))
+            }) } }
+        })
+        put("formTemplate", creationTemplate())
+        put("createValueShape", JsonPrimitive("{scope:global|project,form:formTemplate}"))
+    }
+
     fun registerInto(registry: ConfigRegistry) { registry.register(Roles()) }
 
     private fun id(scope: AgentDefinitionScope, name: String) = scope.name.lowercase() + ":" +
@@ -32,7 +44,7 @@ class ConfigTeamRoleFields @Inject constructor(
     }
 
     private fun form(role: AgentDefinition): JsonObject = buildJsonObject {
-        put("name", role.name); put("description", role.description); put("prompt", role.prompt)
+        put("name", JsonPrimitive(role.name)); put("description", JsonPrimitive(role.description)); put("prompt", role.prompt)
         put("providerId", role.providerId?.let(::JsonPrimitive) ?: JsonNull)
         put("model", role.model?.let(::JsonPrimitive) ?: JsonNull)
         put("reasoningEffort", role.reasoningEffort?.let(::JsonPrimitive) ?: JsonNull)
