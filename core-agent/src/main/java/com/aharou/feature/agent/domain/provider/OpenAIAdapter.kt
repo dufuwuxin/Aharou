@@ -81,7 +81,19 @@ class OpenAIAdapter @Inject constructor(
         get() = OpenAIServiceTier.value(resolveCustomHeaders(customHeaders, logSessionId, apiKey))
 
     private fun promptCacheKey(): String? =
-        logSessionId?.takeIf { chatCacheKeyEnabled || isOfficialOpenAiEndpoint() }
+        logSessionId?.takeIf { it.isNotBlank() && (chatCacheKeyEnabled || isOfficialOpenAiEndpoint()) }
+            ?.let(::stablePromptCacheKey)
+
+    /**
+     * Use a stable opaque shard key scoped to provider/model/session. Raw session IDs can otherwise
+     * collide across model chains and expose a host identifier to upstream cache routers.
+     */
+    private fun stablePromptCacheKey(sessionId: String): String {
+        val identity = listOf(providerId, model, sessionId).joinToString("") { "${it.length}:$it\u0000" }
+        return java.security.MessageDigest.getInstance("SHA-256")
+            .digest(identity.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it.toInt() and 0xff) }
+    }
 
     private fun isOfficialOpenAiEndpoint(): Boolean = runCatching {
         URI(baseUrl.trim()).let { uri ->
@@ -300,7 +312,7 @@ class OpenAIAdapter @Inject constructor(
         }
         // OpenAI 官方 Responses 原生支持 prompt_cache_key（同会话路由到同一缓存 shard）；
         // 自动管理缓存的服务（如 DeepSeek）会静默忽略该字段，不会报错。
-        logSessionId?.let { request["prompt_cache_key"] = it }
+        logSessionId?.takeIf(String::isNotBlank)?.let { request["prompt_cache_key"] = stablePromptCacheKey(it) }
         codexClientMetadata()?.let { request["client_metadata"] = it }
         return request
     }

@@ -511,17 +511,12 @@ class StatefulAgentWorkflow @Inject constructor(
                         }
                     }
                     is AgentSideEffect.CallLlm -> {
-                        state = executeLlmEffect(
-                            initialState = state,
-                            currentContext = currentContext,
-                            currentTools = currentTools,
-                            systemPrompt = systemPrompt,
-                            aiProvider = aiProvider,
-                            budget = llmBudget,
-                            actionQueue = actionQueue,
-                            emit = emit,
-                            telemetry = telemetry
-                        )
+                        if (isLlmCallBudgetExhausted(state.iterations)) {
+                            state = state.stopAtCallBudget()
+                            actionQueue.clear()
+                            FileLogger.w(TAG, "模型调用预算耗尽：${state.iterations} 次，结束当前轮次")
+                        } else state = executeLlmEffect(state, currentContext, currentTools, systemPrompt,
+                            aiProvider, llmBudget, actionQueue, emit, telemetry)
                     }
                     is AgentSideEffect.RequestPermissionBatch -> {
                         handlePermissionBatchEffect(

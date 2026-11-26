@@ -264,7 +264,7 @@ class OpenAIAdapterTest {
             chatCacheKeyEnabled = true
             logSessionId = "session-42"
         }.complete("", emptyList())
-        assertEquals("session-42", reqSlot.captured.prompt_cache_key)
+        assertTrue(reqSlot.captured.prompt_cache_key!!.matches(Regex("[0-9a-f]{64}")))
 
         adapter(api).apply {
             baseUrl = "https://gateway.example/v1"
@@ -281,7 +281,7 @@ class OpenAIAdapterTest {
         coEvery { api.createChatCompletion(any(), any(), any(), capture(reqSlot)) } returns response()
 
         adapter(api).apply { logSessionId = "session-42" }.complete("", emptyList())
-        assertEquals("session-42", reqSlot.captured.prompt_cache_key)
+        assertTrue(reqSlot.captured.prompt_cache_key!!.matches(Regex("[0-9a-f]{64}")))
 
         for (url in listOf("https://gateway.example/v1", "https://api.openai.com.attacker.example/v1",
                 "http://api.openai.com/v1")) {
@@ -297,7 +297,7 @@ class OpenAIAdapterTest {
             chatCacheKeyEnabled = true
             logSessionId = "session-42"
         }.complete("", emptyList())
-        assertEquals("session-42", reqSlot.captured.prompt_cache_key)
+        assertTrue(reqSlot.captured.prompt_cache_key!!.matches(Regex("[0-9a-f]{64}")))
     }
 
     @Test

@@ -334,6 +334,7 @@ class AIAgentViewModel @Inject constructor(
             "refusal", "SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST", "SPII" -> context.getString(R.string.agent_stop_refusal)
             "model_context_window_exceeded" -> context.getString(R.string.agent_stop_context_exceeded)
             "input_budget_exceeded" -> context.getString(R.string.agent_input_budget_exceeded)
+            com.aharou.feature.agent.domain.workflow.LLM_CALL_BUDGET_EXCEEDED_CODE -> context.getString(R.string.agent_stop_call_budget)
             "empty_response" -> context.getString(R.string.agent_stop_empty_response)
             else -> null
         } ?: return event.error

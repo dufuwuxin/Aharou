@@ -49,7 +49,32 @@ class CodexCacheIdentityTest {
         val metadata = requests.map { it.getValue("client_metadata") as Map<*, *> }
         assertEquals(metadata[0]["x-codex-installation-id"], metadata[1]["x-codex-installation-id"])
         assertNotEquals(metadata[0]["turn_id"], metadata[1]["turn_id"])
-        assertEquals(listOf("session-one", "session-one", "session-two"), requests.map { it["prompt_cache_key"] })
+        val cacheKeys = requests.map { it["prompt_cache_key"] as String }
+        assertEquals(cacheKeys[0], cacheKeys[1])
+        assertNotEquals(cacheKeys[0], cacheKeys[2])
+        assertTrue(cacheKeys.all { it.matches(Regex("[0-9a-f]{64}")) })
         headers.indices.forEach { index -> assertEquals(headers[index]["session-id"], metadata[index]["session_id"]) }
     }
+    @Test fun promptCacheRoutingKeyIsStableButScopedToProviderAndModel() = runTest {
+        val api = mockk<OpenAIApi>()
+        val requests = mutableListOf<Map<String, Any?>>()
+        coEvery { api.createResponses(any(), any(), any(), capture(requests)) } returns JsonObject().apply {
+            addProperty("status", "completed")
+        }
+        for ((provider, model) in listOf("provider-one" to "model-a", "provider-one" to "model-a",
+                "provider-two" to "model-a", "provider-one" to "model-b")) {
+            OpenAIAdapter(api).apply {
+                providerId = provider
+                logSessionId = "same-session"
+                this.model = model
+                useResponseApi = true
+            }.complete("stable", emptyList())
+        }
+        val keys = requests.map { it.getValue("prompt_cache_key") as String }
+        assertEquals(keys[0], keys[1])
+        assertNotEquals(keys[0], keys[2])
+        assertNotEquals(keys[0], keys[3])
+        assertTrue(keys.all { it.matches(Regex("[0-9a-f]{64}")) })
+    }
+
 }

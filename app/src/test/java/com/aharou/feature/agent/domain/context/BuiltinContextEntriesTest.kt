@@ -332,6 +332,14 @@ class BuiltinContextEntriesTest {
         assertEquals(recorded, receipt.readText())
     }
 
+    @Test fun mainExecutionContractRequiresTeamPlanningForMultiStageWork() {
+        val contract = seeds().defaults().single { it.id == "main-execution-contract" }.content
+        assertTrue(contract.contains("task(action=\"teams\")"))
+        assertTrue(contract.contains("task(action=\"team_run\""))
+        assertTrue(contract.contains("不得跳过团队规划"))
+        assertTrue(contract.contains("简单原子任务可直接处理"))
+    }
+
     @Test fun legacyExecutionContractsRespectUserNameOffRenameAndDeletion() {
         val memory = memories()
         val defaults = seeds().defaults()
