@@ -1,10 +1,13 @@
 package com.aharou.feature.agent.domain.tool.subagent
 
+import android.content.Context
 import com.aharou.feature.agent.domain.model.AgentContext
+import dagger.hilt.android.qualifiers.ApplicationContext
 import com.aharou.core.util.FileLogger
 import com.aharou.feature.agent.domain.subagent.AgentDefinition
 import com.aharou.feature.agent.domain.subagent.AgentDefinitionRepository
 import com.aharou.feature.agent.domain.subagent.AgentTeamEntry
+import com.aharou.feature.agent.domain.container.ContainerInstaller
 import com.aharou.feature.agent.domain.subagent.AgentTeamRepository
 import com.aharou.feature.agent.domain.subagent.MaxRunningSource
 import com.aharou.feature.agent.domain.tool.ToolResult
@@ -29,7 +32,8 @@ class TeamTasks @Inject constructor(
     private val teamRepository: AgentTeamRepository,
     private val agentDefinitionRepository: AgentDefinitionRepository,
     private val maxRunningSource: MaxRunningSource,
-    private val stageExecutor: TeamStageExecutor
+    private val stageExecutor: TeamStageExecutor,
+    @ApplicationContext private val appContext: Context
 ) {
 
     fun list(args: Map<String, JsonElement>, context: AgentContext, mainSession: Boolean = false): ToolResult {
@@ -148,6 +152,10 @@ class TeamTasks @Inject constructor(
             .joinToString("") { "%02x".format(it) }
 
     private fun loadEntries(workspace: String): List<AgentTeamEntry>? = try {
+        // App startup extraction is asynchronous; make the first real team request wait for the
+        // same consent-aware installer before scanning. This never overwrites retained user files.
+        ContainerInstaller.extractAgents(appContext)
+        ContainerInstaller.extractTeams(appContext)
         teamRepository.forWorkspace(workspace).listAll()
     } catch (e: Exception) {
         FileLogger.e(TAG, "读取团队预设失败", e)

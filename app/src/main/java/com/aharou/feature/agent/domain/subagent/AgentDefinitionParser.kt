@@ -21,6 +21,11 @@ object AgentDefinitionParser {
             return null
         }
 
+        return parseText(text, filePath)
+    }
+
+    /** Parse a packaged or retained role definition without requiring a writable workspace copy. */
+    fun parseText(text: String, filePath: String): AgentDefinition? {
         val (frontmatter, body) = Frontmatter.splitAndParse(text, TAG, "解析子代理定义 YAML 失败")
         val prompt = body.trim()
         if (prompt.isEmpty()) return null

@@ -117,7 +117,7 @@ class TeamToolBoundaryTest {
         every { entry.team } returns AgentTeam("public team", "public introduction", emptyList(), "PRIVATE_CHARTER")
         every { repository.forWorkspace(context.projectRoot) } returns repository
         every { repository.listAll() } returns listOf(entry)
-        val listing = TeamTasks(repository, mockk(), mockk(), mockk())
+        val listing = TeamTasks(repository, mockk(), mockk(), mockk(), mockk())
             .list(mapOf("team" to JsonPrimitive("public team")), context) as ToolResult.Success
         assertTrue(listing.data.toString().contains("public introduction"))
         assertTrue(listing.data.toString().contains("PRIVATE_CHARTER"))

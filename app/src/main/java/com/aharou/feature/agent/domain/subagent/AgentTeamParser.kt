@@ -45,6 +45,11 @@ object AgentTeamParser {
             return null
         }
 
+        return parseText(text, filePath)
+    }
+
+    /** Parse packaged or retained markdown without requiring a writable workspace copy. */
+    fun parseText(text: String, filePath: String): AgentTeam? {
         val (frontmatter, body) = Frontmatter.splitAndParse(text, TAG, "解析团队 YAML 失败")
         val stages = parseStages(frontmatter["stages"], filePath)
         if (stages.isEmpty()) {

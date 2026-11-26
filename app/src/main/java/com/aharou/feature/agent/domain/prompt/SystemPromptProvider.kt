@@ -24,6 +24,11 @@ import kotlinx.coroutines.runBlocking
 
 data class RequestPrompt(val system: String, val transientContext: String = "")
 
+/** Host-owned invariant: multi-stage work must use the configured team pipeline, never an ad-hoc direct role dispatch. */
+internal val MAIN_AGENT_TEAM_DISPATCH_CONTRACT = """
+主代理团队执行硬约束：凡需多个阶段或多个专业职责的实现、修复、调研、审查或验收任务，必须先调用 task(action="teams") 选择已配置且可运行的团队，再调用 task(action="team_run", team=…, goal=…)；不得直接把用户原文交给单个角色，不得跳过团队阶段。goal 仅作共同背景；首阶段按团队自己的分解提示拆出可验收的专属任务，后续阶段只依赖团队任务提示与上游交付，不复述整段原始需求。若 teams 返回 TEAM_LIST_EMPTY、工具不可用或 team_run 未完成，必须停止宣称执行中/已完成，明确报告阻塞与实际错误；禁止退化为直接派角色或谎称已分工。简单原子请求可由主代理直接处理。成员会话不适用本约束。
+""".trimIndent()
+
 /** Application-managed prompt text is read only from editable native memory entries. */
 @Singleton
 @Suppress("unused") // Keep the public injection constructor compatible with existing consumers.
@@ -80,8 +85,9 @@ class SystemPromptProvider @Inject constructor(
 
     fun buildNativeRequest(agentContext: AgentContext): RequestPrompt {
         val parts = buildRequestParts(agentContext)
-        injectedContextStore.record(agentContext.sessionId, parts.system)
-        return RequestPrompt(parts.system, parts.data)
+        val system = if (isMemberSession(agentContext)) parts.system else parts.system + "\n\n" + MAIN_AGENT_TEAM_DISPATCH_CONTRACT
+        injectedContextStore.record(agentContext.sessionId, system)
+        return RequestPrompt(system, parts.data)
     }
 
     fun build(agentContext: AgentContext, consumeInbox: Boolean = true): String {

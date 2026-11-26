@@ -74,7 +74,8 @@ object TeamRunner {
                             put("_teamCommunication", stage.communication.token)
                             put("_teamMessageLimit", stage.messageLimit.coerceIn(1, 100))
                             put("description", "${stage.title}·${task.memberLabel()}".take(DESCRIPTION_MAX))
-                            put("prompt", taskPrompt(team, stage, task, goal, interfaceText = interfaceTexts[stageIndex][taskIndex]) + "\n" + logicalBrief(team, batchSize))
+                            val scopedGoal = if (stageIndex == 0) goal else "上游阶段已接收并拆解原始需求；只执行本阶段 task 与上游交付中明确分配给你的部分，不复述或重新分配原始需求。"
+                            put("prompt", taskPrompt(team, stage, task, scopedGoal, interfaceText = interfaceTexts[stageIndex][taskIndex]) + "\n" + logicalBrief(team, batchSize))
                             task.agent?.let { put("agent", it) }
                             task.department?.let { put("department", it) }
                             task.agentQuery?.let { put("agentQuery", it) }
@@ -158,7 +159,9 @@ object TeamRunner {
                             put("_teamCommunication", stage.communication.token)
                             put("_teamMessageLimit", stage.messageLimit.coerceIn(1, 100))
                             put("description", "第$layerIndex 层·${stage.title}·${task.memberLabel()}".take(DESCRIPTION_MAX))
-                            put("prompt", taskPrompt(team, stage, task, goal, upstreamBrief, interfaceTexts[stageIndex][taskIndex]) + "\n" + logicalBrief(team, batchSize, "w$layerIndex-"))
+                            val hasUpstreamDelivery = upstreamBrief.isNotBlank() && !upstreamBrief.contains("无上游")
+                            val scopedGoal = if (!hasUpstreamDelivery && stageIndex == 0) goal else "只依据上游阶段交付、当前 task 与接口约定执行；原始需求已由上游拆解，不要把它当作唯一任务指令。"
+                            put("prompt", taskPrompt(team, stage, task, scopedGoal, upstreamBrief, interfaceTexts[stageIndex][taskIndex]) + "\n" + logicalBrief(team, batchSize, "w$layerIndex-"))
                             task.agent?.let { put("agent", it) }
                             task.department?.let { put("department", it) }
                             task.agentQuery?.let { put("agentQuery", it) }

@@ -40,7 +40,7 @@ class TeamAdministrationTest {
         io.mockk.every { access.writeFile(any(), any(), any(), any()) } answers { files[firstArg()] = secondArg() }
         val repository = AgentTeamRepository(access)
         val before = repository.listAll().single().team
-        val tasks = TeamTasks(repository, io.mockk.mockk(), io.mockk.mockk(), io.mockk.mockk())
+        val tasks = TeamTasks(repository, io.mockk.mockk(), io.mockk.mockk(), io.mockk.mockk(), io.mockk.mockk(relaxed = true))
         val result = tasks.assign(mapOf("team" to kotlinx.serialization.json.JsonPrimitive("team"),
             "stageId" to kotlinx.serialization.json.JsonPrimitive("stage"), "taskId" to kotlinx.serialization.json.JsonPrimitive("task"),
             "member" to kotlinx.serialization.json.JsonPrimitive("reviewer")),

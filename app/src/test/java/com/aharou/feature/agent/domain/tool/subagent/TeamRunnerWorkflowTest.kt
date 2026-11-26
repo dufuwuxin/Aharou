@@ -188,4 +188,19 @@ class TeamRunnerWorkflowTest {
         assertEquals("AGENT_NOT_FOUND", rejected.code)
         assertTrue(rejected.message.contains("驳回必须指名到具体专家"))
     }
+
+    @Test
+    fun buildScopesRawGoalToFirstStageAndKeepsDownstreamOnSpecificUpstreamWork() {
+        val team = AgentTeam("delivery", "", listOf(
+            TeamStage("需求拆解", listOf(TeamTask(agent = "需求分析师", prompt = "拆成任务清单"))),
+            TeamStage("实现", listOf(TeamTask(agent = "后端工程专家", prompt = "实现分配的任务")))
+        ), charter = "")
+        val plan = TeamRunner.build(team, "用户原始长需求全文", enabled, 2) as TeamRunner.Plan.Ready
+        val prompts = plan.pipeline.objects().map { JsonPrimitive((it["prompt"] as JsonPrimitive).content).content }
+        assertTrue(prompts[0].contains("用户原始长需求全文"))
+        assertTrue(prompts[1].contains("上游阶段已接收并拆解原始需求"))
+        assertTrue(!prompts[1].contains("用户原始长需求全文"))
+        assertTrue(prompts[1].contains("实现分配的任务"))
+    }
+
 }

@@ -271,4 +271,24 @@ class AgentTeamParserTest {
             assertEquals(department.interfaces, actual.interfaces)
         }
     }
+
+    @Test fun parseTextSupportsPackagedTeamsWithoutWritingThemToConfig() {
+        val team = AgentTeamParser.parseText("""---
+name: packaged
+admins: [__main_agent__]
+members:
+  - name: reviewer
+    level: 1
+stages:
+  - title: decomposition
+    agent: reviewer
+    prompt: split the user request into scoped tasks
+---
+charter
+""", "assets/teams/packaged.md")
+        assertEquals("packaged", team?.name)
+        assertEquals("assets/teams/packaged.md", team?.filePath)
+        assertEquals("split the user request into scoped tasks", team?.stages?.single()?.tasks?.single()?.prompt)
+    }
+
 }

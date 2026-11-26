@@ -226,4 +226,16 @@ class AgentDefinitionParserTest {
         assertFalse(AgentDefinitionRepository.isValidName("a:b"))
         assertFalse(AgentDefinitionRepository.isValidName("a".repeat(41)))
     }
+
+    @Test fun parseTextReadsPackagedRolesWithoutFileProvider() {
+        val role = AgentDefinitionParser.parseText("""---
+name: reviewer
+description: verify changes
+---
+Review only the provided diff.
+""", "assets/agents/reviewer.md")
+        assertEquals("reviewer", role?.name)
+        assertEquals("Review only the provided diff.", role?.prompt)
+    }
+
 }
