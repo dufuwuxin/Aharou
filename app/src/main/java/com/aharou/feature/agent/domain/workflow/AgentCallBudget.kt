@@ -1,7 +1,7 @@
 package com.aharou.feature.agent.domain.workflow
 
-/** Hard ceiling for LLM rounds in one user turn; prevents novel-tool-call loops from running forever. */
-internal const val MAX_LLM_CALLS_PER_TURN = 24
+/** Hard ceiling for LLM rounds in one user turn; leaves room for long tasks while bounding novel-tool-call loops. */
+internal const val MAX_LLM_CALLS_PER_TURN = 64
 internal const val LLM_CALL_BUDGET_EXCEEDED_CODE = "LLM_CALL_BUDGET_EXCEEDED"
 
 internal fun isLlmCallBudgetExhausted(completedCalls: Int): Boolean =

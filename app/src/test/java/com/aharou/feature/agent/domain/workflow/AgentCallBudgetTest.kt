@@ -8,6 +8,10 @@ import org.junit.Test
 import com.aharou.feature.agent.domain.model.AgentMessage
 
 class AgentCallBudgetTest {
+    @Test fun hardLimitLeavesRoomForLongToolDrivenTasks() {
+        assertEquals(64, MAX_LLM_CALLS_PER_TURN)
+    }
+
     @Test fun allowsCallsUntilTheHardLimit() {
         assertFalse(isLlmCallBudgetExhausted(0))
         assertFalse(isLlmCallBudgetExhausted(MAX_LLM_CALLS_PER_TURN - 1))
