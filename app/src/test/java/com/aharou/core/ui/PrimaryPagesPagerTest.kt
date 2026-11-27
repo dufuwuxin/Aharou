@@ -1,6 +1,7 @@
 package com.aharou.core.ui
 
 import android.app.Application
+import android.content.res.Configuration
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
@@ -15,6 +16,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.*
@@ -88,7 +90,10 @@ class PrimaryPagesPagerTest {
     }
 
     private fun pager() = compose.onNodeWithTag("primary_pages_pager")
-    private fun tab(id: Int) = compose.onNodeWithText(compose.activity.getString(id))
+    private fun tab(id: Int): SemanticsNodeInteraction {
+        compose.onNodeWithTag("primary_pages_menu").performClick()
+        return compose.onNodeWithText(compose.activity.getString(id))
+    }
     private fun expectRoute(route: String) = compose.runOnIdle { assertEquals(route, currentRoute) }
 
     @Test fun pageMovesAndNeighborIsVisibleBeforeFingerUp() {
@@ -111,7 +116,7 @@ class PrimaryPagesPagerTest {
         pager().performTouchInput { swipeRight() }; expectRoute("projects")
     }
 
-    @Test fun bottomClicksAndRestorationRetainIndependentRootState() {
+    @Test fun drawerNavigationAndRestorationRetainIndependentRootState() {
         val restoration = StateRestorationTester(compose)
         restoration.setContent { Fixture() }
         tab(R.string.bottom_tab_config).performClick()
@@ -128,24 +133,13 @@ class PrimaryPagesPagerTest {
         tab(R.string.project_home).performClick(); expectRoute("projects")
     }
 
-    @Test fun bottomDragMovesPageBeforeUpAndCanReachProject() {
+    @Test fun menuNavigationKeepsContentSwipeAvailable() {
         compose.setContent { Fixture() }
-        val tabs = compose.onNodeWithTag("primary_pages_tabs")
-        tabs.performTouchInput {
-            down(Offset(width * .23f, height * .55f))
-            moveTo(Offset(width * .49f, height * .55f), 200)
-        }
-        val configLeft = compose.onNodeWithTag("root_config").getUnclippedBoundsInRoot().left.value
-        val right = pager().getUnclippedBoundsInRoot().right.value
-        assertTrue("Bottom drag must move the real page before up", configLeft < right - 1f)
-        expectRoute("projects")
-        tabs.performTouchInput { moveTo(Offset(width * .75f, height * .55f), 200); up() }
+        tab(R.string.bottom_tab_config).performClick()
+        expectRoute("config")
+        compose.onNodeWithTag("primary_pages_menu").assertIsDisplayed()
+        pager().performTouchInput { swipeLeft() }
         expectRoute("settings")
-        tabs.performTouchInput {
-            down(Offset(width * .75f, height * .55f))
-            moveTo(Offset(width * .23f, height * .55f), 400); up()
-        }
-        expectRoute("projects")
     }
 
     @Test fun subpagesAllowParentSwipeAndKeepClickNavigationAndBack() {
@@ -183,19 +177,6 @@ class PrimaryPagesPagerTest {
         compose.onNodeWithTag("depth_config").assertTextEquals("depth=0")
         compose.onNodeWithTag("state_config").assertTextEquals("root=true")
         expectRoute("config")
-    }
-
-    @Test fun bottomDragFromSubpageChangesPrimaryPageWithoutClosingDetail() {
-        compose.setContent { Fixture() }
-        tab(R.string.bottom_tab_config).performClick()
-        compose.onNodeWithTag("detail_config").performClick()
-        compose.onNodeWithTag("primary_pages_tabs").performTouchInput {
-            down(Offset(width * .49f, height * .55f))
-            moveTo(Offset(width * .23f, height * .55f), 400); up()
-        }
-        expectRoute("projects")
-        tab(R.string.bottom_tab_config).performClick(); expectRoute("config")
-        compose.onNodeWithTag("state_config").assertTextEquals("root=false")
     }
 
     @Test fun subpageTransformGestureWinsOverPrimarySwipe() {
@@ -260,6 +241,55 @@ class PrimaryPagesPagerTest {
         compose.onNodeWithTag("inner_1").assertIsDisplayed(); expectRoute("projects")
         compose.onNodeWithTag("project_header").performTouchInput { swipeLeft() }
         expectRoute("config")
+    }
+
+    @Test fun compactRootMenuReplacesTabsAndSelectsEveryPageAccessibly() {
+        compose.setContent { Fixture() }
+        compose.onNodeWithTag("primary_pages_tabs").assertDoesNotExist()
+        compose.onNodeWithTag("primary_pages_rail").assertDoesNotExist()
+        compose.onNodeWithTag("primary_pages_menu").assertHeightIsAtLeast(48.dp)
+            .assertContentDescriptionEquals(compose.activity.getString(R.string.primary_navigation_open))
+        assertTrue(
+            "The menu row must not cover page content",
+            compose.onNodeWithTag("primary_pages_menu").getUnclippedBoundsInRoot().bottom <=
+                compose.onNodeWithTag("project_header").getUnclippedBoundsInRoot().top
+        )
+        for ((route, title) in listOf(
+            "projects" to R.string.project_home,
+            "config" to R.string.bottom_tab_config,
+            "settings" to R.string.bottom_tab_settings,
+        )) {
+            compose.onNodeWithTag("primary_pages_menu").performClick()
+            compose.onNodeWithText(compose.activity.getString(title)).performClick()
+            expectRoute(route)
+            compose.onNodeWithText(compose.activity.getString(title)).assertIsSelected()
+            compose.onNodeWithTag("primary_pages_menu").assertIsDisplayed()
+        }
+        compose.onNodeWithTag("primary_pages_menu").performClick()
+        compose.onNodeWithText(compose.activity.getString(R.string.primary_navigation_title)).assertIsDisplayed()
+        compose.runOnIdle { compose.activity.onBackPressedDispatcher.onBackPressed() }
+        compose.onNodeWithText(compose.activity.getString(R.string.primary_navigation_title)).assertDoesNotExist()
+        compose.onNodeWithTag("primary_pages_menu").performClick()
+        compose.onNodeWithText(compose.activity.getString(R.string.primary_navigation_title)).assertIsDisplayed()
+    }
+
+    @Test fun expandedRootRailReplacesMenuAndSelectsEveryPage() {
+        val expandedConfiguration = Configuration(compose.activity.resources.configuration).apply { screenWidthDp = 900 }
+        compose.setContent {
+            CompositionLocalProvider(LocalConfiguration provides expandedConfiguration) { Fixture() }
+        }
+        compose.onNodeWithTag("primary_pages_tabs").assertDoesNotExist()
+        compose.onNodeWithTag("primary_pages_menu").assertDoesNotExist()
+        for ((route, title) in listOf(
+            "projects" to R.string.project_home,
+            "config" to R.string.bottom_tab_config,
+            "settings" to R.string.bottom_tab_settings,
+        )) {
+            compose.onNodeWithText(compose.activity.getString(title)).performClick()
+            expectRoute(route)
+            compose.onNodeWithText(compose.activity.getString(title)).assertIsSelected()
+            compose.onNodeWithTag("primary_pages_rail").assertIsDisplayed()
+        }
     }
 
     @Test fun externalNavigationCoversPagerAndReturningRestoresSelectedRoot() {

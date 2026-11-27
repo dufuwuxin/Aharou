@@ -75,6 +75,8 @@ internal fun GeneralSettingsSection(
             .padding(bottom = Spacing.xl),
         verticalArrangement = Arrangement.spacedBy(Spacing.sm)
     ) {
+        ContextManagementSection()
+
         SettingsGroupHeader(text = stringResource(R.string.settings_general_models))
         SettingsGroup {
             SettingsRow(
@@ -89,10 +91,6 @@ internal fun GeneralSettingsSection(
                 }
             )
         }
-
-        ContextManagementSection()
-
-        SettingsGroupHeader(text = stringResource(R.string.settings_general_session))
         SettingsGroup {
             SettingsRow(
                 icon = null,

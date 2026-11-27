@@ -3335,6 +3335,8 @@
     <string name="bottom_tab_home">会话列表</string>
     <string name="bottom_tab_config">配置</string>
     <string name="bottom_tab_settings">设置</string>
+    <string name="primary_navigation_title">主导航</string>
+    <string name="primary_navigation_open">打开主导航</string>
     <string name="session_list_title">会话列表</string>
     <string name="session_list_empty">没有会话。点击右上角 + 新建一个。</string>
     <string name="session_delete_confirm">是否删除这个会话？此操作不可撤销。</string>

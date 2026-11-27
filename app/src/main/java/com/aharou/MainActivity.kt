@@ -45,8 +45,6 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
@@ -102,7 +100,6 @@ import com.aharou.feature.onboarding.domain.OnboardingStep
 import com.aharou.feature.onboarding.presentation.LocalOnboardingTargetRegistry
 import com.aharou.feature.onboarding.presentation.OnboardingOverlay
 import com.aharou.feature.onboarding.presentation.OnboardingTargetRegistry
-import com.aharou.feature.onboarding.presentation.onboardingTarget
 import com.aharou.feature.settings.data.repository.KeepaliveSettingsRepository
 import com.aharou.feature.settings.data.repository.BackgroundSettingsRepository
 import com.aharou.feature.settings.data.repository.ScreenOnSettingsRepository
@@ -398,9 +395,6 @@ fun AppNavigation(
 
     val currentBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = currentBackStackEntry?.destination?.route
-    val isPrimaryPage = currentRoute == "projects" || currentRoute == "config" || currentRoute == "settings"
-    var bottomBarHeightPx by remember { mutableIntStateOf(0) }
-    val bottomBarHeight = with(LocalDensity.current) { bottomBarHeightPx.toDp() }
 
     LaunchedEffect(currentRoute) {
         AIEditorApp.currentRoute = currentRoute
@@ -607,8 +601,7 @@ fun AppNavigation(
             startDestination = "projects",
             // 限制过渡动画在导航正文内。
             modifier = Modifier.fillMaxSize().clipToBounds()
-                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
-                .padding(bottom = if (isPrimaryPage) bottomBarHeight else 0.dp),
+                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)),
             enterTransition = { pageEnter(forward = true) },
             exitTransition = { pageExit(forward = true) },
             popEnterTransition = { pageEnter(forward = false) },
@@ -897,15 +890,12 @@ fun AppNavigation(
     navBody()
 
     PrimaryPagesPager(
-        bottomContentPadding = bottomBarHeight,
         modifier = Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)),
         route = currentRoute,
         onRouteChange = { route -> navController.navigate(route) {
             popUpTo(navController.graph.startDestinationId) { saveState = true }
             launchSingleTop = true; restoreState = true
         } },
-        bottomBarModifier = Modifier.onboardingTarget(OnboardingStep.ENTER_SETTINGS)
-            .onSizeChanged { bottomBarHeightPx = it.height }.padding(bottom = 8.dp),
         projects = {
             com.aharou.feature.agent.presentation.component.WorkspaceSessionBrowser(
                 agentViewModel, projectTaskViewModel, workspaceViewModel,
