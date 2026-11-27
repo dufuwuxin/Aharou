@@ -206,6 +206,7 @@ private fun RootNavigationIcon(icon: ImageVector, selected: Boolean) {
     Icon(icon, contentDescription = null, modifier = Modifier.graphicsLayer { scaleX = scale; scaleY = scale })
 }
 
+@Composable
 private fun PrimaryPageLifecycle(active: Boolean, content: @Composable () -> Unit) {
     val parent = LocalLifecycleOwner.current
     val owner = remember(parent) { object : LifecycleOwner {
