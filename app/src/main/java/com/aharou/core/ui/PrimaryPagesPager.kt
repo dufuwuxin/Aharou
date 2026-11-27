@@ -138,6 +138,7 @@ fun PrimaryPagesPager(
                                     Modifier.onboardingTarget(com.aharou.feature.onboarding.domain.OnboardingStep.ENTER_SETTINGS)
                                 } else Modifier
                             )
+                            .testTag("primary_navigation_drawer_item_$page")
                             .semantics { selected = page == routeIndex },
                     )
                 }
@@ -172,6 +173,7 @@ fun PrimaryPagesPager(
                                         Modifier.onboardingTarget(com.aharou.feature.onboarding.domain.OnboardingStep.ENTER_SETTINGS)
                                     } else Modifier
                                 )
+                                .testTag("primary_navigation_rail_item_$page")
                                 .semantics { selected = page == routeIndex },
                         )
                     }

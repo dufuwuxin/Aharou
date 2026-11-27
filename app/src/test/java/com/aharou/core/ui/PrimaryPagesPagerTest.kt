@@ -90,9 +90,15 @@ class PrimaryPagesPagerTest {
     }
 
     private fun pager() = compose.onNodeWithTag("primary_pages_pager")
-    private fun tab(id: Int): SemanticsNodeInteraction {
+    private fun navigationItem(page: Int) = compose.onNodeWithTag("primary_navigation_drawer_item_$page")
+    private fun railItem(page: Int) = compose.onNodeWithTag("primary_navigation_rail_item_$page")
+    private fun tab(page: Int): SemanticsNodeInteraction {
         compose.onNodeWithTag("primary_pages_menu").performClick()
-        return compose.onNodeWithText(compose.activity.getString(id))
+        return navigationItem(page)
+    }
+    private fun selectFromDrawer(page: Int) {
+        compose.onNodeWithTag("primary_pages_menu").performClick()
+        navigationItem(page).performClick()
     }
     private fun expectRoute(route: String) = compose.runOnIdle { assertEquals(route, currentRoute) }
 
@@ -119,23 +125,23 @@ class PrimaryPagesPagerTest {
     @Test fun drawerNavigationAndRestorationRetainIndependentRootState() {
         val restoration = StateRestorationTester(compose)
         restoration.setContent { Fixture() }
-        tab(R.string.bottom_tab_config).performClick()
+        tab(1).performClick()
         expectRoute("config")
         compose.onNodeWithTag("count_config").performClick().assertTextEquals("config=1")
-        tab(R.string.bottom_tab_settings).performClick()
+        tab(2).performClick()
         expectRoute("settings")
         compose.onNodeWithTag("count_settings").performClick().assertTextEquals("settings=1")
         restoration.emulateSavedInstanceStateRestore()
         expectRoute("settings")
         compose.onNodeWithTag("count_settings").assertTextEquals("settings=1")
-        tab(R.string.bottom_tab_config).performClick()
+        tab(1).performClick()
         compose.onNodeWithTag("count_config").assertTextEquals("config=1")
-        tab(R.string.project_home).performClick(); expectRoute("projects")
+        tab(0).performClick(); expectRoute("projects")
     }
 
     @Test fun menuNavigationKeepsContentSwipeAvailable() {
         compose.setContent { Fixture() }
-        tab(R.string.bottom_tab_config).performClick()
+        tab(1).performClick()
         expectRoute("config")
         compose.onNodeWithTag("primary_pages_menu").assertIsDisplayed()
         pager().performTouchInput { swipeLeft() }
@@ -144,7 +150,7 @@ class PrimaryPagesPagerTest {
 
     @Test fun subpagesAllowParentSwipeAndKeepClickNavigationAndBack() {
         compose.setContent { Fixture() }
-        tab(R.string.bottom_tab_config).performClick()
+        tab(1).performClick()
         compose.onNodeWithTag("detail_config").performClick()
         pager().performTouchInput { swipeLeft() }; expectRoute("settings")
         compose.onNodeWithTag("detail_settings").performClick()
@@ -153,9 +159,9 @@ class PrimaryPagesPagerTest {
         pager().performTouchInput { swipeRight() }; expectRoute("projects")
         pager().performTouchInput { swipeLeft() }; expectRoute("config")
         compose.onNodeWithTag("state_config").assertTextEquals("root=false")
-        tab(R.string.bottom_tab_settings).performClick(); expectRoute("settings")
+        tab(2).performClick(); expectRoute("settings")
         compose.onNodeWithTag("state_settings").assertTextEquals("root=false")
-        tab(R.string.bottom_tab_config).performClick(); expectRoute("config")
+        tab(1).performClick(); expectRoute("config")
         compose.runOnIdle { compose.activity.onBackPressedDispatcher.onBackPressed() }
         compose.onNodeWithTag("state_config").assertTextEquals("root=true")
         expectRoute("config")
@@ -165,7 +171,7 @@ class PrimaryPagesPagerTest {
 
     @Test fun nestedSettingPagesReturnOneLevelAtATime() {
         compose.setContent { Fixture() }
-        tab(R.string.bottom_tab_config).performClick()
+        tab(1).performClick()
         val detail = compose.onNodeWithTag("detail_config")
         detail.performClick()
         detail.performClick()
@@ -181,7 +187,7 @@ class PrimaryPagesPagerTest {
 
     @Test fun subpageTransformGestureWinsOverPrimarySwipe() {
         compose.setContent { Fixture(nested = true) }
-        tab(R.string.bottom_tab_config).performClick()
+        tab(1).performClick()
         compose.onNodeWithTag("detail_config").performClick()
         compose.onNodeWithTag("detail_canvas_config").performTouchInput { swipeLeft() }
         compose.onNodeWithTag("detail_canvas_config").assertTextContains("panned=true", substring = true)
@@ -191,7 +197,7 @@ class PrimaryPagesPagerTest {
 
     @Test fun asymmetricTwoFingerTransformDoesNotDragTheParentPager() {
         compose.setContent { Fixture(nested = true) }
-        tab(R.string.bottom_tab_config).performClick()
+        tab(1).performClick()
         compose.onNodeWithTag("detail_config").performClick()
         val canvas = compose.onNodeWithTag("detail_canvas_config")
         val initialLeft = compose.onNodeWithTag("root_config").getUnclippedBoundsInRoot().left.value
@@ -254,21 +260,16 @@ class PrimaryPagesPagerTest {
             compose.onNodeWithTag("primary_pages_menu").getUnclippedBoundsInRoot().bottom <=
                 compose.onNodeWithTag("project_header").getUnclippedBoundsInRoot().top
         )
-        for ((route, title) in listOf(
-            "projects" to R.string.project_home,
-            "config" to R.string.bottom_tab_config,
-            "settings" to R.string.bottom_tab_settings,
-        )) {
-            compose.onNodeWithTag("primary_pages_menu").performClick()
-            compose.onNodeWithText(compose.activity.getString(title)).performClick()
+        for ((route, page) in listOf("projects" to 0, "config" to 1, "settings" to 2)) {
+            selectFromDrawer(page)
             expectRoute(route)
-            compose.onNodeWithText(compose.activity.getString(title)).assertIsSelected()
+            navigationItem(page).assertIsSelected()
             compose.onNodeWithTag("primary_pages_menu").assertIsDisplayed()
         }
         compose.onNodeWithTag("primary_pages_menu").performClick()
         compose.onNodeWithText(compose.activity.getString(R.string.primary_navigation_title)).assertIsDisplayed()
         compose.runOnIdle { compose.activity.onBackPressedDispatcher.onBackPressed() }
-        compose.onNodeWithText(compose.activity.getString(R.string.primary_navigation_title)).assertDoesNotExist()
+        compose.onNodeWithText(compose.activity.getString(R.string.primary_navigation_title)).assertIsNotDisplayed()
         compose.onNodeWithTag("primary_pages_menu").performClick()
         compose.onNodeWithText(compose.activity.getString(R.string.primary_navigation_title)).assertIsDisplayed()
     }
@@ -280,21 +281,17 @@ class PrimaryPagesPagerTest {
         }
         compose.onNodeWithTag("primary_pages_tabs").assertDoesNotExist()
         compose.onNodeWithTag("primary_pages_menu").assertDoesNotExist()
-        for ((route, title) in listOf(
-            "projects" to R.string.project_home,
-            "config" to R.string.bottom_tab_config,
-            "settings" to R.string.bottom_tab_settings,
-        )) {
-            compose.onNodeWithText(compose.activity.getString(title)).performClick()
+        for ((route, page) in listOf("projects" to 0, "config" to 1, "settings" to 2)) {
+            railItem(page).performClick()
             expectRoute(route)
-            compose.onNodeWithText(compose.activity.getString(title)).assertIsSelected()
+            railItem(page).assertIsSelected()
             compose.onNodeWithTag("primary_pages_rail").assertIsDisplayed()
         }
     }
 
     @Test fun externalNavigationCoversPagerAndReturningRestoresSelectedRoot() {
         compose.setContent { Fixture() }
-        tab(R.string.bottom_tab_settings).performClick()
+        tab(2).performClick()
         compose.runOnIdle { externalRoute("editor/{path}") }
         compose.onNodeWithTag("primary_pages_tabs").assertDoesNotExist()
         compose.runOnIdle { externalRoute("config") }
