@@ -16,12 +16,13 @@ import com.aharou.feature.agent.domain.container.RootfsSource
 import com.aharou.feature.agent.domain.container.TawcrootRuntime
 import com.aharou.feature.settings.presentation.component.ContainerDoctorEntryPoint
 import com.aharou.feature.settings.presentation.component.ContainerSection
-import dagger.hilt.internal.GeneratedComponent
-import dagger.hilt.internal.GeneratedComponentManager
+import dagger.hilt.android.EntryPointAccessors
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.mockkObject
+import io.mockk.mockkStatic
 import io.mockk.unmockkObject
+import io.mockk.unmockkStatic
 import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.After
 import org.junit.Before
@@ -31,35 +32,33 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
-class ContainerMountPickerTestApplication : Application(), GeneratedComponentManager<Any> {
-    private val doctor = mockk<ContainerDoctor>(relaxed = true)
-    private val translation = mockk<OfflineTranslation>(relaxed = true) {
-        every { enabled } returns MutableStateFlow(false)
-        every { modelState } returns MutableStateFlow(TranslationModelState.READY)
-    }
-    private val component = object : GeneratedComponent, ContainerDoctorEntryPoint, TranslationEntryPoint {
-        override fun containerDoctor(): ContainerDoctor = doctor
-        override fun translation(): OfflineTranslation = translation
-    }
-
-    override fun generatedComponent(): Any = component
-}
-
 @RunWith(RobolectricTestRunner::class)
-@Config(application = ContainerMountPickerTestApplication::class, sdk = [35], qualifiers = "w411dp-h891dp")
+@Config(application = Application::class, sdk = [35], qualifiers = "w411dp-h891dp")
 @org.robolectric.annotation.ConscryptMode(org.robolectric.annotation.ConscryptMode.Mode.OFF)
 @org.robolectric.annotation.SQLiteMode(org.robolectric.annotation.SQLiteMode.Mode.LEGACY)
 @org.robolectric.annotation.GraphicsMode(org.robolectric.annotation.GraphicsMode.Mode.LEGACY)
 class ContainerMountPickerTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
 
-    @Before fun isolateRuntime() {
+    @Before fun isolateSettingsAndRuntime() {
+        val translation = mockk<OfflineTranslation>(relaxed = true) {
+            every { enabled } returns MutableStateFlow(false)
+            every { modelState } returns MutableStateFlow(TranslationModelState.READY)
+        }
+        val translationEntryPoint = mockk<TranslationEntryPoint>()
+        every { translationEntryPoint.translation() } returns translation
+        val doctorEntryPoint = mockk<ContainerDoctorEntryPoint>()
+        every { doctorEntryPoint.containerDoctor() } returns mockk<ContainerDoctor>(relaxed = true)
+        mockkStatic(EntryPointAccessors::class)
+        every { EntryPointAccessors.fromApplication(any(), TranslationEntryPoint::class.java) } returns translationEntryPoint
+        every { EntryPointAccessors.fromApplication(any(), ContainerDoctorEntryPoint::class.java) } returns doctorEntryPoint
         mockkObject(TawcrootRuntime)
         every { TawcrootRuntime.availableForProfile(any(), any(), any()) } returns true
     }
 
     @After fun clearMocks() {
         unmockkObject(TawcrootRuntime)
+        unmockkStatic(EntryPointAccessors::class)
     }
 
     @Test fun mountEditorOffersSystemDirectorySelectionForLocalPath() {
