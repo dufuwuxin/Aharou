@@ -946,6 +946,8 @@
     <string name="container_file_selected">已选择文件</string>
     <string name="container_select_image_file">选择 tar.gz / tgz / tar.xz / txz 镜像文件</string>
     <string name="container_mount_local">本地目录</string>
+    <string name="container_mount_pick_local">选择本机目录</string>
+    <string name="container_mount_directory_unavailable">容器无法访问此目录。请允许本机存储访问权限，或选择容器可访问的本机目录</string>
     <string name="container_mount_container">容器目录</string>
     <string name="container_no_bindings">无挂载</string>
     <string name="container_add_binding">添加挂载</string>

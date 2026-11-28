@@ -1,9 +1,16 @@
 package com.aharou.feature.settings.presentation.component
 
+import android.Manifest
+import android.content.ActivityNotFoundException
 import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
+import android.os.Environment
 import android.provider.OpenableColumns
 import android.widget.Toast
+import java.io.File
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -39,6 +46,8 @@ import com.aharou.core.ui.AppSwitch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import com.aharou.core.ui.AppTextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -71,11 +80,13 @@ import com.aharou.core.theme.semanticColors
 import com.aharou.feature.agent.domain.container.ContainerProfile
 import com.aharou.feature.agent.domain.container.ContainerRuntimeBackend
 import com.aharou.feature.agent.domain.container.RootfsSource
+import com.aharou.feature.workspace.domain.UriPathResolver
 import com.aharou.feature.settings.data.repository.ExecutionMode
 import com.aharou.feature.settings.presentation.ContainerResetUiState
 import compose.icons.FeatherIcons
 import compose.icons.feathericons.Check
 import compose.icons.feathericons.Edit3
+import compose.icons.feathericons.Folder
 import compose.icons.feathericons.HardDrive
 import compose.icons.feathericons.Plus
 import compose.icons.feathericons.RefreshCw
@@ -444,7 +455,7 @@ private fun SourceBadge(text: String, color: Color) {
 /** 添加/编辑本地容器镜像的底部弹层。 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ProfileEditSheet(
+internal fun ProfileEditSheet(
     initial: ContainerProfile?,
     defaultContainerId: String = ContainerProfile.BUILTIN_ID,
     onDismiss: () -> Unit,
@@ -497,6 +508,34 @@ private fun ProfileEditSheet(
         arrayOf("*/*"),
         { Toast.makeText(context, R.string.document_picker_unavailable, Toast.LENGTH_LONG).show() },
     ) { uri -> pickedUri = uri.toString() }
+    var pickedMountIndex by remember { mutableStateOf(-1) }
+    val pickMountDirectory = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) {
+            val path = UriPathResolver.toFilePath(context, uri)
+            if (path != null && isAccessibleMountDirectory(path) && hasContainerStorageAccess(context)) {
+                runCatching {
+                    context.contentResolver.takePersistableUriPermission(
+                        uri,
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                    )
+                }
+                if (pickedMountIndex in bindingsList.indices) {
+                    bindingsList[pickedMountIndex] = path to bindingsList[pickedMountIndex].second
+                }
+            } else {
+                Toast.makeText(context, R.string.container_mount_directory_unavailable, Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    fun launchMountPicker(index: Int) {
+        pickedMountIndex = index
+        try {
+            pickMountDirectory.launch(null)
+        } catch (_: ActivityNotFoundException) {
+            Toast.makeText(context, R.string.document_picker_unavailable, Toast.LENGTH_LONG).show()
+        }
+    }
 
     AdaptiveModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -585,7 +624,8 @@ private fun ProfileEditSheet(
                             title = stringResource(R.string.container_extra_bindings),
                             items = bindingsList,
                             emptyText = stringResource(R.string.container_no_bindings),
-                            addText = stringResource(R.string.container_add_binding)
+                            addText = stringResource(R.string.container_add_binding),
+                            onPickLocalDirectory = ::launchMountPicker
                         )
                         bindingError?.let { msg ->
                             Text(
@@ -827,13 +867,28 @@ private fun StringListEditor(
     }
 }
 
+internal fun isAccessibleMountDirectory(
+    path: String,
+    isDirectory: Boolean = File(path).isDirectory,
+    canRead: Boolean = File(path).canRead()
+): Boolean = isDirectory && canRead
+
+private fun hasContainerStorageAccess(context: Context): Boolean =
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        Environment.isExternalStorageManager()
+    } else {
+        context.checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) ==
+            PackageManager.PERMISSION_GRANTED
+    }
+
 /** 挂载编辑器：每项卡片「本地目录 + 容器目录」两个输入框与删除按钮，保存时拼成 `本地:容器`。 */
 @Composable
 private fun MountListEditor(
     title: String,
     items: SnapshotStateList<Pair<String, String>>,
     emptyText: String,
-    addText: String
+    addText: String,
+    onPickLocalDirectory: (Int) -> Unit
 ) {
     Text(
         text = title,
@@ -864,6 +919,18 @@ private fun MountListEditor(
                         onValueChange = { items[index] = it to container },
                         label = stringResource(R.string.container_mount_local),
                         placeholder = "/sdcard",
+                        trailingIcon = {
+                            IconButton(
+                                onClick = { onPickLocalDirectory(index) },
+                                modifier = Modifier.size(48.dp)
+                            ) {
+                                Icon(
+                                    FeatherIcons.Folder,
+                                    contentDescription = stringResource(R.string.container_mount_pick_local),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
                     )
                     ContainerField(
                         value = container,
