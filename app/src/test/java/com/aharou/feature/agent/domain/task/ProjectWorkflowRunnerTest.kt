@@ -141,6 +141,7 @@ class ProjectWorkflowRunnerTest {
         coEvery { messages.restoreAll(any()) } returns emptyList()
         val runner = ProjectWorkflowRunner(repository, sessions, turns, javax.inject.Provider { tasks }, events, mockk(), messages, ProjectTaskExecutionCoordinator())
         if (team) teamTool = tasks
+        launchTool = tasks
         return Triple(runner, { synchronized(guard) { snapshot } }, { change -> synchronized(guard) { snapshot = change(snapshot) } })
     }
 
@@ -149,6 +150,7 @@ class ProjectWorkflowRunnerTest {
         copy(tasks = tasks.map { if (it.id == "a") change(it).copy(requirementsVersion = it.requirementsVersion + 1, status = ProjectTaskStatus.READY) else it })
 
     private var teamTool: TaskTool? = null
+    private var launchTool: TaskTool? = null
 
     @Test fun projectTaskActuallyCallsTeamAndOnlyEntersReviewWithRunEvidence() = runBlocking {
         val (runner, snapshot) = fixture(false, team = true)
@@ -158,6 +160,23 @@ class ProjectWorkflowRunnerTest {
         val task = snapshot().tasks.first { it.id == "a" }
         assertEquals(ProjectTaskStatus.REVIEW, task.status)
         assertTrue(task.evidenceRefs.single().contains(":v1:run:real-run"))
+    }
+
+    @Test fun projectLaunchesOnlyTheCurrentTaskRequirementsAndConstraints() = runBlocking {
+        for (team in listOf(true, false)) {
+            val (runner) = fixture(true, team = team, seed = { it.copy(
+                requirement = "CURRENT_REQUIREMENT", background = "LOCAL_BACKGROUND", constraints = listOf("LOCAL_SCOPE"),
+                acceptance = "LOCAL_ACCEPTANCE", supplements = listOf("LOCAL_SUPPLEMENT")) })
+            runner.run("p", "w", "a")
+            val tool = requireNotNull(launchTool)
+            val prompt = slot<String>()
+            if (team) coVerify(exactly = 1) { tool.runProjectTeam("builders", capture(prompt), any(), "hash", any()) }
+            else coVerify(exactly = 1) { tool.createProjectMember("a", capture(prompt), any(), any()) }
+            assertFalse(prompt.captured.contains("a then b"))
+            listOf("CURRENT_REQUIREMENT", "LOCAL_BACKGROUND", "LOCAL_SCOPE", "LOCAL_ACCEPTANCE", "LOCAL_SUPPLEMENT").forEach {
+                assertTrue("missing $it in mode team=$team", prompt.captured.contains(it))
+            }
+        }
     }
 
     @Test fun teamChildrenAreLinkedWithRealRoleAndOnlyCurrentRunRecordsAreFinished() = runBlocking {

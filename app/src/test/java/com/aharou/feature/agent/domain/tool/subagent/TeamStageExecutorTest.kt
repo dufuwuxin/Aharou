@@ -116,6 +116,50 @@ class TeamStageExecutorTest {
         assertEquals(3, calls)
         assertEquals("blocked", output.data.jsonObject.getValue("state").jsonPrimitive.content)
     }
+    @Test fun legacyGoalIsNotBroadcastToParallelOrQueuedMembers() = runBlocking {
+        val intake = "original request PRIVATE_ORIGINAL"
+        val later = "deliver-only-result"
+        val roles = (listOf(role) + listOf("builder", "reviewer").map { role.copy(name = it) })
+        val configured = team().copy(
+            charter = "SHARED_TEAM_RULE",
+            members = roles.map { com.aharou.feature.agent.domain.subagent.TeamMemberRef(it.name) },
+            stages = listOf(
+                TeamStage("prepare", listOf(task("INTAKE_PRESET"), task("BUILDER_PRESET").copy(agent = "builder", writePaths = listOf("two.kt")),
+                    task("QUEUED_PRESET").copy(agent = "reviewer", writePaths = listOf("three.kt")))),
+                TeamStage("consume", listOf(task("CONSUMER_PRESET")))
+            )
+        )
+        val registry = TeamRunRegistry()
+        val executor = TeamStageExecutor(registry)
+        val context = com.aharou.feature.agent.domain.model.AgentContext(null, null, "/project", null, sessionId = "parent")
+        val bus = com.aharou.feature.agent.domain.subagent.SubAgentEventBus(
+            com.aharou.feature.agent.domain.subagent.MaxRunningSource { 2 },
+            com.aharou.feature.agent.domain.subagent.CommunicationEnabledSource { true }, registry)
+        val launches = linkedMapOf<String, Map<String, JsonElement>>()
+        val result = executor.run(configured, intake, roles, 2, "parent") { batch ->
+            executor.pipeline(mapOf("pipeline" to batch), context, bus, create = { args ->
+                val id = args.getValue("_teamLogicalId").jsonPrimitive.content
+                launches[id] = args
+                bus.emit(com.aharou.feature.agent.domain.subagent.SubAgentEvent("child-$id", "parent",
+                    com.aharou.feature.agent.domain.subagent.SubAgentEventType.COMPLETED, accepted = true))
+                ToolResult.Success(buildJsonObject { put("id", "child-$id") })
+            }, read = { if (it == "child-s1-b1-t1") later else "result from $it" })
+        } as ToolResult.Success
+        assertEquals("done", result.data.jsonObject.getValue("state").jsonPrimitive.content)
+        assertEquals(listOf("s1-b1-t1", "s1-b1-t2", "s1-b2-t1", "s2-b1-t1"), launches.keys.toList())
+        val prompts = launches.values.map { it.getValue("prompt").jsonPrimitive.content }
+        assertTrue(prompts[0].contains(intake))
+        assertFalse(prompts.drop(1).any { it.contains("PRIVATE_ORIGINAL") })
+        listOf("INTAKE_PRESET", "BUILDER_PRESET", "QUEUED_PRESET", "CONSUMER_PRESET").forEachIndexed { index, preset ->
+            assertTrue(prompts[index].contains(preset))
+            assertTrue(prompts[index].contains("SHARED_TEAM_RULE"))
+        }
+        assertFalse(prompts[2].contains(later))
+        assertTrue(prompts[3].contains(later))
+        assertEquals("reviewer", launches.getValue("s1-b2-t1").getValue("agent").jsonPrimitive.content)
+        assertEquals(listOf(JsonPrimitive("three.kt")), launches.getValue("s1-b2-t1").getValue("writePaths").jsonArray)
+    }
+
     @Test fun everyPriorBatchIsHandedToNextStageWithoutTruncation() {
         val many = team().copy(stages = listOf(TeamStage("up", listOf(task(), task(), task())), TeamStage("down", listOf(task()))))
         val plan = TeamRunner.build(many, "goal", listOf(role), 1) as TeamRunner.Plan.Ready
