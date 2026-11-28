@@ -3936,6 +3936,7 @@
     <string name="conversation_nav_empty">本会话还没有可导航的用户消息</string>
     <string name="conversation_nav_loading">正在加载本会话消息</string>
     <string name="conversation_nav_partial">仅显示已加载的消息；继续向上加载可查看更早记录。</string>
+    <string name="conversation_nav_load_earlier">加载更早消息</string>
     <string name="conversation_nav_empty_partial">当前已加载部分没有可导航的用户消息；加载更早记录后列表可能更新。</string>
     <string name="conversation_map_title">对话地图</string>
     <string name="conversation_map_close">关闭</string>

@@ -1589,6 +1589,7 @@ fun AIChatPanel(
                             followBottom = true
                             scope.launch { snapToBottom() }
                         },
+                        onLoadMore = viewModel::loadMoreMessages,
                         onDismiss = { showConversationNavigation = false }
                     )
                 }

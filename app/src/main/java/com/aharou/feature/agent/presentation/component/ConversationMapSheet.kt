@@ -69,6 +69,7 @@ internal fun ConversationNavigationPopup(
     canLocate: (String) -> Boolean,
     onJump: (String) -> Boolean,
     onScrollToBottom: () -> Unit,
+    onLoadMore: () -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -104,6 +105,12 @@ internal fun ConversationNavigationPopup(
                 if (ready && projection.hasMore) {
                     Text(stringResource(R.string.conversation_nav_partial), style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    TextButton(
+                        onClick = onLoadMore,
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                    ) {
+                        Text(stringResource(R.string.conversation_nav_load_earlier))
+                    }
                 }
                 when {
                     !ready -> Text(stringResource(if (sessionId == null) R.string.conversation_nav_empty else R.string.conversation_nav_loading),
