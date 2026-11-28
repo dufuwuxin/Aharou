@@ -13,6 +13,7 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -30,10 +31,10 @@ class TeamToolBoundaryTest {
     private val context = AgentContext(null, null, "", null, sessionId = "main")
 
     @Test fun schemaOnlyOffersTeamIntroductionAndTeamRun() {
-        assertEquals(setOf("action", "team", "goal", "stageId", "taskId", "member"), tool.parameters.keys)
+        assertEquals(setOf("action", "team", "goal", "stageId", "taskId", "member", "sharedGoal", "taskBriefs"), tool.parameters.keys)
         assertEquals(listOf("teams", "team_run", "team_assign"), tool.parameters.getValue("action").enum)
         val schema = tool.toJsonSchema()
-        assertEquals(setOf("tool_title", "action", "team", "goal", "stageId", "taskId", "member"), (schema["properties"] as Map<*, *>).keys)
+        assertEquals(setOf("tool_title", "action", "team", "goal", "stageId", "taskId", "member", "sharedGoal", "taskBriefs"), (schema["properties"] as Map<*, *>).keys)
         assertTrue((schema["required"] as List<*>).contains("tool_title"))
     }
 
@@ -76,6 +77,23 @@ class TeamToolBoundaryTest {
 
         assertTrue(result is ToolResult.Success)
         coVerify(exactly = 1) { teams.run(args, any(), any(), any(), any()) }
+    }
+
+    @Test fun ordinaryTeamCanDeclareSharedGoalWithoutDiscoveringPrivateSteps() = runBlocking {
+        val args = mapOf("action" to JsonPrimitive("team_run"), "team" to JsonPrimitive("team"), "sharedGoal" to JsonPrimitive("shared"))
+        coEvery { teams.run(args, any(), any(), any(), any()) } returns ToolResult.Success(buildJsonObject { put("state", "done") })
+        assertTrue(tool.executeWithContext(args, context) is ToolResult.Success)
+        coVerify(exactly = 1) { teams.run(args, any(), any(), any(), any()) }
+    }
+
+    @Test fun nonMainSessionCannotSendTargetedSteps() = runBlocking {
+        coEvery { sessions.getSessionById("main") } returns mockk { every { parentId } returns "real-parent" }
+        val target = buildJsonObject { put("stageId", "s1"); put("taskId", "t1"); put("brief", "one exact task") }
+        val args = mapOf("action" to JsonPrimitive("team_run"), "team" to JsonPrimitive("team"), "goal" to JsonPrimitive("shared"),
+            "taskBriefs" to JsonArray(listOf(target)))
+        val result = tool.executeWithContext(args, context) as ToolResult.Error
+        assertEquals("TEAM_ADMIN_DENIED", result.code)
+        verify { teams wasNot Called }
     }
 
     @Test fun teamReturnDoesNotExposeMemberBodiesOrExecutionHistory() = runBlocking {

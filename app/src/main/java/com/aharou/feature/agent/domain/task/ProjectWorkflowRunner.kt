@@ -121,7 +121,7 @@ class ProjectWorkflowRunner @Inject constructor(
                             val result = ProjectTeamExecution.execute(minOf(memberTimeoutMs, remaining),
                                 current = { requireCurrent(workspace, next, participants) },
                                 invoke = { tasks.runProjectTeam(selectedTeam.name,
-                                    ProjectWorkflowPlan.prompt(next, projectTasks, currentProject.requirements + "\n" + ProjectGoalPlan.context(goal, acceptance, horizon)),
+                                    ProjectWorkflowPlan.prompt(next, projectTasks, requirements = ""),
                                     context, selectedTeam.signature, onCreated = { id, role ->
                                         repository.transact(workspace) { store ->
                                             val latest = store.tasks.firstOrNull { it.id == next.id } ?: throw ProjectTaskSuperseded()
@@ -185,7 +185,7 @@ class ProjectWorkflowRunner @Inject constructor(
                             // Cancellation must not strand a created child between creation and durable linking.
                             withContext(NonCancellable) {
                                 val result = tasks.createProjectMember(next.title,
-                                    ProjectWorkflowPlan.prompt(next, projectTasks, currentProject.requirements + "\n" + ProjectGoalPlan.context(goal, acceptance, horizon), member, index + 1, outputs.toList(), projectTools),
+                                    ProjectWorkflowPlan.prompt(next, projectTasks, "", member, index + 1, outputs.toList(), projectTools),
                                     member.takeIf { it.isNotBlank() }, context)
                                 if (result is ToolResult.Error && result.code == "MAX_SUBAGENTS_REACHED") return@withContext
                                 check(result is ToolResult.Success) { (result as? ToolResult.Error)?.message ?: "PROJECT_MEMBER_START_FAILED" }

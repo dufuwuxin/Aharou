@@ -89,21 +89,23 @@ class TaskTool @Inject constructor(
     override suspend fun executeWithContext(args: Map<String, JsonElement>, context: AgentContext): ToolResult {
         val taskArgs = stripToolTitle(args)
         if (taskArgs.keys.any { it !in parameters }) {
-            return ToolResult.Error("只接受团队动作、团队名称和任务目标", "INVALID_ARGS")
+            return ToolResult.Error("存在不支持的团队工具参数", "INVALID_ARGS")
         }
         val action = (taskArgs["action"] as? JsonPrimitive)?.contentOrNull?.trim()?.lowercase()
         val allowed = when (action) {
             "teams" -> setOf("action", "team")
-            "team_run" -> setOf("action", "team", "goal")
+            "team_run" -> setOf("action", "team", "goal", "sharedGoal", "taskBriefs")
             "team_assign" -> setOf("action", "team", "stageId", "taskId", "member")
             else -> emptySet()
         }
         if (taskArgs.keys.any { it !in allowed }) return ToolResult.Error("参数不适用于该动作", "INVALID_ARGS")
-        val mainSession = if (action == "teams" || action == "team_assign") {
+        val hasTaskAssignments = (taskArgs["taskBriefs"] as? JsonArray)?.isNotEmpty() == true
+        val mainSession = if (action == "teams" || action == "team_assign" || hasTaskAssignments) {
             context.agentDefinition == null && context.sessionId?.let { id ->
                 sessionUseCase.getSessionById(id)?.let { it.parentId == null }
             } == true
         } else false
+        if (hasTaskAssignments && !mainSession) return ToolResult.Error("仅主代理可向已有团队步骤提供任务简述", "TEAM_ADMIN_DENIED")
         return when (action) {
             "teams" -> teamTasks.list(taskArgs, context, mainSession)
             "team_assign" -> teamTasks.assign(taskArgs, context, mainSession)
@@ -429,7 +431,12 @@ class TaskTool @Inject constructor(
         }
 
     private fun publicTeamResult(result: ToolResult, args: Map<String, JsonElement>): ToolResult {
-        if (result is ToolResult.Error) return ToolResult.Error("团队执行未完成，请在团队执行记录查看详情", result.code)
+        if (result is ToolResult.Error) return when (result.code) {
+            "INVALID_TEAM_BRIEFS" -> ToolResult.Error("请按已授权查看的团队详情提供已有阶段和任务的唯一非空简述", result.code)
+            "AGENT_NOT_FOUND" -> ToolResult.Error("团队引用了不可用的成员，请在团队配置中选择已启用的成员", result.code)
+            "TEAM_ADMIN_DENIED" -> ToolResult.Error("该团队仅能接收共同目标，不能从外部指定内部步骤", result.code)
+            else -> ToolResult.Error("团队执行未完成，请在团队执行记录查看详情", result.code)
+        }
         val data = (result as? ToolResult.Success)?.data as? JsonObject
             ?: return ToolResult.Error("团队未返回执行状态", "TEAM_RESULT_MISSING")
         return ToolResult.Success(buildJsonObject {

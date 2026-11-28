@@ -10,11 +10,13 @@ import com.aharou.feature.agent.domain.subagent.AgentTeamEntry
 import com.aharou.feature.agent.domain.container.ContainerInstaller
 import com.aharou.feature.agent.domain.subagent.AgentTeamRepository
 import com.aharou.feature.agent.domain.subagent.MaxRunningSource
+import com.aharou.feature.agent.domain.subagent.TeamFlowNode
 import com.aharou.feature.agent.domain.tool.ToolResult
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
@@ -79,8 +81,12 @@ class TeamTasks @Inject constructor(
             return ToolResult.Error("team_run 需要 team（团队名，先用 task(action=\"teams\") 查）", "MISSING_TEAM")
         }
         val goal = (args["goal"] as? JsonPrimitive)?.contentOrNull?.trim().orEmpty()
-        if (goal.isEmpty()) {
-            return ToolResult.Error("team_run 需要 goal（本次团队要达成的目标）", "MISSING_GOAL")
+        // Internal project callers pass an already-scoped task context, never the project-wide requirements.
+        val sharedGoal = if (expectedSignature != null) goal else
+            (args["sharedGoal"] as? JsonPrimitive)?.takeIf { it.isString }?.content?.trim().orEmpty()
+        val intakeGoal = if (expectedSignature != null) "" else goal
+        if (intakeGoal.isEmpty() && sharedGoal.isEmpty()) {
+            return ToolResult.Error("team_run 需要 sharedGoal（共同目标）或旧版 goal", "MISSING_GOAL")
         }
 
         val entries = loadEntries(workspace) ?: return ToolResult.Error("读取团队预设失败", "TEAM_LIST_FAILED")
@@ -94,20 +100,41 @@ class TeamTasks @Inject constructor(
             return ToolResult.Error("读取子代理定义失败：${e.message ?: "未知错误"}", "AGENT_LIST_FAILED")
         }
 
+        val input = args["taskBriefs"]
+        val briefs = if (input == null) emptyMap() else parseBriefs(input)
+            ?: return ToolResult.Error("taskBriefs 必须按已有阶段和任务提供唯一的非空简述", "INVALID_TEAM_BRIEFS")
+        if (briefs.isNotEmpty() && !team.mainAgentAdmin) {
+            return ToolResult.Error("仅主代理管理的团队支持按步骤提供简述", "TEAM_ADMIN_DENIED")
+        }
         val projectFiles = if (team.stages.any { it.condition !in setOf("always", "never") })
             teamRepository.forWorkspace(workspace).projectFiles() else emptySet()
         if (expectedSignature != null && expectedSignature != signature(team, enabled, projectFiles))
             return ToolResult.Error("团队配置已变化，请重新执行", "TEAM_CONFIG_CHANGED")
-        return when (val plan = TeamRunner.build(team, goal, enabled, maxRunningSource.maxRunning(), projectFiles)) {
+        val capacity = maxRunningSource.maxRunning()
+        return when (val plan = TeamRunner.build(team, intakeGoal, enabled, capacity, projectFiles, briefs, sharedGoal)) {
             is TeamRunner.Plan.Rejected -> ToolResult.Error(plan.message, plan.code)
             is TeamRunner.Plan.Ready -> {
                 FileLogger.i(
                     TAG,
                     "团队「${team.name}」开始执行：${team.stages.size} 阶段 → ${plan.layers} 层 / ${plan.taskCount} 任务"
                 )
-                stageExecutor.run(team, goal, enabled, maxRunningSource.maxRunning(), parentSessionId, projectFiles, exec)
+                stageExecutor.run(team, intakeGoal, enabled, capacity, parentSessionId, projectFiles, briefs, sharedGoal, exec)
             }
         }
+    }
+
+    private fun parseBriefs(input: JsonElement): Map<TeamFlowNode, String>? {
+        val items = input as? JsonArray ?: return null
+        val briefs = linkedMapOf<TeamFlowNode, String>()
+        for (item in items) {
+            val fields = item as? JsonObject ?: return null
+            if (fields.keys != setOf("stageId", "taskId", "brief")) return null
+            fun text(key: String): String? = (fields[key] as? JsonPrimitive)?.takeIf { it.isString }
+                ?.content?.trim()?.takeIf { it.isNotEmpty() }
+            val node = TeamFlowNode(text("stageId") ?: return null, text("taskId") ?: return null)
+            if (briefs.put(node, text("brief") ?: return null) != null) return null
+        }
+        return briefs
     }
 
     fun assign(args: Map<String, JsonElement>, context: AgentContext, mainSession: Boolean): ToolResult {

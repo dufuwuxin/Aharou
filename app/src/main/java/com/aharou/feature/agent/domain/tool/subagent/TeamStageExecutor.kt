@@ -32,10 +32,12 @@ class TeamStageExecutor @Inject constructor(private val registry: TeamRunRegistr
     enum class Review { PASS, REJECT, INVALID }
 
     suspend fun run(team: AgentTeam, goal: String, enabled: List<AgentDefinition>, maxRunning: Int,
-        parent: String, projectFiles: Set<String>? = null, exec: suspend (JsonArray) -> ToolResult): ToolResult {
+        parent: String, projectFiles: Set<String>? = null,
+        taskBriefs: Map<TeamFlowNode, String> = emptyMap(), sharedGoal: String = "",
+        exec: suspend (JsonArray) -> ToolResult): ToolResult {
         if (parent.isBlank()) return ToolResult.Error("缺少会话上下文", "NO_SESSION")
         TeamFlowGraph.validate(team)?.let { return ToolResult.Error(it, "INVALID_TEAM_FLOW") }
-        val plan = TeamRunner.build(team, goal, enabled, maxRunning, projectFiles)
+        val plan = TeamRunner.build(team, goal, enabled, maxRunning, projectFiles, taskBriefs, sharedGoal)
         if (plan is TeamRunner.Plan.Rejected) return ToolResult.Error(plan.message, plan.code)
         plan as TeamRunner.Plan.Ready
         if (team.stages.isEmpty() || team.stages.any { it.tasks.isEmpty() }) {
@@ -355,6 +357,7 @@ class TeamStageExecutor @Inject constructor(private val registry: TeamRunRegistr
                     description = (obj["description"] as? JsonPrimitive)?.contentOrNull?.trim()
                         ?.replace(Regex("\\s+"), " ")?.take(30)?.takeIf { it.isNotBlank() } ?: id,
                     dependsOn = stringSetOf(obj["dependsOn"]).orEmpty(),
+                    queueAfter = stringSetOf(obj["_queueAfter"]).orEmpty(),
                     writePaths = stringSetOf(obj["writePaths"]),
                     agent = (obj["agent"] as? JsonPrimitive)?.contentOrNull?.trim()?.takeIf { it.isNotBlank() },
                     department = (obj["department"] as? JsonPrimitive)?.contentOrNull?.trim()?.takeIf { it.isNotBlank() },
@@ -415,7 +418,8 @@ class TeamStageExecutor @Inject constructor(private val registry: TeamRunRegistr
                     report += "- ${task.id}：必需依赖未成功，未启动"
                     continue
                 }
-                val upstream = task.dependsOn.mapNotNull { dep ->
+                // Same-stage batching is an execution dependency, not a reason to expose another member's body.
+                val upstream = (task.dependsOn - task.queueAfter).mapNotNull { dep ->
                     outputs[dep]?.takeIf { it.isNotBlank() }?.let { "## 上游任务「$dep」的产出\n$it" }
                 }.joinToString("\n\n")
                 val fullPrompt = if (upstream.isEmpty()) task.prompt else "$upstream\n\n---\n\n${task.prompt}"
@@ -552,6 +556,7 @@ class TeamStageExecutor @Inject constructor(private val registry: TeamRunRegistr
         val prompt: String,
         val description: String,
         val dependsOn: Set<String>,
+        val queueAfter: Set<String>,
         val writePaths: Set<String>?,
         val agent: String?,
         val department: String?,

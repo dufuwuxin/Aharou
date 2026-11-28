@@ -1,10 +1,17 @@
 package com.aharou.feature.agent.domain.tool.subagent
 
 import com.aharou.feature.agent.domain.subagent.AgentDefinition
+import com.aharou.feature.agent.domain.subagent.AgentDefinitionEntry
+import com.aharou.feature.agent.domain.subagent.AgentDefinitionRepository
+import com.aharou.feature.agent.domain.subagent.AgentDefinitionScope
+import com.aharou.feature.agent.domain.subagent.AgentTeamEntry
+import com.aharou.feature.agent.domain.subagent.AgentTeamRepository
 import com.aharou.feature.agent.domain.subagent.AgentTeam
 import com.aharou.feature.agent.domain.subagent.TeamStage
 import com.aharou.feature.agent.domain.subagent.TeamTask
 import com.aharou.feature.agent.domain.tool.ToolResult
+import io.mockk.every
+import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.*
 import org.junit.Assert.*
@@ -116,17 +123,26 @@ class TeamStageExecutorTest {
         assertEquals(3, calls)
         assertEquals("blocked", output.data.jsonObject.getValue("state").jsonPrimitive.content)
     }
-    @Test fun legacyGoalIsNotBroadcastToParallelOrQueuedMembers() = runBlocking {
+    @Test fun legacyGoalIsNotBroadcastToParallelOrQueuedMembers() = runBlocking { verifyScopedLaunches(false) }
+
+    @Test fun mappedBriefsStayWithTheirPresetStepsAcrossBatches() = runBlocking { verifyScopedLaunches(true) }
+
+    private suspend fun verifyScopedLaunches(mapped: Boolean) {
         val intake = "original request PRIVATE_ORIGINAL"
+        val common = "CURRENT_SHARED_GOAL"
         val later = "deliver-only-result"
         val roles = (listOf(role) + listOf("builder", "reviewer").map { role.copy(name = it) })
         val configured = team().copy(
             charter = "SHARED_TEAM_RULE",
+            admins = if (mapped) listOf(com.aharou.feature.agent.domain.subagent.MAIN_AGENT_ADMIN) else team().admins,
             members = roles.map { com.aharou.feature.agent.domain.subagent.TeamMemberRef(it.name) },
             stages = listOf(
-                TeamStage("prepare", listOf(task("INTAKE_PRESET"), task("BUILDER_PRESET").copy(agent = "builder", writePaths = listOf("two.kt")),
-                    task("QUEUED_PRESET").copy(agent = "reviewer", writePaths = listOf("three.kt")))),
-                TeamStage("consume", listOf(task("CONSUMER_PRESET")))
+                TeamStage("prepare", listOf(
+                    task("INTAKE_PRESET").copy(id = "intake"),
+                    task("BUILDER_PRESET").copy(agent = "builder", writePaths = listOf("two.kt"), id = "builder"),
+                    task("QUEUED_PRESET").copy(agent = "reviewer", writePaths = listOf("three.kt"), id = "queued",
+                        interfaces = listOf(com.aharou.feature.agent.domain.subagent.TeamInterface("consume/final", "QUEUED_INTERFACE")))), id = "prep"),
+                TeamStage("consume", listOf(task("CONSUMER_PRESET").copy(id = "final")), id = "consume")
             )
         )
         val registry = TeamRunRegistry()
@@ -136,7 +152,7 @@ class TeamStageExecutorTest {
             com.aharou.feature.agent.domain.subagent.MaxRunningSource { 2 },
             com.aharou.feature.agent.domain.subagent.CommunicationEnabledSource { true }, registry)
         val launches = linkedMapOf<String, Map<String, JsonElement>>()
-        val result = executor.run(configured, intake, roles, 2, "parent") { batch ->
+        val execute: suspend (JsonArray) -> ToolResult = { batch ->
             executor.pipeline(mapOf("pipeline" to batch), context, bus, create = { args ->
                 val id = args.getValue("_teamLogicalId").jsonPrimitive.content
                 launches[id] = args
@@ -144,8 +160,29 @@ class TeamStageExecutorTest {
                     com.aharou.feature.agent.domain.subagent.SubAgentEventType.COMPLETED, accepted = true))
                 ToolResult.Success(buildJsonObject { put("id", "child-$id") })
             }, read = { if (it == "child-s1-b1-t1") later else "result from $it" })
-        } as ToolResult.Success
-        assertEquals("done", result.data.jsonObject.getValue("state").jsonPrimitive.content)
+        }
+        val result = if (!mapped) executor.run(configured, intake, roles, 2, "parent", exec = execute) else {
+            val repository = mockk<AgentTeamRepository>()
+            every { repository.forWorkspace(context.projectRoot) } returns repository
+            every { repository.listAll() } returns listOf(AgentTeamEntry(configured, AgentDefinitionScope.PROJECT))
+            val definitions = mockk<AgentDefinitionRepository>()
+            every { definitions.listEnabled() } returns roles.map { AgentDefinitionEntry(it, AgentDefinitionScope.PROJECT) }
+            val teams = TeamTasks(repository, definitions, com.aharou.feature.agent.domain.subagent.MaxRunningSource { 2 }, executor, mockk())
+            fun brief(stage: String, task: String, text: String) = buildJsonObject {
+                put("stageId", stage); put("taskId", task); put("brief", text)
+            }
+            val a = brief("prep", "intake", "A_ONLY")
+            val rest = listOf(brief("prep", "builder", "B_ONLY"), brief("prep", "queued", "C_ONLY"),
+                brief("consume", "final", "D_ONLY"))
+            suspend fun invoke(items: List<JsonObject>) = teams.run(buildJsonObject {
+                put("team", configured.name); put("goal", intake); put("sharedGoal", common); put("taskBriefs", JsonArray(items))
+            }, "parent", context.projectRoot, exec = execute)
+            assertEquals("INVALID_TEAM_BRIEFS", (invoke(listOf(a, a)) as ToolResult.Error).code)
+            assertEquals("INVALID_TEAM_BRIEFS", (invoke(listOf(brief("prep", "unknown", "private"))) as ToolResult.Error).code)
+            assertTrue(launches.isEmpty())
+            invoke(listOf(a) + rest)
+        }
+        assertEquals("done", (result as ToolResult.Success).data.jsonObject.getValue("state").jsonPrimitive.content)
         assertEquals(listOf("s1-b1-t1", "s1-b1-t2", "s1-b2-t1", "s2-b1-t1"), launches.keys.toList())
         val prompts = launches.values.map { it.getValue("prompt").jsonPrimitive.content }
         assertTrue(prompts[0].contains(intake))
@@ -154,6 +191,17 @@ class TeamStageExecutorTest {
             assertTrue(prompts[index].contains(preset))
             assertTrue(prompts[index].contains("SHARED_TEAM_RULE"))
         }
+        if (mapped) {
+            listOf("A_ONLY", "B_ONLY", "C_ONLY", "D_ONLY").forEachIndexed { index, detail ->
+                assertTrue(prompts[index].contains(detail))
+                assertFalse(prompts.filterIndexed { i, _ -> i != index }.any { it.contains(detail) })
+            }
+            assertTrue(prompts.all { it.contains(common) })
+        }
+        assertFalse(prompts[0].contains("QUEUED_INTERFACE"))
+        assertFalse(prompts[1].contains("QUEUED_INTERFACE"))
+        assertTrue(prompts[2].contains("QUEUED_INTERFACE"))
+        assertTrue(prompts[3].contains("QUEUED_INTERFACE"))
         assertFalse(prompts[2].contains(later))
         assertTrue(prompts[3].contains(later))
         assertEquals("reviewer", launches.getValue("s1-b2-t1").getValue("agent").jsonPrimitive.content)

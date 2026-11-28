@@ -2,6 +2,7 @@ package com.aharou.feature.agent.domain.tool.subagent
 
 import com.aharou.feature.agent.domain.subagent.AgentDefinition
 import com.aharou.feature.agent.domain.subagent.AgentTeam
+import com.aharou.feature.agent.domain.subagent.TeamFlowNode
 import com.aharou.feature.agent.domain.subagent.TeamStage
 import com.aharou.feature.agent.domain.subagent.TeamTask
 import com.aharou.feature.agent.domain.teamworkflow.TeamWorkflow
@@ -190,6 +191,30 @@ class TeamRunnerWorkflowTest {
     }
 
     @Test
+    fun buildRejectsAnUnknownOrAmbiguousPresetStep() {
+        val configured = team("scope", "需求分析师")
+        val stage = configured.stages.single()
+        val task = stage.tasks.single()
+        val cases = listOf(
+            configured to TeamFlowNode(stage.id, "not-a-step"),
+            configured.copy(stages = listOf(stage.copy(tasks = listOf(task, task)))) to TeamFlowNode(stage.id, task.id)
+        )
+        cases.forEach { (candidate, node) ->
+            val result = TeamRunner.build(candidate, "shared", enabled, 2, taskBriefs = mapOf(node to "specific")) as TeamRunner.Plan.Rejected
+            assertEquals("INVALID_TEAM_BRIEFS", result.code)
+        }
+    }
+
+    @Test
+    fun workflowDeliveryContainingNoUpstreamWordsIsStillADelivery() {
+        val plan = TeamRunner.buildWorkflowLayer(workflow, 2, workflow.teams[1], team("架构设计团队", "系统架构师"),
+            "ORIGINAL_ONLY", "结论：这个模块无上游 API；接口证据已交付", enabled, 1) as TeamRunner.Plan.Ready
+        val member = plan.pipeline.objects().first().text("prompt")
+        assertTrue(member.contains("接口证据已交付"))
+        assertTrue(!member.contains("ORIGINAL_ONLY"))
+    }
+
+    @Test
     fun buildScopesRawGoalToFirstStageAndKeepsDownstreamOnSpecificUpstreamWork() {
         val team = AgentTeam("delivery", "", listOf(
             TeamStage("需求拆解", listOf(TeamTask(agent = "需求分析师", prompt = "拆成任务清单"))),
@@ -198,7 +223,7 @@ class TeamRunnerWorkflowTest {
         val plan = TeamRunner.build(team, "用户原始长需求全文", enabled, 2) as TeamRunner.Plan.Ready
         val prompts = plan.pipeline.objects().map { JsonPrimitive((it["prompt"] as JsonPrimitive).content).content }
         assertTrue(prompts[0].contains("用户原始长需求全文"))
-        assertTrue(prompts[1].contains("上游阶段已接收并拆解原始需求"))
+        assertTrue(prompts[1].contains("只执行自己的预设任务与收到的相关交付"))
         assertTrue(!prompts[1].contains("用户原始长需求全文"))
         assertTrue(prompts[1].contains("实现分配的任务"))
     }

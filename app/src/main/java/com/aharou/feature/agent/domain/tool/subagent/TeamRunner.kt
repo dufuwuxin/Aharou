@@ -6,6 +6,7 @@ import com.aharou.feature.agent.domain.subagent.AgentTeam
 import com.aharou.feature.agent.domain.subagent.AgentTeamEntry
 import com.aharou.feature.agent.domain.subagent.SubAgentProfileMatcher
 import com.aharou.feature.agent.domain.subagent.TeamFlowGraph
+import com.aharou.feature.agent.domain.subagent.TeamFlowNode
 import com.aharou.feature.agent.domain.subagent.TeamStage
 import com.aharou.feature.agent.domain.subagent.TeamTask
 import com.aharou.feature.agent.domain.teamworkflow.TeamWorkflow
@@ -42,7 +43,9 @@ object TeamRunner {
      * 阶段内任务数超过并发上限时**自动分批排队**（后一批依赖前一批），不报错——预设里多写两个
      * 成员不该逼用户去拆阶段。
      */
-    fun build(team: AgentTeam, goal: String, enabled: List<AgentDefinition>, maxRunning: Int, projectFiles: Set<String>? = null): Plan {
+    fun build(team: AgentTeam, goal: String, enabled: List<AgentDefinition>, maxRunning: Int,
+        projectFiles: Set<String>? = null, taskBriefs: Map<TeamFlowNode, String> = emptyMap(),
+        sharedGoal: String = ""): Plan {
         if (team.stages.any { TeamStageCondition.evaluate(it.condition, projectFiles) == TeamStageCondition.Result.UNKNOWN })
             return Plan.Rejected("TEAM_CONDITION_UNKNOWN", "Cannot determine stage conditions from this workspace")
         val active = team.copy(stages = team.stages.filter { TeamStageCondition.evaluate(it.condition, projectFiles) == TeamStageCondition.Result.RUN })
@@ -52,13 +55,27 @@ object TeamRunner {
                 "AGENT_NOT_FOUND",
                 "团队「${team.name}」引用了不可用的角色：${badRoles.joinToString("；")}。" +
                     "可用部门：${SubAgentProfileMatcher.departmentHint(enabled)}；" +
-                    "先用 task(action=\"roles\", department=\"…\", agentQuery=\"…\") 查角色名，再改团队文件的 agent 字段。"
+                    "请在团队配置中选择已启用的成员，再重新运行。"
             )
         }
 
         val batchSize = maxRunning.coerceAtLeast(1)
         val idOf = logicalIds(team, batchSize)
         val interfaceTexts = interfaceBriefs(team, idOf)
+        val nodes = TeamFlowGraph.nodes(team)
+        if (taskBriefs.any { (node, brief) -> nodes.count { it == node } != 1 || brief.isBlank() }) {
+            return Plan.Rejected("INVALID_TEAM_BRIEFS", "Each brief must identify one existing team step and contain a task description")
+        }
+        val activeSteps = team.stages.flatMapIndexed { stageIndex, stage ->
+            if (TeamStageCondition.evaluate(stage.condition, projectFiles) != TeamStageCondition.Result.RUN) emptyList()
+            else stage.tasks.mapIndexed { i, task -> TeamFlowNode(stage.id, task.id) to idOf[stageIndex][i] }
+        }
+        val intakeId = if (team.routes.isEmpty()) activeSteps.firstOrNull()?.second else {
+            val graphNodes = TeamFlowGraph.forward(team).flatMap { listOf(it.from, it.to) }.toSet()
+            val roots = TeamFlowGraph.ready(team, emptySet()).toSet()
+            (activeSteps.firstOrNull { it.first in roots } ?: activeSteps.firstOrNull { it.first in graphNodes })?.second
+        }
+        val logicalTasks = logicalBrief(team, batchSize)
         var layers = 0
         val pipeline = buildJsonArray {
             var upstream: List<String> = emptyList()
@@ -74,8 +91,17 @@ object TeamRunner {
                             put("_teamCommunication", stage.communication.token)
                             put("_teamMessageLimit", stage.messageLimit.coerceIn(1, 100))
                             put("description", "${stage.title}·${task.memberLabel()}".take(DESCRIPTION_MAX))
-                            val scopedGoal = if (stageIndex == 0) goal else "上游阶段已接收并拆解原始需求；只执行本阶段 task 与上游交付中明确分配给你的部分，不复述或重新分配原始需求。"
-                            put("prompt", taskPrompt(team, stage, task, scopedGoal, interfaceText = interfaceTexts[stageIndex][taskIndex]) + "\n" + logicalBrief(team, batchSize))
+                            val node = TeamFlowNode(stage.id, task.id)
+                            val legacyIntake = ids[taskIndex] == intakeId && goal.isNotBlank()
+                            val scopedGoal = when {
+                                sharedGoal.isNotBlank() -> sharedGoal
+                                legacyIntake -> goal
+                                else -> "只执行自己的预设任务与收到的相关交付；不要重分团队目标，也不要要求转发原始需求。"
+                            }
+                            put("prompt", taskPrompt(team, stage, task, scopedGoal,
+                                interfaceText = interfaceTexts[stageIndex][batchIndex * batchSize + taskIndex],
+                                taskBrief = taskBriefs[node], legacyIntake = legacyIntake,
+                                intakeContext = goal.takeIf { legacyIntake && sharedGoal.isNotBlank() }) + "\n" + logicalTasks)
                             task.agent?.let { put("agent", it) }
                             task.department?.let { put("department", it) }
                             task.agentQuery?.let { put("agentQuery", it) }
@@ -84,6 +110,9 @@ object TeamRunner {
                             }
                             if (upstream.isNotEmpty()) {
                                 put("dependsOn", buildJsonArray { upstream.forEach { add(JsonPrimitive(it)) } })
+                            }
+                            if (stageIds.isNotEmpty()) {
+                                put("_queueAfter", buildJsonArray { stageIds.forEach { add(JsonPrimitive(it)) } })
                             }
                         }
                     }
@@ -141,6 +170,8 @@ object TeamRunner {
         val batchSize = maxRunning.coerceAtLeast(1)
         val idOf = logicalIds(team, batchSize, "w$layerIndex-")
         val interfaceTexts = interfaceBriefs(team, idOf)
+        val firstStage = team.stages.indexOfFirst { TeamStageCondition.evaluate(it.condition, projectFiles) == TeamStageCondition.Result.RUN }
+        val noUpstream = upstreamBrief.isBlank() || upstreamBrief == "（无上游）"
         var layers = 0
         // 本层全部成员任务的 id：协调者要看到整层的产出，不能只看最后一批。
         val members = mutableListOf<String>()
@@ -159,9 +190,10 @@ object TeamRunner {
                             put("_teamCommunication", stage.communication.token)
                             put("_teamMessageLimit", stage.messageLimit.coerceIn(1, 100))
                             put("description", "第$layerIndex 层·${stage.title}·${task.memberLabel()}".take(DESCRIPTION_MAX))
-                            val hasUpstreamDelivery = upstreamBrief.isNotBlank() && !upstreamBrief.contains("无上游")
-                            val scopedGoal = if (!hasUpstreamDelivery && stageIndex == 0) goal else "只依据上游阶段交付、当前 task 与接口约定执行；原始需求已由上游拆解，不要把它当作唯一任务指令。"
-                            put("prompt", taskPrompt(team, stage, task, scopedGoal, upstreamBrief, interfaceTexts[stageIndex][taskIndex]) + "\n" + logicalBrief(team, batchSize, "w$layerIndex-"))
+                            val legacyIntake = noUpstream && stageIndex == firstStage && batchIndex == 0 && taskIndex == 0
+                            val scopedGoal = if (legacyIntake) goal else "只依据收到的上游交付、当前 task 与接口约定执行，不重新分配原始需求。"
+                            put("prompt", taskPrompt(team, stage, task, scopedGoal, upstreamBrief,
+                                interfaceTexts[stageIndex][batchIndex * batchSize + taskIndex], legacyIntake = legacyIntake) + "\n" + logicalBrief(team, batchSize, "w$layerIndex-"))
                             task.agent?.let { put("agent", it) }
                             task.department?.let { put("department", it) }
                             task.agentQuery?.let { put("agentQuery", it) }
@@ -170,6 +202,9 @@ object TeamRunner {
                             }
                             if (upstream.isNotEmpty()) {
                                 put("dependsOn", buildJsonArray { upstream.forEach { add(JsonPrimitive(it)) } })
+                            }
+                            if (stageIds.isNotEmpty()) {
+                                put("_queueAfter", buildJsonArray { stageIds.forEach { add(JsonPrimitive(it)) } })
                             }
                         }
                     }
@@ -227,7 +262,7 @@ object TeamRunner {
             return Plan.Rejected(
                 "AGENT_NOT_FOUND",
                 "驳回目标「$targetTeam·$targetExpert」不是可用角色：驳回必须指名到具体专家，" +
-                    "可先 task(action=\"roles\") 查名字。可用部门：${SubAgentProfileMatcher.departmentHint(enabled)}"
+                    "请在团队配置中核对已启用的成员。可用部门：${SubAgentProfileMatcher.departmentHint(enabled)}"
             )
         }
         val pipeline = buildJsonArray {
@@ -400,7 +435,9 @@ object TeamRunner {
     }
 
     /** 单个团队成员的任务指令：团队公约 + 本次目标 + 本阶段任务 + 上游交付摘要 + 关系链（执行/驳回）。 */
-    private fun taskPrompt(team: AgentTeam, stage: TeamStage, task: TeamTask, goal: String, upstreamBrief: String = "", interfaceText: String = ""): String =
+    private fun taskPrompt(team: AgentTeam, stage: TeamStage, task: TeamTask, goal: String,
+        upstreamBrief: String = "", interfaceText: String = "", taskBrief: String? = null, legacyIntake: Boolean = false,
+        intakeContext: String? = null): String =
         kotlinx.serialization.json.buildJsonObject {
             put("team", team.name)
             put("stage", stage.title)
@@ -411,6 +448,10 @@ object TeamRunner {
             put("goal", goal)
             put("charter", team.charter)
             put("task", task.prompt)
+            put("goalUsage", if (legacyIntake) "仅为本次目标的参考；只执行自己的预设职责，交接提供下游必要的结论和证据，不照抄目标。"
+                else "仅作共同背景；执行自己的预设职责与专属简述，保留团队公约、范围与验收要求。")
+            intakeContext?.let { put("intakeContext", it) }
+            taskBrief?.let { put("taskBrief", it) }
             put("upstream", upstreamBrief)
             put("interfaces", interfaceText)
             stage.rejectTo?.let { put("rejectTo", it) }

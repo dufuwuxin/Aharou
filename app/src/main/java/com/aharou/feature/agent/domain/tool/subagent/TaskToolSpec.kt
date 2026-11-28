@@ -23,8 +23,26 @@ internal object TaskToolSpec {
             description = "team_assign 必填：同一团队名单内的真实成员名。不接受主代理保留值。", required = false),
         "goal" to ToolParameter(
             name = "goal", type = ParameterType.STRING,
-            description = "交给团队完成的目标；team_run 必填。成员分工和内部交接由团队执行。",
+            description = "旧版 team_run 目标，兼容现有调用。始终只给一个入口任务作参考；新调用用 sharedGoal。",
             required = false
+        ),
+        "sharedGoal" to ToolParameter(
+            name = "sharedGoal", type = ParameterType.STRING, required = false,
+            description = "新 team_run 调用必填：简短、明确、可共享的团队目标与共同约束；不要粘贴原始需求。"
+        ),
+        "taskBriefs" to ToolParameter(
+            name = "taskBriefs", type = ParameterType.ARRAY, required = false,
+            description = "team_run：主代理管理的团队可按 teams(team=…) 详情为已有步骤提供专属简述；普通团队省略此参数，仅传 sharedGoal，不须查看内部步骤。",
+            itemsSchema = mapOf(
+                "type" to "object",
+                "properties" to mapOf(
+                    "stageId" to mapOf("type" to "string"),
+                    "taskId" to mapOf("type" to "string"),
+                    "brief" to mapOf("type" to "string", "description" to "只有此步骤需要的任务、范围和验收，不复制整段请求")
+                ),
+                "required" to listOf("stageId", "taskId", "brief"),
+                "additionalProperties" to false
+            )
         )
     )
 }
