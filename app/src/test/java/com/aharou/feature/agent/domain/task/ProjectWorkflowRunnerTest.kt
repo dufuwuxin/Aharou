@@ -32,11 +32,13 @@ class ProjectWorkflowRunnerTest {
         beforeCommit: ((ProjectTaskSnapshot) -> ProjectTaskSnapshot)? = null,
         afterMemberEnds: ((ProjectTaskSnapshot) -> ProjectTaskSnapshot)? = null,
         commitStatus: ProjectTaskStatus = ProjectTaskStatus.REVIEW,
+        projectGoal: String = "", projectAcceptance: String = "",
         seed: (ProjectTask) -> ProjectTask = { it }): Triple<ProjectWorkflowRunner, () -> ProjectTaskSnapshot, ((ProjectTaskSnapshot) -> ProjectTaskSnapshot) -> Unit> {
         val repository = mockk<ProjectTaskRepository>()
         coEvery { repository.checkpointProjectGoal(any(), any()) } returns Unit
         val guard = Any()
-        var snapshot = ProjectTaskSnapshot(version = 1, projects = listOf(ProjectPlan(id = "p", workspace = "w", title = "p", requirements = "a then b", executionTeam = if (team) "auto" else null)),
+        var snapshot = ProjectTaskSnapshot(version = 1, projects = listOf(ProjectPlan(id = "p", workspace = "w", title = "p", requirements = "a then b", executionTeam = if (team) "auto" else null,
+            overallGoal = projectGoal, goalAcceptance = projectAcceptance)),
             tasks = listOf(seed(task("a").copy(owner = owner.ifBlank { if (members.isEmpty()) "legacy" else "" }, members = members)), task("b", listOf("a"))))
         val seeded = snapshot.tasks[0].processSessionIds.size
         coEvery { repository.load("w") } answers { synchronized(guard) { snapshot } }
@@ -162,9 +164,10 @@ class ProjectWorkflowRunnerTest {
         assertTrue(task.evidenceRefs.single().contains(":v1:run:real-run"))
     }
 
-    @Test fun projectLaunchesOnlyTheCurrentTaskRequirementsAndConstraints() = runBlocking {
+    @Test fun projectLaunchesIncludeCurrentTaskAndSharedConstraintsWithoutTheFullRequest() = runBlocking {
         for (team in listOf(true, false)) {
-            val (runner) = fixture(true, team = team, seed = { it.copy(
+            val (runner) = fixture(true, team = team, projectGoal = "SHARED_PROJECT_GOAL",
+                projectAcceptance = "SHARED_PROJECT_ACCEPTANCE", seed = { it.copy(
                 requirement = "CURRENT_REQUIREMENT", background = "LOCAL_BACKGROUND", constraints = listOf("LOCAL_SCOPE"),
                 acceptance = "LOCAL_ACCEPTANCE", supplements = listOf("LOCAL_SUPPLEMENT")) })
             runner.run("p", "w", "a")
@@ -173,7 +176,8 @@ class ProjectWorkflowRunnerTest {
             if (team) coVerify(exactly = 1) { tool.runProjectTeam("builders", capture(prompt), any(), "hash", any()) }
             else coVerify(exactly = 1) { tool.createProjectMember("a", capture(prompt), any(), any()) }
             assertFalse(prompt.captured.contains("a then b"))
-            listOf("CURRENT_REQUIREMENT", "LOCAL_BACKGROUND", "LOCAL_SCOPE", "LOCAL_ACCEPTANCE", "LOCAL_SUPPLEMENT").forEach {
+            listOf("CURRENT_REQUIREMENT", "LOCAL_BACKGROUND", "LOCAL_SCOPE", "LOCAL_ACCEPTANCE", "LOCAL_SUPPLEMENT",
+                "Shared project constraints", "SHARED_PROJECT_GOAL", "SHARED_PROJECT_ACCEPTANCE", "Horizon: short").forEach {
                 assertTrue("missing $it in mode team=$team", prompt.captured.contains(it))
             }
         }

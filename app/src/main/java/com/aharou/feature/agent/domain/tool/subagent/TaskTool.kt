@@ -426,12 +426,13 @@ class TaskTool @Inject constructor(
     }
 
     private suspend fun runTeam(args: Map<String, JsonElement>, context: AgentContext): ToolResult =
-        teamTasks.run(args, context.sessionId.orEmpty(), context.projectRoot) { pipeline ->
+        teamTasks.run(args, context.sessionId.orEmpty(), context.projectRoot, currentUserText = context.currentUserText) { pipeline ->
             runPipeline(buildJsonObject { put("pipeline", pipeline) }, context)
         }
 
     private fun publicTeamResult(result: ToolResult, args: Map<String, JsonElement>): ToolResult {
         if (result is ToolResult.Error) return when (result.code) {
+            "TEAM_INPUT_NEEDS_SCOPING" -> result
             "INVALID_TEAM_BRIEFS" -> ToolResult.Error("请按已授权查看的团队详情提供已有阶段和任务的唯一非空简述", result.code)
             "AGENT_NOT_FOUND" -> ToolResult.Error("团队引用了不可用的成员，请在团队配置中选择已启用的成员", result.code)
             "TEAM_ADMIN_DENIED" -> ToolResult.Error("该团队仅能接收共同目标，不能从外部指定内部步骤", result.code)

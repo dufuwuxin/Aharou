@@ -23,7 +23,7 @@ internal object TaskToolSpec {
             description = "team_assign 必填：同一团队名单内的真实成员名。不接受主代理保留值。", required = false),
         "goal" to ToolParameter(
             name = "goal", type = ParameterType.STRING,
-            description = "旧版 team_run 目标，兼容现有调用。始终只给一个入口任务作参考；新调用用 sharedGoal。",
+            description = "旧版 team_run 主题；单独使用时传给入口阶段成员；与新字段混用时仅作单个入口任务参考。新调用用 sharedGoal，不复制用户原文。",
             required = false
         ),
         "sharedGoal" to ToolParameter(

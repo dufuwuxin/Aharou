@@ -75,6 +75,9 @@ object TeamRunner {
             val roots = TeamFlowGraph.ready(team, emptySet()).toSet()
             (activeSteps.firstOrNull { it.first in roots } ?: activeSteps.firstOrNull { it.first in graphNodes })?.second
         }
+        val legacyTopic = sharedGoal.isBlank() && taskBriefs.isEmpty()
+        val firstActiveStage = activeSteps.firstOrNull()?.first?.stageId
+        val initialRoots = if (legacyTopic && team.routes.isNotEmpty()) TeamFlowGraph.ready(team, emptySet()).toSet() else emptySet()
         val logicalTasks = logicalBrief(team, batchSize)
         var layers = 0
         val pipeline = buildJsonArray {
@@ -92,10 +95,11 @@ object TeamRunner {
                             put("_teamMessageLimit", stage.messageLimit.coerceIn(1, 100))
                             put("description", "${stage.title}·${task.memberLabel()}".take(DESCRIPTION_MAX))
                             val node = TeamFlowNode(stage.id, task.id)
-                            val legacyIntake = ids[taskIndex] == intakeId && goal.isNotBlank()
+                            val legacyIntake = !legacyTopic && ids[taskIndex] == intakeId && goal.isNotBlank()
+                            val initialTopic = legacyTopic && (stage.id == firstActiveStage || node in initialRoots)
                             val scopedGoal = when {
                                 sharedGoal.isNotBlank() -> sharedGoal
-                                legacyIntake -> goal
+                                initialTopic || legacyIntake -> goal
                                 else -> "只执行自己的预设任务与收到的相关交付；不要重分团队目标，也不要要求转发原始需求。"
                             }
                             put("prompt", taskPrompt(team, stage, task, scopedGoal,

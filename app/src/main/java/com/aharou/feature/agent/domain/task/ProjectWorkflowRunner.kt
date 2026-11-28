@@ -64,6 +64,7 @@ class ProjectWorkflowRunner @Inject constructor(
             while (true) {
                 val snapshot = repository.load(workspace)
                 val currentProject = snapshot.projects.first { it.id == projectId }
+                val projectContext = ProjectGoalPlan.context(currentProject.overallGoal, currentProject.goalAcceptance, horizon)
                 val projectTasks = snapshot.tasks.filter { it.projectId == projectId }
                 currentCoroutineContext().ensureActive()
                 if (attempts >= ProjectGoalPlan.taskBudget(horizon) ||
@@ -121,7 +122,7 @@ class ProjectWorkflowRunner @Inject constructor(
                             val result = ProjectTeamExecution.execute(minOf(memberTimeoutMs, remaining),
                                 current = { requireCurrent(workspace, next, participants) },
                                 invoke = { tasks.runProjectTeam(selectedTeam.name,
-                                    ProjectWorkflowPlan.prompt(next, projectTasks, requirements = ""),
+                                    ProjectWorkflowPlan.prompt(next, projectTasks, requirements = "", projectContext = projectContext),
                                     context, selectedTeam.signature, onCreated = { id, role ->
                                         repository.transact(workspace) { store ->
                                             val latest = store.tasks.firstOrNull { it.id == next.id } ?: throw ProjectTaskSuperseded()
@@ -185,7 +186,7 @@ class ProjectWorkflowRunner @Inject constructor(
                             // Cancellation must not strand a created child between creation and durable linking.
                             withContext(NonCancellable) {
                                 val result = tasks.createProjectMember(next.title,
-                                    ProjectWorkflowPlan.prompt(next, projectTasks, "", member, index + 1, outputs.toList(), projectTools),
+                                    ProjectWorkflowPlan.prompt(next, projectTasks, "", member, index + 1, outputs.toList(), projectTools, projectContext),
                                     member.takeIf { it.isNotBlank() }, context)
                                 if (result is ToolResult.Error && result.code == "MAX_SUBAGENTS_REACHED") return@withContext
                                 check(result is ToolResult.Success) { (result as? ToolResult.Error)?.message ?: "PROJECT_MEMBER_START_FAILED" }

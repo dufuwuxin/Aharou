@@ -123,12 +123,12 @@ class TeamStageExecutorTest {
         assertEquals(3, calls)
         assertEquals("blocked", output.data.jsonObject.getValue("state").jsonPrimitive.content)
     }
-    @Test fun legacyGoalIsNotBroadcastToParallelOrQueuedMembers() = runBlocking { verifyScopedLaunches(false) }
+    @Test fun legacyTopicReachesAllIntakeMembersButNotDownstream() = runBlocking { verifyScopedLaunches(false) }
 
     @Test fun mappedBriefsStayWithTheirPresetStepsAcrossBatches() = runBlocking { verifyScopedLaunches(true) }
 
     private suspend fun verifyScopedLaunches(mapped: Boolean) {
-        val intake = "original request PRIVATE_ORIGINAL"
+        val intake = if (mapped) "original request PRIVATE_ORIGINAL" else "COMPATIBLE_LEGACY_TOPIC"
         val common = "CURRENT_SHARED_GOAL"
         val later = "deliver-only-result"
         val roles = (listOf(role) + listOf("builder", "reviewer").map { role.copy(name = it) })
@@ -186,7 +186,11 @@ class TeamStageExecutorTest {
         assertEquals(listOf("s1-b1-t1", "s1-b1-t2", "s1-b2-t1", "s2-b1-t1"), launches.keys.toList())
         val prompts = launches.values.map { it.getValue("prompt").jsonPrimitive.content }
         assertTrue(prompts[0].contains(intake))
-        assertFalse(prompts.drop(1).any { it.contains("PRIVATE_ORIGINAL") })
+        if (mapped) assertFalse(prompts.drop(1).any { it.contains(intake) })
+        else {
+            assertTrue(prompts.take(3).all { it.contains(intake) })
+            assertFalse(prompts[3].contains(intake))
+        }
         listOf("INTAKE_PRESET", "BUILDER_PRESET", "QUEUED_PRESET", "CONSUMER_PRESET").forEachIndexed { index, preset ->
             assertTrue(prompts[index].contains(preset))
             assertTrue(prompts[index].contains("SHARED_TEAM_RULE"))

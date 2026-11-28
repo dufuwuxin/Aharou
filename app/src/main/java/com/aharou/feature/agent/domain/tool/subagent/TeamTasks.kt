@@ -74,6 +74,7 @@ class TeamTasks @Inject constructor(
         parentSessionId: String,
         workspace: String,
         expectedSignature: String? = null,
+        currentUserText: String = "",
         exec: suspend (JsonArray) -> ToolResult
     ): ToolResult {
         val teamName = (args["team"] as? JsonPrimitive)?.contentOrNull?.trim().orEmpty()
@@ -114,12 +115,35 @@ class TeamTasks @Inject constructor(
         return when (val plan = TeamRunner.build(team, intakeGoal, enabled, capacity, projectFiles, briefs, sharedGoal)) {
             is TeamRunner.Plan.Rejected -> ToolResult.Error(plan.message, plan.code)
             is TeamRunner.Plan.Ready -> {
+                val activeCount = team.stages.filter {
+                    TeamStageCondition.evaluate(it.condition, projectFiles) == TeamStageCondition.Result.RUN
+                }.sumOf { it.tasks.size }
+                if (expectedSignature == null && activeCount > 1) {
+                    val copied = copiedInputFields(currentUserText, intakeGoal, sharedGoal, briefs.values)
+                    if (copied.isNotEmpty()) return ToolResult.Error(
+                        "${copied.joinToString("、")} 包含本轮用户原文，团队尚未启动。请把共同目标及必要约束改写为 sharedGoal，" +
+                            "仅在有授权时为各步骤提供其职责所需的 taskBriefs，然后重试 team_run。",
+                        "TEAM_INPUT_NEEDS_SCOPING"
+                    )
+                }
                 FileLogger.i(
                     TAG,
                     "团队「${team.name}」开始执行：${team.stages.size} 阶段 → ${plan.layers} 层 / ${plan.taskCount} 任务"
                 )
                 stageExecutor.run(team, intakeGoal, enabled, capacity, parentSessionId, projectFiles, briefs, sharedGoal, exec)
             }
+        }
+    }
+
+    private fun copiedInputFields(source: String, goal: String, sharedGoal: String, briefs: Collection<String>): List<String> {
+        val original = source.replace(INPUT_WHITESPACE, " ").trim()
+        if (original.isEmpty()) return emptyList()
+        // Treat only an observed whole-input match as a copy; length and similar wording prove nothing.
+        fun matches(value: String) = value.replace(INPUT_WHITESPACE, " ").trim() == original
+        return buildList {
+            if (matches(goal)) add("goal")
+            if (matches(sharedGoal)) add("sharedGoal")
+            if (briefs.any(::matches)) add("taskBriefs.brief")
         }
     }
 
@@ -198,5 +222,6 @@ class TeamTasks @Inject constructor(
 
     private companion object {
         const val TAG = "TeamTasks"
+        val INPUT_WHITESPACE = Regex("[\\s\\p{Z}]+")
     }
 }

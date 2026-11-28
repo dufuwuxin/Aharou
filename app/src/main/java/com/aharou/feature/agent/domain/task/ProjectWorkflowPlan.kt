@@ -83,8 +83,9 @@ object ProjectWorkflowPlan {
 
     fun prompt(task: ProjectTask, tasks: List<ProjectTask>, requirements: String,
         member: String = task.owner, ordinal: Int = 1, previous: List<String> = emptyList(),
-        projectTools: Boolean = false): String = buildString {
+        projectTools: Boolean = false, projectContext: String = ""): String = buildString {
         if (requirements.isNotBlank()) append("Project requirements:\n").append(requirements)
+        if (projectContext.isNotBlank()) append("\n\nShared project constraints (apply only to this task):\n").append(projectContext)
         for (branch in requirementBranches(task, tasks)) {
             append("\n\nRequirement branch [").append(branch.id).append("]:\n").append(branch.requirement)
         }

@@ -1,9 +1,17 @@
 package com.aharou.feature.agent.domain.tool.subagent
 
 import com.aharou.feature.agent.domain.model.AgentContext
+import com.aharou.feature.agent.domain.subagent.AgentDefinition
+import com.aharou.feature.agent.domain.subagent.AgentDefinitionEntry
+import com.aharou.feature.agent.domain.subagent.AgentDefinitionRepository
+import com.aharou.feature.agent.domain.subagent.AgentDefinitionScope
 import com.aharou.feature.agent.domain.subagent.AgentTeam
 import com.aharou.feature.agent.domain.subagent.AgentTeamEntry
 import com.aharou.feature.agent.domain.subagent.AgentTeamRepository
+import com.aharou.feature.agent.domain.subagent.MAIN_AGENT_ADMIN
+import com.aharou.feature.agent.domain.subagent.MaxRunningSource
+import com.aharou.feature.agent.domain.subagent.TeamStage
+import com.aharou.feature.agent.domain.subagent.TeamTask
 import com.aharou.feature.agent.domain.tool.ToolResult
 import io.mockk.Called
 import com.aharou.feature.agent.domain.session.SessionUseCase
@@ -69,21 +77,21 @@ class TeamToolBoundaryTest {
     @Test fun teamRunAcceptsSchemaTitleWithoutForwardingIt() = runBlocking {
         val args = mapOf("action" to JsonPrimitive("team_run"),
             "team" to JsonPrimitive("team"), "goal" to JsonPrimitive("goal"))
-        coEvery { teams.run(args, any(), any(), any(), any()) } returns ToolResult.Success(buildJsonObject {
+        coEvery { teams.run(args, any(), any(), any(), any(), any()) } returns ToolResult.Success(buildJsonObject {
             put("state", "completed"); put("runId", "run")
         })
 
         val result = tool.executeWithContext(args + ("tool_title" to JsonPrimitive("分配团队任务")), context)
 
         assertTrue(result is ToolResult.Success)
-        coVerify(exactly = 1) { teams.run(args, any(), any(), any(), any()) }
+        coVerify(exactly = 1) { teams.run(args, any(), any(), any(), any(), any()) }
     }
 
     @Test fun ordinaryTeamCanDeclareSharedGoalWithoutDiscoveringPrivateSteps() = runBlocking {
         val args = mapOf("action" to JsonPrimitive("team_run"), "team" to JsonPrimitive("team"), "sharedGoal" to JsonPrimitive("shared"))
-        coEvery { teams.run(args, any(), any(), any(), any()) } returns ToolResult.Success(buildJsonObject { put("state", "done") })
+        coEvery { teams.run(args, any(), any(), any(), any(), any()) } returns ToolResult.Success(buildJsonObject { put("state", "done") })
         assertTrue(tool.executeWithContext(args, context) is ToolResult.Success)
-        coVerify(exactly = 1) { teams.run(args, any(), any(), any(), any()) }
+        coVerify(exactly = 1) { teams.run(args, any(), any(), any(), any(), any()) }
     }
 
     @Test fun nonMainSessionCannotSendTargetedSteps() = runBlocking {
@@ -96,8 +104,46 @@ class TeamToolBoundaryTest {
         verify { teams wasNot Called }
     }
 
+    @Test fun publicRunDiagnosesCopiedCurrentInputAndAllowsARewrittenRetry() = runBlocking {
+        val definition = AgentDefinition(name = "worker", description = "", prompt = "")
+        fun task(id: String) = TeamTask(agent = "worker", prompt = "execute $id", id = id)
+        var preset = AgentTeam("team", "", listOf(TeamStage("work", listOf(task("a"), task("b")), id = "s")), "",
+            admins = listOf(MAIN_AGENT_ADMIN))
+        val repository = mockk<AgentTeamRepository>()
+        every { repository.forWorkspace(context.projectRoot) } returns repository
+        every { repository.listAll() } answers { listOf(AgentTeamEntry(preset, AgentDefinitionScope.PROJECT)) }
+        val definitions = mockk<AgentDefinitionRepository>()
+        every { definitions.listEnabled() } returns listOf(AgentDefinitionEntry(definition, AgentDefinitionScope.PROJECT))
+        val executor = mockk<TeamStageExecutor>()
+        val teamTasks = TeamTasks(repository, definitions, MaxRunningSource { 2 }, executor, mockk())
+        val publicTool = TaskTool(sessions, mockk(), mockk(), mockk(), mockk(), teamTasks, mockk(), mockk(), mockk(), mockk())
+        coEvery { sessions.getSessionById("main") } returns mockk { every { parentId } returns null }
+        val current = context.copy(currentUserText = "USER_SOURCE_MARKER\nLimit scope to the parser.")
+        val copied = " USER_SOURCE_MARKER  Limit scope to the parser. "
+        val base = mapOf("action" to JsonPrimitive("team_run"), "team" to JsonPrimitive("team"), "sharedGoal" to JsonPrimitive("Verify parser error reporting"))
+        val brief = buildJsonObject { put("stageId", "s"); put("taskId", "a"); put("brief", copied) }
+        for ((field, value) in listOf("goal" to JsonPrimitive(copied), "sharedGoal" to JsonPrimitive(copied),
+                "taskBriefs" to JsonArray(listOf(brief)))) {
+            val probe = if (field == "goal") base - "sharedGoal" else base
+            val error = publicTool.executeWithContext(probe + (field to value), current) as ToolResult.Error
+            assertEquals("TEAM_INPUT_NEEDS_SCOPING", error.code)
+            assertTrue(error.message.contains(field))
+            assertFalse(error.message.contains("USER_SOURCE_MARKER"))
+        }
+        verify { executor wasNot Called }
+        coEvery { executor.run(any(), any(), any(), any(), any(), any(), any(), any(), any()) } returns
+            ToolResult.Success(buildJsonObject { put("state", "done") })
+        assertTrue(publicTool.executeWithContext(base, current) is ToolResult.Success)
+        val legacy = (base - "sharedGoal") + ("goal" to JsonPrimitive(copied))
+        assertTrue(publicTool.executeWithContext(legacy, context) is ToolResult.Success)
+        assertTrue(publicTool.executeWithContext(legacy + ("goal" to JsonPrimitive("Parser error reporting")), current) is ToolResult.Success)
+        preset = preset.copy(stages = listOf(preset.stages.single().copy(tasks = listOf(task("a")))))
+        assertTrue(publicTool.executeWithContext(legacy, current) is ToolResult.Success)
+        coVerify(exactly = 4) { executor.run(any(), any(), any(), any(), any(), any(), any(), any(), any()) }
+    }
+
     @Test fun teamReturnDoesNotExposeMemberBodiesOrExecutionHistory() = runBlocking {
-        coEvery { teams.run(any(), any(), any(), any(), any()) } returns ToolResult.Success(buildJsonObject {
+        coEvery { teams.run(any(), any(), any(), any(), any(), any()) } returns ToolResult.Success(buildJsonObject {
             put("state", "blocked"); put("runId", "run"); put("reworkRounds", 1)
             put("outputs", "PRIVATE_MEMBER_BODY"); put("history", "PRIVATE_HISTORY")
             put("reason", "PRIVATE_MEMBER_NAME")
