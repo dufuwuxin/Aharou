@@ -155,6 +155,7 @@ class MessagePersistenceUseCase @Inject constructor(
 
     internal suspend fun persistPendingTool(
         sessionId: String,
+        messageId: String,
         toolCallId: String,
         toolName: String,
         toolArgs: String,
@@ -162,7 +163,7 @@ class MessagePersistenceUseCase @Inject constructor(
         timestamp: Long,
     ) {
         storeMessage(AgentMessageEntity(
-            id = "tool_$toolCallId",
+            id = messageId,
             sessionId = sessionId,
             role = MessageRole.TOOL.name,
             content = content,
@@ -173,10 +174,15 @@ class MessagePersistenceUseCase @Inject constructor(
         ))
     }
 
-    internal suspend fun settlePendingTool(sessionId: String, toolCallId: String, timestamp: Long, content: String) {
+    internal suspend fun settlePendingTool(
+        sessionId: String,
+        messageId: String,
+        toolCallId: String,
+        timestamp: Long,
+        content: String,
+    ) {
         val updated = agentDatabase.withTransaction {
-            val row = agentMessageDao.getMessageById("tool_$toolCallId") ?: return@withTransaction false
-            // Provider call IDs can be reused. The timestamp identifies this exact start write.
+            val row = agentMessageDao.getMessageById(messageId) ?: return@withTransaction false
             if (row.sessionId != sessionId || row.role != MessageRole.TOOL.name || row.toolCallId != toolCallId ||
                 row.timestamp != timestamp || !row.content.startsWith(SessionUseCase.PENDING_TOOL_MARKER)
             ) return@withTransaction false

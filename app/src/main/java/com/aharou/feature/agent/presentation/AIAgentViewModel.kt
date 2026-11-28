@@ -61,6 +61,7 @@ import com.aharou.feature.agent.domain.mention.FileMentionState
 import com.aharou.feature.agent.domain.mention.fileMentionQuery
 import com.aharou.feature.agent.domain.runner.AgentTurnRequest
 import com.aharou.feature.agent.domain.runner.AgentTurnRunner
+import com.aharou.feature.agent.domain.runner.AgentTurnToolRows
 import com.aharou.feature.agent.domain.subagent.SubAgentEvent
 import com.aharou.feature.agent.domain.subagent.SubAgentEventBus
 import com.aharou.feature.agent.domain.subagent.SubAgentEventType
@@ -1245,7 +1246,7 @@ class AIAgentViewModel @Inject constructor(
 
     // 工具调用传入参数（argsPreview）按落库消息 id 暂存：ToolCallStarted 落库后，
     // ToolCallFinished / 用户停止会用同 id REPLACE 整行，需在此把参数带到后续落库。
-    private val toolArgsByMsgId = mutableMapOf<String, String>()
+    private val toolRowsBySession = mutableMapOf<String, AgentTurnToolRows>()
 
     /** 是否有正在运行、可被打断的 agent 任务。 */
     val isRunning: Boolean get() {
@@ -2010,6 +2011,7 @@ class AIAgentViewModel @Inject constructor(
             return@launch
         }
         val currentJob = requireNotNull(coroutineContext[Job])
+        val toolRows = AgentTurnToolRows()
         var stewardNext: (() -> String?)? = null
         var effectiveModelRequest = modelRequest
         try {
@@ -2037,6 +2039,7 @@ class AIAgentViewModel @Inject constructor(
             }
             projectExecution.begin(sessionId, executionTurnId)
             sessionJobs[sessionId] = currentJob
+            toolRowsBySession[sessionId] = toolRows
             turnEndBridge.onRequestStarted(sessionId, request, isAutoTrigger)
             _activeAgentSessions.value = _activeAgentSessions.value + sessionId
             currentJob.invokeOnCompletion { cause ->
@@ -2085,7 +2088,8 @@ class AIAgentViewModel @Inject constructor(
                     skipTitleUpdate = skipTitleUpdate,
                     persistUserMessage = persistUserMessage,
                     replayUserMessageId = replayUserMessageId
-                )
+                ),
+                toolRows,
             ).collect { event ->
                 if (sessionJobs[sessionId] !== currentJob) return@collect
                 when (event) {
@@ -2167,25 +2171,23 @@ class AIAgentViewModel @Inject constructor(
                         }
                     }
                     is AgentEvent.ToolCallStarted -> {
-                        val msgId = "tool_${event.id}"
+                        val msgId = toolRows.messageIdFor(event.id)
                         setStreamingText(sessionId, null)
                         setPreparingTool(sessionId, null)
-                        toolArgsByMsgId[msgId] = event.argsPreview
                         setRunningTool(sessionId, msgId, RunningToolOutput(msgId, "", event.toolName, event.argsPreview))
                     }
                     is AgentEvent.ToolCallProgress -> {
-                        val msgId = "tool_${event.id}"
+                        val msgId = toolRows.messageIdFor(event.id)
                         setRunningTool(sessionId, msgId, RunningToolOutput(
                             msgId,
                             event.accumulated,
                             event.toolName,
-                            toolArgsByMsgId[msgId] ?: ""
+                            _runningTools.value[sessionId]?.get(msgId)?.toolArgs.orEmpty()
                         ))
                     }
                     is AgentEvent.ToolCallFinished -> {
-                        val msgId = "tool_${event.id}"
+                        val msgId = toolRows.messageIdFor(event.id)
                         appendToolTrace(sessionId, event.toolName, event.result)
-                        toolArgsByMsgId.remove(msgId)
                         removeRunningTool(sessionId, msgId)
                     }
                     is AgentEvent.Failed -> {
@@ -2276,6 +2278,7 @@ class AIAgentViewModel @Inject constructor(
                  _completedSessions.value = _completedSessions.value - sessionId
              }
         } finally {
+            if (toolRowsBySession[sessionId] === toolRows) toolRowsBySession.remove(sessionId)
             projectExecution.failIfRunning(sessionId, executionTurnId)
             val isOwnJob = sessionJobs[sessionId] == coroutineContext[Job]
             FileLogger.d(TAG, "stream finally: sid=$sessionId isOwnJob=$isOwnJob state=${_agentStates.value[sessionId]}")
@@ -2413,15 +2416,18 @@ class AIAgentViewModel @Inject constructor(
         if (job?.isActive == true) projectExecution.stop(sessionId)
         releaseStoppedSubAgent(sessionId)
         // 取消前先取快照：协程被取消后 _runningTools 与待授权请求会随之清空，那时就取不到了。
-        val runningTools = _runningTools.value[sessionId]?.values?.toList() ?: emptyList()
+        val toolRows = toolRowsBySession[sessionId] ?: AgentTurnToolRows()
+        val runningTools = _runningTools.value[sessionId].orEmpty().values.mapNotNull { running ->
+            toolRows.callIdFor(running.messageId)?.let { running to it }
+        }
         val pendingPermissions = buildList {
             toolPermissionManager.pendingForSession(sessionId)?.let { add(it) }
             toolPermissionManager.pendingBatchForSession(sessionId)?.items?.let { addAll(it) }
-        }
+        }.map { it to toolRows.messageIdFor(it.id) }
         val stoppedText = context.getString(R.string.agent_stopped_by_user)
         FileLogger.d(
             TAG,
-            "forceStopAgent: sid=$sessionId active=${job?.isActive == true} runningTools=${runningTools.size} pendingPerm=${pendingPermissions.map { it.id }}"
+            "forceStopAgent: sid=$sessionId active=${job?.isActive == true} runningTools=${runningTools.size} pendingPerm=${pendingPermissions.map { it.first.id }}"
         )
         // 软打断留下的占位先放行：可能有协程正挂在它上面等（排队的新消息），只替换引用会让那些
         // 等待者永远醒不过来。放行后它们会重新读 map，挂到下面这份新占位上。
@@ -2458,8 +2464,8 @@ class AIAgentViewModel @Inject constructor(
      */
     private suspend fun settleStoppedTools(
         sessionId: String,
-        runningTools: List<RunningToolOutput>,
-        pendingPermissions: List<PendingToolPermission>,
+        runningTools: List<Pair<RunningToolOutput, String>>,
+        pendingPermissions: List<Pair<PendingToolPermission, String>>,
         stoppedText: String
     ) {
         suspend fun needsStoppedResult(messageId: String): Boolean {
@@ -2468,11 +2474,8 @@ class AIAgentViewModel @Inject constructor(
                 (message.content.startsWith(SessionUseCase.PENDING_TOOL_MARKER) ||
                     message.content.startsWith(SessionUseCase.LEGACY_PENDING_TOOL_MARKER))
         }
-        runningTools.forEach { running ->
-            if (!needsStoppedResult(running.messageId)) {
-                toolArgsByMsgId.remove(running.messageId)
-                return@forEach
-            }
+        runningTools.forEach { (running, callId) ->
+            if (!needsStoppedResult(running.messageId)) return@forEach
             val partial = running.text.trimEnd()
             val content = if (partial.isNotEmpty()) "$partial\n\n$stoppedText" else stoppedText
             messagePersistenceUseCase.persist(
@@ -2480,16 +2483,14 @@ class AIAgentViewModel @Inject constructor(
                 role = MessageRole.TOOL,
                 content = content,
                 id = running.messageId,
-                toolCallId = running.messageId.removePrefix("tool_"),
+                toolCallId = callId,
                 toolName = running.toolName.ifBlank { null },
-                toolArgs = running.toolArgs.ifBlank { toolArgsByMsgId[running.messageId] },
+                toolArgs = running.toolArgs.takeIf { it.isNotBlank() },
                 isError = true
             )
-            toolArgsByMsgId.remove(running.messageId)
         }
-        pendingPermissions.forEach { pending ->
-            if (!needsStoppedResult("tool_${pending.id}")) return@forEach
-            val msgId = "tool_${pending.id}"
+        pendingPermissions.forEach { (pending, msgId) ->
+            if (!needsStoppedResult(msgId)) return@forEach
             messagePersistenceUseCase.persist(
                 sessionId = sessionId,
                 role = MessageRole.TOOL,

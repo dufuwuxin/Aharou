@@ -45,6 +45,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -81,6 +83,15 @@ data class AgentTurnRequest(
     val replayUserMessageId: String? = null,
 )
 
+/** Per collection: provider call IDs are protocol keys, not database primary keys. */
+internal class AgentTurnToolRows {
+    private val rows = mutableMapOf<String, String>()
+
+    fun messageIdFor(callId: String): String = rows.getOrPut(callId) { UUID.randomUUID().toString() }
+    fun callIdFor(messageId: String): String? = rows.entries.firstOrNull { it.value == messageId }?.key
+    fun finished(callId: String) { rows.remove(callId) }
+}
+
 /**
  * 一轮 agent 请求的编排：准备数据 → 跑 workflow → 把结果落库。
  *
@@ -115,7 +126,7 @@ class AgentTurnRunner @Inject constructor(
     @param:ApplicationContext private val context: Context,
 ) {
 
-    private data class PendingTool(val timestamp: Long, val args: String, var progress: String = "")
+    private data class PendingTool(val messageId: String, val timestamp: Long, val args: String, var progress: String = "")
 
     /** 标题生成这种「跑完再补」的活儿不该拖住本轮，丢到进程级 scope 里。 */
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -198,7 +209,9 @@ class AgentTurnRunner @Inject constructor(
     /**
      * 跑一轮。冷流，collect 期间完成落库；调用方只消费事件用于展示。
      */
-    fun run(turn: AgentTurnRequest): Flow<AgentEvent> = flow {
+    fun run(turn: AgentTurnRequest): Flow<AgentEvent> = run(turn, null)
+
+    internal fun run(turn: AgentTurnRequest, toolRows: AgentTurnToolRows?): Flow<AgentEvent> = flow {
         val session = sessionUseCase.getSessionById(turn.sessionId)
         val workspace = projectExecution.executionWorkspace(turn.projectRoot, session?.workspacePath, currentWorkspacePath())
         if (session?.parentId == null) {
@@ -207,10 +220,10 @@ class AgentTurnRunner @Inject constructor(
             }
         }
         // Only task readiness is workspace-wide; independent sessions must not wait for a long-lived flow.
-        runUncoordinated(turn).collect { emit(it) }
+        runUncoordinated(turn, toolRows ?: AgentTurnToolRows()).collect { emit(it) }
     }
 
-    private fun runUncoordinated(turn: AgentTurnRequest): Flow<AgentEvent> = flow {
+    private fun runUncoordinated(turn: AgentTurnRequest, toolRows: AgentTurnToolRows): Flow<AgentEvent> = flow {
         val sessionId = turn.sessionId
 
         // 兼容历史会话：尚未绑定 provider/model 的会话，发消息时固化下来，
@@ -408,11 +421,13 @@ class AgentTurnRunner @Inject constructor(
                 }
 
                 is AgentEvent.ToolCallStarted -> {
+                    val msgId = toolRows.messageIdFor(event.id)
                     val timestamp = messagePersistenceUseCase.nextTimestamp()
                     // Register before the write: cancellation can arrive after the insert committed.
-                    pendingTools[event.id] = PendingTool(timestamp, event.argsPreview)
+                    pendingTools[event.id] = PendingTool(msgId, timestamp, event.argsPreview)
                     messagePersistenceUseCase.persistPendingTool(
                         sessionId = sessionId,
+                        messageId = msgId,
                         toolCallId = event.id,
                         toolName = event.toolName,
                         toolArgs = event.argsPreview,
@@ -427,7 +442,7 @@ class AgentTurnRunner @Inject constructor(
                 }
 
                 is AgentEvent.ToolCallFinished -> {
-                    val msgId = "tool_${event.id}"
+                    val msgId = toolRows.messageIdFor(event.id)
                     messagePersistenceUseCase.persist(
                         sessionId,
                         MessageRole.TOOL,
@@ -440,6 +455,7 @@ class AgentTurnRunner @Inject constructor(
                         attachments = event.attachments,
                     )
                     pendingTools.remove(event.id)
+                    toolRows.finished(event.id)
                     event.persisted?.complete(Unit)
                 }
 
@@ -457,16 +473,32 @@ class AgentTurnRunner @Inject constructor(
             }
         }.onCompletion { cause ->
             // A Failed event alone does not imply producer or tool shutdown.
-            if (pendingTools.isNotEmpty()) withContext(NonCancellable) {
-                settlePendingTools(sessionId, pendingTools, cause)
+            if (pendingTools.isNotEmpty()) {
+                val failure = withContext(NonCancellable) { settlePendingTools(sessionId, pendingTools, cause) }
+                if (cause != null) {
+                    if (failure != null && failure !== cause) cause.addSuppressed(failure)
+                } else {
+                    // NonCancellable can return into an already-cancelled collector on the same dispatcher.
+                    try {
+                        currentCoroutineContext().ensureActive()
+                    } catch (cancelled: CancellationException) {
+                        if (failure != null && failure !== cancelled) cancelled.addSuppressed(failure)
+                        throw cancelled
+                    }
+                    if (failure != null) throw failure
+                }
             }
         }.collect()
 
         sessionUseCase.touch(sessionId, messagePersistenceUseCase.nextTimestamp())
     }
 
-    private suspend fun settlePendingTools(sessionId: String, tools: Map<String, PendingTool>, cause: Throwable?) {
-        var failure = cause
+    private suspend fun settlePendingTools(
+        sessionId: String,
+        tools: Map<String, PendingTool>,
+        cause: Throwable?,
+    ): Throwable? {
+        var failure: Throwable? = null
         for ((id, tool) in tools) {
             try {
                 val text = context.getString(
@@ -479,15 +511,16 @@ class AgentTurnRunner @Inject constructor(
                         partial.startsWith(SessionUseCase.LEGACY_PENDING_TOOL_MARKER) -> "$text\n\n$partial"
                     else -> "$partial\n\n$text"
                 }
-                messagePersistenceUseCase.settlePendingTool(sessionId, id, tool.timestamp, result)
+                messagePersistenceUseCase.settlePendingTool(sessionId, tool.messageId, id, tool.timestamp, result)
             } catch (writeFailure: Throwable) {
                 // Try the remaining rows without replacing the original exception or cancellation.
+                if (writeFailure === cause) continue
                 val first = failure
                 if (first == null) failure = writeFailure
                 else if (first !== writeFailure) first.addSuppressed(writeFailure)
             }
         }
-        if (cause == null) failure?.let { throw it }
+        return failure
     }
 
     /**
