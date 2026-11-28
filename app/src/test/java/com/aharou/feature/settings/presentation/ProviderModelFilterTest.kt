@@ -83,8 +83,8 @@ class ProviderEditorOptionsGroupTest {
 
         compose.onNode(hasSetTextAction()).performClick()
         compose.onNode(hasSetTextAction()).performTextInput("CLAUDE")
-        compose.onNodeWithText("gpt-4.1").performScrollTo().assertDoesNotExist()
-        compose.onNodeWithText("claude-3.7").performScrollTo().assertExists()
+        compose.onNodeWithText("gpt-4.1").assertDoesNotExist()
+        compose.onNodeWithText("claude-3.7").assertExists()
         compose.runOnIdle {
             assertEquals("gpt-4.1", selectedModel.value)
             assertEquals("my-custom-model", customModel.value)
