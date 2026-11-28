@@ -60,11 +60,15 @@ class ProjectWorkflowRunner @Inject constructor(
         }
         var active: ProjectTask? = null
         var child: String? = null
+        val whitespace = Regex("[\\s\\p{Z}]+")
+        fun normalized(text: String) = text.replace(whitespace, " ").trim()
         try {
             while (true) {
                 val snapshot = repository.load(workspace)
                 val currentProject = snapshot.projects.first { it.id == projectId }
-                val projectContext = ProjectGoalPlan.context(currentProject.overallGoal, currentProject.goalAcceptance, horizon)
+                val request = normalized(currentProject.requirements)
+                fun scoped(text: String) = text.takeUnless { normalized(it) == request }.orEmpty()
+                val projectContext = ProjectGoalPlan.context(scoped(currentProject.overallGoal), scoped(currentProject.goalAcceptance), horizon)
                 val projectTasks = snapshot.tasks.filter { it.projectId == projectId }
                 currentCoroutineContext().ensureActive()
                 if (attempts >= ProjectGoalPlan.taskBudget(horizon) ||

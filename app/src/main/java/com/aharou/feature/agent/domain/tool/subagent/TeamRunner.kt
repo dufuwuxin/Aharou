@@ -70,14 +70,11 @@ object TeamRunner {
             if (TeamStageCondition.evaluate(stage.condition, projectFiles) != TeamStageCondition.Result.RUN) emptyList()
             else stage.tasks.mapIndexed { i, task -> TeamFlowNode(stage.id, task.id) to idOf[stageIndex][i] }
         }
-        val intakeId = if (team.routes.isEmpty()) activeSteps.firstOrNull()?.second else {
-            val graphNodes = TeamFlowGraph.forward(team).flatMap { listOf(it.from, it.to) }.toSet()
-            val roots = TeamFlowGraph.ready(team, emptySet()).toSet()
-            (activeSteps.firstOrNull { it.first in roots } ?: activeSteps.firstOrNull { it.first in graphNodes })?.second
-        }
+        val initialRoots = TeamFlowGraph.ready(team, emptySet()).toSet()
+        val intakeId = (if (team.routes.isEmpty()) activeSteps.firstOrNull()
+            else activeSteps.firstOrNull { it.first in initialRoots })?.second
         val legacyTopic = sharedGoal.isBlank() && taskBriefs.isEmpty()
         val firstActiveStage = activeSteps.firstOrNull()?.first?.stageId
-        val initialRoots = if (legacyTopic && team.routes.isNotEmpty()) TeamFlowGraph.ready(team, emptySet()).toSet() else emptySet()
         val logicalTasks = logicalBrief(team, batchSize)
         var layers = 0
         val pipeline = buildJsonArray {
@@ -96,7 +93,8 @@ object TeamRunner {
                             put("description", "${stage.title}·${task.memberLabel()}".take(DESCRIPTION_MAX))
                             val node = TeamFlowNode(stage.id, task.id)
                             val legacyIntake = !legacyTopic && ids[taskIndex] == intakeId && goal.isNotBlank()
-                            val initialTopic = legacyTopic && (stage.id == firstActiveStage || node in initialRoots)
+                            val initialTopic = legacyTopic && (if (team.routes.isEmpty()) stage.id == firstActiveStage
+                                else node in initialRoots)
                             val scopedGoal = when {
                                 sharedGoal.isNotBlank() -> sharedGoal
                                 initialTopic || legacyIntake -> goal

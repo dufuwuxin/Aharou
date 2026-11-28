@@ -260,19 +260,27 @@ class TeamStageExecutorTest {
     }
     @Test fun routeTargetReceivesOnlyItsImmediateRequiredPredecessors() = runBlocking {
         val a = com.aharou.feature.agent.domain.subagent.TeamFlowNode("a", "t")
-        val b = com.aharou.feature.agent.domain.subagent.TeamFlowNode("b", "t")
+        val b = com.aharou.feature.agent.domain.subagent.TeamFlowNode("a", "next")
         val c = com.aharou.feature.agent.domain.subagent.TeamFlowNode("c", "t")
-        val base = routedTeam().copy(routes = listOf(com.aharou.feature.agent.domain.subagent.TeamRoute(a, b),
-            com.aharou.feature.agent.domain.subagent.TeamRoute(b, c)))
-        val prompts = mutableListOf<String>()
-        val output = TeamStageExecutor(TeamRunRegistry()).run(base, "goal", listOf(role), 2, "parent") { batch ->
-            prompts += batch.single().jsonObject.getValue("prompt").jsonPrimitive.content
-            result(batch, if (prompts.size == 1) "PRIVATE_FIRST_NODE_EVIDENCE" else "DIRECT_PREDECESSOR_EVIDENCE")
+        val original = routedTeam()
+        val first = original.stages.first()
+        val base = original.copy(stages = listOf(first.copy(tasks = first.tasks + task().copy(id = "next")), original.stages.last()),
+            routes = listOf(com.aharou.feature.agent.domain.subagent.TeamRoute(a, b), com.aharou.feature.agent.domain.subagent.TeamRoute(b, c)))
+        val topic = "LEGACY_ORIGINAL_REQUEST"
+        val prompts = linkedMapOf<String, String>()
+        val output = TeamStageExecutor(TeamRunRegistry()).run(base, topic, listOf(role), 2, "parent") { batch ->
+            val step = batch.single().jsonObject
+            val id = step.getValue("id").jsonPrimitive.content
+            prompts[id] = step.getValue("prompt").jsonPrimitive.content
+            result(batch, if (id == "s1-b1-t1") "PRIVATE_FIRST_NODE_EVIDENCE" else "DIRECT_PREDECESSOR_EVIDENCE")
         } as ToolResult.Success
         assertEquals("done", output.data.jsonObject.getValue("state").jsonPrimitive.content)
-        assertTrue(prompts[1].contains("PRIVATE_FIRST_NODE_EVIDENCE"))
-        assertFalse(prompts[2].contains("PRIVATE_FIRST_NODE_EVIDENCE"))
-        assertTrue(prompts[2].contains("DIRECT_PREDECESSOR_EVIDENCE"))
+        assertEquals(listOf("s1-b1-t1", "s1-b1-t2", "s2-b1-t1"), prompts.keys.toList())
+        assertTrue(prompts.getValue("s1-b1-t1").contains(topic))
+        assertFalse(prompts.getValue("s1-b1-t2").contains(topic))
+        assertTrue(prompts.getValue("s1-b1-t2").contains("PRIVATE_FIRST_NODE_EVIDENCE"))
+        assertFalse(prompts.getValue("s2-b1-t1").contains("PRIVATE_FIRST_NODE_EVIDENCE"))
+        assertTrue(prompts.getValue("s2-b1-t1").contains("DIRECT_PREDECESSOR_EVIDENCE"))
     }
     @Test fun structuredHandoffCanHoldOrSelectNoDownstreamButCannotInventOne() = runBlocking {
         val executor = TeamStageExecutor(TeamRunRegistry())

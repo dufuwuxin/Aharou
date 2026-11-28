@@ -165,9 +165,10 @@ class ProjectWorkflowRunnerTest {
     }
 
     @Test fun projectLaunchesIncludeCurrentTaskAndSharedConstraintsWithoutTheFullRequest() = runBlocking {
-        for (team in listOf(true, false)) {
-            val (runner) = fixture(true, team = team, projectGoal = "SHARED_PROJECT_GOAL",
-                projectAcceptance = "SHARED_PROJECT_ACCEPTANCE", seed = { it.copy(
+        val duplicate = " \ta\nthen\u3000b  "
+        val fields = listOf("SHARED_PROJECT_GOAL" to "SHARED_PROJECT_ACCEPTANCE", duplicate to "then b", "a then" to duplicate)
+        for (team in listOf(true, false)) for ((goal, acceptance) in fields) {
+            val (runner) = fixture(true, team = team, projectGoal = goal, projectAcceptance = acceptance, seed = { it.copy(
                 requirement = "CURRENT_REQUIREMENT", background = "LOCAL_BACKGROUND", constraints = listOf("LOCAL_SCOPE"),
                 acceptance = "LOCAL_ACCEPTANCE", supplements = listOf("LOCAL_SUPPLEMENT")) })
             runner.run("p", "w", "a")
@@ -176,8 +177,11 @@ class ProjectWorkflowRunnerTest {
             if (team) coVerify(exactly = 1) { tool.runProjectTeam("builders", capture(prompt), any(), "hash", any()) }
             else coVerify(exactly = 1) { tool.createProjectMember("a", capture(prompt), any(), any()) }
             assertFalse(prompt.captured.contains("a then b"))
+            assertFalse(prompt.captured.contains(duplicate))
+            val expectedGoal = goal.takeUnless { it == duplicate }.orEmpty()
+            val expectedAcceptance = acceptance.takeUnless { it == duplicate }.orEmpty()
             listOf("CURRENT_REQUIREMENT", "LOCAL_BACKGROUND", "LOCAL_SCOPE", "LOCAL_ACCEPTANCE", "LOCAL_SUPPLEMENT",
-                "Shared project constraints", "SHARED_PROJECT_GOAL", "SHARED_PROJECT_ACCEPTANCE", "Horizon: short").forEach {
+                "Shared project constraints", "Overall goal:\n$expectedGoal\n", "Project acceptance:\n$expectedAcceptance\n", "Horizon: short").forEach {
                 assertTrue("missing $it in mode team=$team", prompt.captured.contains(it))
             }
         }
