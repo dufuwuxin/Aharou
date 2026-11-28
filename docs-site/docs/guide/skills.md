@@ -243,3 +243,7 @@ AI 也可以通过配置通道读取与修改单个技能的 `keywords` 和 `key
 Enable built-in skill editing in Special Permissions before editing. Changes are stored as global overrides with the same name; APK assets remain unchanged. Disabling the switch or restarting prevents further changes but preserves saved content. Ordinary user skills remain editable. The config channel exposes the permission read-only and cannot grant itself permission.
 
 Disabling this permission does not disable ordinary skill enable/disable controls. Revocation and protected writes share a lock: once revocation returns, an earlier authorized write cannot commit afterward. Closed permission fields and built-in editing fields are omitted from normal Config listings.
+
+## 使用普通团队预设
+
+使用普通团队预设时，主代理先梳理本次工作的共同范围，再按预设中的成员职责分派。模型不一定每次都会实际发起团队执行，是否已执行以本次运行记录为准。
