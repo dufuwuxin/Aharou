@@ -15,12 +15,15 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -30,6 +33,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.heading
@@ -37,6 +42,11 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
+import compose.icons.FeatherIcons
+import compose.icons.feathericons.MessageSquare
+import androidx.compose.ui.unit.IntOffset
 import com.aharou.R
 import com.aharou.core.theme.Radius
 import com.aharou.core.theme.Spacing
@@ -50,6 +60,94 @@ import com.aharou.feature.settings.presentation.component.SettingsGroup
 import com.aharou.feature.settings.presentation.component.SettingsRow
 import java.text.DateFormat
 import java.util.Date
+
+@Composable
+internal fun ConversationNavigationPopup(
+    sessionId: String?,
+    messagesState: ChatMessagesState,
+    bodyVisible: Boolean,
+    canLocate: (String) -> Boolean,
+    onJump: (String) -> Boolean,
+    onScrollToBottom: () -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val ready = sessionId != null && messagesState.loaded && messagesState.sessionId == sessionId
+    val projection = remember(ready, messagesState.messages, messagesState.hasMore) {
+        projectConversationMap(if (ready) messagesState.messages else emptyList(), messagesState.hasMore)
+    }
+    Popup(
+        alignment = Alignment.BottomEnd,
+        offset = IntOffset(0, with(LocalDensity.current) { -8.dp.roundToPx() }),
+        onDismissRequest = onDismiss,
+        properties = PopupProperties(focusable = true, dismissOnBackPress = true, dismissOnClickOutside = true)
+    ) {
+        Surface(
+            modifier = modifier.width(300.dp).heightIn(max = 360.dp).testTag("conversation_navigation_popup"),
+            shape = RoundedCornerShape(20.dp),
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
+            tonalElevation = 6.dp,
+            shadowElevation = 12.dp
+        ) {
+            Column(Modifier.padding(Spacing.md), verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                Text(stringResource(R.string.conversation_map_title), style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.semantics { heading() })
+                TextButton(
+                    onClick = {
+                        onScrollToBottom()
+                        onDismiss()
+                    },
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                ) {
+                    Text(stringResource(R.string.common_scroll_to_bottom))
+                }
+                if (ready && projection.hasMore) {
+                    Text(stringResource(R.string.conversation_nav_partial), style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                when {
+                    !ready -> Text(stringResource(if (sessionId == null) R.string.conversation_nav_empty else R.string.conversation_nav_loading),
+                        style = MaterialTheme.typography.bodyMedium)
+                    projection.nodes.isEmpty() -> Text(stringResource(
+                        if (projection.hasMore) R.string.conversation_nav_empty_partial else R.string.conversation_nav_empty
+                    ), style = MaterialTheme.typography.bodyMedium)
+                    else -> LazyColumn(
+                        modifier = Modifier.heightIn(max = 300.dp),
+                        contentPadding = PaddingValues(vertical = Spacing.xs),
+                        verticalArrangement = Arrangement.spacedBy(Spacing.xs)
+                    ) {
+                        items(projection.nodes, key = { it.startMessageId }) { node ->
+                            val locatable = bodyVisible && canLocate(node.startMessageId)
+                            Surface(
+                                onClick = {
+                                    if (locatable && onJump(node.startMessageId)) onDismiss()
+                                },
+                                enabled = locatable,
+                                shape = RoundedCornerShape(Radius.mdLarge),
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f),
+                                modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)
+                            ) {
+                                Column(Modifier.padding(horizontal = Spacing.md, vertical = Spacing.sm),
+                                    verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+                                    Text(node.userSummary?.ifBlank { null } ?: stringResource(R.string.conversation_map_no_text),
+                                        style = MaterialTheme.typography.bodyMedium, maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis)
+                                    Row(verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                                        Text(formatConversationTime(node.timestamp), style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        if (!locatable) Text(stringResource(R.string.conversation_map_unavailable),
+                                            style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -145,6 +243,28 @@ private fun ConversationNodeCard(node: ConversationMapNode, number: Int, connect
                     style = MaterialTheme.typography.bodySmall)
                 Text(formatConversationTime(node.timestamp), style = MaterialTheme.typography.bodySmall)
                 if (!enabled) Text(stringResource(R.string.conversation_map_unavailable), style = MaterialTheme.typography.labelMedium)
+            }
+        }
+    }
+}
+
+@Composable
+internal fun ConversationNavigationButton(expanded: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val state = stringResource(if (expanded) R.string.conversation_nav_expanded else R.string.conversation_nav_collapsed)
+    val label = stringResource(if (expanded) R.string.conversation_nav_close else R.string.conversation_nav_open)
+    Box(modifier.size(52.dp), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(52.dp).blur(12.dp).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.64f), CircleShape))
+        Surface(
+            onClick = onClick,
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.84f),
+            tonalElevation = 4.dp,
+            shadowElevation = 8.dp,
+            modifier = Modifier.size(52.dp).semantics { stateDescription = state }
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(FeatherIcons.MessageSquare, contentDescription = label,
+                    tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(22.dp))
             }
         }
     }

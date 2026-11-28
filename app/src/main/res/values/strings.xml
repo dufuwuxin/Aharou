@@ -3929,6 +3929,14 @@
     <string name="memory_cloud_search_invalid_endpoint">请输入有效 HTTPS 地址，不得包含用户名、密码、查询参数或片段。</string>
     <string name="memory_cloud_search_unconfigured">尚未配置，不会发送请求</string>
     <string name="memory_cloud_search_changed">配置已在其他入口更新，请关闭后重新打开，未覆盖新配置。</string>
+    <string name="conversation_nav_open">打开本会话消息导航</string>
+    <string name="conversation_nav_close">关闭本会话消息导航</string>
+    <string name="conversation_nav_expanded">导航已展开</string>
+    <string name="conversation_nav_collapsed">导航已收起</string>
+    <string name="conversation_nav_empty">本会话还没有可导航的用户消息</string>
+    <string name="conversation_nav_loading">正在加载本会话消息</string>
+    <string name="conversation_nav_partial">仅显示已加载的消息；继续向上加载可查看更早记录。</string>
+    <string name="conversation_nav_empty_partial">当前已加载部分没有可导航的用户消息；加载更早记录后列表可能更新。</string>
     <string name="conversation_map_title">对话地图</string>
     <string name="conversation_map_close">关闭</string>
     <string name="conversation_map_loaded">按用户消息划分轮次，仅展示实际记录，不代表 AI 分支。</string>
@@ -3945,7 +3953,7 @@
     <string name="conversation_map_no_results">没有匹配的用户摘要</string>
     <string name="conversation_map_prelude">起始记录</string>
     <string name="conversation_map_round">节点 %1$d · 用户轮次</string>
-    <string name="conversation_map_no_text">无文字摘要（可能为附件或系统记录）</string>
+    <string name="conversation_map_no_text">这条消息没有文字内容</string>
     <string name="conversation_map_node_counts">%1$d 条消息 · 助手 %2$d · 工具 %3$d</string>
     <string name="conversation_map_unknown">暂无数据</string>
     <string name="conversation_map_session_title">标题</string>

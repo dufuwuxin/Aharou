@@ -18,40 +18,29 @@ internal data class ConversationMapProjection(
     val hasMore: Boolean
 )
 
-/** Only the supplied page is projected. Non-user records before the first user stay in a prelude. */
+/** Projects only real user-authored messages; message ids remain the navigation identity. */
 internal fun projectConversationMap(
     messages: List<AgentUIMessage>,
     hasMore: Boolean
 ): ConversationMapProjection {
-    val seen = HashSet<String>()
-    val nodes = mutableListOf<ConversationMapNode>()
-    var anchor: AgentUIMessage? = null
-    var summary: String? = null
-    var count = 0
-    var assistants = 0
-    var tools = 0
-    fun finish() {
-        val start = anchor ?: return
-        nodes += ConversationMapNode(start.id, start.id, summary, start.timestamp, count, assistants, tools)
+    val loadedMessageCount = messages.map { it.id }.toSet().size
+    val seenUsers = HashSet<String>()
+    val nodes = messages.mapNotNull { message ->
+        if (message.role != MessageRole.USER || message.isCompactionMarker ||
+            message.isContextSummary || message.isBackgroundNotification || !seenUsers.add(message.id)
+        ) return@mapNotNull null
+
+        val summary = message.content.take(CONVERSATION_MAP_SUMMARY_LIMIT * 3)
+            .replace(Regex("\\s+"), " ").trim().take(CONVERSATION_MAP_SUMMARY_LIMIT)
+        ConversationMapNode(
+            id = message.id,
+            startMessageId = message.id,
+            userSummary = summary,
+            timestamp = message.timestamp,
+            messageCount = 1,
+            assistantCount = 0,
+            toolCount = 0
+        )
     }
-    messages.forEach { message ->
-        // The first occurrence owns identity and order, so duplicate ids never create duplicate Lazy keys.
-        if (!seen.add(message.id)) return@forEach
-        val startsTurn = message.role == MessageRole.USER &&
-            !message.isCompactionMarker && !message.isContextSummary && !message.isBackgroundNotification
-        if (startsTurn || anchor == null) {
-            finish()
-            anchor = message
-            summary = if (startsTurn) message.content.take(CONVERSATION_MAP_SUMMARY_LIMIT * 3)
-                .replace(Regex("\\s+"), " ").trim().take(CONVERSATION_MAP_SUMMARY_LIMIT) else null
-            count = 0
-            assistants = 0
-            tools = 0
-        }
-        count++
-        if (message.role == MessageRole.ASSISTANT) assistants++
-        if (message.role == MessageRole.TOOL) tools++
-    }
-    finish()
-    return ConversationMapProjection(nodes, seen.size, hasMore)
+    return ConversationMapProjection(nodes, loadedMessageCount, hasMore)
 }

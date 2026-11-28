@@ -299,6 +299,7 @@ fun AIChatPanel(
     var messageForMenu by remember { mutableStateOf<AgentUIMessage?>(null) }
     var crossCheckMessage by remember { mutableStateOf<AgentUIMessage?>(null) }
     var showSessionDiagnostics by remember(diagnosticsSessionId) { mutableStateOf(false) }
+    var showConversationNavigation by remember(currentSessionId) { mutableStateOf(false) }
     val quoteReplyEnabled = rememberQuoteReplyEnabled()
     var editingMessage by remember { mutableStateOf<AgentUIMessage?>(null) }
     var queuedEditing by remember { mutableStateOf<QueuedRequest?>(null) }
@@ -832,39 +833,6 @@ fun AIChatPanel(
             val movedOuter = start == null || start.index != listState.firstVisibleItemIndex ||
                 start.offset != listState.firstVisibleItemScrollOffset
             followBottom = if (movedOuter) isAtBottom else start.following
-        }
-    }
-
-    // 回底按钮的显示门槛：只用「不在底部」会让流式增长的那一两帧（校准循环还没把视口拉回）
-    // 也算离底，按钮跟着闪。要求离底超过半个视口，用户真的翻上去看历史时才出现。
-    // messagesReady / messages.isEmpty() 与 totalItemsCount 是同一枚硬币的两面：layoutInfo 是
-    // 「最后一次布局 pass」的产物，LazyColumn 卸载（空会话 WelcomeState、加载占位）后不会自动
-    // 清空——旧会话翻历史后切到空会话，残留布局会让按钮悬在新会话上。totalItemsCount 再拦截
-    // 「新列表尚未按当前消息重测」（layout 开始前 layoutInfo 仍是旧会话的）那一帧。
-    val isFarFromBottom by remember(inputBarReservePx, messagesReady, messages.size, chatItems.size) {
-        derivedStateOf {
-            if (!messagesReady || messages.isEmpty()) return@derivedStateOf false
-            if (!listState.canScrollForward) return@derivedStateOf false
-            val layout = listState.layoutInfo
-            val lastVisible = layout.visibleItemsInfo.lastOrNull()
-                ?: return@derivedStateOf false
-            if (layout.totalItemsCount != chatItems.size + 1) return@derivedStateOf false
-            if (lastVisible.index < layout.totalItemsCount - 1) return@derivedStateOf true
-            val safeBottom = layout.viewportEndOffset - inputBarReservePx
-            (lastVisible.offset + lastVisible.size) - safeBottom > layout.viewportEndOffset / 2
-        }
-    }
-
-    // 上一条用户消息在 chatItems 里的下标：视口顶之前最近的 USER 消息。
-    // 只取 firstVisibleItemIndex 之前的部分，所以视口顶端正停在那条用户消息上时
-    // 找的是它**上面**那条（否则按一下几乎不动）。没有则 -1，按钮隐藏。
-    // 必须排掉轮头折叠条（turnHeader）：它内部也持同一条 userMessage，下标更大，
-    // 不排除就会跳到「已完成 Xs」上，视口落在折叠的过程项里。
-    val prevUserItemIndex by remember(messagesReady, chatItems.size) {
-        derivedStateOf {
-            if (!messagesReady) return@derivedStateOf -1
-            val beforeViewport = chatItems.take(listState.firstVisibleItemIndex.coerceIn(0, chatItems.size))
-            beforeViewport.indexOfLast { it.message.role == MessageRole.USER && it.turnHeader == null }
         }
     }
 
@@ -1587,51 +1555,43 @@ fun AIChatPanel(
                 if (anyPermissionPending) permissionPanelHeightPx + Spacing.xs.toPx() else 0f
             }
 
-            // 滚到上一条用户消息：与回底按钮同位于输入框右上角上方，堆在它正上方一档。
-            // 只有上方确实还有我发的消息时才出现（不看滚动方向，与回底按钮同思路）。
-            // 点击先停跟随，否则校准循环下一帧就把视口拉回底部，看不出跳转。
-            androidx.compose.animation.AnimatedVisibility(
-                visible = prevUserItemIndex >= 0,
+            Box(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(end = Spacing.lg)
                     .padding(bottom = with(LocalDensity.current) {
-                        (floatingLayerHeightPx + permissionOffsetPx + FLOATING_LAYER_GAP_DP.toPx()).toDp() +
-                            SCROLL_BUTTON_SIZE_DP.dp + Spacing.sm
+                        (floatingLayerHeightPx + permissionOffsetPx + FLOATING_LAYER_GAP_DP.toPx()).toDp()
                     })
-                    .graphicsLayer { alpha = if (listState.isScrollInProgress) 0.4f else 1f },
-                enter = fadeIn() + scaleIn(),
-                exit = fadeOut() + scaleOut()
             ) {
-                ScrollToPrevUserButton(
-                    onClick = {
-                        followBottom = false
-                        // 下标在点击后重算：launch 里的代码要等到下一帧才跑，那一刻列表可能已经变了
-                        // （新消息、压缩、切会话），原值会变成 -1，而 animateScrollToItem 对负下标直接抛。
-                        val target = prevUserItemIndex
-                        scope.launch { if (target >= 0) listState.animateScrollToItem(target) }
-                    }
+                ConversationNavigationButton(
+                    expanded = showConversationNavigation,
+                    onClick = { showConversationNavigation = !showConversationNavigation }
                 )
-            }
-
-            // 滚动到底部按钮：悬浮在输入框右上角上方（避让底栏及可能悬浮的授权弹窗），离底超过半屏时
-            // 显示，不看滚动方向——往上翻历史后停住恰恰是最需要一键回底的时刻；滚动时跟随输入框淡出。
-            androidx.compose.animation.AnimatedVisibility(
-                visible = isFarFromBottom,
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(end = Spacing.lg)
-                    .padding(bottom = with(LocalDensity.current) { (floatingLayerHeightPx + permissionOffsetPx + FLOATING_LAYER_GAP_DP.toPx()).toDp() })
-                    .graphicsLayer { alpha = if (listState.isScrollInProgress) 0.4f else 1f },
-                enter = fadeIn() + scaleIn(),
-                exit = fadeOut() + scaleOut()
-            ) {
-                ScrollToBottomButton(
-                    onClick = {
-                        followBottom = true
-                        scope.launch { snapToBottom() }
-                    }
-                )
+                if (showConversationNavigation) {
+                    ConversationNavigationPopup(
+                        sessionId = currentSessionId,
+                        messagesState = messagesState,
+                        bodyVisible = bodyOverride == null,
+                        canLocate = { findChatMessageIndex(chatItems, it) >= 0 },
+                        onJump = { id ->
+                            val index = findChatMessageIndex(chatItems, id)
+                            val valid = messagesReady && bodyOverride == null && index >= 0 &&
+                                viewModel.currentSessionId.value == currentSessionId
+                            if (valid) {
+                                followBottom = false
+                                scope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+                                    if (viewModel.currentSessionId.value == currentSessionId) listState.scrollToItem(index)
+                                }
+                            }
+                            valid
+                        },
+                        onScrollToBottom = {
+                            followBottom = true
+                            scope.launch { snapToBottom() }
+                        },
+                        onDismiss = { showConversationNavigation = false }
+                    )
+                }
             }
 
             val rewindPreviewFiles by viewModel.rewindPreviewFiles.collectAsStateWithLifecycle()
