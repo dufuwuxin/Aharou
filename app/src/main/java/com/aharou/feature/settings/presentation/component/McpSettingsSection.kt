@@ -23,13 +23,16 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -54,13 +57,17 @@ import com.aharou.core.ui.SwipeToDeleteRow
 import com.aharou.core.ui.rememberListSelectionState
 import com.aharou.core.theme.semanticColors
 import com.aharou.feature.settings.presentation.SettingsViewModel
+import com.aharou.feature.agent.domain.mcp.McpClientPreferences
 import com.aharou.feature.agent.domain.mcp.McpScope
 import com.aharou.feature.agent.domain.mcp.McpServerConfig
 import com.aharou.feature.agent.domain.mcp.McpServerEntry
 import com.aharou.feature.agent.domain.mcp.McpServerStatus
 import com.aharou.feature.agent.domain.mcp.McpOAuthStatus
 import com.aharou.feature.agent.domain.mcp.oauthStatusOf
+import dagger.hilt.EntryPoint
+import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
+import dagger.hilt.components.SingletonComponent
 import compose.icons.FeatherIcons
 import compose.icons.feathericons.Box
 import compose.icons.feathericons.CheckSquare
@@ -98,6 +105,12 @@ internal fun McpSection(
             .mcpOAuthController()
     }
     val settingsViewModel = rememberSettingsViewModel()
+    val clientPreferences = remember(context) {
+        EntryPointAccessors.fromApplication(context.applicationContext, McpClientPreferencesEntryPoint::class.java)
+            .mcpClientPreferences()
+    }
+    var idleTimeoutMinutes by remember { mutableIntStateOf(clientPreferences.idleTimeoutMinutes) }
+    var choosingIdleTimeout by remember { mutableStateOf(false) }
     val selection = rememberListSelectionState()
     // 选中 id 带作用域前缀：同名 server 可能全局 / 项目各一份，只用名字会互相顶掉
     val selectionIds = entries.map(::mcpSelectionId)
@@ -108,6 +121,43 @@ internal fun McpSection(
     // 长按的可能是列表深处的行，进多选后把操作栏所在的首项滚回视野，否则看不到「已选 N 项」与批量动作
     LaunchedEffect(selection.selectionMode) {
         if (selection.selectionMode) listState.animateScrollToItem(0)
+    }
+    if (choosingIdleTimeout) {
+        AlertDialog(
+            onDismissRequest = { choosingIdleTimeout = false },
+            title = { Text(stringResource(R.string.mcp_idle_timeout_title)) },
+            text = {
+                Column {
+                    McpClientPreferences.IDLE_TIMEOUT_CHOICES_MINUTES.forEach { minutes ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    clientPreferences.idleTimeoutMinutes = minutes
+                                    idleTimeoutMinutes = minutes
+                                    choosingIdleTimeout = false
+                                },
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            RadioButton(
+                                selected = idleTimeoutMinutes == minutes,
+                                onClick = {
+                                    clientPreferences.idleTimeoutMinutes = minutes
+                                    idleTimeoutMinutes = minutes
+                                    choosingIdleTimeout = false
+                                },
+                            )
+                            Text(stringResource(R.string.mcp_idle_timeout_value, minutes))
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { choosingIdleTimeout = false }) {
+                    Text(stringResource(R.string.common_done))
+                }
+            },
+        )
     }
     Box(modifier = Modifier.fillMaxSize()) {
     LazyColumn(
@@ -194,6 +244,16 @@ internal fun McpSection(
                     title = stringResource(R.string.mcp_export_json),
                     subtitle = stringResource(R.string.mcp_export_json_hint),
                     onClick = onExportJson
+                )
+                SettingsDivider()
+                SettingsRow(
+                    icon = FeatherIcons.Terminal,
+                    title = stringResource(R.string.mcp_idle_timeout_title),
+                    subtitle = stringResource(R.string.mcp_idle_timeout_value, idleTimeoutMinutes),
+                    onClick = {
+                        idleTimeoutMinutes = clientPreferences.idleTimeoutMinutes
+                        choosingIdleTimeout = true
+                    }
                 )
             }
         }
@@ -495,6 +555,12 @@ internal fun McpServerRow(
 }
 
 /** OAuth 状态胶囊文案（与授权面板共用同一组状态字符串）。 */
+@EntryPoint
+@InstallIn(SingletonComponent::class)
+internal interface McpClientPreferencesEntryPoint {
+    fun mcpClientPreferences(): McpClientPreferences
+}
+
 private fun oauthPillStatusRes(status: McpOAuthStatus): Int = when (status) {
     McpOAuthStatus.NOT_AUTHORIZED -> R.string.mcp_oauth_status_not_authorized
     McpOAuthStatus.AUTHORIZED -> R.string.mcp_oauth_status_authorized

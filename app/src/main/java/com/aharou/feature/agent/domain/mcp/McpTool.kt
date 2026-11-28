@@ -33,7 +33,11 @@ class McpTool(
     private val descriptor: McpToolDescriptor,
     /** 连接被空闲回收拆掉后，调用时用它重新连上（返回 null 表示重连失败）。 */
     private val onReconnect: (suspend () -> McpClient?)? = null,
-    /** 每次调用前通知一次，回收逻辑据此判断这个 server 还在被使用。 */
+    /** 仅 STDIO 客户端关闭后按需重连，避免改变 HTTP 生命周期。 */
+    private val reconnectClosedClient: (() -> Boolean)? = null,
+    /** 调用开始/结束时更新管理器的活动调用计数，防止长调用期间连接被回收。 */
+    private val onExecutionStateChanged: ((Boolean) -> Boolean)? = null,
+    /** 更新最后使用时间。 */
     private val onUsed: (() -> Unit)? = null
 ) : AgentTool() {
 
@@ -94,23 +98,48 @@ class McpTool(
     }
 
     override suspend fun execute(args: Map<String, JsonElement>): ToolResult {
+        var executionRegistered = onExecutionStateChanged?.invoke(true) ?: true
         onUsed?.invoke()
         return try {
-            callOn(client, args)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (first: Exception) {
-            // 连接可能已被空闲回收拆掉：重连一次再试，别让回收变成随机报错。
-            val fresh = onReconnect?.invoke()
-            if (fresh == null || fresh === client) {
-                FileLogger.e(TAG, "MCP 工具调用失败: $name", first)
-                return ToolResult.Error("MCP 工具执行失败: ${first.message}")
+            if (!executionRegistered || (reconnectClosedClient?.invoke() == true && !client.isOpen)) {
+                val fresh = try {
+                    onReconnect?.invoke()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    FileLogger.e(TAG, "MCP 回收期间重连失败: $name", e)
+                    null
+                }
+                if (fresh == null) return ToolResult.Error("MCP 服务器正在回收，且重新连接失败")
+                client = fresh
+                executionRegistered = onExecutionStateChanged?.invoke(true) ?: true
+                if (!executionRegistered) return ToolResult.Error("MCP 服务器仍在回收，请重试")
             }
-            client = fresh
-            runCatching { callOn(fresh, args) }.getOrElse { e ->
-                FileLogger.e(TAG, "重连后调用仍失败: $name", e)
-                ToolResult.Error("MCP 工具执行失败: ${e.message}")
+            try {
+                callOn(client, args)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (first: Exception) {
+                // 连接可能已被空闲回收拆掉：重连一次再试，别让回收变成随机报错。
+                val fresh = onReconnect?.invoke()
+                if (fresh == null || fresh === client) {
+                    FileLogger.e(TAG, "MCP 工具调用失败: $name", first)
+                    return ToolResult.Error("MCP 工具执行失败: ${first.message}")
+                }
+                client = fresh
+                try {
+                    callOn(fresh, args)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    FileLogger.e(TAG, "重连后调用仍失败: $name", e)
+                    ToolResult.Error("MCP 工具执行失败: ${e.message}")
+                }
             }
+        } finally {
+            // Anchor the idle clock at completion and release the in-flight protection on every exit.
+            onUsed?.invoke()
+            if (executionRegistered) onExecutionStateChanged?.invoke(false)
         }
     }
 

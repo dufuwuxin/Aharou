@@ -11,6 +11,7 @@ import com.aharou.core.util.FileLogger
 import com.aharou.feature.agent.domain.tool.script.ScriptToolManager
 import com.aharou.core.config.fields.ClosureField
 import com.aharou.core.config.fields.ReadOnlyField
+import com.aharou.feature.agent.domain.mcp.McpClientPreferences
 import com.aharou.feature.agent.domain.mcp.McpConfigRepository
 import com.aharou.feature.agent.domain.mcp.McpServerConfig
 import com.aharou.feature.agent.domain.mcp.oauthStatusOf
@@ -36,10 +37,29 @@ class ConfigMcpFields @Inject constructor(
     private val mcpConfig: McpConfigRepository,
     private val scriptFields: ConfigScriptToolFields,
     private val scriptManager: ScriptToolManager,
+    private val clientPreferences: McpClientPreferences,
 ) {
 
     fun registerInto(registry: ConfigRegistry) {
         registry.register(ServerCollection())
+        registry.register(ClosureField(
+            path = "mcp.client.idle_timeout_minutes",
+            displayName = "MCP STDIO 空闲超时（分钟）",
+            description = "STDIO 连接空闲回收时间，可选 1、3、5、10、30 或 60 分钟。HTTP/SSE 连接不受影响。",
+            valueSchema = ConfigSchema.Int(
+                McpClientPreferences.IDLE_TIMEOUT_CHOICES_MINUTES.min(),
+                McpClientPreferences.IDLE_TIMEOUT_CHOICES_MINUTES.max(),
+            ),
+            revertable = true,
+            reader = { ConfigValue.Int(clientPreferences.idleTimeoutMinutes) },
+            writer = { value ->
+                val minutes = (value as? ConfigValue.Int)?.value ?: throw ConfigError.TypeMismatch("integer")
+                if (minutes !in McpClientPreferences.IDLE_TIMEOUT_CHOICES_MINUTES) {
+                    throw ConfigError.InvalidValue("MCP 空闲超时仅支持 1、3、5、10、30 或 60 分钟")
+                }
+                clientPreferences.idleTimeoutMinutes = minutes
+            },
+        ))
         scriptFields.registerInto(registry)
         runCatching { scriptManager.reload() }.onFailure {
             FileLogger.w("ConfigMcpFields", "Script tools could not be loaded")

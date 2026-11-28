@@ -199,6 +199,7 @@
 | 列出 server | `McpSettingsSection.kt:245`（列表行） | 有 | `manageMcp` `action=list`、`config get mcp.servers` | 无 |
 | 编辑 server 参数 | `McpSettingsSection.kt:245`（`onEdit`） | 有 | `config` `action=set path=mcp.servers.<id>.<段>`（`ConfigMcpFields.kt:67-98`） | 无 |
 | 启用/停用 server | `SettingsScreen.kt:1077`（`setMcpServerEnabled`） | 有 | `config` `mcp.servers.<id>.enabled`（`ConfigMcpFields.kt:174`） | 无 |
+| 设置 STDIO 空闲回收时长 | MCP 设置页「STDIO 空闲回收」（`McpSettingsSection.kt`） | 有 | `config` `mcp.client.idle_timeout_minutes`（`ConfigMcpFields.kt`）；可选 1、3、5、10、30、60 分钟，默认 10 分钟 | 全局设置，仅回收空闲 STDIO；HTTP/SSE 不受影响，keepAlive 开启时不回收 |
 | 重连接 / 刷新连接 | `SettingsScreen.kt:755`（`viewModel.reloadMcp()`） | 无 | 未找到（`config set enabled` 是否触发重连未核实） | **缺口**：连不上时只能改配置或等下轮会话，没有“立刻重连”的动作 |
 
 The consolidated source also includes a separate in-process, read-only file inspector: `file_analyze` covers format/header/hash, text pages and archive entry listings; `elf_analyze` covers bounded ELF metadata, sections, symbols, dependencies, strings and relocations. Both are registered through `AgentModule` and use the workspace file backend via `SomcpAnalysisService`. File-browser analysis opens `GeneralFileAnalysisScreen` and its ELF detail. These tools do not execute or modify the inspected file, do not extract archives, and do not include dynamic debugging or Rizin/LIEF decompilation. Device execution remains unverified.

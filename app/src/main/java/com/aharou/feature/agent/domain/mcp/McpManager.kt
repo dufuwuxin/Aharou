@@ -41,6 +41,44 @@ data class McpServerStatus(
     enum class State { CONNECTING, CONNECTED, FAILED, DISABLED }
 }
 
+internal fun isIdleMcpServerEvictable(
+    isStdio: Boolean,
+    keepAlive: Boolean,
+    hasActiveCalls: Boolean,
+    idleMillis: Long,
+    timeoutMillis: Long,
+): Boolean = isStdio && !keepAlive && !hasActiveCalls && idleMillis > timeoutMillis
+
+internal class McpCallEvictionGate {
+    private val lock = Any()
+    private val activeCalls = mutableMapOf<String, Int>()
+    private val evictingNames = mutableSetOf<String>()
+
+    fun beginCall(serverName: String): Boolean = synchronized(lock) {
+        if (serverName in evictingNames) return@synchronized false
+        activeCalls[serverName] = (activeCalls[serverName] ?: 0) + 1
+        true
+    }
+
+    fun endCall(serverName: String) = synchronized(lock) {
+        val remaining = (activeCalls[serverName] ?: 1) - 1
+        if (remaining <= 0) activeCalls.remove(serverName) else activeCalls[serverName] = remaining
+    }
+
+    fun hasActiveCalls(serverName: String): Boolean = synchronized(lock) {
+        (activeCalls[serverName] ?: 0) > 0
+    }
+
+    fun claimEviction(serverName: String): Boolean = synchronized(lock) {
+        if ((activeCalls[serverName] ?: 0) > 0 || !evictingNames.add(serverName)) return@synchronized false
+        true
+    }
+
+    fun finishEviction(serverName: String) = synchronized(lock) {
+        evictingNames.remove(serverName)
+    }
+}
+
 /**
  * MCP 连接管理：**按工作区**各自维护一套连接。
  *
@@ -64,7 +102,8 @@ class McpManager @Inject constructor(
     private val workspaceRepository: WorkspaceRepository,
     private val containerSettingsRepository: ContainerSettingsRepository,
     private val profileResolver: ContainerProfileResolver,
-    private val vault: VaultRepository
+    private val vault: VaultRepository,
+    private val clientPreferences: McpClientPreferences,
 ) {
     private companion object {
         const val TAG = "McpManager"
@@ -77,11 +116,11 @@ class McpManager @Inject constructor(
 
         /** 快速重试用尽后的低频重试间隔：装包重启时 stdio server（如容器里的 bridge）起得慢，
          *  只试三次会一直停在 FAILED，直到用户新建会话或手动重载。 */
-        /** 非活动工作区的连接空闲超过这个时长就拆掉（开了保活的 server 不受影响）。 */
-        const val IDLE_EVICT_MS = 15 * 60 * 1000L
+        /** 偏好值缺失或无效时使用兼容默认值 10 分钟。 */
+        const val DEFAULT_IDLE_EVICT_MS = McpClientPreferences.DEFAULT_IDLE_TIMEOUT_MINUTES * 60 * 1000L
 
-        /** 空闲检查的轮询间隔。 */
-        const val EVICT_CHECK_MS = 5 * 60 * 1000L
+        /** 30 秒轮询一次，使 1 分钟选项及时生效且避免高频轮询。 */
+        const val EVICT_CHECK_MS = 30_000L
 
         const val SLOW_RETRY_MS = 10 * 60 * 1000L
 
@@ -102,6 +141,12 @@ class McpManager @Inject constructor(
 
         /** 每个 server 最后一次被调用的时间：空闲回收按它判定，工作区切换不重置。 */
         val lastUsed = mutableMapOf<String, Long>()
+
+        /** 只记录 STDIO server；HTTP 传输由独立生命周期管理，不参与空闲回收。 */
+        val stdioNames = mutableSetOf<String>()
+
+        /** 原子协调活动调用登记与空闲回收认领，避免选中回收后的新调用打到即将关闭的连接。 */
+        val callEvictionGate = McpCallEvictionGate()
 
         /** 配置里开了保活开关的 server 名：空闲回收跳过它们。 */
         val keepAliveNames = mutableSetOf<String>()
@@ -320,6 +365,7 @@ class McpManager @Inject constructor(
                 runtimes[workspacePath]?.let { rt ->
                 rt.clients[cfg.name] = client
                 rt.lastUsed[cfg.name] = System.currentTimeMillis()
+                if (cfg.isStdio) rt.stdioNames += cfg.name else rt.stdioNames -= cfg.name
                 if (cfg.keepAlive) rt.keepAliveNames += cfg.name else rt.keepAliveNames -= cfg.name
             }
             }
@@ -463,6 +509,10 @@ class McpManager @Inject constructor(
             client = client,
             descriptor = tool,
             onReconnect = { ensureClient(path, server) },
+            reconnectClosedClient = {
+                synchronized(runtimes) { server in runtimes[path]?.stdioNames.orEmpty() }
+            },
+            onExecutionStateChanged = { active -> markCallActive(path, server, active) },
             onUsed = { touch(path, server) }
         )
 
@@ -486,32 +536,58 @@ class McpManager @Inject constructor(
         if (path == activeWorkspace) _statuses.value = emptyList()
     }
 
-    /** 按 server 判空闲：超过 [IDLE_EVICT_MS] 没被调用就拆（保活的不拆），下次调用自动重连。 */
+    /** 仅回收空闲 STDIO 连接；保留工具目录以便后续按需重连。 */
     private fun evictIdleServers() {
         scope.launch {
             reloadMutex.withLock {
+                val idleTimeoutMs = clientPreferences.idleTimeoutMinutes
+                    .takeIf { it in McpClientPreferences.IDLE_TIMEOUT_CHOICES_MINUTES }
+                    ?.times(60_000L) ?: DEFAULT_IDLE_EVICT_MS
                 val now = System.currentTimeMillis()
                 val victims = synchronized(runtimes) {
                     runtimes.values.flatMap { rt ->
                         rt.clients.keys.filter { name ->
-                            name !in rt.keepAliveNames && now - (rt.lastUsed[name] ?: now) > IDLE_EVICT_MS
+                            rt.clients[name]?.isOpen == true && isIdleMcpServerEvictable(
+                                isStdio = name in rt.stdioNames,
+                                keepAlive = name in rt.keepAliveNames,
+                                hasActiveCalls = rt.callEvictionGate.hasActiveCalls(name),
+                                idleMillis = now - (rt.lastUsed[name] ?: now),
+                                timeoutMillis = idleTimeoutMs,
+                            ) && rt.callEvictionGate.claimEviction(name)
                         }.map { name -> rt.path to name }
                     }
                 }
                 victims.forEach { (path, name) ->
-                    FileLogger.i(TAG, "[$path] $name 空闲超过 15 分钟，回收连接（工具保留，下次调用时自动重连）")
-                    teardownServerLocked(path, name, keepTools = true)
+                    FileLogger.i(TAG, "[$path] $name STDIO 空闲超时，回收连接（工具保留，下次调用时自动重连）")
+                    try {
+                        // Keep the closed client and its descriptors so switching back can restore tools.
+                        val client = synchronized(runtimes) { runtimes[path]?.clients?.get(name) }
+                        runCatching { client?.close() }
+                    } finally {
+                        synchronized(runtimes) {
+                            runtimes[path]?.callEvictionGate?.finishEviction(name)
+                        }
+                    }
                 }
             }
         }
     }
 
-    /** 工具调用前登记使用时间。 */
+    /** 工具调用开始与结束都重置空闲计时；调用期间另以活动计数保护连接。 */
     private fun touch(workspacePath: String, serverName: String) {
         synchronized(runtimes) {
             runtimes[workspacePath]?.lastUsed?.put(serverName, System.currentTimeMillis())
         }
     }
+
+    private fun markCallActive(workspacePath: String, serverName: String, active: Boolean): Boolean =
+        synchronized(runtimes) {
+            val gate = runtimes[workspacePath]?.callEvictionGate ?: return@synchronized false
+            if (active) gate.beginCall(serverName) else {
+                gate.endCall(serverName)
+                true
+            }
+        }
 
     /** 连接被空闲回收后按需重连，供工具调用失败时重试。 */
     private suspend fun ensureClient(workspacePath: String, serverName: String): McpClient? =
