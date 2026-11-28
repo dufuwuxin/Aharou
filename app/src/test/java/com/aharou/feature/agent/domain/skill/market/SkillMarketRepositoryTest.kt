@@ -10,7 +10,14 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+import org.robolectric.annotation.ConscryptMode
 
+@RunWith(RobolectricTestRunner::class)
+@Config(application = android.app.Application::class, sdk = [35])
+@ConscryptMode(ConscryptMode.Mode.OFF)
 class SkillMarketRepositoryTest {
     @Test
     fun clawHubSearchParsesOfficialResultsAndEncodesQuery() = MockWebServer().use { server ->

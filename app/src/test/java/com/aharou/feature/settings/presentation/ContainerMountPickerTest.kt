@@ -227,7 +227,6 @@ class ContainerMountPickerTest {
     }
 
     private fun launchPicker() {
-        compose.onNodeWithContentDescription("编辑").performClick()
         compose.onNodeWithContentDescription(compose.activity.getString(R.string.container_mount_pick_local))
             .performScrollTo().performClick()
         compose.runOnIdle { assertEquals(Intent.ACTION_OPEN_DOCUMENT_TREE, registry.launchedAction) }

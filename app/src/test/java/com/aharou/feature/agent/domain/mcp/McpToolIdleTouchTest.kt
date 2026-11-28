@@ -136,9 +136,11 @@ class McpToolIdleTouchTest {
     private class BlockingCallTransport(
         private val call: suspend () -> com.aharou.feature.agent.domain.mcp.JsonRpcResponse,
     ) : McpTransport {
+        private var open = true
+        override val isOpen: Boolean get() = open
         override suspend fun request(method: String, params: JsonObject?): JsonRpcResponse = call()
         override suspend fun notify(method: String, params: JsonObject?) = Unit
-        override fun close() = Unit
+        override fun close() { open = false }
     }
 
     private fun successfulCallResponse(): JsonRpcResponse = JsonRpcResponse(

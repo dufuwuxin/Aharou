@@ -6,10 +6,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
-import androidx.compose.ui.test.performTextInput
-import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.performClick
 import com.aharou.core.theme.AIEditorTheme
 import com.aharou.core.translation.OfflineTranslation
 import com.aharou.core.translation.TranslationEntryPoint
@@ -70,8 +68,6 @@ class ProviderEditorOptionsGroupTest {
         compose.setContent {
             AIEditorTheme {
                 Column {
-                    androidx.compose.material3.Text("selected=${selectedModel.value}")
-                    androidx.compose.material3.Text("custom=${customModel.value}")
                     FetchModelsDialog(
                         fetchState = FetchState.Success(listOf("gpt-4.1", "claude-3.7")),
                         providerId = "openai",
@@ -85,15 +81,16 @@ class ProviderEditorOptionsGroupTest {
             }
         }
 
-        compose.onNodeWithText("gpt-4.1", substring = true).assertExists()
+        compose.onNodeWithText("gpt-4.1").assertExists()
         compose.onNodeWithText("claude-3.7").assertDoesNotExist()
-        compose.onNodeWithText(compose.activity.getString(com.aharou.R.string.provider_filter_models_hint))
-            .performClick().performTextInput("CLAUDE")
-        compose.onNodeWithText("gpt-4.1", substring = true).assertDoesNotExist()
+        compose.onNode(hasSetTextAction()).performTextInput("CLAUDE")
+        compose.onNodeWithText("gpt-4.1").assertDoesNotExist()
         compose.onNodeWithText("claude-3.7").assertExists()
-        compose.onNodeWithText("selected=gpt-4.1").assertExists()
-        compose.onNodeWithText("custom=my-custom-model").assertExists()
-        compose.runOnIdle { assertEquals(emptyList<String>(), added) }
+        compose.runOnIdle {
+            assertEquals("gpt-4.1", selectedModel.value)
+            assertEquals("my-custom-model", customModel.value)
+            assertEquals(emptyList<String>(), added)
+        }
     }
 
     @Test fun onboardingFallbackShowsNoMatchesAfterFilteringErrorState() {
@@ -113,8 +110,7 @@ class ProviderEditorOptionsGroupTest {
         }
 
         compose.onNodeWithText("deepseek-v4-flash").assertExists()
-        compose.onNodeWithText(compose.activity.getString(com.aharou.R.string.provider_filter_models_hint))
-            .performClick().performTextInput("not-a-model")
+        compose.onNode(hasSetTextAction()).performTextInput("not-a-model")
         compose.onNodeWithText("deepseek-v4-flash").assertDoesNotExist()
         compose.onNodeWithText(compose.activity.getString(com.aharou.R.string.provider_no_matching_models)).assertExists()
     }
