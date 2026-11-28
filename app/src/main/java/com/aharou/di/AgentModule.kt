@@ -495,9 +495,10 @@ object AgentModule {
         gitBlameTool: GitBlameTool,
         customToolSource: CustomToolSource,
         appControlTool: com.aharou.feature.plugin.runtime.AppControlTool,
-        guard: ToolCallGuard
+        guard: ToolCallGuard,
+        chatSessionDao: ChatSessionDao,
     ): ToolRegistry {
-        return ToolRegistry(guard, customToolSource).apply {
+        return ToolRegistry(guard, customToolSource, chatSessionDao).apply {
             register("readFile", readFileTool)
             register("elf_analyze", elfAnalysisTool)
             register("file_analyze", fileAnalysisTool)

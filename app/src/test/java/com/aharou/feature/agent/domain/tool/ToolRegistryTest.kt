@@ -1,6 +1,16 @@
 package com.aharou.feature.agent.domain.tool
 
+import com.aharou.feature.agent.data.local.dao.ChatSessionDao
+import com.aharou.feature.agent.data.local.entity.ChatSessionEntity
 import com.aharou.feature.agent.domain.model.AgentContext
+import com.aharou.feature.agent.domain.subagent.AgentDefinition
+import com.aharou.feature.agent.domain.tool.custom.ToolInjectionGate
+import com.aharou.feature.agent.domain.tool.custom.ToolInjectionMode
+import com.aharou.feature.agent.domain.tool.custom.ToolOverride
+import com.aharou.feature.agent.domain.tool.custom.ToolSettingsStore
+import io.mockk.coEvery
+import io.mockk.coVerify
+import io.mockk.mockk
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Assert.assertEquals
@@ -113,6 +123,51 @@ class ToolRegistryTest {
         assertTrue(registry.getDeferredTools(context.copy(sessionId = "b")).isEmpty())
         assertTrue(registry.getDeferredTools(context.copy(projectRoot = "/two")).isEmpty())
         assertTrue(registry.getDeferredTools(context.copy(inputMessageId = "next")).isEmpty())
+    }
+
+    @Test
+    fun mainSessionBootstrapsAllowedTaskWithoutActivatingOrdinaryTools() {
+        val sessions = mockk<ChatSessionDao>()
+        val context = AgentContext(null, null, "/one", null, sessionId = "main")
+        coEvery { sessions.getById("main") } returns ChatSessionEntity("main", "Main", 0, 0)
+        val registry = ToolRegistry(chatSessionDao = sessions)
+        val allowed = listOf("memory", "task", "tool_search", "project_tasks").map { FakeAgentTool(it) }
+        registry.bindDiscoveryTools(allowed, context)
+
+        val bootstrap = allowed.take(3)
+        assertEquals(bootstrap, registry.requestTools(allowed, context))
+        assertFalse(registry.isActivated("task", context))
+        assertEquals(bootstrap, registry.requestTools(allowed, context))
+        coVerify(exactly = 1) { sessions.getById("main") }
+
+        val gate = ToolInjectionGate(mockk())
+        val off = ToolSettingsStore.Snapshot(overrides = mapOf("task" to ToolOverride(injectionMode = ToolInjectionMode.OFF)))
+        val filtered = gate.visible(allowed, context.currentUserText, off)
+        assertEquals(listOf("memory", "tool_search"), registry.requestTools(filtered, context).map { it.name })
+        registry.bindDiscoveryTools(filtered, context)
+        assertFalse(registry.getDeferredTools(context).any { it.name == "task" })
+    }
+
+    @Test
+    fun childAndUnverifiedSessionsDoNotBootstrapTask() {
+        val sessions = mockk<ChatSessionDao>()
+        coEvery { sessions.getById("child") } returns ChatSessionEntity("child", "Child", 0, 0, parentId = "main")
+        coEvery { sessions.getById("missing") } returns null
+        coEvery { sessions.getById("unavailable") } throws IllegalStateException("Database unavailable")
+        val registry = ToolRegistry(chatSessionDao = sessions)
+        val allowed = listOf("memory", "task", "tool_search").map { FakeAgentTool(it) }
+        val child = AgentContext(null, null, "/one", null, sessionId = "child")
+        val role = AgentDefinition("reader", "test", allowedTools = listOf("*"), prompt = "")
+        val contexts = listOf(child, child.copy(sessionId = "missing"), child.copy(sessionId = "unavailable"),
+            child.copy(sessionId = null), child.copy(sessionId = "role", agentDefinition = role))
+        for (context in contexts) {
+            registry.bindDiscoveryTools(allowed, context)
+            assertEquals(listOf("memory", "tool_search"), registry.requestTools(allowed, context).map { it.name })
+        }
+        coVerify(exactly = 0) { sessions.getById("role") }
+
+        registry.activate(listOf("task"), child)
+        assertEquals(allowed, registry.requestTools(allowed, child))
     }
 
     @Test

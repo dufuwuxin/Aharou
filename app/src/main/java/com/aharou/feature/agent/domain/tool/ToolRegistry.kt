@@ -1,37 +1,63 @@
 package com.aharou.feature.agent.domain.tool
 
+import com.aharou.feature.agent.data.local.dao.ChatSessionDao
 import com.aharou.feature.agent.domain.model.AgentContext
 import com.aharou.feature.agent.domain.tool.custom.CustomToolSource
 import com.aharou.feature.agent.domain.tool.custom.ToolSettingsStore
 import java.util.Collections
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
 
 @Singleton
 class ToolRegistry @Inject constructor(
     private val guard: ToolCallGuard? = null,
     private val customToolSource: CustomToolSource? = null,
+    private val chatSessionDao: ChatSessionDao? = null,
 ) {
     // LinkedHashMap 保留注册顺序（内置工具固定顺序 + MCP 动态追加），避免工具增删后
     // 前缀顺序漂移打断隐式前缀缓存；synchronizedMap 保证并发注册/读取安全。
     private val tools = Collections.synchronizedMap(LinkedHashMap<String, AgentTool>())
 
     private val activated = LinkedHashMap<Pair<String, String>, MutableSet<String>>(16, 0.75f, true)
-    private val discoveryTools = LinkedHashMap<Triple<String, String, String>, List<AgentTool>>(16, 0.75f, true)
+    private data class DiscoverySnapshot(val tools: List<AgentTool>, val bootstrapTask: Boolean)
+    private val discoveryTools = LinkedHashMap<Triple<String, String, String>, DiscoverySnapshot>(16, 0.75f, true)
 
     private fun discoveryScope(context: AgentContext) =
         Triple(context.sessionId ?: context.inputMessageId, context.projectRoot, context.inputMessageId)
 
     /** The workflow supplies its already role/policy-filtered execution list, never the global registry. */
     fun bindDiscoveryTools(allowed: List<AgentTool>, context: AgentContext) {
+        // Resolve the audience once per turn, not in each provider request of the tool loop.
+        val snapshot = DiscoverySnapshot(allowed.toList(), allowed.any { it.name == "task" } && isMainSession(context))
         synchronized(discoveryTools) {
-            discoveryTools[discoveryScope(context)] = allowed.toList()
+            discoveryTools[discoveryScope(context)] = snapshot
             while (discoveryTools.size > 128) discoveryTools.remove(discoveryTools.keys.first())
         }
     }
 
-    fun requestTools(allowed: List<AgentTool>, context: AgentContext): List<AgentTool> =
-        allowed.filter { livePermission(it) && (it.name == "memory" || it.name == "tool_search" || isActivated(it.name, context)) }
+    fun requestTools(allowed: List<AgentTool>, context: AgentContext): List<AgentTool> {
+        val bootstrapTask = synchronized(discoveryTools) { discoveryTools[discoveryScope(context)]?.bootstrapTask == true }
+        return allowed.filter { tool ->
+            livePermission(tool) && (tool.name == "memory" || tool.name == "tool_search" ||
+                (tool.name == "task" && bootstrapTask) || isActivated(tool.name, context))
+        }
+    }
+
+    private fun isMainSession(context: AgentContext): Boolean {
+        if (context.agentDefinition != null) return false
+        val id = context.sessionId?.takeIf(String::isNotBlank) ?: return false
+        val sessions = chatSessionDao ?: return false
+        return try {
+            runBlocking(Dispatchers.IO) { sessions.getById(id)?.let { it.parentId == null } == true }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            false
+        }
+    }
 
     private fun scope(context: AgentContext) =
         (context.sessionId ?: context.inputMessageId) to context.projectRoot
@@ -80,7 +106,7 @@ class ToolRegistry @Inject constructor(
 
     /** Discovery is limited to the current turn's execution snapshot, including ordinary/custom tools. */
     fun getDeferredTools(context: AgentContext): List<AgentTool> =
-        synchronized(discoveryTools) { discoveryTools[discoveryScope(context)].orEmpty().filter(::livePermission) }
+        synchronized(discoveryTools) { discoveryTools[discoveryScope(context)]?.tools.orEmpty().filter(::livePermission) }
 
     /** 展开一批延迟加载工具，使其进入后续每轮的 tools 数组。 */
     fun activate(names: Collection<String>, context: AgentContext) {
