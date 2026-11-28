@@ -21,11 +21,15 @@ import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.FlowCollector
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.flow
@@ -34,6 +38,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
@@ -166,10 +171,98 @@ class AgentTurnRunnerConcurrencyTest {
         }
     }
 
+    @Test fun exceptionSettlesOnlyPendingToolsFromTheFailedTurn() = runBlocking {
+        val fixture = Fixture()
+        fixture.toolRows["tool_previous"] = ToolRow("a", SessionUseCase.PENDING_TOOL_MARKER, false)
+        val otherStarted = CompletableDeferred<Unit>()
+        fixture.turn("b") {
+            emit(AgentEvent.ToolCallStarted("other", "readFile", "other args"))
+            otherStarted.complete(Unit)
+            awaitCancellation()
+        }
+        val other = fixture.start(this, "b")
+        try {
+            withTimeout(5_000) { otherStarted.await() }
+            val failure = IllegalStateException("workflow failed after starting a tool")
+            fixture.turn("a") {
+                emit(AgentEvent.ToolCallStarted("finished", "readFile", "original args"))
+                emit(AgentEvent.ToolCallFinished("finished", "readFile", "real result", isError = false))
+                emit(AgentEvent.ToolCallStarted("unfinished", "readFile", "unfinished args"))
+                fixture.assertPending("unfinished")
+                throw failure
+            }
+            try {
+                fixture.runner.run(fixture.request("a")).collect()
+                fail("the workflow exception must escape the runner")
+            } catch (caught: IllegalStateException) {
+                assertSame(failure, caught)
+            }
+            fixture.assertSettled("unfinished", "a", "unfinished args")
+            assertEquals(ToolRow("a", "real result", false, "original args"), fixture.toolRows["tool_finished"])
+            fixture.assertPending("previous")
+            fixture.assertPending("other")
+            assertTrue(other.isActive)
+        } finally {
+            other.cancelAndJoin()
+        }
+    }
+
+    @Test fun cancellationSettlesThePersistedPlaceholderAndStillEscapesCollection() = runBlocking {
+        val fixture = Fixture()
+        val started = CompletableDeferred<Unit>()
+        fixture.turn("a") {
+            emit(AgentEvent.ToolCallStarted("cancelled", "Bash", "tool args"))
+            emit(AgentEvent.ToolCallProgress("cancelled", "Bash", "partial output"))
+            started.complete(Unit)
+            awaitCancellation()
+        }
+        val cancellation = CancellationException("cancel test turn")
+        val caught = CompletableDeferred<CancellationException>()
+        val turn = launch {
+            try {
+                fixture.runner.run(fixture.request("a")).collect()
+            } catch (failure: CancellationException) {
+                caught.complete(failure)
+                throw failure
+            }
+        }
+        try {
+            withTimeout(5_000) { started.await() }
+            fixture.assertPending("cancelled")
+            turn.cancel(cancellation)
+            withTimeout(5_000) { turn.join() }
+            assertTrue(turn.isCancelled)
+            assertEquals(cancellation.message, withTimeout(5_000) { caught.await() }.message)
+            fixture.assertSettled("cancelled", "a", "tool args")
+            assertTrue(fixture.toolRows.getValue("tool_cancelled").content.startsWith("partial output\n\n"))
+        } finally {
+            turn.cancelAndJoin()
+        }
+    }
+
+    @Test fun failedEventThenCompletedSettlesThePendingToolWithoutChangingTerminalEvents() = runBlocking {
+        val fixture = Fixture()
+        val failure = AgentEvent.Failed("workflow reported a failure")
+        fixture.turn("a") {
+            emit(AgentEvent.ToolCallStarted("failed", "readFile", "tool args"))
+            fixture.assertPending("failed")
+            emit(failure)
+            emit(AgentEvent.Completed)
+        }
+        val events = mutableListOf<AgentEvent>()
+        fixture.runner.run(fixture.request("a")).collect { events.add(it) }
+        fixture.assertSettled("failed", "a", "tool args")
+        assertEquals(listOf(failure, AgentEvent.Completed), events.takeLast(2))
+    }
+
+    private data class ToolRow(val sessionId: String, val content: String, val isError: Boolean, val args: String? = null)
+
     private class Fixture {
         val coordinator = ProjectTaskExecutionCoordinator()
         val tasks = mockk<ProjectTaskRepository>(relaxed = true)
         val workflow = mockk<AgentWorkflow>()
+        val toolRows = mutableMapOf<String, ToolRow>()
+        private val toolTurns = mutableMapOf<String, Flow<AgentEvent>>()
         val persistence = mockk<MessagePersistenceUseCase>(relaxed = true)
         val leases = mockk<SubAgentWriteLease>()
         val started = listOf("a", "b", "child").associateWith { CompletableDeferred<AgentContext>() }
@@ -196,10 +289,16 @@ class AgentTurnRunnerConcurrencyTest {
             every { workspaces.current } returns MutableStateFlow(null)
             every { workspaces.workspaces } returns MutableStateFlow(emptyList())
             coEvery { gate.snapshotForProject(any()) } returns ToolSettingsStore.Snapshot(emptyList(), emptyMap())
+            coEvery {
+                persistence.persist(any(), MessageRole.TOOL, any(), id = any(), toolCallId = any(),
+                    toolName = any(), toolArgs = any(), isError = any(), attachments = any())
+            } coAnswers {
+                toolRows[arg(3)] = ToolRow(arg(0), arg(2), arg(8), arg(7))
+            }
             every { workflow.executeEvents(any(), any(), any(), any()) } answers {
                 val context = secondArg<AgentContext>()
                 val id = requireNotNull(context.sessionId)
-                flow {
+                toolTurns[id] ?: flow {
                     started.getValue(id).complete(context)
                     release.getValue(id).await()
                     emit(AgentEvent.AssistantDelta("$id finished"))
@@ -209,6 +308,24 @@ class AgentTurnRunnerConcurrencyTest {
                 mockk(relaxed = true), sessions, coordinator, tasks, persistence,
                 mockk<CheckpointManager>(relaxed = true), mockk(relaxed = true), mockk(relaxed = true),
                 leases, workspaces, questions, gate, mockk(relaxed = true))
+        }
+
+        fun turn(id: String, block: suspend FlowCollector<AgentEvent>.() -> Unit) {
+            toolTurns[id] = flow(block)
+        }
+
+        fun assertPending(id: String) {
+            val row = toolRows.getValue("tool_$id")
+            assertTrue(row.content.startsWith(SessionUseCase.PENDING_TOOL_MARKER))
+            assertFalse(row.isError)
+        }
+
+        fun assertSettled(id: String, sessionId: String, args: String) {
+            val row = toolRows.getValue("tool_$id")
+            assertEquals(sessionId, row.sessionId)
+            assertEquals(args, row.args)
+            assertFalse(row.content.startsWith(SessionUseCase.PENDING_TOOL_MARKER))
+            assertTrue(row.isError)
         }
 
         fun request(id: String) = AgentTurnRequest(id, "message $id", projectRoot = WORKSPACE, skipTitleUpdate = true)
