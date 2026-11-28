@@ -143,6 +143,20 @@ import com.aharou.R
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 
+@Composable
+internal fun ProviderEditorOptionsGroup(
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit
+) {
+    SettingsGroupHeader(
+        text = stringResource(R.string.provider_section_options),
+        expanded = expanded,
+        onToggle = onToggle
+    )
+    SettingsGroup(visible = expanded, content = content)
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProviderEditorScreen(
@@ -269,6 +283,7 @@ fun ProviderEditorScreen(
     }
     var showProxyPage by remember { mutableStateOf(false) }
     var showKeysPage by remember { mutableStateOf(false) }
+    var providerOptionsExpanded by remember { mutableStateOf(false) }
     var showHeadersSheet by remember { mutableStateOf(false) }
     var showScriptParamsSheet by remember { mutableStateOf(false) }
     var fetchDialogKey by remember { mutableIntStateOf(0) }
@@ -508,9 +523,10 @@ fun ProviderEditorScreen(
                             models.addAll(remoteModels)
                         }
                     }
-                    // ── 选项 ──
-                    SettingsGroupHeader(text = stringResource(R.string.provider_section_options))
-                    SettingsGroup {
+                    ProviderEditorOptionsGroup(
+                        expanded = providerOptionsExpanded,
+                        onToggle = { providerOptionsExpanded = !providerOptionsExpanded }
+                    ) {
                         SettingsRow(
                             title = stringResource(R.string.provider_custom_icon),
                             subtitle = stringResource(R.string.provider_custom_icon_hint),

@@ -476,6 +476,9 @@ private fun CapabilitySwitchRow(
     }
 }
 
+internal fun filterProviderModelCandidates(models: List<String>, query: String): List<String> =
+    if (query.isBlank()) models else models.filter { it.contains(query, ignoreCase = true) }
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun FetchModelsDialog(
@@ -579,10 +582,25 @@ internal fun FetchModelsDialog(
                 is FetchState.Error -> {
                     if (isOnboarding) {
                         // 引导模式下未配置有效 Key 时，呈现 DeepSeek 推荐模型演示供新手继续体验
-                        val fallbackModels = listOf("deepseek-v4-flash").filter { it !in existingModels }
-                        val grouped = fallbackModels.groupBy { m -> modelBrandKey(m) }
-                            .toSortedMap(compareBy<String> { it == "other" }.thenBy { brandDisplayName(context, it) })
-                        LazyColumn(
+                        val fallbackModels = filterProviderModelCandidates(
+                            listOf("deepseek-v4-flash").filter { it !in existingModels },
+                            searchQuery
+                        )
+                        if (fallbackModels.isEmpty()) {
+                            SettingsGroup {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(min = 360.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(stringResource(R.string.provider_no_matching_models), style = MaterialTheme.typography.bodyMedium)
+                                }
+                            }
+                        } else {
+                            val grouped = fallbackModels.groupBy { m -> modelBrandKey(m) }
+                                .toSortedMap(compareBy<String> { it == "other" }.thenBy { brandDisplayName(context, it) })
+                            LazyColumn(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .heightIn(min = 180.dp, max = 420.dp),
@@ -615,6 +633,7 @@ internal fun FetchModelsDialog(
                                     }
                                 }
                             }
+                        }
                         }
                     } else {
                         SettingsGroup {
@@ -668,8 +687,11 @@ internal fun FetchModelsDialog(
                     }
                 }
                 is FetchState.Success -> {
-                    val rawModels = fetchState.models.filter { it !in existingModels && it.contains(searchQuery, ignoreCase = true) }
-                    val newModels = if (rawModels.isEmpty() && isOnboarding) {
+                    val rawModels = filterProviderModelCandidates(
+                        fetchState.models.filter { it !in existingModels },
+                        searchQuery
+                    )
+                    val newModels = if (rawModels.isEmpty() && isOnboarding && searchQuery.isBlank()) {
                         listOf("deepseek-v4-flash").filter { it !in existingModels }
                     } else rawModels
                     if (newModels.isEmpty()) {
