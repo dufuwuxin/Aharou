@@ -62,6 +62,7 @@ class ProjectRequirementBranchTest {
         val messages = MutableStateFlow(ChatMessagesState("main", emptyList(), true))
         val sessions = MutableStateFlow(listOf(main, discussion))
         every { agent.currentSessionId } returns current
+        every { agent.skillEvolutionDraft } returns MutableStateFlow(null)
         every { agent.currentSessionState } returns selected
         every { agent.currentSessionWorkspace } returns MutableStateFlow("w")
         every { agent.messagesState } returns messages
@@ -226,6 +227,7 @@ class ProjectRequirementBranchTest {
         val messages = MutableStateFlow(ChatMessagesState("main", emptyList(), true))
         val draft = MutableStateFlow("")
         every { agent.currentSessionId } returns current
+        every { agent.skillEvolutionDraft } returns MutableStateFlow(null)
         every { agent.currentSessionState } returns selected
         every { agent.currentSessionWorkspace } returns MutableStateFlow("w")
         every { agent.messagesState } returns messages

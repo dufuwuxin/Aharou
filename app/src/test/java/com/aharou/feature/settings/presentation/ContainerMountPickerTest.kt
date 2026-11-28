@@ -118,7 +118,6 @@ class ContainerMountPickerTest {
     @Test fun unavailableDirectoryPickerLeavesExistingPathsUnchanged() {
         openEditor()
         compose.runOnIdle { registry.failLaunch = true }
-        compose.onNodeWithContentDescription("编辑").performClick()
         compose.onNodeWithContentDescription(compose.activity.getString(R.string.container_mount_pick_local))
             .performScrollTo().performClick()
 

@@ -113,6 +113,7 @@ class McpToolIdleTouchTest {
             successfulCallResponse()
         }).also { it.tools = listOf(descriptor) }
         staleClient.close()
+        assertFalse(staleClient.isOpen)
         val freshClient = McpClient("stdio", BlockingCallTransport {
             freshCalls++
             successfulCallResponse()
@@ -121,7 +122,7 @@ class McpToolIdleTouchTest {
             staleClient,
             descriptor,
             onReconnect = { if (activeWorkspace == "workspace-a") freshClient else null },
-            reconnectClosedClient = { activeWorkspace == "workspace-a" },
+            reconnectClosedClient = { activeWorkspace == "workspace-a" && !staleClient.isOpen },
         )
 
         activeWorkspace = "workspace-b"
