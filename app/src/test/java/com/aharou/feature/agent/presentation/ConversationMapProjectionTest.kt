@@ -25,7 +25,7 @@ class ConversationMapProjectionTest {
 
         assertEquals(listOf("user"), result.nodes.map { it.startMessageId })
         assertEquals("hello world", result.nodes.single().userSummary)
-        assertEquals(message("user").id.hashCode().toLong(), result.nodes.single().timestamp)
+        assertEquals(message("user", MessageRole.USER).id.hashCode().toLong(), result.nodes.single().timestamp)
         assertEquals(records.size, result.loadedMessageCount)
         assertFalse(result.hasMore)
     }
