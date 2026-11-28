@@ -9,6 +9,7 @@ import androidx.compose.ui.test.performClick
 import com.aharou.core.theme.AIEditorTheme
 import com.aharou.core.translation.OfflineTranslation
 import com.aharou.core.translation.TranslationEntryPoint
+import com.aharou.core.translation.TranslationModelState
 import com.aharou.feature.agent.domain.container.ContainerDoctor
 import com.aharou.feature.agent.domain.container.ContainerProfile
 import com.aharou.feature.agent.domain.container.RootfsSource
@@ -34,6 +35,7 @@ class ContainerMountPickerTestApplication : Application(), GeneratedComponentMan
     private val doctor = mockk<ContainerDoctor>(relaxed = true)
     private val translation = mockk<OfflineTranslation>(relaxed = true) {
         every { enabled } returns MutableStateFlow(false)
+        every { modelState } returns MutableStateFlow(TranslationModelState.READY)
     }
     private val component = object : GeneratedComponent, ContainerDoctorEntryPoint, TranslationEntryPoint {
         override fun containerDoctor(): ContainerDoctor = doctor
