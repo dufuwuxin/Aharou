@@ -9,7 +9,9 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withContext
 
 @Singleton
 class ToolRegistry @Inject constructor(
@@ -28,10 +30,20 @@ class ToolRegistry @Inject constructor(
     private fun discoveryScope(context: AgentContext) =
         Triple(context.sessionId ?: context.inputMessageId, context.projectRoot, context.inputMessageId)
 
-    /** The workflow supplies its already role/policy-filtered execution list, never the global registry. */
+    /** Bind discovery only, without verifying the audience for bootstrap. */
     fun bindDiscoveryTools(allowed: List<AgentTool>, context: AgentContext) {
+        storeDiscoverySnapshot(context, DiscoverySnapshot(allowed.toList(), bootstrapTask = false))
+    }
+
+    /** The workflow supplies its already role/policy-filtered execution list, never the global registry. */
+    internal suspend fun bindTurnDiscoveryTools(allowed: List<AgentTool>, context: AgentContext) {
         // Resolve the audience once per turn, not in each provider request of the tool loop.
         val snapshot = DiscoverySnapshot(allowed.toList(), allowed.any { it.name == "task" } && isMainSession(context))
+        currentCoroutineContext().ensureActive()
+        storeDiscoverySnapshot(context, snapshot)
+    }
+
+    private fun storeDiscoverySnapshot(context: AgentContext, snapshot: DiscoverySnapshot) {
         synchronized(discoveryTools) {
             discoveryTools[discoveryScope(context)] = snapshot
             while (discoveryTools.size > 128) discoveryTools.remove(discoveryTools.keys.first())
@@ -46,12 +58,12 @@ class ToolRegistry @Inject constructor(
         }
     }
 
-    private fun isMainSession(context: AgentContext): Boolean {
+    private suspend fun isMainSession(context: AgentContext): Boolean {
         if (context.agentDefinition != null) return false
         val id = context.sessionId?.takeIf(String::isNotBlank) ?: return false
         val sessions = chatSessionDao ?: return false
         return try {
-            runBlocking(Dispatchers.IO) { sessions.getById(id)?.let { it.parentId == null } == true }
+            withContext(Dispatchers.IO) { sessions.getById(id)?.let { it.parentId == null } == true }
         } catch (e: CancellationException) {
             throw e
         } catch (_: Exception) {

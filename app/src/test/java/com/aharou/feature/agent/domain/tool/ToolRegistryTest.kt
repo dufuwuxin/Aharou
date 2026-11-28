@@ -11,6 +11,11 @@ import com.aharou.feature.agent.domain.tool.custom.ToolSettingsStore
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Assert.assertEquals
@@ -126,13 +131,13 @@ class ToolRegistryTest {
     }
 
     @Test
-    fun mainSessionBootstrapsAllowedTaskWithoutActivatingOrdinaryTools() {
+    fun mainSessionBootstrapsAllowedTaskWithoutActivatingOrdinaryTools() = runTest {
         val sessions = mockk<ChatSessionDao>()
         val context = AgentContext(null, null, "/one", null, sessionId = "main")
         coEvery { sessions.getById("main") } returns ChatSessionEntity("main", "Main", 0, 0)
         val registry = ToolRegistry(chatSessionDao = sessions)
         val allowed = listOf("memory", "task", "tool_search", "project_tasks").map { FakeAgentTool(it) }
-        registry.bindDiscoveryTools(allowed, context)
+        registry.bindTurnDiscoveryTools(allowed, context)
 
         val bootstrap = allowed.take(3)
         assertEquals(bootstrap, registry.requestTools(allowed, context))
@@ -144,12 +149,12 @@ class ToolRegistryTest {
         val off = ToolSettingsStore.Snapshot(overrides = mapOf("task" to ToolOverride(injectionMode = ToolInjectionMode.OFF)))
         val filtered = gate.visible(allowed, context.currentUserText, off)
         assertEquals(listOf("memory", "tool_search"), registry.requestTools(filtered, context).map { it.name })
-        registry.bindDiscoveryTools(filtered, context)
+        registry.bindTurnDiscoveryTools(filtered, context)
         assertFalse(registry.getDeferredTools(context).any { it.name == "task" })
     }
 
     @Test
-    fun childAndUnverifiedSessionsDoNotBootstrapTask() {
+    fun childAndUnverifiedSessionsDoNotBootstrapTask() = runTest {
         val sessions = mockk<ChatSessionDao>()
         coEvery { sessions.getById("child") } returns ChatSessionEntity("child", "Child", 0, 0, parentId = "main")
         coEvery { sessions.getById("missing") } returns null
@@ -161,13 +166,44 @@ class ToolRegistryTest {
         val contexts = listOf(child, child.copy(sessionId = "missing"), child.copy(sessionId = "unavailable"),
             child.copy(sessionId = null), child.copy(sessionId = "role", agentDefinition = role))
         for (context in contexts) {
-            registry.bindDiscoveryTools(allowed, context)
+            registry.bindTurnDiscoveryTools(allowed, context)
             assertEquals(listOf("memory", "tool_search"), registry.requestTools(allowed, context).map { it.name })
         }
         coVerify(exactly = 0) { sessions.getById("role") }
 
         registry.activate(listOf("task"), child)
         assertEquals(allowed, registry.requestTools(allowed, child))
+    }
+
+    @Test
+    fun cancellingTurnDuringSessionLookupDoesNotPublishDiscoverySnapshot() = runTest {
+        val sessions = mockk<ChatSessionDao>()
+        val queryStarted = CompletableDeferred<Unit>()
+        val queryStopped = CompletableDeferred<Unit>()
+        coEvery { sessions.getById("main") } coAnswers {
+            queryStarted.complete(Unit)
+            try {
+                awaitCancellation()
+            } finally {
+                queryStopped.complete(Unit)
+            }
+        }
+        val registry = ToolRegistry(chatSessionDao = sessions)
+        val context = AgentContext(null, null, "/one", null, sessionId = "main")
+        val allowed = listOf("memory", "task", "tool_search").map { FakeAgentTool(it) }
+        var returnedNormally = false
+        val turn = launch {
+            registry.bindTurnDiscoveryTools(allowed, context)
+            returnedNormally = true
+        }
+
+        queryStarted.await()
+        turn.cancelAndJoin()
+
+        assertTrue(queryStopped.isCompleted)
+        assertFalse(returnedNormally)
+        assertTrue(registry.getDeferredTools(context).isEmpty())
+        assertEquals(listOf("memory", "tool_search"), registry.requestTools(allowed, context).map { it.name })
     }
 
     @Test
