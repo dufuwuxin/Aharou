@@ -1,6 +1,8 @@
 package com.aharou.feature.agent.domain.skill.market
 
 import java.security.MessageDigest
+import java.security.Provider
+import java.security.Security
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -9,6 +11,8 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.After
+import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -19,6 +23,22 @@ import org.robolectric.annotation.ConscryptMode
 @Config(application = android.app.Application::class, sdk = [35])
 @ConscryptMode(ConscryptMode.Mode.OFF)
 class SkillMarketRepositoryTest {
+    private var conscryptProvider: Provider? = null
+
+    @Before
+    fun removeGlobalConscryptProviderForMockHttp() {
+        conscryptProvider = Security.getProviders().firstOrNull {
+            it.name.equals("Conscrypt", ignoreCase = true)
+        }
+        conscryptProvider?.let { Security.removeProvider(it.name) }
+    }
+
+    @After
+    fun restoreGlobalConscryptProvider() {
+        conscryptProvider?.let { Security.insertProviderAt(it, 1) }
+        conscryptProvider = null
+    }
+
     @Test
     fun clawHubSearchParsesOfficialResultsAndEncodesQuery() = MockWebServer().use { server ->
         server.enqueue(MockResponse().setBody("""{"results":[{"slug":"owner/pdf","displayName":"PDF","summary":"Read files","version":"1.2.0","updatedAt":12,"ownerHandle":"owner"}]}"""))

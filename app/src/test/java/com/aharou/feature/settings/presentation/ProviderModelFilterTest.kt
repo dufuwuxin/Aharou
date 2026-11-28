@@ -83,6 +83,7 @@ class ProviderEditorOptionsGroupTest {
 
         compose.onNodeWithText("gpt-4.1").assertExists()
         compose.onNodeWithText("claude-3.7").assertDoesNotExist()
+        compose.onNode(hasSetTextAction()).performClick()
         compose.onNode(hasSetTextAction()).performTextInput("CLAUDE")
         compose.onNodeWithText("gpt-4.1").assertDoesNotExist()
         compose.onNodeWithText("claude-3.7").assertExists()
@@ -110,6 +111,7 @@ class ProviderEditorOptionsGroupTest {
         }
 
         compose.onNodeWithText("deepseek-v4-flash").assertExists()
+        compose.onNode(hasSetTextAction()).performClick()
         compose.onNode(hasSetTextAction()).performTextInput("not-a-model")
         compose.onNodeWithText("deepseek-v4-flash").assertDoesNotExist()
         compose.onNodeWithText(compose.activity.getString(com.aharou.R.string.provider_no_matching_models)).assertExists()
