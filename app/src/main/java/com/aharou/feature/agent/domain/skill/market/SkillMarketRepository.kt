@@ -411,22 +411,23 @@ class SkillMarketRepository @Inject constructor(
 
     private suspend fun installClawHub(skill: MarketSkill, scope: SkillScope): SkillImportReport {
         val slug = skill.clawHubSlug
-        val moderation = withContext(Dispatchers.IO) {
+        val (installVersion, moderation) = withContext(Dispatchers.IO) {
             val detail = clawHubClient.detail(slug)
             val selectedVersion = effectiveClawHubVersion(skill.version, detail?.skill?.version)
             val matchingDetailModeration = detail?.moderation?.takeIf {
                 it.matchesRequestedVersion == null || it.matchesRequestedVersion == true
             }
-            if (selectedVersion.isBlank()) return@withContext matchingDetailModeration
-            val scan = clawHubClient.scan(slug, selectedVersion)
-            mergeClawHubModeration(matchingDetailModeration, scan)
+            val scan = selectedVersion.takeIf { it.isNotBlank() }
+                ?.let { clawHubClient.scan(slug, it) }
+            selectedVersion to mergeClawHubModeration(matchingDetailModeration, scan)
         }
+        if (installVersion.isBlank()) return SkillImportReport(emptyList())
         if (!canInstallClawHubModeration(moderation)) {
             FileLogger.w(TAG, "ClawHub 将该技能标记为 malware/hidden/removed，阻止安装：$slug")
             return SkillImportReport(emptyList())
         }
         val verified = withContext(Dispatchers.IO) {
-            clawHubClient.download(slug, skill.version, moderation?.securitySha256)
+            clawHubClient.download(slug, installVersion, moderation?.securitySha256)
         } ?: return SkillImportReport(emptyList())
         val existingFingerprint = skillRepository.skillFingerprint(skill.name, scope)
         val previous = installRepository.record(skill.name)
@@ -443,7 +444,7 @@ class SkillMarketRepository @Inject constructor(
             val fingerprint = skillRepository.skillFingerprint(skill.name, scope).orEmpty()
             installRepository.save(skill.name, SkillInstallRecord(
                 source = skill.sourceId,
-                version = skill.version,
+                version = installVersion,
                 installedAt = System.currentTimeMillis(),
                 installedFingerprint = fingerprint
             ))
