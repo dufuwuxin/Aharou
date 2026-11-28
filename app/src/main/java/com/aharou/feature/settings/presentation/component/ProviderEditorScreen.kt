@@ -143,19 +143,6 @@ import com.aharou.R
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 
-@Composable
-internal fun ProviderEditorOptionsGroup(
-    expanded: Boolean,
-    onToggle: () -> Unit,
-    content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit
-) {
-    SettingsGroupHeader(
-        text = stringResource(R.string.provider_section_options),
-        expanded = expanded,
-        onToggle = onToggle
-    )
-    SettingsGroup(visible = expanded, content = content)
-}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
