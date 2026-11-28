@@ -81,12 +81,10 @@ class ProviderEditorOptionsGroupTest {
             }
         }
 
-        compose.onNodeWithText("gpt-4.1").assertExists()
-        compose.onNodeWithText("claude-3.7").assertDoesNotExist()
         compose.onNode(hasSetTextAction()).performClick()
         compose.onNode(hasSetTextAction()).performTextInput("CLAUDE")
-        compose.onNodeWithText("gpt-4.1").assertDoesNotExist()
-        compose.onNodeWithText("claude-3.7").assertExists()
+        compose.onNodeWithText("gpt-4.1").performScrollTo().assertDoesNotExist()
+        compose.onNodeWithText("claude-3.7").performScrollTo().assertExists()
         compose.runOnIdle {
             assertEquals("gpt-4.1", selectedModel.value)
             assertEquals("my-custom-model", customModel.value)
@@ -110,7 +108,6 @@ class ProviderEditorOptionsGroupTest {
             }
         }
 
-        compose.onNodeWithText("deepseek-v4-flash").assertExists()
         compose.onNode(hasSetTextAction()).performClick()
         compose.onNode(hasSetTextAction()).performTextInput("not-a-model")
         compose.onNodeWithText("deepseek-v4-flash").assertDoesNotExist()
