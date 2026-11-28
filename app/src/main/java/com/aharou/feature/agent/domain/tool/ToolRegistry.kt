@@ -24,39 +24,36 @@ class ToolRegistry @Inject constructor(
     private val tools = Collections.synchronizedMap(LinkedHashMap<String, AgentTool>())
 
     private val activated = LinkedHashMap<Pair<String, String>, MutableSet<String>>(16, 0.75f, true)
-    private data class DiscoverySnapshot(val tools: List<AgentTool>, val bootstrapTask: Boolean)
-    private val discoveryTools = LinkedHashMap<Triple<String, String, String>, DiscoverySnapshot>(16, 0.75f, true)
+    private val discoveryTools = LinkedHashMap<Triple<String, String, String>, List<AgentTool>>(16, 0.75f, true)
 
     private fun discoveryScope(context: AgentContext) =
         Triple(context.sessionId ?: context.inputMessageId, context.projectRoot, context.inputMessageId)
 
     /** Bind discovery only, without verifying the audience for bootstrap. */
     fun bindDiscoveryTools(allowed: List<AgentTool>, context: AgentContext) {
-        storeDiscoverySnapshot(context, DiscoverySnapshot(allowed.toList(), bootstrapTask = false))
-    }
-
-    /** The workflow supplies its already role/policy-filtered execution list, never the global registry. */
-    internal suspend fun bindTurnDiscoveryTools(allowed: List<AgentTool>, context: AgentContext) {
-        // Resolve the audience once per turn, not in each provider request of the tool loop.
-        val snapshot = DiscoverySnapshot(allowed.toList(), allowed.any { it.name == "task" } && isMainSession(context))
-        currentCoroutineContext().ensureActive()
-        storeDiscoverySnapshot(context, snapshot)
-    }
-
-    private fun storeDiscoverySnapshot(context: AgentContext, snapshot: DiscoverySnapshot) {
         synchronized(discoveryTools) {
-            discoveryTools[discoveryScope(context)] = snapshot
+            discoveryTools[discoveryScope(context)] = allowed.toList()
             while (discoveryTools.size > 128) discoveryTools.remove(discoveryTools.keys.first())
         }
     }
 
-    fun requestTools(allowed: List<AgentTool>, context: AgentContext): List<AgentTool> {
-        val bootstrapTask = synchronized(discoveryTools) { discoveryTools[discoveryScope(context)]?.bootstrapTask == true }
-        return allowed.filter { tool ->
+    /** The workflow supplies its already role/policy-filtered execution list, never the global registry. */
+    internal suspend fun bindTurnDiscoveryTools(allowed: List<AgentTool>, context: AgentContext): Boolean {
+        // The active turn retains its eligibility even if the discovery LRU evicts its snapshot.
+        val bootstrapTask = allowed.any { it.name == "task" } && isMainSession(context)
+        currentCoroutineContext().ensureActive()
+        bindDiscoveryTools(allowed, context)
+        return bootstrapTask
+    }
+
+    fun requestTools(allowed: List<AgentTool>, context: AgentContext): List<AgentTool> =
+        requestTools(allowed, context, bootstrapTask = false)
+
+    internal fun requestTools(allowed: List<AgentTool>, context: AgentContext, bootstrapTask: Boolean): List<AgentTool> =
+        allowed.filter { tool ->
             livePermission(tool) && (tool.name == "memory" || tool.name == "tool_search" ||
                 (tool.name == "task" && bootstrapTask) || isActivated(tool.name, context))
         }
-    }
 
     private suspend fun isMainSession(context: AgentContext): Boolean {
         if (context.agentDefinition != null) return false
@@ -118,7 +115,7 @@ class ToolRegistry @Inject constructor(
 
     /** Discovery is limited to the current turn's execution snapshot, including ordinary/custom tools. */
     fun getDeferredTools(context: AgentContext): List<AgentTool> =
-        synchronized(discoveryTools) { discoveryTools[discoveryScope(context)]?.tools.orEmpty().filter(::livePermission) }
+        synchronized(discoveryTools) { discoveryTools[discoveryScope(context)].orEmpty().filter(::livePermission) }
 
     /** 展开一批延迟加载工具，使其进入后续每轮的 tools 数组。 */
     fun activate(names: Collection<String>, context: AgentContext) {

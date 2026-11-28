@@ -323,11 +323,11 @@ class StatefulAgentWorkflow @Inject constructor(
             session?.parentId != null -> allTools // 子代理可再派子代理，递归由 MAX_SUBAGENT_DEPTH 兜底
             else -> allTools.filterNot { it.name == AgentDefinition.PARENT_MESSAGE_TOOL }
         }, null, toolSnapshot)
-        toolRegistry.bindTurnDiscoveryTools(tools, context)
+        val bootstrapTask = toolRegistry.bindTurnDiscoveryTools(tools, context)
         val compactionProvider = resolveCompactionFallbackProvider(sessionId) ?: provider
         val reuseMainPrefix = compactionProvider.providerId == provider.providerId && compactionProvider.model == provider.model  // 前缀缓存只同 provider 同 model 内生效，配了独立压缩模型就不复用主前缀
         return contextCompactor.compactIfNeeded(history, compactionTransport(compactionProvider), sessionId, force = true, windowProvider = provider,
-            systemPrompt = if (reuseMainPrefix) projectSystemPrompt(provider.providerId, withContext(Dispatchers.IO) { promptProvider.build(context, consumeInbox = false) }) else "", tools = if (reuseMainPrefix) requestTools(tools, context) else emptyList(), onEvent = onEvent).compacted
+            systemPrompt = if (reuseMainPrefix) projectSystemPrompt(provider.providerId, withContext(Dispatchers.IO) { promptProvider.build(context, consumeInbox = false) }) else "", tools = if (reuseMainPrefix) requestTools(tools, context, bootstrapTask) else emptyList(), onEvent = onEvent).compacted
     }
 
     /**
@@ -446,7 +446,7 @@ class StatefulAgentWorkflow @Inject constructor(
         var currentContext = context
         var state = AgentSessionState()
         var currentTools = tools
-        toolRegistry.bindTurnDiscoveryTools(tools, context)
+        val bootstrapTask = toolRegistry.bindTurnDiscoveryTools(tools, context)
         // 执行期只认「本次运行允许的工具集」：toolRegistry 是全量的，回落过去等于把所有黑白名单
         // （子代理禁 task、messageParent 方向限制、定义里的 allowedTools/disallowedTools）全部作废——
         // 模型只要发出一个不在清单里的调用就能绕过（2026-10-05 实测：子代理真的派出了子代理）。
@@ -477,7 +477,7 @@ class StatefulAgentWorkflow @Inject constructor(
         // 让该分支抽成独立函数后不必在主循环里再留 4 个跨挂起点局部变量。
         val llmBudget = LlmCallBudgetState(providerKey = "${aiProvider.providerId.length}:${aiProvider.providerId}:${aiProvider.model}",
             baselineEstimate = withContext(Dispatchers.Default) { ContextTokenEstimator.estimate(projectSystemPrompt(aiProvider.providerId, listOf(systemPrompt.system, systemPrompt.transientContext).filter { it.isNotBlank() }.joinToString("\n\n")),
-                currentContext.history.take(lastAssistantIndex.coerceAtLeast(0)), requestTools(currentTools, currentContext)) },
+                currentContext.history.take(lastAssistantIndex.coerceAtLeast(0)), requestTools(currentTools, currentContext, bootstrapTask)) },
             baselineUsage = if (currentContext.lastInputTokens > 0 && lastAssistantIndex >= 0) {
                 (currentContext.history[lastAssistantIndex] as AgentMessage.AssistantMessage).inputTokens
             } else 0
@@ -515,7 +515,7 @@ class StatefulAgentWorkflow @Inject constructor(
                             state = state.stopAtCallBudget()
                             actionQueue.clear()
                             FileLogger.w(TAG, "模型调用预算耗尽：${state.iterations} 次，结束当前轮次")
-                        } else state = executeLlmEffect(state, currentContext, currentTools, systemPrompt,
+                        } else state = executeLlmEffect(state, currentContext, currentTools, bootstrapTask, systemPrompt,
                             aiProvider, llmBudget, actionQueue, emit, telemetry)
                     }
                     is AgentSideEffect.RequestPermissionBatch -> {
@@ -560,8 +560,8 @@ class StatefulAgentWorkflow @Inject constructor(
 
     /** 会话是否收到了「用户打断」：peek 到就打勾并 ack 掉（一次性消费），主循环与收流两处共用。 */
     /** 随请求发送的工具（延迟加载的 MCP 工具要 tool_search 展开过）；压缩与预算估算共用此口径。 */
-    private fun requestTools(tools: List<AgentTool>, context: AgentContext) =
-        toolRegistry.requestTools(tools, context).sortedBy { it.name }
+    private fun requestTools(tools: List<AgentTool>, context: AgentContext, bootstrapTask: Boolean) =
+        toolRegistry.requestTools(tools, context, bootstrapTask).sortedBy { it.name }
 
     private fun consumeUserInterrupt(sessionId: String?): Boolean {
         if (sessionId == null) return false
@@ -590,6 +590,7 @@ class StatefulAgentWorkflow @Inject constructor(
         initialState: AgentSessionState,
         currentContext: AgentContext,
         currentTools: List<AgentTool>,
+        bootstrapTask: Boolean,
         systemPrompt: com.aharou.feature.agent.domain.prompt.RequestPrompt,
         aiProvider: AIProvider,
         budget: LlmCallBudgetState,
@@ -611,7 +612,7 @@ class StatefulAgentWorkflow @Inject constructor(
         val requestPrompt = promptProvider.buildRequest(currentContext.copy(history = state.messages), native.system, native.transientContext)
         val requestMiddleware = middlewareConfig(providerInUse.providerId)
         val requestSystemPrompt = projectMiddlewareSystemPrompt(requestMiddleware, requestPrompt.system)
-        val promptTools = requestTools(currentTools, currentContext)
+        val promptTools = requestTools(currentTools, currentContext, bootstrapTask)
         val compactionProvider = resolveCompactionFallbackProvider(currentContext.sessionId) ?: providerInUse
         val reuseMainPrefix = compactionProvider.providerId == providerInUse.providerId && compactionProvider.model == providerInUse.model  // 前缀缓存只同 provider 同 model 内生效，配了独立压缩模型就不复用主前缀
         var compactedMessages = state.messages
@@ -851,7 +852,7 @@ class StatefulAgentWorkflow @Inject constructor(
                     telemetry.llmStreamFailed(callId, callError ?: "unknown", 0)
                     budget.baselineUsage = 0; budget.baselineEstimate = 0
                     val fb = createStandaloneProvider(target, currentContext.sessionId)
-                    return executeLlmEffect(state, currentContext, currentTools, systemPrompt, fb,
+                    return executeLlmEffect(state, currentContext, currentTools, bootstrapTask, systemPrompt, fb,
                         budget, actionQueue, emit, telemetry)
                 }
             }

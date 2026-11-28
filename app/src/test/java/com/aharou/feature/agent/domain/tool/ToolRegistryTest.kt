@@ -137,20 +137,40 @@ class ToolRegistryTest {
         coEvery { sessions.getById("main") } returns ChatSessionEntity("main", "Main", 0, 0)
         val registry = ToolRegistry(chatSessionDao = sessions)
         val allowed = listOf("memory", "task", "tool_search", "project_tasks").map { FakeAgentTool(it) }
-        registry.bindTurnDiscoveryTools(allowed, context)
+        val bootstrapTask = registry.bindTurnDiscoveryTools(allowed, context)
 
         val bootstrap = allowed.take(3)
-        assertEquals(bootstrap, registry.requestTools(allowed, context))
+        assertEquals(bootstrap, registry.requestTools(allowed, context, bootstrapTask))
         assertFalse(registry.isActivated("task", context))
-        assertEquals(bootstrap, registry.requestTools(allowed, context))
+        assertEquals(bootstrap, registry.requestTools(allowed, context, bootstrapTask))
         coVerify(exactly = 1) { sessions.getById("main") }
 
         val gate = ToolInjectionGate(mockk())
         val off = ToolSettingsStore.Snapshot(overrides = mapOf("task" to ToolOverride(injectionMode = ToolInjectionMode.OFF)))
         val filtered = gate.visible(allowed, context.currentUserText, off)
-        assertEquals(listOf("memory", "tool_search"), registry.requestTools(filtered, context).map { it.name })
-        registry.bindTurnDiscoveryTools(filtered, context)
+        assertEquals(listOf("memory", "tool_search"), registry.requestTools(filtered, context, bootstrapTask).map { it.name })
+        assertFalse(registry.bindTurnDiscoveryTools(filtered, context))
         assertFalse(registry.getDeferredTools(context).any { it.name == "task" })
+    }
+
+    @Test
+    fun activeTurnKeepsTaskAfterItsDiscoverySnapshotIsEvicted() = runTest {
+        val sessions = mockk<ChatSessionDao>()
+        coEvery { sessions.getById("main") } returns ChatSessionEntity("main", "Main", 0, 0)
+        val registry = ToolRegistry(chatSessionDao = sessions)
+        val context = AgentContext(null, null, "/one", null, sessionId = "main")
+        val allowed = listOf("memory", "task", "tool_search", "project_tasks").map { FakeAgentTool(it) }
+        val bootstrapTask = registry.bindTurnDiscoveryTools(allowed, context)
+        assertEquals(allowed, registry.getDeferredTools(context))
+
+        val otherTools = allowed.filterNot { it.name == "task" }
+        repeat(129) { index ->
+            registry.bindTurnDiscoveryTools(otherTools, context.copy(inputMessageId = "other-$index"))
+        }
+
+        assertTrue(registry.getDeferredTools(context).isEmpty())
+        assertEquals(allowed.take(3), registry.requestTools(allowed, context, bootstrapTask))
+        assertFalse(registry.requestTools(allowed, context).any { it.name == "task" })
     }
 
     @Test
@@ -166,8 +186,8 @@ class ToolRegistryTest {
         val contexts = listOf(child, child.copy(sessionId = "missing"), child.copy(sessionId = "unavailable"),
             child.copy(sessionId = null), child.copy(sessionId = "role", agentDefinition = role))
         for (context in contexts) {
-            registry.bindTurnDiscoveryTools(allowed, context)
-            assertEquals(listOf("memory", "tool_search"), registry.requestTools(allowed, context).map { it.name })
+            val bootstrapTask = registry.bindTurnDiscoveryTools(allowed, context)
+            assertEquals(listOf("memory", "tool_search"), registry.requestTools(allowed, context, bootstrapTask).map { it.name })
         }
         coVerify(exactly = 0) { sessions.getById("role") }
 
