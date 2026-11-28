@@ -42,10 +42,43 @@ import okhttp3.Request
  * 所以列表结果按源缓存在磁盘上——不然每进一次市场都要重跑几十个请求。
  */
 @Singleton
+internal fun mayOverwriteUnmodifiedMarketSkill(
+    currentFingerprint: String?,
+    previous: SkillInstallRecord?,
+    sourceId: String
+): Boolean = currentFingerprint != null && previous?.source == sourceId &&
+    previous.installedFingerprint.isNotBlank() && previous.installedFingerprint == currentFingerprint
+
+internal fun canInstallClawHubModeration(moderation: ClawHubClient.ClawHubModeration?): Boolean =
+    moderation == null || !moderation.malwareBlocked && !moderation.hidden && !moderation.removed &&
+        !moderation.verdict.equals("malicious", ignoreCase = true)
+
+internal fun mergeClawHubModeration(
+    detail: ClawHubClient.ClawHubModeration?,
+    scan: ClawHubClient.ClawHubModeration?
+): ClawHubClient.ClawHubModeration? {
+    val matchingScan = scan?.takeIf { it.matchesRequestedVersion == true }
+    if (detail == null) return matchingScan
+    if (matchingScan == null) return detail
+    return matchingScan.copy(
+        malwareBlocked = matchingScan.malwareBlocked || detail.malwareBlocked,
+        hidden = matchingScan.hidden || detail.hidden,
+        removed = matchingScan.removed || detail.removed,
+        suspicious = matchingScan.suspicious || detail.suspicious,
+        pending = matchingScan.pending || detail.pending,
+        verdict = if (detail.verdict.equals("malicious", true) || matchingScan.verdict.equals("malicious", true)) "malicious"
+            else matchingScan.verdict.ifBlank { detail.verdict }
+    )
+}
+
+internal fun effectiveClawHubVersion(selectedVersion: String, detailVersion: String?): String =
+    selectedVersion.ifBlank { detailVersion.orEmpty() }
+
 class SkillMarketRepository @Inject constructor(
     private val catalog: SkillMarketCatalog,
     private val installRepository: SkillInstallRepository,
     private val skillRepository: SkillRepository,
+    private val clawHubClient: ClawHubClient,
     @param:ApplicationContext private val context: Context
 ) {
     // 与 RepoDataFetcher.DEFAULT_CLIENT 保持一致的代理与超时配置：
@@ -91,6 +124,7 @@ class SkillMarketRepository @Inject constructor(
         useCache: Boolean = true
     ): MarketListing {
         val source = sources()[sourceId] ?: return MarketListing(emptyList())
+        if (source.isClawHub) return MarketListing(emptyList())
         if (useCache) readCache(sourceId)?.let { return MarketListing(it) }
 
         val skills = runCatching { listFrom(sourceId, source, onUpdate) }.getOrElse {
@@ -149,6 +183,27 @@ class SkillMarketRepository @Inject constructor(
      */
     suspend fun searchSkills(sourceId: String, query: String): MarketListing {
         val source = sources()[sourceId] ?: return MarketListing(emptyList())
+        if (source.isClawHub) {
+            val results = withContext(Dispatchers.IO) { clawHubClient.search(query) }
+                ?: return MarketListing(emptyList(), failed = true)
+            return MarketListing(results.map { item ->
+                MarketSkill(
+                    sourceId = sourceId,
+                    host = "clawhub",
+                    repo = "clawhub.ai",
+                    branch = "",
+                    isDirectory = false,
+                    dir = item.slug,
+                    name = item.slug.substringAfterLast('/'),
+                    displayName = item.displayName,
+                    description = item.summary,
+                    version = item.version,
+                    author = item.owner,
+                    license = "",
+                    clawHubSlug = item.slug
+                )
+            })
+        }
         val url = source.searchUrlFor(query) ?: return MarketListing(emptyList())
         val body = httpGet(url) ?: return MarketListing(emptyList(), failed = true)
         val parsed = runCatching { json.decodeFromString<SkillSearchResponse>(body) }.getOrNull()
@@ -256,6 +311,22 @@ class SkillMarketRepository @Inject constructor(
      * 拉不到 SKILL.md 不算失败——[SkillDetail.skillMd] 为 null，由 UI 说明该源不提供在线预览。
      */
     suspend fun loadDetail(skill: MarketSkill): SkillDetail = withContext(Dispatchers.IO) {
+        if (skill.clawHubSlug.isNotBlank()) {
+            val detail = clawHubClient.detail(skill.clawHubSlug)
+            val selectedVersion = effectiveClawHubVersion(skill.version, detail?.skill?.version)
+            val scan = selectedVersion.takeIf { it.isNotBlank() }
+                ?.let { clawHubClient.scan(skill.clawHubSlug, it) }
+            val matchingDetailModeration = detail?.moderation?.takeIf {
+                it.matchesRequestedVersion == null || it.matchesRequestedVersion == true
+            }
+            return@withContext SkillDetail(
+                files = emptyList(),
+                skillMd = null,
+                safety = SkillSafetyScan.scan(emptyList(), null),
+                moderation = mergeClawHubModeration(matchingDetailModeration, scan),
+                clawHubDetail = detail
+            )
+        }
         val coord = SkillRepoAccess.Coord(skill.host, skill.repo, skill.branch)
         val files = skill.files.ifEmpty {
             fetchTree(coord)
@@ -272,12 +343,14 @@ class SkillMarketRepository @Inject constructor(
     data class SkillDetail(
         val files: List<String>,
         val skillMd: String?,
-        val safety: SkillSafety
+        val safety: SkillSafety,
+        val moderation: ClawHubClient.ClawHubModeration? = null,
+        val clawHubDetail: ClawHubClient.ClawHubDetail? = null
     )
 
     /**
-     * 安装（或更新）一个技能：[scope] 决定装到全局还是当前项目。
-     * 已在同作用域存在同名技能时直接覆盖——市场里点「安装」就是对「更新」的语义。
+     * 安装一个技能：[scope] 决定装到全局还是当前项目。
+     * 同名技能默认作为冲突跳过；没有可验证的安装前指纹时不能证明它未被用户修改，因此不覆盖。
      */
     suspend fun install(skill: MarketSkill, scope: SkillScope): SkillImportReport {
         // 检索型源只给了技能名与所在仓库，不知道它在仓库里的哪个目录
@@ -287,6 +360,7 @@ class SkillMarketRepository @Inject constructor(
     }
 
     private suspend fun installResolved(skill: MarketSkill, scope: SkillScope): SkillImportReport {
+        if (skill.clawHubSlug.isNotBlank()) return installClawHub(skill, scope)
         val coord = SkillRepoAccess.Coord(skill.host, skill.repo, skill.branch)
 
         // 两种源只是技能包的取得方式不同，拿到 zip 字节后完全同路。
@@ -310,23 +384,69 @@ class SkillMarketRepository @Inject constructor(
             return SkillImportReport(emptyList())
         }
 
+        val existingFingerprint = skillRepository.skillFingerprint(skill.name, scope)
+        val previous = installRepository.record(skill.name)
+        val canUpdate = mayOverwriteUnmodifiedMarketSkill(existingFingerprint, previous, skill.sourceId)
         val report = withContext(Dispatchers.IO) {
             skillRepository.importZip(
                 input = zipBytes.inputStream(),
                 fallbackName = skill.name,
                 scope = scope,
-                overwrite = true
+                overwrite = canUpdate
             )
         }
-        if (report.imported.isNotEmpty()) {
+        if (report.imported.any { it.equals(skill.name, ignoreCase = true) }) {
             installRepository.save(
                 skill.name,
                 SkillInstallRecord(
                     source = skill.sourceId,
                     version = skill.version,
-                    installedAt = System.currentTimeMillis()
+                    installedAt = System.currentTimeMillis(),
+                    installedFingerprint = skillRepository.skillFingerprint(skill.name, scope).orEmpty()
                 )
             )
+        }
+        return report
+    }
+
+    private suspend fun installClawHub(skill: MarketSkill, scope: SkillScope): SkillImportReport {
+        val slug = skill.clawHubSlug
+        val moderation = withContext(Dispatchers.IO) {
+            val detail = clawHubClient.detail(slug)
+            val selectedVersion = effectiveClawHubVersion(skill.version, detail?.skill?.version)
+            val matchingDetailModeration = detail?.moderation?.takeIf {
+                it.matchesRequestedVersion == null || it.matchesRequestedVersion == true
+            }
+            if (selectedVersion.isBlank()) return@withContext matchingDetailModeration
+            val scan = clawHubClient.scan(slug, selectedVersion)
+            mergeClawHubModeration(matchingDetailModeration, scan)
+        }
+        if (!canInstallClawHubModeration(moderation)) {
+            FileLogger.w(TAG, "ClawHub 将该技能标记为 malware/hidden/removed，阻止安装：$slug")
+            return SkillImportReport(emptyList())
+        }
+        val verified = withContext(Dispatchers.IO) {
+            clawHubClient.download(slug, skill.version, moderation?.securitySha256)
+        } ?: return SkillImportReport(emptyList())
+        val existingFingerprint = skillRepository.skillFingerprint(skill.name, scope)
+        val previous = installRepository.record(skill.name)
+        val canUpdate = mayOverwriteUnmodifiedMarketSkill(existingFingerprint, previous, skill.sourceId)
+        val report = withContext(Dispatchers.IO) {
+            skillRepository.importZip(
+                input = verified.bytes.inputStream(),
+                fallbackName = skill.name,
+                scope = scope,
+                overwrite = canUpdate
+            )
+        }
+        if (report.imported.any { it.equals(skill.name, ignoreCase = true) }) {
+            val fingerprint = skillRepository.skillFingerprint(skill.name, scope).orEmpty()
+            installRepository.save(skill.name, SkillInstallRecord(
+                source = skill.sourceId,
+                version = skill.version,
+                installedAt = System.currentTimeMillis(),
+                installedFingerprint = fingerprint
+            ))
         }
         return report
     }

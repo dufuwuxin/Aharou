@@ -385,6 +385,29 @@ class SkillRepository @Inject constructor(
         SkillScope.PROJECT -> projectDirectorySkillSource.listSkills()
     }
 
+    /** Stable fingerprint for update protection; includes instructions and every user resource file. */
+    fun skillFingerprint(name: String, scope: SkillScope): String? {
+        if (scope == SkillScope.BUILTIN) return null
+        val skill = entriesIn(scope).firstOrNull { it.name.equals(name, ignoreCase = true) } ?: return null
+        val dir = skill.dirPath ?: return null
+        return runCatching {
+            val access = fileAccess.checked()
+            val instruction = instructionFile(access, dir) ?: return null
+            val relativeFiles = (access.listFilesRecursive(dir, 16) + instruction.substringAfterLast('/'))
+                .distinct().sorted()
+            val digest = java.security.MessageDigest.getInstance("SHA-256")
+            relativeFiles.forEach { relative ->
+                access.requireResourcePath(dir, relative)
+                val path = if (relative.contains('/')) "$dir/$relative" else "$dir/$relative"
+                digest.update(relative.toByteArray(Charsets.UTF_8))
+                digest.update(0.toByte())
+                digest.update(access.readBytes(path))
+                digest.update(0.toByte())
+            }
+            digest.digest().joinToString("") { "%02x".format(it) }
+        }.getOrNull()
+    }
+
     /** 指定作用域下已有技能名（小写），供导入查重。 */
     private fun existingNamesIn(scope: SkillScope): Set<String> =
         entriesIn(scope).map { it.name.lowercase() }.toSet()

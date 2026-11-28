@@ -32,7 +32,9 @@ data class SkillMarketSourceDef(
 ) {
     val isDirectory: Boolean get() = kind.equals("directory", ignoreCase = true)
 
-    val isSearch: Boolean get() = kind.equals("search", ignoreCase = true)
+    val isSearch: Boolean get() = kind.equals("search", ignoreCase = true) || isClawHub
+
+    val isClawHub: Boolean get() = kind.equals("clawhub", ignoreCase = true)
 
     fun displayName(lang: String): String =
         name[lang] ?: name.values.firstOrNull() ?: repo
@@ -119,5 +121,7 @@ data class MarketSkill(
      * 安装前的风险提示（附带的脚本、是否要凭据）。
      * 列表页只有补读过 SKILL.md 的技能才带得上；拿不到时为 null，不代表「安全」。
      */
-    val safety: SkillSafety? = null
+    val safety: SkillSafety? = null,
+    /** ClawHub v1 identifies entries by slug rather than a Git repository path. */
+    val clawHubSlug: String = ""
 )

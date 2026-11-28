@@ -98,6 +98,10 @@ import com.aharou.feature.agent.domain.command.SlashCommandContext
 import com.aharou.feature.agent.domain.command.SlashCommandRegistry
 import com.aharou.feature.agent.domain.command.SlashCommandRegistry.ResolvedCommand
 import com.aharou.feature.agent.domain.skill.Skill
+import com.aharou.feature.agent.domain.skill.SkillForm
+import com.aharou.feature.agent.domain.skill.SkillRepository
+import com.aharou.feature.agent.domain.skill.SkillScope
+import com.aharou.feature.agent.data.ConfigSkillEvolutionFields
 import com.aharou.feature.agent.presentation.AgentAttachment
 import com.aharou.feature.agent.presentation.component.PendingUploadAttachment
 import com.aharou.feature.agent.presentation.component.PastedText
@@ -164,6 +168,8 @@ import javax.inject.Inject
 @HiltViewModel
 class AIAgentViewModel @Inject constructor(
     private val agentWorkflow: AgentWorkflow,
+    private val skillRepository: SkillRepository,
+    private val skillEvolutionConfig: ConfigSkillEvolutionFields,
     private val agentMessageDao: AgentMessageDao,
     private val agentTaskDao: AgentTaskDao,
     private val chatSessionDao: ChatSessionDao,
@@ -226,6 +232,39 @@ class AIAgentViewModel @Inject constructor(
      * 本轮结束时取走；整理没跑（节流中）则继续累积，下次一并喂。
      */
     private val toolTraceBySession = java.util.concurrent.ConcurrentHashMap<String, StringBuilder>()
+
+    private val _skillEvolutionDraft = MutableStateFlow<Pair<String, com.aharou.feature.agent.presentation.component.SkillEvolutionSuggestion>?>(null)
+    val skillEvolutionDraft: StateFlow<Pair<String, com.aharou.feature.agent.presentation.component.SkillEvolutionSuggestion>?> = _skillEvolutionDraft.asStateFlow()
+
+    fun dismissSkillEvolutionDraft(sessionId: String) {
+        if (_skillEvolutionDraft.value?.first == sessionId) _skillEvolutionDraft.value = null
+    }
+
+    fun saveSkillEvolutionDraft(
+        sessionId: String,
+        original: com.aharou.feature.agent.presentation.component.SkillEvolutionSuggestion,
+        edited: com.aharou.feature.agent.presentation.component.SkillEvolutionSuggestion,
+        scope: SkillScope
+    ): Boolean {
+        val currentWorkspaceId = com.aharou.feature.workspace.domain.WorkspaceIdentity.idFor(_currentWorkspace.value)
+        if (!com.aharou.feature.agent.presentation.component.maySaveSkillEvolutionDraft(
+                optedIn = skillEvolutionConfig.enabled(),
+                sameSession = _currentSessionId.value == sessionId,
+                currentDraft = _skillEvolutionDraft.value?.let {
+                    it.first == sessionId && it.second.draftId == original.draftId && it.second == original
+                } == true,
+                scope = scope,
+                expectedWorkspaceId = original.projectWorkspaceId,
+                currentWorkspaceId = currentWorkspaceId
+            ) || skillRepository.isBuiltinName(edited.name)) return false
+        val error = skillRepository.save(
+            SkillForm(edited.name, edited.description, edited.instructions),
+            scope
+        )
+        if (error != null) return false
+        dismissSkillEvolutionDraft(sessionId)
+        return true
+    }
 
     /** 累积一条工具轨迹，单会话总量封顶 [TOOL_TRACE_MAX_CHARS]。 */
     private fun appendToolTrace(sessionId: String, toolName: String, result: String) {
@@ -2039,6 +2078,7 @@ class AIAgentViewModel @Inject constructor(
             }
             projectExecution.begin(sessionId, executionTurnId)
             sessionJobs[sessionId] = currentJob
+            if (_skillEvolutionDraft.value?.first == sessionId) _skillEvolutionDraft.value = null
             toolRowsBySession[sessionId] = toolRows
             turnEndBridge.onRequestStarted(sessionId, request, isAutoTrigger)
             _activeAgentSessions.value = _activeAgentSessions.value + sessionId
@@ -2059,6 +2099,9 @@ class AIAgentViewModel @Inject constructor(
             setAgentState(sessionId, AgentUIState.Streaming)
             acquireKeepalive()
             var failed = false
+            val currentTurnToolTrace = StringBuilder()
+            var currentTurnToolCount = 0
+            var currentTurnAnswer = ""
 
             // 会话就绪、历史组装、工具装配、落库全在 runner 里；这里只管界面状态。
             var currentReasoningStart: Long? = null
@@ -2094,6 +2137,7 @@ class AIAgentViewModel @Inject constructor(
                 if (sessionJobs[sessionId] !== currentJob) return@collect
                 when (event) {
                     is AgentEvent.AssistantDelta -> {
+                        currentTurnAnswer = event.accumulated
                         if (event.accumulated.hasVisibleContent()) {
                             finishReasoning()
                         }
@@ -2150,6 +2194,7 @@ class AIAgentViewModel @Inject constructor(
                     is AgentEvent.CompactionFailed -> { compactionUsage.markFailed(sessionId); setCompacting(sessionId, false) }
                     is AgentEvent.SamplingLoopDetected -> Unit
                     is AgentEvent.AssistantText -> {
+                        if (event.content.isNotBlank()) currentTurnAnswer = event.content
                         val reasoningDuration = currentReasoningStart?.let { System.currentTimeMillis() - it }
                         currentReasoningStart = null
 
@@ -2188,6 +2233,12 @@ class AIAgentViewModel @Inject constructor(
                     is AgentEvent.ToolCallFinished -> {
                         val msgId = toolRows.messageIdFor(event.id)
                         appendToolTrace(sessionId, event.toolName, event.result)
+                        currentTurnToolCount++
+                        if (currentTurnToolTrace.length < TOOL_TRACE_MAX_CHARS) {
+                            if (currentTurnToolTrace.isNotEmpty()) currentTurnToolTrace.append('\n')
+                            currentTurnToolTrace.append("工具 ").append(event.toolName).append(": ")
+                                .append(event.result.trim().replace('\n', ' ').take(TOOL_TRACE_ENTRY_CHARS))
+                        }
                         removeRunningTool(sessionId, msgId)
                     }
                     is AgentEvent.Failed -> {
@@ -2201,6 +2252,44 @@ class AIAgentViewModel @Inject constructor(
                         // 子代理失败时通知父会话的事在 runner 里做
                     }
                     AgentEvent.Completed -> {
+                        val maySuggest = com.aharou.feature.agent.presentation.component.SkillEvolutionSuggestion.maySuggest(
+                            enabled = skillEvolutionConfig.enabled(),
+                            successful = !failed,
+                            toolCalls = currentTurnToolCount,
+                            autoTriggered = isAutoTrigger
+                        )
+                        if (maySuggest && sessionJobs[sessionId] === currentJob && sessionId !in stoppingSessions) {
+                            val userAndTrace = buildString {
+                                appendLine("User request:")
+                                appendLine(request.take(6000))
+                                appendLine("Current-turn tool trace:")
+                                appendLine(currentTurnToolTrace.toString().take(12000))
+                                appendLine("Assistant answer:")
+                                appendLine(currentTurnAnswer.take(4000))
+                            }
+                            val rawDraft = try {
+                                agentWorkflow.completeOnce(
+                                    systemPrompt = "Propose one reusable skill only from the supplied current-turn request, tool trace, and answer. Do not include secrets or private user files. Return only JSON with string fields name, description, instructions. If nothing reusable, return an empty string.",
+                                    userText = userAndTrace,
+                                    sessionId = sessionId
+                                )
+                            } catch (cancelled: CancellationException) {
+                                throw cancelled
+                            } catch (_: Exception) {
+                                null
+                            }
+                            val workspaceId = sessionUseCase.getSessionById(sessionId)?.workspacePath?.let {
+                                com.aharou.feature.workspace.domain.WorkspaceIdentity.idFor(it)
+                            }
+                            val suggestion = rawDraft
+                                ?.let(com.aharou.feature.agent.presentation.component.SkillEvolutionSuggestion::parse)
+                                ?.copy(projectWorkspaceId = workspaceId)
+                            if (skillEvolutionConfig.enabled() && suggestion != null &&
+                                sessionJobs[sessionId] === currentJob && sessionId !in stoppingSessions
+                            ) {
+                                _skillEvolutionDraft.value = sessionId to suggestion
+                            }
+                        }
                         if (!failed) projectExecution.finish(sessionId, executionTurnId, com.aharou.feature.agent.domain.task.ProjectTaskExecutionOutcome.SUCCEEDED)
                         setRetryState(sessionId, null)
                         setKeySwitchState(sessionId, null)

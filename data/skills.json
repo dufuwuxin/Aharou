@@ -32,6 +32,10 @@
       "name": { "zh": "skills.sh 搜索", "en": "skills.sh Search" },
       "kind": "search",
       "searchUrl": "https://skills.sh/api/search?q={q}"
+    },
+    "clawhub": {
+      "name": { "zh": "ClawHub 技能", "en": "ClawHub Skills" },
+      "kind": "clawhub"
     }
   }
 }

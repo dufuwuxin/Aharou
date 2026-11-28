@@ -1394,6 +1394,16 @@
     <string name="skills_market_detail_author">作者</string>
     <string name="skills_market_detail_version">版本</string>
     <string name="skills_market_detail_license">许可</string>
+    <string name="skills_market_license_unknown">未知</string>
+    <string name="skills_market_detail_scan">ClawHub 扫描状态</string>
+    <string name="skills_market_scan_unknown">未知（未取得扫描结果）</string>
+    <string name="skills_market_scan_pending">扫描待处理</string>
+    <string name="skills_market_scan_suspicious">可疑（请自行审阅）</string>
+    <string name="skills_market_scan_malware_blocked">ClawHub 判定为恶意，已阻止安装</string>
+    <string name="skills_market_scan_hidden">ClawHub 隐藏该技能</string>
+    <string name="skills_market_scan_removed">ClawHub 已移除该技能</string>
+    <string name="skills_market_scan_clean">ClawHub 报告未发现风险</string>
+    <string name="skills_market_scan_reasons">扫描原因</string>
     <string name="skills_market_detail_installs">安装量</string>
     <string name="skills_market_detail_installs_value">%1$d 次</string>
     <string name="skills_market_detail_content">技能说明</string>

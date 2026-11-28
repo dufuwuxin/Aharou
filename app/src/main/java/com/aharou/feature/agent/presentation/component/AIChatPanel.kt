@@ -209,6 +209,7 @@ fun AIChatPanel(
     val streamingReasoning by viewModel.streamingReasoning.collectAsStateWithLifecycle()
     val reasoningTiming by viewModel.reasoningTiming.collectAsStateWithLifecycle()
     val preparingTool by viewModel.preparingTool.collectAsStateWithLifecycle()
+    val skillEvolutionDraft by viewModel.skillEvolutionDraft.collectAsStateWithLifecycle()
     // 等待模型或工具执行时的状态文案：
     // 1. 若当前有正在执行的工具（runningTool）或模型正在准备的工具（preparingTool，工具名先到参数还在流式），
     //    直接说清在做什么（「正在读取文件」、「正在编辑文件」等，见 toolRunningLabelRes）；
@@ -1782,6 +1783,21 @@ fun AIChatPanel(
                     onConfirm = { newContent ->
                         viewModel.updateMessageContent(message.id, newContent)
                         editingMessage = null
+                    }
+                )
+            }
+
+            skillEvolutionDraft?.takeIf { it.first == currentSessionId }?.let { (sessionId, suggestion) ->
+                SkillEvolutionSuggestionDialog(
+                    suggestion = suggestion,
+                    onDismiss = { viewModel.dismissSkillEvolutionDraft(sessionId) },
+                    onSave = { name, description, instructions, scope ->
+                        viewModel.saveSkillEvolutionDraft(
+                            sessionId,
+                            suggestion,
+                            suggestion.copy(name = name, description = description, instructions = instructions),
+                            scope
+                        )
                     }
                 )
             }

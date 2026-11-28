@@ -53,6 +53,66 @@ class SkillRepositoryTest {
     )
 
     @Test
+    fun skillFingerprintCoversInstructionsAndAdditionalUserFiles() {
+        val root = java.nio.file.Files.createTempDirectory("skill-fingerprint").toFile()
+        try {
+            val dir = File(root, "sample").apply { mkdirs() }
+            val instructions = File(dir, "SKILL.md").apply {
+                writeText(listOf("---", "name: sample", "---", "original").joinToString("\n"))
+            }
+            val resource = File(dir, "resources/data.json").apply { parentFile!!.mkdirs(); writeText("value=1") }
+            every { globalSource.listSkills() } answers {
+                listOf(SkillParser.parseText(instructions.readText(), "sample").copy(dirPath = dir.path))
+            }
+            val before = repository.skillFingerprint("sample", SkillScope.GLOBAL)
+            assertNotNull(before)
+            assertEquals(before, repository.skillFingerprint("sample", SkillScope.GLOBAL))
+
+            resource.writeText("value=2")
+            assertFalse(before == repository.skillFingerprint("sample", SkillScope.GLOBAL))
+            instructions.writeText(listOf("---", "name: sample", "---", "user edited").joinToString("\n"))
+            assertFalse(repository.skillFingerprint("sample", SkillScope.GLOBAL) == before)
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun skillDraftSaveUsesChosenGlobalOrProjectRootAndRejectsBuiltinCollision() {
+        val globalRoot = java.nio.file.Files.createTempDirectory("skill-draft-global").toFile()
+        val projectRoot = java.nio.file.Files.createTempDirectory("skill-draft-project").toFile()
+        try {
+            every { globalSource.skillsRoot } returns globalRoot.path
+            every { projectSource.skillsRoot } returns projectRoot.path
+            every { globalSource.listSkills() } answers {
+                globalRoot.walkTopDown().filter { it.isFile && it.name.equals("SKILL.md", true) }.map { file ->
+                    SkillParser.parseText(file.readText(), file.parentFile?.name.orEmpty()).copy(dirPath = file.parentFile?.path)
+                }.toList()
+            }
+            every { projectSource.listSkills() } answers {
+                projectRoot.walkTopDown().filter { it.isFile && it.name.equals("SKILL.md", true) }.map { file ->
+                    SkillParser.parseText(file.readText(), file.parentFile?.name.orEmpty()).copy(dirPath = file.parentFile?.path)
+                }.toList()
+            }
+            assertNull(repository.save(SkillForm("draft-global", "desc", "instructions"), SkillScope.GLOBAL))
+            assertNull(repository.save(SkillForm("draft-project", "desc", "instructions"), SkillScope.PROJECT))
+            assertTrue(File(globalRoot, "draft-global/SKILL.md").isFile)
+            assertTrue(File(projectRoot, "draft-project/SKILL.md").isFile)
+            assertEquals(SkillSaveError.NAME_CONFLICT,
+                repository.save(SkillForm("draft-global", "replacement", "replacement"), SkillScope.GLOBAL))
+            assertTrue(File(globalRoot, "draft-global/SKILL.md").readText().contains("instructions"))
+
+            every { builtinSource.listSkills() } returns listOf(skill("builtin"))
+            assertEquals(SkillSaveError.READ_ONLY,
+                repository.save(SkillForm("builtin", "desc", "instructions"), SkillScope.GLOBAL))
+            assertFalse(File(globalRoot, "builtin/SKILL.md").exists())
+        } finally {
+            globalRoot.deleteRecursively()
+            projectRoot.deleteRecursively()
+        }
+    }
+
+    @Test
     fun deletedBuiltinStaysDeletedAfterRepositoryReloadAndDoesNotHideUserOverride() {
         val access = spyk(provider)
         var tombstones: String? = null

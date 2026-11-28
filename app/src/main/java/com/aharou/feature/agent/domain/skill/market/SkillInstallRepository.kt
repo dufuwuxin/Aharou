@@ -14,7 +14,9 @@ import kotlinx.serialization.json.Json
 data class SkillInstallRecord(
     val source: String = "",
     val version: String = "",
-    val installedAt: Long = 0L
+    val installedAt: Long = 0L,
+    /** Missing in old records; an empty fingerprint intentionally disables overwriting on upgrade. */
+    val installedFingerprint: String = ""
 )
 
 @Serializable

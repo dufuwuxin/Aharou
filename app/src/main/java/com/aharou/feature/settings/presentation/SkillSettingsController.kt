@@ -424,8 +424,8 @@ class SkillSettingsController @Inject constructor(
         // 用 App 内语言（per-app 语言下进程 Locale 未必跟着 App 走，详见 SkillMarketRepository.appLanguage）
         val lang = context.resources.configuration.locales[0].language
         val sources = skillMarketRepository.sources()
-            // 检索型源不进源列表：它没有自己的技能清单，只是给关键词搜索提供接口
-            .filterValues { !it.isSearch }
+            // 传统搜索适配器不单独占列表项；ClawHub 有独立详情/扫描/下载链路，需显示为可选源。
+            .filterValues { !it.isSearch || it.isClawHub }
             .map { (id, def) -> id to def.displayName(lang) }
         // 自己贴的仓库排第一个：刚加载完就在最显眼处，不会被挤到滑动条的末尾看不见
         _marketSources.value = adhocSourceEntry() + sources
@@ -484,6 +484,23 @@ class SkillSettingsController @Inject constructor(
      * 结果是列表的视图，点回当前源名就能回到完整列表。
      */
     private fun searchMarketInSource(query: String) {
+        if (skillMarketRepository.sources()[_marketSourceId.value]?.isClawHub == true) {
+            scope.launch {
+                _marketLoading.value = true
+                _marketAlert.value = null
+                val listing = withContext(Dispatchers.IO) { skillMarketRepository.searchSkills(_marketSourceId.value, query) }
+                marketSourceSkills = listing.skills
+                _marketSearching.value = true
+                publishMarket(listing.skills)
+                _marketAlert.value = when {
+                    listing.failed -> MarketAlert.LoadFailed
+                    listing.skills.isEmpty() -> MarketAlert.NoMatchInRepo
+                    else -> null
+                }
+                _marketLoading.value = false
+            }
+            return
+        }
         val all = marketSourceSkills
         if (all.isEmpty()) {
             _marketAlert.value = MarketAlert.MarketNotLoaded

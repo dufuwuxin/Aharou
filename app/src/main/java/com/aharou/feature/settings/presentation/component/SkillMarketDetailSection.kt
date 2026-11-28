@@ -29,6 +29,8 @@ import com.aharou.core.theme.semanticColors
 import com.aharou.feature.agent.domain.skill.SkillScope
 import com.aharou.feature.agent.domain.skill.market.MarketSkill
 import com.aharou.feature.agent.domain.skill.market.SkillSafety
+import com.aharou.feature.agent.domain.skill.market.canInstallClawHubModeration
+import com.aharou.feature.agent.domain.skill.market.effectiveClawHubVersion
 import com.aharou.feature.agent.domain.skill.market.SkillTranslation
 import com.aharou.feature.agent.domain.skill.market.translationKey
 import com.aharou.feature.settings.presentation.MarketDetailUi
@@ -50,11 +52,15 @@ internal fun SkillMarketDetailSection(
     val skill = state.ui.skill
     val detail = state.detail
     val safety = detail?.safety
+    val clawHubSkill = detail?.clawHubDetail?.skill
     // 与列表页一致：仓库没给中文的条目显示模型译文（英文标识仍留在下面那行小字）
     val translation = translations[skill.translationKey()]
     val title = translation?.name?.takeIf { it.isNotBlank() }
+        ?: clawHubSkill?.displayName?.takeIf { it.isNotBlank() }
         ?: skill.displayName.ifBlank { skill.name }
-    val description = translation?.description?.takeIf { it.isNotBlank() } ?: skill.description
+    val description = translation?.description?.takeIf { it.isNotBlank() }
+        ?: clawHubSkill?.summary?.takeIf { it.isNotBlank() }
+        ?: skill.description
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -88,17 +94,22 @@ internal fun SkillMarketDetailSection(
         item {
             SettingsGroup {
                 DetailRow(stringResource(R.string.skills_market_detail_source), skill.repo)
-                if (skill.author.isNotBlank()) {
+                val author = clawHubSkill?.owner?.takeIf { it.isNotBlank() } ?: skill.author.takeIf { it.isNotBlank() }
+                if (author != null) {
                     SettingsDivider()
-                    DetailRow(stringResource(R.string.skills_market_detail_author), skill.author)
+                    DetailRow(stringResource(R.string.skills_market_detail_author), author)
                 }
-                if (skill.version.isNotBlank()) {
+                val version = effectiveClawHubVersion(skill.version, clawHubSkill?.version).takeIf { it.isNotBlank() }
+                if (version != null) {
                     SettingsDivider()
-                    DetailRow(stringResource(R.string.skills_market_detail_version), skill.version)
+                    DetailRow(stringResource(R.string.skills_market_detail_version), version)
                 }
-                if (skill.license.isNotBlank()) {
+                if (skill.license.isNotBlank() || skill.clawHubSlug.isNotBlank()) {
                     SettingsDivider()
-                    DetailRow(stringResource(R.string.skills_market_detail_license), skill.license)
+                    DetailRow(
+                        stringResource(R.string.skills_market_detail_license),
+                        skill.license.ifBlank { stringResource(R.string.skills_market_license_unknown) }
+                    )
                 }
                 if (skill.installs > 0) {
                     SettingsDivider()
@@ -106,6 +117,31 @@ internal fun SkillMarketDetailSection(
                         stringResource(R.string.skills_market_detail_installs),
                         stringResource(R.string.skills_market_detail_installs_value, skill.installs)
                     )
+                }
+            }
+        }
+
+        if (skill.clawHubSlug.isNotBlank()) {
+            item {
+                val moderation = detail?.moderation
+                val scanStatus = when {
+                    moderation == null || moderation.matchesRequestedVersion == false -> stringResource(R.string.skills_market_scan_unknown)
+                    moderation.malwareBlocked -> stringResource(R.string.skills_market_scan_malware_blocked)
+                    moderation.suspicious -> stringResource(R.string.skills_market_scan_suspicious)
+                    moderation.pending -> stringResource(R.string.skills_market_scan_pending)
+                    moderation.hidden -> stringResource(R.string.skills_market_scan_hidden)
+                    moderation.removed -> stringResource(R.string.skills_market_scan_removed)
+                    moderation.verdict.equals("clean", ignoreCase = true) -> stringResource(R.string.skills_market_scan_clean)
+                    else -> stringResource(R.string.skills_market_scan_unknown)
+                }
+                SettingsGroup {
+                    Column(modifier = Modifier.fillMaxWidth().padding(Spacing.md)) {
+                        DetailRow(stringResource(R.string.skills_market_detail_scan), scanStatus)
+                        moderation?.reasonCodes?.takeIf { it.isNotEmpty() }?.let { reasons ->
+                            SettingsDivider()
+                            DetailRow(stringResource(R.string.skills_market_scan_reasons), reasons.joinToString(", "))
+                        }
+                    }
                 }
             }
         }
@@ -178,7 +214,8 @@ internal fun SkillMarketDetailSection(
                     )
                 }
                 Button(
-                    onClick = { onInstall(skill) },
+                    onClick = { onInstall(skill.copy(version = effectiveClawHubVersion(skill.version, clawHubSkill?.version))) },
+                    enabled = skill.clawHubSlug.isBlank() || canInstallClawHubModeration(detail?.moderation),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
