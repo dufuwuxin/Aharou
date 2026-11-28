@@ -1,5 +1,7 @@
 package com.aharou.feature.agent.domain.runner
 
+import android.content.Context
+import com.aharou.R
 import com.aharou.feature.agent.data.local.entity.ChatSessionEntity
 import com.aharou.feature.agent.data.task.ProjectTaskRepository
 import com.aharou.feature.agent.domain.checkpoint.CheckpointManager
@@ -234,7 +236,7 @@ class AgentTurnRunnerConcurrencyTest {
             assertTrue(turn.isCancelled)
             assertEquals(cancellation.message, withTimeout(5_000) { caught.await() }.message)
             fixture.assertSettled("cancelled", "a", "tool args")
-            assertTrue(fixture.toolRows.getValue("tool_cancelled").content.startsWith("partial output\n\n"))
+            assertEquals("partial output\n\nTurn cancelled", fixture.toolRows.getValue("tool_cancelled").content)
         } finally {
             turn.cancelAndJoin()
         }
@@ -247,6 +249,7 @@ class AgentTurnRunnerConcurrencyTest {
             emit(AgentEvent.ToolCallStarted("failed", "readFile", "tool args"))
             fixture.assertPending("failed")
             emit(failure)
+            fixture.assertPending("failed")
             emit(AgentEvent.Completed)
         }
         val events = mutableListOf<AgentEvent>()
@@ -255,13 +258,73 @@ class AgentTurnRunnerConcurrencyTest {
         assertEquals(listOf(failure, AgentEvent.Completed), events.takeLast(2))
     }
 
-    private data class ToolRow(val sessionId: String, val content: String, val isError: Boolean, val args: String? = null)
+    @Test fun cancellationDoesNotSettleAReplacementPlaceholderUsingTheSameId() = runBlocking {
+        val fixture = Fixture()
+        val firstStarted = CompletableDeferred<Unit>()
+        fixture.turn("a") {
+            emit(AgentEvent.ToolCallStarted("reused", "readFile", "same args"))
+            firstStarted.complete(Unit)
+            awaitCancellation()
+        }
+        val first = fixture.start(this, "a")
+        try {
+            withTimeout(5_000) { firstStarted.await() }
+            val replacementStarted = CompletableDeferred<Unit>()
+            fixture.turn("a") {
+                emit(AgentEvent.ToolCallStarted("reused", "readFile", "same args"))
+                replacementStarted.complete(Unit)
+                awaitCancellation()
+            }
+            val replacement = fixture.start(this, "a")
+            try {
+                withTimeout(5_000) { replacementStarted.await() }
+                val replacementRow = fixture.toolRows.getValue("tool_reused")
+                first.cancelAndJoin()
+                assertTrue(replacement.isActive)
+                fixture.assertPending("reused")
+                assertEquals(replacementRow, fixture.toolRows.getValue("tool_reused"))
+            } finally {
+                replacement.cancelAndJoin()
+            }
+            fixture.assertSettled("reused", "a", "same args")
+        } finally {
+            first.cancelAndJoin()
+        }
+    }
+
+    @Test fun cancellationAfterFinishCommitDoesNotOverwriteTheRealResult() = runBlocking {
+        val fixture = Fixture()
+        val cancellation = CancellationException("finish committed before cancellation")
+        fixture.afterToolResultWrite = { throw cancellation }
+        fixture.turn("a") {
+            emit(AgentEvent.ToolCallStarted("committed", "readFile", "original args"))
+            emit(AgentEvent.ToolCallFinished("committed", "readFile", "actual result", isError = false))
+        }
+        try {
+            fixture.runner.run(fixture.request("a")).collect()
+            fail("the write cancellation must escape the runner")
+        } catch (caught: CancellationException) {
+            assertSame(cancellation, caught)
+        }
+        val row = fixture.toolRows.getValue("tool_committed")
+        assertEquals(ToolRow("a", "actual result", false, "original args"), row)
+    }
+
+    private data class ToolRow(
+        val sessionId: String,
+        val content: String,
+        val isError: Boolean,
+        val args: String? = null,
+        val timestamp: Long = 0L,
+    )
 
     private class Fixture {
         val coordinator = ProjectTaskExecutionCoordinator()
         val tasks = mockk<ProjectTaskRepository>(relaxed = true)
         val workflow = mockk<AgentWorkflow>()
         val toolRows = mutableMapOf<String, ToolRow>()
+        var afterToolResultWrite: () -> Unit = {}
+        private var timestamp = 0L
         private val toolTurns = mutableMapOf<String, Flow<AgentEvent>>()
         val persistence = mockk<MessagePersistenceUseCase>(relaxed = true)
         val leases = mockk<SubAgentWriteLease>()
@@ -271,6 +334,9 @@ class AgentTurnRunnerConcurrencyTest {
         val runner: AgentTurnRunner
 
         init {
+            val androidContext = mockk<Context>(relaxed = true)
+            every { androidContext.getString(R.string.chat_turn_cancelled) } returns "Turn cancelled"
+            every { androidContext.getString(R.string.chat_tool_failed) } returns "Tool failed"
             val sessions = mockk<SessionUseCase>(relaxed = true)
             val registry = mockk<ToolRegistry>(relaxed = true)
             val questions = mockk<PendingUserQuestionStore>()
@@ -289,11 +355,23 @@ class AgentTurnRunnerConcurrencyTest {
             every { workspaces.current } returns MutableStateFlow(null)
             every { workspaces.workspaces } returns MutableStateFlow(emptyList())
             coEvery { gate.snapshotForProject(any()) } returns ToolSettingsStore.Snapshot(emptyList(), emptyMap())
+            every { persistence.nextTimestamp() } answers { ++timestamp }
+            coEvery { persistence.persistPendingTool(any(), any(), any(), any(), any(), any()) } coAnswers {
+                toolRows["tool_${arg<String>(1)}"] = ToolRow(arg(0), arg(4), false, arg(3), arg(5))
+            }
+            coEvery { persistence.settlePendingTool(any(), any(), any(), any()) } coAnswers {
+                val id = "tool_${arg<String>(1)}"
+                val row = toolRows[id]
+                if (row != null && row.sessionId == arg<String>(0) && row.timestamp == arg<Long>(2) &&
+                    row.content.startsWith(SessionUseCase.PENDING_TOOL_MARKER)
+                ) toolRows[id] = row.copy(content = arg(3), isError = true)
+            }
             coEvery {
                 persistence.persist(any(), MessageRole.TOOL, any(), id = any(), toolCallId = any(),
                     toolName = any(), toolArgs = any(), isError = any(), attachments = any())
             } coAnswers {
                 toolRows[arg(3)] = ToolRow(arg(0), arg(2), arg(8), arg(7))
+                afterToolResultWrite()
             }
             every { workflow.executeEvents(any(), any(), any(), any()) } answers {
                 val context = secondArg<AgentContext>()
@@ -307,7 +385,7 @@ class AgentTurnRunnerConcurrencyTest {
             runner = AgentTurnRunner(workflow, registry, mockk(relaxed = true), mockk(relaxed = true),
                 mockk(relaxed = true), sessions, coordinator, tasks, persistence,
                 mockk<CheckpointManager>(relaxed = true), mockk(relaxed = true), mockk(relaxed = true),
-                leases, workspaces, questions, gate, mockk(relaxed = true))
+                leases, workspaces, questions, gate, androidContext)
         }
 
         fun turn(id: String, block: suspend FlowCollector<AgentEvent>.() -> Unit) {

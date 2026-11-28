@@ -40,12 +40,16 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.onCompletion
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -110,6 +114,8 @@ class AgentTurnRunner @Inject constructor(
     private val toolInjectionGate: ToolInjectionGate,
     @param:ApplicationContext private val context: Context,
 ) {
+
+    private data class PendingTool(val timestamp: Long, val args: String, var progress: String = "")
 
     /** 标题生成这种「跑完再补」的活儿不该拖住本轮，丢到进程级 scope 里。 */
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -335,8 +341,7 @@ class AgentTurnRunner @Inject constructor(
 
         val tools = toolInjectionGate.visible(permittedTools, agentContext.currentUserText, toolSnapshot)
 
-        // 工具参数预览：结束时只有部分事件带 argsPreview，缺失时回退到开始时记下的那份
-        val toolArgsByMsgId = mutableMapOf<String, String>()
+        val pendingTools = mutableMapOf<String, PendingTool>()
 
         // 预算用尽这类路径会先发 Failed 再发 Completed：只认第一个终态，
         // 否则父代理会收到两条同因通知（2026-10-05 实测）。
@@ -346,7 +351,7 @@ class AgentTurnRunner @Inject constructor(
             context = agentContext,
             tools = tools,
             trigger = turn.trigger,
-        ).collect { event ->
+        ).onEach { event ->
             // 先转发、后落库：调用方先清流式气泡，落库消息才不会与它同屏并存。
             emit(event)
             when (event) {
@@ -403,19 +408,22 @@ class AgentTurnRunner @Inject constructor(
                 }
 
                 is AgentEvent.ToolCallStarted -> {
-                    val msgId = "tool_${event.id}"
-                    toolArgsByMsgId[msgId] = event.argsPreview
-                    messagePersistenceUseCase.persist(
-                        sessionId,
-                        MessageRole.TOOL,
-                        "${SessionUseCase.PENDING_TOOL_MARKER} " +
-                            context.getString(R.string.agent_tool_executing, event.toolName),
-                        id = msgId,
+                    val timestamp = messagePersistenceUseCase.nextTimestamp()
+                    // Register before the write: cancellation can arrive after the insert committed.
+                    pendingTools[event.id] = PendingTool(timestamp, event.argsPreview)
+                    messagePersistenceUseCase.persistPendingTool(
+                        sessionId = sessionId,
                         toolCallId = event.id,
                         toolName = event.toolName,
                         toolArgs = event.argsPreview,
-                        isError = false,
+                        content = "${SessionUseCase.PENDING_TOOL_MARKER} " +
+                            context.getString(R.string.agent_tool_executing, event.toolName),
+                        timestamp = timestamp,
                     )
+                }
+
+                is AgentEvent.ToolCallProgress -> {
+                    pendingTools[event.id]?.progress = event.accumulated
                 }
 
                 is AgentEvent.ToolCallFinished -> {
@@ -427,11 +435,11 @@ class AgentTurnRunner @Inject constructor(
                         id = msgId,
                         toolCallId = event.id,
                         toolName = event.toolName,
-                        toolArgs = event.argsPreview ?: toolArgsByMsgId[msgId],
+                        toolArgs = event.argsPreview ?: pendingTools[event.id]?.args,
                         isError = event.isError,
                         attachments = event.attachments,
                     )
-                    toolArgsByMsgId.remove(msgId)
+                    pendingTools.remove(event.id)
                     event.persisted?.complete(Unit)
                 }
 
@@ -447,9 +455,39 @@ class AgentTurnRunner @Inject constructor(
 
                 else -> Unit
             }
-        }
+        }.onCompletion { cause ->
+            // A Failed event alone does not imply producer or tool shutdown.
+            if (pendingTools.isNotEmpty()) withContext(NonCancellable) {
+                settlePendingTools(sessionId, pendingTools, cause)
+            }
+        }.collect()
 
         sessionUseCase.touch(sessionId, messagePersistenceUseCase.nextTimestamp())
+    }
+
+    private suspend fun settlePendingTools(sessionId: String, tools: Map<String, PendingTool>, cause: Throwable?) {
+        var failure = cause
+        for ((id, tool) in tools) {
+            try {
+                val text = context.getString(
+                    if (cause is CancellationException) R.string.chat_turn_cancelled else R.string.chat_tool_failed
+                )
+                val partial = tool.progress.trimEnd()
+                val result = when {
+                    partial.isEmpty() -> text
+                    partial.startsWith(SessionUseCase.PENDING_TOOL_MARKER) ||
+                        partial.startsWith(SessionUseCase.LEGACY_PENDING_TOOL_MARKER) -> "$text\n\n$partial"
+                    else -> "$partial\n\n$text"
+                }
+                messagePersistenceUseCase.settlePendingTool(sessionId, id, tool.timestamp, result)
+            } catch (writeFailure: Throwable) {
+                // Try the remaining rows without replacing the original exception or cancellation.
+                val first = failure
+                if (first == null) failure = writeFailure
+                else if (first !== writeFailure) first.addSuppressed(writeFailure)
+            }
+        }
+        if (cause == null) failure?.let { throw it }
     }
 
     /**

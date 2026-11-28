@@ -1,5 +1,6 @@
 package com.aharou.feature.agent.domain.session
 
+import androidx.room.withTransaction
 import com.aharou.feature.agent.data.local.dao.AgentMessageDao
 import com.aharou.feature.agent.data.local.dao.ChatSearchMatch
 import com.aharou.feature.agent.data.local.dao.toEntity
@@ -149,8 +150,49 @@ class MessagePersistenceUseCase @Inject constructor(
             isCompacted = isCompacted,
             isContextExcluded = isContextExcluded
         )
+        storeMessage(entity)
+    }
+
+    internal suspend fun persistPendingTool(
+        sessionId: String,
+        toolCallId: String,
+        toolName: String,
+        toolArgs: String,
+        content: String,
+        timestamp: Long,
+    ) {
+        storeMessage(AgentMessageEntity(
+            id = "tool_$toolCallId",
+            sessionId = sessionId,
+            role = MessageRole.TOOL.name,
+            content = content,
+            timestamp = timestamp,
+            toolCallId = toolCallId,
+            toolName = toolName,
+            toolArgs = toolArgs,
+        ))
+    }
+
+    internal suspend fun settlePendingTool(sessionId: String, toolCallId: String, timestamp: Long, content: String) {
+        val updated = agentDatabase.withTransaction {
+            val row = agentMessageDao.getMessageById("tool_$toolCallId") ?: return@withTransaction false
+            // Provider call IDs can be reused. The timestamp identifies this exact start write.
+            if (row.sessionId != sessionId || row.role != MessageRole.TOOL.name || row.toolCallId != toolCallId ||
+                row.timestamp != timestamp || !row.content.startsWith(SessionUseCase.PENDING_TOOL_MARKER)
+            ) return@withTransaction false
+            // Archive only the new content; existing fields may already hold archive references.
+            val storedContent = prepareForStorage(AgentMessageEntity(
+                row.id, row.sessionId, row.role, content, row.timestamp,
+            )).content
+            agentMessageDao.insert(row.copy(content = storedContent, isError = true))
+            true
+        }
+        if (updated) invalidateHistory(sessionId)
+    }
+
+    private suspend fun storeMessage(entity: AgentMessageEntity) {
         agentMessageDao.insert(prepareForStorage(entity))
-        invalidateHistory(sessionId)
+        invalidateHistory(entity.sessionId)
     }
 
     /** 当前会话的数据库消息流，按 DAO 的分页口径读取。 */
